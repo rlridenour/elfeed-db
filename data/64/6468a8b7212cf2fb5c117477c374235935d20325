@@ -1,0 +1,98 @@
+<h2 id="modules">Modules</h2>
+<p>The module <a href="https://gitlab.com/aimebertrand/dotemacs/-/blob/main/libraries/timu-bits.el">timu-bits.el</a> in my Emacs configuration is the first to loaded after the init file.</p>
+<p>Why? It handles packages and the proper loading of all other modules.</p>
+<h2 id="commands-and-functions">Commands and functions</h2>
+<h3 id="timu-bits-install-packages">timu-bits-install-packages</h3>
+<p>I quite like the way <a href="https://github.com/bbatsov/prelude/blob/master/core/prelude-packages.el">Emacs Prelude</a> handles automatic package installation. This means of course stealing some code here.</p>
+<p>What I did not like was the fact that this is split into several functions. I reworked this into one single function.</p>
+<p>This checks whether the packages in the variable <a href="https://gitlab.com/aimebertrand/dotemacs/-/blob/main/early-init.el#L130">timu-package-list</a> (list) are installed or not and installs the missing from package archives.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-bits-install-packages</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Check if all packages in </span><span class="ss">`timu-package-list&#39;</span><span class="s"> are installed.
+</span></span></span><span class="line"><span class="cl"><span class="s">Install the missing packages and if not.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">Credit: https://github.com/bbatsov/prelude
+</span></span></span><span class="line"><span class="cl"><span class="s">Credit: https://chat.openai.com/chat.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let</span> <span class="p">((</span><span class="nv">missing-packages</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">cl-remove-if</span> <span class="nf">#&#39;</span><span class="nv">package-installed-p</span> <span class="nv">timu-package-list</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">when</span> <span class="nv">missing-packages</span>
+</span></span><span class="line"><span class="cl">      <span class="c1">;; check for new packages (package versions)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;%s&#34;</span> <span class="s">&#34;Reloading packages DB...&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">package-refresh-contents</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;%s&#34;</span> <span class="s">&#34; done.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="c1">;; install the missing packages</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">mapc</span> <span class="nf">#&#39;</span><span class="nv">package-install</span> <span class="nv">missing-packages</span><span class="p">))))</span>
+</span></span></code></pre></div><p>This function is used in the <code>init.el</code> before the other configuration is loaded of course.</p>
+<h3 id="timu-bits-require">timu-bits-require</h3>
+<p>A simple-ish macro to robustly <code>require</code> packages, libraries and modules.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defmacro</span> <span class="nv">timu-bits-require</span> <span class="p">(</span><span class="kp">&amp;rest</span> <span class="nv">modules</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Load MODULES, if they are not already loaded and are installed.
+</span></span></span><span class="line"><span class="cl"><span class="s">Skips any modules that are not found.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">Displays a message in the minibuffer for any modules that are not found.
+</span></span></span><span class="line"><span class="cl"><span class="s">Displays a message in the minibuffer for any modules that are already loaded.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">Credit: https://chat.openai.com/chat.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="o">`</span><span class="p">(</span><span class="nb">progn</span>
+</span></span><span class="line"><span class="cl">     <span class="o">,@</span><span class="p">(</span><span class="nf">mapcar</span> <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">module</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                 <span class="o">`</span><span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nv">not</span> <span class="p">(</span><span class="nb">featurep</span> <span class="ss">&#39;,module</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                    <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nv">locate-library</span> <span class="o">,</span><span class="p">(</span><span class="nf">symbol-name</span> <span class="nv">module</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                        <span class="p">(</span><span class="nb">progn</span>
+</span></span><span class="line"><span class="cl">                          <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;,module</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                          <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;Loaded module &#39;%s&#39;&#34;</span> <span class="ss">&#39;,module</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                      <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;Module &#39;%s&#39; not found&#34;</span> <span class="ss">&#39;,module</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">               <span class="nv">modules</span><span class="p">)))</span>
+</span></span></code></pre></div><p>The following code &hellip;</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nv">timu-bits-require</span> <span class="nv">timu-bits</span><span class="p">)</span>
+</span></span></code></pre></div><p>&hellip; would expand to</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">progn</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">when</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">not</span>
+</span></span><span class="line"><span class="cl">       <span class="p">(</span><span class="nb">featurep</span> <span class="ss">&#39;timu-bits</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">if</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nv">locate-library</span> <span class="s">&#34;timu-bits&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nb">progn</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-bits</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;Loaded module &#39;%s&#39;&#34;</span> <span class="ss">&#39;timu-bits</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;Module &#39;%s&#39; not found&#34;</span> <span class="ss">&#39;timu-bits</span><span class="p">))))</span>
+</span></span></code></pre></div><p>Nice bonus. There is a message trace for potential debugging. All i have to do is use the micro in my configuration, which I don&rsquo;t yet.</p>
+<h3 id="timu-bits-load">timu-bits-load</h3>
+<p>This one is really simple. It is called in the <code>init.el</code> to load my custom modules in the configuration.</p>
+<p>Might user <code>timu-bits-require</code> instead of <code>require</code> in the future.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-bits-load</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Load all custom the modules using </span><span class="ss">`require&#39;</span><span class="s">.
+</span></span></span><span class="line"><span class="cl"><span class="s">The order in which the modules are loaded is important.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-evil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-base</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-personal</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;dired</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-dired</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-ui</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;org</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-org</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-roam</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-nav</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-modes</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-edit</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;eshell</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-shell</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-fun</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-map</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-scratch</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">pcase</span> <span class="nv">system-type</span>
+</span></span><span class="line"><span class="cl">    <span class="p">((</span><span class="nb">or</span> <span class="ss">&#39;darwin</span> <span class="ss">&#39;gnu/linux</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;pdf-view</span>
+</span></span><span class="line"><span class="cl">       <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-pdf</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;magit</span>
+</span></span><span class="line"><span class="cl">       <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-git</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-mu4e</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-elfeed</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-prog</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">with-eval-after-load</span> <span class="ss">&#39;latex</span>
+</span></span><span class="line"><span class="cl">       <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-latex</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-work</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">     <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;timu-try</span><span class="p">))))</span>
+</span></span></code></pre></div><p>The end!</p>
+<h2 id="update-27-dot-may-2023">UPDATE - 27. May 2023</h2>
+<p><a href="https://gitlab.com/aimebertrand/dotemacs/-/commit/5d6083e0c2fe9b42755ebb3805da7721776e2905">Renamed a few modules</a> (now &lsquo;bits&rsquo;). Hence the few changes in this post.</p>

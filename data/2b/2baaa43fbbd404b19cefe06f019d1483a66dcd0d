@@ -1,0 +1,546 @@
+<style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p><strong>UPDATE - 16. Jan. 2023:</strong></p>
+</div>
+<p>Recently I came across a behaviour in Mu4e that did not do what was expected. It turns out Mu4e was not selecting the proper from-address when composing emails, which I did not notice for a long time.</p>
+<p>The short of it is that the function used to send emails did not take into account the <code>message-send-mail-hook</code>, which is responsible to select the proper from-address.</p>
+<p>To fix this adjust the following lines in the <strong>mu4e-sending</strong> section:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl">;; send function:
+</span></span><span class="line"><span class="cl"><span class="gd">-(setq send-mail-function &#39;sendmail-send-it
+</span></span></span><span class="line"><span class="cl"><span class="gd">-      message-send-mail-function &#39;sendmail-send-it)
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+(setq send-mail-function &#39;message-send-mail-with-sendmail
+</span></span></span><span class="line"><span class="cl"><span class="gi">+      message-send-mail-function &#39;message-send-mail-with-sendmail)
+</span></span></span></code></pre></div><h2 id="motivation">Motivation</h2>
+<p>There are a bunch of instructions on setting up <a href="https://www.djcbsoftware.nl/code/mu/mu4e.html">Mu4e</a> on macOS online. However I found that most of them kind of require too deep a knowledge of Emacs and command-line tools for a beginner to master or troubleshoot without a proper headache. I know, because that was the case for me in the beginning.</p>
+<p>My goal here is to provide a step by step instruction without looking too far behind the curtain. With the hope that this way the discovery and deep dive into emailing with Mu4e in Emacs starts <strong>after</strong> the joy of a working system.</p>
+<p>Now this seems long. And to be completely honest it is. But we are trying to be as thorough as possible here, right.</p>
+<p>The last reason for typing this down is purely selfish. I want to have a record/documentation to go back to myself. As a matter of fact this is actually true for all my posts.</p>
+<figure><img src="https://macowners.club/images/emacs_mu4e.png" width="800px">
+</figure>
+
+<style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p><strong>NOTE:</strong> This will only cover the setup. It is not a how to use Mu4e. The usage should be reasonably easy.</p>
+</div>
+<h2 id="prerequisites">Prerequisites</h2>
+<dl>
+<dt>A working Emacs configuration:</dt>
+<dd>I suppose no one will setup Mu4e without that.</dd>
+<dt>A working Installation of <code>Homebrew</code>:</dt>
+<dd>Fortunately <a href="https://brew.sh">the installation</a> is easy. In my mind, this is the best or maybe just the easiest way to get (open-source) software onto your Mac.</dd>
+</dl>
+<p>The two above things will not be covered the instructions on this page.</p>
+<h2 id="how-this-will-work">How this will work</h2>
+<p>Mu4e is part of the command-line indexer <code>mu</code> for emails in <a href="https://en.wikipedia.org/wiki/Maildir">maildir (mail directory)</a> format. It does need other 3rd party dependencies for retrieving and for sending emails.</p>
+<p>This post is limited to fetching emails over <code>imap</code> and for sending over <code>smtp</code>. Other Protocols and methods – I am looking at you Exchange – are out of scope.</p>
+<p>However I am convinced that this should cover a vast majority of the users. I will be using a dummy example account <code>dummy@example.com</code> for a generic email account and one for <strong>Gmail</strong>, <code>dummy@gmail.com</code>. Since we are on a Mac we will be looking at a dummy <strong>iCloud</strong> account <code>dummy@icloud.com</code> as well.</p>
+<p><strong>iCloud</strong> and <strong>Gmail</strong> require more password setup for access through imap. There are good instructions for <a href="https://support.apple.com/en-us/HT204397">&ldquo;app-specific passwords&rdquo; with iCloud</a> &amp; <a href="https://support.google.com/accounts/answer/185833?hl=en">&ldquo;app passwords&rdquo; with Gmail</a> respectively.</p>
+<h2 id="preparation">Preparation</h2>
+<h3 id="making-the-directories">making the directories</h3>
+<p>This uses the maildir system. Meaning that the messages will be stored in a directory hierarchy as separate plain text files. We will need the following directories in the user&rsquo;s home directory:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">~/.maildir/icloud <span class="c1"># name used for setting up mbsync an msmtp</span>
+</span></span><span class="line"><span class="cl">~/.maildir/gmail <span class="c1"># name used for setting up mbsync an msmtp</span>
+</span></span><span class="line"><span class="cl">~/.maildir/example <span class="c1"># name used for setting up mbsync an msmtp</span>
+</span></span><span class="line"><span class="cl">~/.maildir/certificates <span class="c1"># we will store System root certificates here</span>
+</span></span></code></pre></div><h3 id="storing-passwords-in-the-keychain">storing passwords in the keychain</h3>
+<p>The easiest way to store ones password in the macOS keychain is with the <code>security</code> command in your terminal. For our accounts we will setup the three items <code>mu4e-icloud</code>, <code>mu4e-gmail</code> and <code>mu4e-example</code>.</p>
+<dl>
+<dt>icloud:</dt>
+<dd><code>security add-generic-password -s mu4e-icloud -a dummy -w</code></dd>
+<dt>gmail:</dt>
+<dd><code>security add-generic-password -s mu4e-gmail -a dummy@gmail.com -w</code></dd>
+<dt>example:</dt>
+<dd><code>security add-generic-password -s mu4e-example -a dummy@example.com -w</code></dd>
+</dl>
+<p>For each account you will be prompted for the password to be stored.</p>
+<style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p>The names &ldquo;mu4e-icloud&rdquo;, &ldquo;mu4e-gmail&rdquo; and &ldquo;mu4e-example&rdquo; are entirely arbitrary.</p>
+</div>
+<h3 id="storing-trusted-root-certificates">storing trusted root certificates</h3>
+<p>The applications <code>mbsync</code> and <code>msmtp</code> need a way to trust email servers&rsquo;s tls/ssl certificates. We will use the list of certificate Authority trusted by the macOS system.</p>
+<ol>
+<li>Open the Application <code>Keychain Access.app</code></li>
+<li>Select <code>System Roots</code> in the sidebar</li>
+<li>Select all items listen here – <code>⌘ + a</code></li>
+<li>Export the items with <code>⇧ + ⌘ + e</code> to the file <code>~/.maildir/certificates/root-certificates.pem</code></li>
+</ol>
+<h2 id="installing-dependencies">Installing dependencies</h2>
+<ul>
+<li><strong>mu</strong>:
+<ul>
+<li>To index your emails in your mail directory.</li>
+<li>Recommended Installation: <code>brew install mu</code></li>
+</ul>
+</li>
+<li><strong>mbsync</strong>:
+<ul>
+<li>To Synchronize a maildir with an imap server we will need the command <code>mbsync</code> which is part of the <a href="https://isync.sourceforge.io/">isync</a> application.</li>
+<li>Recommended Installation: <code>brew install isync</code></li>
+</ul>
+</li>
+<li><strong>msmtp</strong>:
+<ul>
+<li>Like the name suggests, <a href="https://marlam.de/msmtp/">msmtp</a> is a smtp client. According to the website, it transmits a mail to an smtp server which takes care of further delivery.</li>
+<li>Recommended Installation: <code>brew install msmtp</code></li>
+</ul>
+</li>
+</ul>
+<h2 id="setup-imap-sync">Setup imap sync</h2>
+<p>The settings used by <code>mbsync</code> are stored in the file <code>~/.mbsyncrc</code> by default.</p>
+<style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p><strong>NOTE:</strong> Which imap servers, ports and credentials to use will be most definitely documented by your email provider.</p>
+</div>
+<h3 id="configuration-file">configuration file</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">IMAPAccount icloud
+</span></span><span class="line"><span class="cl">Host imap.mail.me.com
+</span></span><span class="line"><span class="cl">User dummy
+</span></span><span class="line"><span class="cl">PassCmd <span class="s2">&#34;security find-generic-password -s mu4e-icloud -a dummy -w&#34;</span>
+</span></span><span class="line"><span class="cl">Port <span class="m">993</span>
+</span></span><span class="line"><span class="cl">SSLType IMAPS
+</span></span><span class="line"><span class="cl">SSLVersions TLSv1.2
+</span></span><span class="line"><span class="cl">AuthMechs PLAIN
+</span></span><span class="line"><span class="cl">SystemCertificates no
+</span></span><span class="line"><span class="cl">CertificateFile ~/.maildir/certificates/root-certificates.pem
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">IMAPStore icloud-remote
+</span></span><span class="line"><span class="cl">Account icloud
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">MaildirStore icloud-local
+</span></span><span class="line"><span class="cl">SubFolders Verbatim
+</span></span><span class="line"><span class="cl">Path ~/.maildir/icloud/
+</span></span><span class="line"><span class="cl">Inbox ~/.maildir/icloud/INBOX
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Channel icloud
+</span></span><span class="line"><span class="cl">Far :icloud-remote:
+</span></span><span class="line"><span class="cl">Near :icloud-local:
+</span></span><span class="line"><span class="cl">Patterns *
+</span></span><span class="line"><span class="cl">Create Near
+</span></span><span class="line"><span class="cl">Sync All
+</span></span><span class="line"><span class="cl">Expunge Both
+</span></span><span class="line"><span class="cl">SyncState *
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># =====================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">IMAPAccount gmail
+</span></span><span class="line"><span class="cl">Host imap.gmail.com
+</span></span><span class="line"><span class="cl">User dummy@gmail.com
+</span></span><span class="line"><span class="cl">PassCmd <span class="s2">&#34;security find-generic-password -s mu4e-gmail -a dummy -w&#34;</span>
+</span></span><span class="line"><span class="cl">Port <span class="m">993</span>
+</span></span><span class="line"><span class="cl">SSLType IMAPS
+</span></span><span class="line"><span class="cl">SSLVersions TLSv1.2
+</span></span><span class="line"><span class="cl">AuthMechs PLAIN
+</span></span><span class="line"><span class="cl">SystemCertificates no
+</span></span><span class="line"><span class="cl">CertificateFile ~/.maildir/certificates/root-certificates.pem
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">IMAPStore gmail-remote
+</span></span><span class="line"><span class="cl">Account gmail
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">MaildirStore gmail-local
+</span></span><span class="line"><span class="cl">SubFolders Verbatim
+</span></span><span class="line"><span class="cl">Path ~/.maildir/gmail/
+</span></span><span class="line"><span class="cl">Inbox ~/.maildir/gmail/INBOX
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Channel gmail
+</span></span><span class="line"><span class="cl">Far :gmail-remote:
+</span></span><span class="line"><span class="cl">Near :gmail-local:
+</span></span><span class="line"><span class="cl">Patterns *
+</span></span><span class="line"><span class="cl">Create Near
+</span></span><span class="line"><span class="cl">Sync All
+</span></span><span class="line"><span class="cl">Expunge Both
+</span></span><span class="line"><span class="cl">SyncState *
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># =====================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">IMAPAccount example
+</span></span><span class="line"><span class="cl">Host imap.example.com
+</span></span><span class="line"><span class="cl">User dummy@example.com
+</span></span><span class="line"><span class="cl">PassCmd <span class="s2">&#34;security find-generic-password -s mu4e-example -a dummy@example.com -w&#34;</span>
+</span></span><span class="line"><span class="cl">Port <span class="m">993</span>
+</span></span><span class="line"><span class="cl">SSLType IMAPS
+</span></span><span class="line"><span class="cl">AuthMechs Login
+</span></span><span class="line"><span class="cl">CertificateFile ~/.maildir/certificates/root-certificates.pem
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">IMAPStore example-remote
+</span></span><span class="line"><span class="cl">Account example
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">MaildirStore example-local
+</span></span><span class="line"><span class="cl">SubFolders Verbatim
+</span></span><span class="line"><span class="cl">Path ~/.maildir/example/
+</span></span><span class="line"><span class="cl">Inbox ~/.maildir/example/INBOX
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Channel example
+</span></span><span class="line"><span class="cl">Far :example-remote:
+</span></span><span class="line"><span class="cl">Near :example-local:
+</span></span><span class="line"><span class="cl">Patterns *
+</span></span><span class="line"><span class="cl">Create Near
+</span></span><span class="line"><span class="cl">Sync All
+</span></span><span class="line"><span class="cl">Expunge Both
+</span></span><span class="line"><span class="cl">SyncState *
+</span></span></code></pre></div><h3 id="let-me-explain">let me explain</h3>
+<p>Bare with me here. This part might seem a tad to much, but I would have been happy to have it, back then when. You can skip it of course if you want.</p>
+<ul>
+<li><strong><em>IMAPAccount:</em></strong> You choose the name. But be consistent. See the sections above.</li>
+<li><strong><em>Host:</em></strong> This is the imap server according to your provider.</li>
+<li><strong><em>User:</em></strong> This is the login/user name according to your provider</li>
+<li><strong><em>PassCmd:</em></strong> Remember we added the password in the section <a href="#storing-passwords-in-the-keychain">storing passwords in the keychain</a>. We retrieve it withe command <code>security find-generic-password</code>.</li>
+<li><strong><em>Port:</em></strong> The imap port according to your provider.</li>
+<li><strong><em>SSLType:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>AuthMechs:</em></strong> This is the way the account authenticates with the imap server. Leave the default here.</li>
+<li><strong><em>CertificateFile:</em></strong> this is the file containing the trusted root certificates of the trusted Certificate authorities. See the section <a href="#storing-trusted-root-certificates">storing trusted root certificates</a>.</li>
+<li><strong><em>IMAPStore:</em></strong> Value for <code>IMAPAccount</code> plus <code>-remote</code>.</li>
+<li><strong><em>Account:</em></strong> Same as <code>IMAPAccount</code>.</li>
+<li><strong><em>MaildirStore:</em></strong> Value for <code>IMAPAccount</code> plus <code>-local</code>.</li>
+<li><strong><em>SubFolders:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>Path:</em></strong> We created this in the section <a href="#making-the-directories">making the directories</a>.</li>
+<li><strong><em>Inbox:</em></strong> This is <code>PATH</code> plus <code>/INBOX</code>.</li>
+<li><strong><em>Channel:</em></strong> Same as <code>IMAPAccount</code>.</li>
+<li><strong><em>Far:</em></strong> The syntax with the 2 <code>:</code> is important. Value for <code>IMAPAccount</code> plus <code>-remote</code>.</li>
+<li><strong><em>Near:</em></strong> The syntax with the 2 <code>:</code> is important. Value for <code>IMAPAccount</code> plus <code>-local</code>.</li>
+<li><strong><em>Patterns:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>Create:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>Sync:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>Expunge:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>SyncState:</em></strong> Leave this as is in the example file.</li>
+</ul>
+<h2 id="initial-sync">Initial sync</h2>
+<p>Now that all the above is setup, it is time to sync our mail for the first time. This will download all our mails from the imap servers.</p>
+<h3 id="first-step-mbsync">first step - mbsync</h3>
+<p>This is as simple as:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">mbsync -aV
+</span></span><span class="line"><span class="cl"><span class="c1"># -a for &#39;all&#39; and</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># -V for &#39;vorbose&#39; - might be helpfull to see whats happening</span>
+</span></span></code></pre></div><h3 id="second-step-mu">second step - mu</h3>
+<p>Now we need to initialize our email settings to get our emails indexed. This is for mu and Mu4e to be able to search emails and more.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># initialize the email settings:</span>
+</span></span><span class="line"><span class="cl">mu init -m ~/.maildir <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>   --my-address dummy@icloud.com <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>   --my-address dummy@gmail.com <span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span>   --my-address dummy@example.com
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># index the emails in your .maildir:</span>
+</span></span><span class="line"><span class="cl">mu index
+</span></span></code></pre></div><h2 id="setup-msmtp-for-sending">Setup msmtp for sending</h2>
+<p><code>msmtp</code> by default uses the file <code>~/.msmtprc</code> to store the settings.</p>
+<style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p><strong>NOTE:</strong> Which smtp servers, ports and credentials to use will be most definitely documented by your email provider.</p>
+</div>
+<h3 id="configuration-file">configuration file</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># Set default values for all the accounts.</span>
+</span></span><span class="line"><span class="cl">defaults
+</span></span><span class="line"><span class="cl">logfile ~/.maildir/msmtp.log
+</span></span><span class="line"><span class="cl">tls_trust_file ~/.maildir/certificates/root-certificates.pem
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># ======================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">account icloud
+</span></span><span class="line"><span class="cl">auth on
+</span></span><span class="line"><span class="cl">host smtp.mail.me.com
+</span></span><span class="line"><span class="cl">port <span class="m">465</span>
+</span></span><span class="line"><span class="cl">protocol smtp
+</span></span><span class="line"><span class="cl">from dummy@icloud.com
+</span></span><span class="line"><span class="cl">user dummy
+</span></span><span class="line"><span class="cl">passwordeval security find-generic-password -s mu4e-icloud -a dummy -w
+</span></span><span class="line"><span class="cl">tls on
+</span></span><span class="line"><span class="cl">tls_starttls off
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># ======================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">account gmail
+</span></span><span class="line"><span class="cl">auth on
+</span></span><span class="line"><span class="cl">host smtp.gmail.com
+</span></span><span class="line"><span class="cl">port <span class="m">465</span>
+</span></span><span class="line"><span class="cl">protocol smtp
+</span></span><span class="line"><span class="cl">from dummy@gmail.com
+</span></span><span class="line"><span class="cl">user dummy
+</span></span><span class="line"><span class="cl">passwordeval security find-generic-password -s mu4e-gmail -a dummy -w
+</span></span><span class="line"><span class="cl">tls on
+</span></span><span class="line"><span class="cl">tls_starttls off
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># ======================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">account example
+</span></span><span class="line"><span class="cl">auth on
+</span></span><span class="line"><span class="cl">host smtp.example.com
+</span></span><span class="line"><span class="cl">port <span class="m">465</span>
+</span></span><span class="line"><span class="cl">protocol smtp
+</span></span><span class="line"><span class="cl">from dummy@example.com
+</span></span><span class="line"><span class="cl">user dummy@example.com
+</span></span><span class="line"><span class="cl">passwordeval security find-internet-password -s mu4e-example -a dummy@example.com -w
+</span></span><span class="line"><span class="cl">tls on
+</span></span><span class="line"><span class="cl">tls_starttls off
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># ======================================================================</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">account default : gmail
+</span></span></code></pre></div><h3 id="let-me-explain">let me explain</h3>
+<p>Same as before in the mbsync section. Bit much, but useful to many.</p>
+<ul>
+<li><strong><em>defaults:</em></strong> Defaults for all accounts.</li>
+<li><strong><em>logfile:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>tls_trust_file:</em></strong> this is the file containing the trusted root certificates of the trusted Certificate authorities. See the section <a href="#storing-trusted-root-certificates">storing trusted root certificates</a>.</li>
+<li><strong><em>account:</em></strong> Same as the directory you created in <a href="#making-the-directories">making the directories</a>.</li>
+<li><strong><em>auth:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>host:</em></strong> smtp server according to your provider.</li>
+<li><strong><em>port:</em></strong> smtp port according to your provider.</li>
+<li><strong><em>protocol:</em></strong> Leave this as is in the example file.</li>
+<li><strong><em>from:</em></strong> login/user name according to your provider.</li>
+<li><strong><em>user:</em></strong> login/user name according to your provider.</li>
+<li><strong><em>passwordeval:</em></strong> Remember we added the password in the section <a href="#storing-passwords-in-the-keychain">storing passwords in the keychain</a>. We retrieve it withe command <code>security find-generic-password</code>.</li>
+<li><strong><em>tls:</em></strong> this should be <code>on</code>.</li>
+<li><strong><em>tls_starttls:</em></strong> Usually this should be <code>off</code>. Check with the providers documentation if sending doesn&rsquo;t work.</li>
+<li><strong><em>account default</em>:</strong> If you are using gmail, this should be the default. Otherwise you can choose. Without going to to much details, gmail is a bit touchy.</li>
+</ul>
+<h2 id="setup-mu4e-in-emacs">Setup Mu4e in Emacs</h2>
+<p>Put the following settings/configuration in your init file. Should be <code>~/.emacs</code> or <code>~/.emacs.d/init.el</code>. I will divide them into sections for better understanding. <code>;;</code> is used for comments.</p>
+<h3 id="require-packages-upfront">require packages upfront</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; load mu4e from the installation path.</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; yours might differ check with the Emacs installation</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">use-package</span> <span class="nv">mu4e</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">:load-path</span>  <span class="s">&#34;/usr/local/share/emacs/site-lisp/mu/mu4e/&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; for sending mails</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;smtpmail</span><span class="p">)</span>
+</span></span></code></pre></div><h3 id="mu4e-general-settings">mu4e-general-settings</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; we installed this with homebrew</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-mu-binary</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;mu&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; this is the directory we created before:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-maildir</span> <span class="s">&#34;~/.maildir&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; this command is called to sync imap servers:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-get-mail-command</span> <span class="p">(</span><span class="nf">concat</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;mbsync&#34;</span><span class="p">)</span> <span class="s">&#34; -a&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; how often to call it in seconds:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-update-interval</span> <span class="mi">300</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; save attachment to desktop by default</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; or another choice of yours:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-attachment-dir</span> <span class="s">&#34;~/Desktop&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; rename files when moving - needed for mbsync:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-change-filenames-when-moving</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; list of your email adresses:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-user-mail-address-list</span> <span class="o">&#39;</span><span class="p">(</span><span class="s">&#34;dummy@icloud.com&#34;</span>
+</span></span><span class="line"><span class="cl">                                    <span class="s">&#34;dummy@gmail.com&#34;</span>
+</span></span><span class="line"><span class="cl">                                    <span class="s">&#34;dummy@example.com&#34;</span><span class="p">))</span>
+</span></span></code></pre></div><h3 id="mu4e-favorites">mu4e-favorites</h3>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; check your ~/.maildir to see how the subdirectories are called</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; for the generic imap account:</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; e.g `ls ~/.maildir/example&#39;</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span>   <span class="nv">mu4e-maildir-shortcuts</span>
+</span></span><span class="line"><span class="cl">        <span class="o">&#39;</span><span class="p">((</span><span class="s">&#34;/icloud/INBOX&#34;</span> <span class="o">.</span> <span class="sc">?i</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="s">&#34;/icloud/Sent Messages&#34;</span> <span class="o">.</span> <span class="sc">?I</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="s">&#34;/gmail/INBOX&#34;</span> <span class="o">.</span> <span class="sc">?g</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="s">&#34;/gmail/[Gmail]/Sent Mail&#34;</span> <span class="o">.</span> <span class="sc">?G</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="s">&#34;/example/INBOX&#34;</span> <span class="o">.</span> <span class="sc">?e</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="s">&#34;/example/Sent&#34;</span> <span class="o">.</span> <span class="sc">?E</span><span class="p">)))</span>
+</span></span></code></pre></div><style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p>The letters assigned here – &ldquo;?x&rdquo; – are arbitrary.</p>
+</div>
+<h3 id="mu4e-bookmarks">mu4e-bookmarks</h3>
+<figure><img src="https://macowners.club/images/mu4e_main_view.png" width="800px">
+</figure>
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; the following is to show shortcuts in the main view.</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">&#39;mu4e-bookmarks</span>
+</span></span><span class="line"><span class="cl">             <span class="p">(</span><span class="nv">make-mu4e-bookmark</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:name</span> <span class="s">&#34;Inbox - iCloud&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:query</span> <span class="s">&#34;maildir:/icloud/INBOX&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:key</span> <span class="sc">?i</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">&#39;mu4e-bookmarks</span>
+</span></span><span class="line"><span class="cl">             <span class="p">(</span><span class="nv">make-mu4e-bookmark</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:name</span> <span class="s">&#34;Inbox - Gmail&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:query</span> <span class="s">&#34;maildir:/gmail/INBOX&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:key</span> <span class="sc">?g</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">&#39;mu4e-bookmarks</span>
+</span></span><span class="line"><span class="cl">             <span class="p">(</span><span class="nv">make-mu4e-bookmark</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:name</span> <span class="s">&#34;Inbox - example&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:query</span> <span class="s">&#34;maildir:/example/INBOX&#34;</span>
+</span></span><span class="line"><span class="cl">              <span class="nb">:key</span> <span class="sc">?e</span><span class="p">))</span>
+</span></span></code></pre></div><style>.orange {color: #f7821b;}</style>
+<div class="orange">
+<p>The letters assigned here – &ldquo;?x&rdquo; – are arbitrary.</p>
+</div>
+<h3 id="mu4e-context">mu4e-context</h3>
+<p>This controls the account context one is in. Helpful for instance, when composing an email.
+You can then select the context, which sets at the same time the sender.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-contexts</span>
+</span></span><span class="line"><span class="cl">      <span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="p">(</span><span class="nv">make-mu4e-context</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:name</span> <span class="s">&#34;icloud&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:enter-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Enter dummy@icloud.com context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:leave-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Leave dummy@icloud.com context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:match-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">msg</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="nb">when</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">              <span class="p">(</span><span class="nv">mu4e-message-contact-field-matches</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">                                                  <span class="nb">:to</span> <span class="s">&#34;dummy@icloud.com&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:vars</span> <span class="o">&#39;</span><span class="p">((</span><span class="nv">user-mail-address</span> <span class="o">.</span> <span class="s">&#34;dummy@icloud.com&#34;</span> <span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nf">user-full-name</span> <span class="o">.</span> <span class="s">&#34;Dummy McDummerson&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-drafts-folder</span> <span class="o">.</span> <span class="s">&#34;/icloud/Drafts&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-refile-folder</span> <span class="o">.</span> <span class="s">&#34;/icloud/Archive&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-sent-folder</span> <span class="o">.</span> <span class="s">&#34;/icloud/Sent Messages&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-trash-folder</span> <span class="o">.</span> <span class="s">&#34;/icloud/Deleted Messages&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="o">,</span><span class="p">(</span><span class="nv">make-mu4e-context</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:name</span> <span class="s">&#34;gmail&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:enter-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Enter dummy@gmail.com context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:leave-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Leave dummy@gmail.com context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:match-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">msg</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="nb">when</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">              <span class="p">(</span><span class="nv">mu4e-message-contact-field-matches</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">                                                  <span class="nb">:to</span> <span class="s">&#34;dummy@gmail.com&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:vars</span> <span class="o">&#39;</span><span class="p">((</span><span class="nv">user-mail-address</span> <span class="o">.</span> <span class="s">&#34;dummy@gmail.com&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nf">user-full-name</span> <span class="o">.</span> <span class="s">&#34;Dummy McDummerson&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-drafts-folder</span> <span class="o">.</span> <span class="s">&#34;/gmail/Drafts&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-refile-folder</span> <span class="o">.</span> <span class="s">&#34;/gmail/Archive&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-sent-folder</span> <span class="o">.</span> <span class="s">&#34;/gmail/Sent&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-trash-folder</span> <span class="o">.</span> <span class="s">&#34;/gmail/Trash&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="o">,</span><span class="p">(</span><span class="nv">make-mu4e-context</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:name</span> <span class="s">&#34;example&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:enter-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Enter dummy@example.de context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:leave-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">mu4e-message</span> <span class="s">&#34;Leave dummy@example.de context&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:match-func</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">msg</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="nb">when</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">              <span class="p">(</span><span class="nv">mu4e-message-contact-field-matches</span> <span class="nv">msg</span>
+</span></span><span class="line"><span class="cl">                                                  <span class="nb">:to</span> <span class="s">&#34;dummy@example.de&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">          <span class="nb">:vars</span> <span class="o">&#39;</span><span class="p">((</span><span class="nv">user-mail-address</span> <span class="o">.</span> <span class="s">&#34;dummy@example.de&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nf">user-full-name</span> <span class="o">.</span> <span class="s">&#34;Dummy McDummerson&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="c1">;; check your ~/.maildir to see how the subdirectories are called</span>
+</span></span><span class="line"><span class="cl">                  <span class="c1">;; e.g `ls ~/.maildir/example&#39;</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-drafts-folder</span> <span class="o">.</span> <span class="s">&#34;/example/Drafts&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-refile-folder</span> <span class="o">.</span> <span class="s">&#34;/example/Archive&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-sent-folder</span> <span class="o">.</span> <span class="s">&#34;/example/Sent&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">mu4e-trash-folder</span> <span class="o">.</span> <span class="s">&#34;/example/Trash&#34;</span><span class="p">)))))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-context-policy</span> <span class="ss">&#39;pick-first</span><span class="p">)</span> <span class="c1">;; start with the first (default) context;</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-compose-context-policy</span> <span class="ss">&#39;ask</span><span class="p">)</span> <span class="c1">;; ask for context if no context matches;</span>
+</span></span></code></pre></div><h3 id="mu4e-sending">mu4e-sending</h3>
+<figure><img src="https://macowners.club/images/mu4e_address_completion.png" width="800px">
+</figure>
+
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; gpg encryptiom &amp; decryption:</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; this can be left alone</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;epa-file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">epa-file-enable</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">epa-pinentry-mode</span> <span class="ss">&#39;loopback</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">auth-source-forget-all-cached</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; don&#39;t keep message compose buffers around after sending:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">message-kill-buffer-on-exit</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; send function:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">send-mail-function</span> <span class="ss">&#39;sendmail-send-it</span>
+</span></span><span class="line"><span class="cl">      <span class="nv">message-send-mail-function</span> <span class="ss">&#39;sendmail-send-it</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; send program:</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; this is exeranal. remember we installed it before.</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">sendmail-program</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;msmtp&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; select the right sender email from the context.</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">message-sendmail-envelope-from</span> <span class="ss">&#39;header</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; chose from account before sending</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; this is a custom function that works for me.</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; well I stole it somewhere long ago.</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; I suggest using it to make matters easy</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; of course adjust the email adresses and account descriptions</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/set-msmtp-account</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nv">message-mail-p</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">save-excursion</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nb">let*</span>
+</span></span><span class="line"><span class="cl">            <span class="p">((</span><span class="nv">from</span> <span class="p">(</span><span class="nb">save-restriction</span>
+</span></span><span class="line"><span class="cl">                     <span class="p">(</span><span class="nv">message-narrow-to-headers</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                     <span class="p">(</span><span class="nv">message-fetch-field</span> <span class="s">&#34;from&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">             <span class="p">(</span><span class="nv">account</span>
+</span></span><span class="line"><span class="cl">              <span class="p">(</span><span class="nb">cond</span>
+</span></span><span class="line"><span class="cl">               <span class="p">((</span><span class="nf">string-match</span> <span class="s">&#34;dummy@icloud.com&#34;</span> <span class="nv">from</span><span class="p">)</span> <span class="s">&#34;icloud&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">               <span class="p">((</span><span class="nf">string-match</span> <span class="s">&#34;dummy@gmail.com&#34;</span> <span class="nv">from</span><span class="p">)</span> <span class="s">&#34;gmail&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">               <span class="p">((</span><span class="nf">string-match</span> <span class="s">&#34;dummy@example.com&#34;</span> <span class="nv">from</span><span class="p">)</span> <span class="s">&#34;example&#34;</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">setq</span> <span class="nv">message-sendmail-extra-arguments</span> <span class="p">(</span><span class="nf">list</span> <span class="o">&#39;</span><span class="s">&#34;-a&#34;</span> <span class="nv">account</span><span class="p">))))))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;message-send-mail-hook</span> <span class="ss">&#39;timu/set-msmtp-account</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; mu4e cc &amp; bcc</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; this is custom as well</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-mode-hook</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/add-cc-and-bcc</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">            <span class="s">&#34;My Function to automatically add Cc &amp; Bcc: headers.
+</span></span></span><span class="line"><span class="cl"><span class="s">    This is in the mu4e compose mode.&#34;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="nb">save-excursion</span> <span class="p">(</span><span class="nv">message-add-header</span> <span class="s">&#34;Cc:\n&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="nb">save-excursion</span> <span class="p">(</span><span class="nv">message-add-header</span> <span class="s">&#34;Bcc:\n&#34;</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; mu4e address completion</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-mode-hook</span> <span class="ss">&#39;company-mode</span><span class="p">)</span>
+</span></span></code></pre></div><figure><img src="https://macowners.club/images/mu4e_compose_view.png" width="800px">
+</figure>
+
+<h3 id="optional">optional</h3>
+<p>This are optional variables to set. At least the way I have set them. They are not needed for the system to work, but are a suggestion. My sane defaults sort of speak.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; store link to message if in header view, not to header query:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">org-mu4e-link-query-in-headers-mode</span> <span class="no">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; don&#39;t have to confirm when quitting:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-confirm-quit</span> <span class="no">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; number of visible headers in horizontal split view:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-headers-visible-lines</span> <span class="mi">20</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; don&#39;t show threading by default:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-headers-show-threads</span> <span class="no">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; hide annoying &#34;mu4e Retrieving mail...&#34; msg in mini buffer:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-hide-index-messages</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; customize the reply-quote-string:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">message-citation-line-format</span> <span class="s">&#34;%N @ %Y-%m-%d %H:%M :\n&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; M-x find-function RET message-citation-line-format for docs:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">message-citation-line-function</span> <span class="ss">&#39;message-insert-formatted-citation-line</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; by default do not show related emails:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-headers-include-related</span> <span class="no">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; by default do not show threads:</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-headers-show-threads</span> <span class="no">nil</span><span class="p">)</span>
+</span></span></code></pre></div><blockquote>
+<p>That is it! You should now be ready to go and discover.</p>
+</blockquote>
+<h2 id="conclusion">Conclusion</h2>
+<p>The opinions on which email client to use are many. I was a happy user of the macOS built-in Mail.app till I discovered Emacs. Even then it took me a while to get into migrating my mail workflow into Mu4e.</p>
+<p>Now that I am quite invested and committed however, I cannot imagine myself using another client. It is true that I keep the Mail.app around as a backup, because I like to tinker with my Emacs config, but I have not needed it so far. The Mu4e system works and the advantages cannot be denied.</p>
+<ul>
+<li>Emails in plain text
+<ul>
+<li>When all fails, I can read my mails in an editor.</li>
+<li>I can even keep my mails in a version control. Deleted mails you did not want to. Go back a few commits.</li>
+</ul>
+</li>
+<li>Another workflow into Emacs
+<ul>
+<li>We Emacs enthusiast know, why this is a brilliant idea. You can use all the amenities with your mails.</li>
+</ul>
+</li>
+<li>Much more.</li>
+</ul>
+<p>Since Mu4e is inside Emacs and adheres to the principles as well, there is nothing you cannot do with it.</p>
+<ul>
+<li>You got <a href="https://melpa.org/#/?q=mu4e">all manner of packages</a> – this is just a selection – to extend the capabilities.</li>
+<li>You can easily write or steal Emacs-lisp code for Mu4e to make it yours. This might not be obvious from the start, but be patient and you will see.</li>
+</ul>
+<h2 id="sources">Sources</h2>
+<p>Starting I scoured the web for any info I could find.</p>
+<ul>
+<li><a href="https://www.djcbsoftware.nl/code/mu/mu4e/">Mu4e user manual</a></li>
+<li><a href="https://www.djcbsoftware.nl/code/mu/cheatsheet.html">Mu Cheatsheet</a></li>
+<li><a href="http://www.macs.hw.ac.uk/~rs46/posts/2014-01-13-mu4e-email-client.html">Drowning in Email; mu4e to the Rescue</a></li>
+<li><a href="https://vxlabs.com/2017/02/07/mu4e-0-9-18-e-mailing-with-emacs-now-even-better/">mu4e 0.9.18: E-Mailing with Emacs now even better</a></li>
+<li>Pragmatic Emacs&rsquo;s <a href="http://pragmaticemacs.com/mu4e-tutorials/">Mu4e posts</a></li>
+<li>Mike Zamansky&rsquo;s <a href="https://www.youtube.com/user/mzamansky/search?query=mu4e">YouTube videos about mu4e</a></li>
+<li>System Crafters&rsquo;s <a href="https://www.youtube.com/watch?v=yZRyEhi4y44&amp;list=PLEoMzSkcN8oM-kA19xOQc8s0gr0PpFGJQ">YouTube series about mu4e</a></li>
+<li>All kind of posts on <a href="https://www.reddit.com/r/emacs/search?q=mu4e&amp;restrict_sr=1">reddit.com/r/emacs</a></li>
+</ul>

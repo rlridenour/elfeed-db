@@ -1,0 +1,47 @@
+<style>.orange {color: #f7821b; font-weight: bold;}</style>
+<div class="orange">
+<p>Edit 2026-02-01:</p>
+</div>
+<p>Since some internal functions in Mu4e have changed I had to update the code for <code>timu-mu4e-view-just-save-all-attachments</code> as well. See <a href="https://gitlab.com/aimebertrand/dotemacs/-/commit/184953d96d525655a61813af809bafae4032424d">this commit</a>.</p>
+<h2 id="my-issue">My Issue</h2>
+<p>In an older post I wrote down my solution for <a href="https://macowners.club/posts/mu4e-save-attachments-faster-with-ivy/">saving multiple attachements at once</a> without a completion from Mu4e. The reason being that my the bulk of use cases are to save all attachments at once.</p>
+<p>In the rare cases I want to select an attachments out of many I can still use <code>mu4e-view-mime-part-action</code>.</p>
+<p>Now I have encountered a few <a href="https://macowners.club/posts/mu4e-save-attachments-faster-with-ivy/#edits">breaking updates of Mu4e</a> and for a while I have been dealing with another one. Granted, You are not supposed to use private function in an Emacs package/library in you own solution. So in this case I am the one to blame.</p>
+<h2 id="my-solution">My solution</h2>
+<p>The default command <code>mu4e-view-save-attachments</code> provides a way of selecting multiple files in the completion list, but even this kind of grinds my gear. I do not need the completion at all. See above.</p>
+<p>This is the reason, why I went ahead and modified the command. Simply put, this removes the completion for a files. Then it <strong>always</strong> ask for the directory to save to starting with the <code>mu4e-attachment-dir</code>.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-mu4e-view-just-save-all-attachments</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Save files from the current Mu4e view buffer.
+</span></span></span><span class="line"><span class="cl"><span class="s">This applies to all MIME-parts that are \&#34;attachment-like\&#34; (have a filename),
+</span></span></span><span class="line"><span class="cl"><span class="s">regardless of their disposition.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">This is a modified version of </span><span class="ss">`mu4e-view-save-attachments&#39;</span><span class="s">.
+</span></span></span><span class="line"><span class="cl"><span class="s">It does not use </span><span class="ss">`mu4e--completing-read&#39;</span><span class="s"> to select files, but just selects all.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">Also it always prompts for the directory to save to.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let*</span> <span class="p">((</span><span class="nv">parts</span> <span class="p">(</span><span class="nv">mu4e-view-mime-parts</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">candidates</span>  <span class="p">(</span><span class="nv">seq-map</span>
+</span></span><span class="line"><span class="cl">                         <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">fpart</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                           <span class="p">(</span><span class="nf">cons</span> <span class="c1">;; (filename . annotation)</span>
+</span></span><span class="line"><span class="cl">                            <span class="p">(</span><span class="nf">plist-get</span> <span class="nv">fpart</span> <span class="nb">:filename</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                            <span class="nv">fpart</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                         <span class="p">(</span><span class="nv">seq-filter</span>
+</span></span><span class="line"><span class="cl">                          <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">part</span><span class="p">)</span> <span class="p">(</span><span class="nf">plist-get</span> <span class="nv">part</span> <span class="nb">:attachment-like</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                          <span class="nv">parts</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">candidates</span> <span class="p">(</span><span class="nb">or</span> <span class="nv">candidates</span>
+</span></span><span class="line"><span class="cl">                         <span class="p">(</span><span class="nv">mu4e-warn</span> <span class="s">&#34;No attachments for this message&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">files</span> <span class="p">(</span><span class="nf">mapcar</span> <span class="nf">#&#39;car</span> <span class="nv">candidates</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">default-directory</span> <span class="nv">mu4e-attachment-dir</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nv">custom-dir</span> <span class="p">(</span><span class="nv">read-directory-name</span>
+</span></span><span class="line"><span class="cl">                                    <span class="s">&#34;Save to directory: &#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">seq-do</span> <span class="p">(</span><span class="nb">lambda</span> <span class="p">(</span><span class="nv">fname</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">              <span class="p">(</span><span class="nb">let*</span> <span class="p">((</span><span class="nv">part</span> <span class="p">(</span><span class="nf">cdr</span> <span class="p">(</span><span class="nf">assoc</span> <span class="nv">fname</span> <span class="nv">candidates</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">                     <span class="p">(</span><span class="nv">path</span> <span class="p">(</span><span class="nv">mu4e--uniqify-file-name</span>
+</span></span><span class="line"><span class="cl">                            <span class="p">(</span><span class="nv">mu4e-join-paths</span>
+</span></span><span class="line"><span class="cl">                             <span class="p">(</span><span class="nb">or</span> <span class="nv">custom-dir</span> <span class="p">(</span><span class="nf">plist-get</span> <span class="nv">part</span> <span class="nb">:target-dir</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                             <span class="p">(</span><span class="nf">plist-get</span> <span class="nv">part</span> <span class="nb">:filename</span><span class="p">)))))</span>
+</span></span><span class="line"><span class="cl">                <span class="p">(</span><span class="nv">mm-save-part-to-file</span> <span class="p">(</span><span class="nf">plist-get</span> <span class="nv">part</span> <span class="nb">:handle</span><span class="p">)</span> <span class="nv">path</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">            <span class="nv">files</span><span class="p">)))</span>
+</span></span></code></pre></div><h2 id="conclusion">Conclusion</h2>
+<p>This might be a quick and dirty way of solving my issue, however it works really good for me. You are always free to hit me up with a better solution however. I am not the Emacs Lisp magician, so I am thinking a proper wiz might use an advice or hook or something.</p>

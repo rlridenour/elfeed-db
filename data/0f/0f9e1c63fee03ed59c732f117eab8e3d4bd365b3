@@ -1,0 +1,127 @@
+<style>.orange {color: #f7821b; font-weight: bold;}</style>
+<div class="orange">
+<p>Update 2024-03-10:</p>
+</div>
+<p>With the update of Mu4e to 1.12.0 some functions/variables have been deprecated and/or changed. The fix to accommodate those changes can be seen in the following commit:</p>
+<p><a href="https://gitlab.com/aimebertrand/dotemacs/-/commit/e11b484a9fad11baaaa629857e7ccafd5c8b31f0">https://gitlab.com/aimebertrand/dotemacs/-/commit/e11b484a9fad11baaaa629857e7ccafd5c8b31f0</a></p>
+<h2 id="issue">Issue</h2>
+<p>By default, when replying or forwarding an email, the signature is put at the end of the email body. This means that it is even below the cited text of the original email.</p>
+<p>This is a weird behavior since I want to sign my own text and not all of the body.</p>
+<p>I usually scroll down while composing the email cut my automatically added signature and paste it above the cited text.</p>
+<p>Recently I saw this <a href="https://www.reddit.com/r/emacs/comments/ww15x3/doomemacs_how_to_put_the_signature_above_the/">post on Reddit</a> that motivated me to change this behaviour which is a nuisance.</p>
+<h2 id="solution">Solution</h2>
+<h3 id="first-step">First step</h3>
+<p>After a few searches on google I found <a href="https://github.com/djcb/mu/issues/706#issuecomment-904328020">this solution</a> in the issues <a href="https://github.com/djcb/mu/issues/706">#706</a> of the mu/mu4e GitHub repo.</p>
+<p>The solution is not to automatically add the signature when composing , replying to or forwarding a message&hellip;</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-compose-signature-auto-include</span> <span class="no">nil</span><span class="p">)</span>
+</span></span></code></pre></div><p>&hellip; then to add a hook to <code>mu4e-compose-mode-hook</code> and <code>mu4e-compose-pre-hook</code>.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">message-insert-signature-at-point</span> <span class="p">(</span><span class="nv">pmode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Function to insert signature at point.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">when</span> <span class="nv">pmode</span> <span class="p">(</span><span class="nv">mu4e-compose-goto-top</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;message</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">message-goto-body</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">save-restriction</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">narrow-to-region</span> <span class="p">(</span><span class="nf">point</span><span class="p">)</span> <span class="p">(</span><span class="nf">point</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">message-insert-signature</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">mu4e-compose-goto-top</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; add them to the hooks with appropriate input arguments</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-mode-hook</span> <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">                                    <span class="p">(</span><span class="nv">message-insert-signature-at-point</span> <span class="no">nil</span><span class="p">))</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-pre-hook</span> <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">                                   <span class="p">(</span><span class="nv">message-insert-signature-at-point</span> <span class="no">t</span><span class="p">))</span> <span class="no">t</span><span class="p">)</span>
+</span></span></code></pre></div><p><strong>This would solve the issue putting the signature above the cited text in the email.</strong></p>
+<style>.orange-text {color: #f7821b; font-weight: bold;}</style>
+<div class="orange-text">
+<p>However there is another slight issue:</p>
+</div>
+<p><strong>You see, everything that follows <code>--</code> (the 2 dashes are automatically inserted with the signature) in a message is viewed/handled as a signature/comment. Meaning even the quoted text. This leads to all manners of wrong display in the message.</strong></p>
+<h3 id="second-step">Second step</h3>
+<p>I found a solution for the second issue. The easiest way was to change the function <code>message-insert-signature</code> since the two dashes (<code>--</code>) are hard coded here.</p>
+<p>I simply switch the <code>--</code> to <code>......</code>.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-func-message-insert-signature</span> <span class="p">(</span><span class="kp">&amp;optional</span> <span class="nv">force</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Insert a signature at the end of the buffer.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">See the documentation for the </span><span class="ss">`message-signature&#39;</span><span class="s"> variable for
+</span></span></span><span class="line"><span class="cl"><span class="s">more information.
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">If FORCE is 0 (or when called interactively), the global values
+</span></span></span><span class="line"><span class="cl"><span class="s">of the signature variables will be consulted if the local ones
+</span></span></span><span class="line"><span class="cl"><span class="s">are null.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span> <span class="p">(</span><span class="nf">list</span> <span class="mi">0</span><span class="p">)</span> <span class="nv">message-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let</span> <span class="p">((</span><span class="nv">message-signature</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">message-signature-file</span> <span class="nv">message-signature-file</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; If called interactively and there&#39;s no signature to insert,</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; consult the global values to see whether there&#39;s anything they</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; have to say for themselves.  This can happen when using</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; `gnus-posting-styles&#39;, for instance.</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nf">null</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">null</span> <span class="nv">message-signature-file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">eq</span> <span class="nv">force</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">setq</span> <span class="nv">message-signature</span> <span class="p">(</span><span class="nf">default-value</span> <span class="ss">&#39;message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nv">message-signature-file</span> <span class="p">(</span><span class="nf">default-value</span> <span class="ss">&#39;message-signature-file</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">let*</span> <span class="p">((</span><span class="nv">signature</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nb">cond</span>
+</span></span><span class="line"><span class="cl">         <span class="p">((</span><span class="nb">and</span> <span class="p">(</span><span class="nf">null</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">eq</span> <span class="nv">force</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">save-excursion</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nf">goto-char</span> <span class="p">(</span><span class="nf">point-max</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nv">not</span> <span class="p">(</span><span class="nf">re-search-backward</span> <span class="nv">message-signature-separator</span> <span class="no">nil</span> <span class="no">t</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">((</span><span class="nb">and</span> <span class="p">(</span><span class="nf">null</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="nv">force</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="p">((</span><span class="nf">functionp</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nf">funcall</span> <span class="nv">message-signature</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">((</span><span class="nf">listp</span> <span class="nv">message-signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nf">eval</span> <span class="nv">message-signature</span> <span class="no">t</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="no">t</span> <span class="nv">message-signature</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">       <span class="nv">signature-file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">setq</span> <span class="nv">signature</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nb">cond</span> <span class="p">((</span><span class="nf">stringp</span> <span class="nv">signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="nv">signature</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">((</span><span class="nb">and</span> <span class="p">(</span><span class="nf">eq</span> <span class="no">t</span> <span class="nv">signature</span><span class="p">)</span> <span class="nv">message-signature-file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nb">setq</span> <span class="nv">signature-file</span>
+</span></span><span class="line"><span class="cl">             <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nb">and</span> <span class="nv">message-signature-directory</span>
+</span></span><span class="line"><span class="cl">                  <span class="c1">;; don&#39;t actually use the signature directory</span>
+</span></span><span class="line"><span class="cl">                  <span class="c1">;; if message-signature-file contains a path.</span>
+</span></span><span class="line"><span class="cl">                  <span class="p">(</span><span class="nv">not</span> <span class="p">(</span><span class="nf">file-name-directory</span>
+</span></span><span class="line"><span class="cl">                    <span class="nv">message-signature-file</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">                 <span class="p">(</span><span class="nf">expand-file-name</span> <span class="nv">message-signature-file</span>
+</span></span><span class="line"><span class="cl">                           <span class="nv">message-signature-directory</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">               <span class="nv">message-signature-file</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">file-exists-p</span> <span class="nv">signature-file</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">when</span> <span class="nv">signature</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">goto-char</span> <span class="p">(</span><span class="nf">point-max</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; Insert the signature.</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nf">bolp</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">newline</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">when</span> <span class="nv">message-signature-insert-empty-line</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">newline</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">insert</span> <span class="s">&#34;...... &#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">newline</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nf">eq</span> <span class="nv">signature</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nf">insert-file-contents</span> <span class="nv">signature-file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">insert</span> <span class="nv">signature</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">goto-char</span> <span class="p">(</span><span class="nf">point-max</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nf">bolp</span><span class="p">)</span> <span class="p">(</span><span class="nv">newline</span><span class="p">))))))</span>
+</span></span></code></pre></div><p>With that the complete solution is&hellip;</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-func-message-insert-signature-at-point</span> <span class="p">(</span><span class="nv">pmode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Function to insert signature at point.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">when</span> <span class="nv">pmode</span> <span class="p">(</span><span class="nv">mu4e-compose-goto-top</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;message</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">message-goto-body</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">save-restriction</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">narrow-to-region</span> <span class="p">(</span><span class="nf">point</span><span class="p">)</span> <span class="p">(</span><span class="nf">point</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">timu-func-message-insert-signature</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">mu4e-compose-goto-top</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-mode-hook</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">timu-func-message-insert-signature-at-point</span> <span class="no">nil</span><span class="p">))</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;mu4e-compose-pre-hook</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nb">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">timu-func-message-insert-signature-at-point</span> <span class="no">t</span><span class="p">))</span> <span class="no">t</span><span class="p">)</span>
+</span></span></code></pre></div><h2 id="conclusion">Conclusion</h2>
+<p>I am almost completely certain that one is able to find a nicer and shorter solution. Especially looking at &ldquo;redefining&rdquo; the function <code>message-insert-signature</code>.</p>
+<p>However I find that this works wonderfully for me. Yeah!!!</p>

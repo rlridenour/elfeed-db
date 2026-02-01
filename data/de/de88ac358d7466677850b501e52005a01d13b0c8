@@ -1,0 +1,363 @@
+<p>
+I spent few hours trying to launch home automation software — <a href="https://www.openhab.org/">OpenHAB</a>
+(4th version) — to the my NetBSD box. If installation didn't cause any
+problems, then I got some tricky error about JNA<sup><a id="fnr.jna" class="footref" href="#fn.jna" role="doc-backlink">1</a></sup> while the system
+was starting up.
+</p>
+
+<p>
+Why I selected the OpenHAB? I searched for some home automation
+software which able to operate with Zigbee network (without
+<code>zigbee2mqtt</code>, which is written in TypeScript — software to operate with
+embedded systems, written in the JS? No way!), able to communicate
+with various network services and able to call external programs and
+scripts. At the <a href="https://awesome-selfhosted.net/">awesome-selfhosted.net</a> I found the next solutions,
+which are mature enough and have necessary features:
+</p>
+<ol class="org-ol">
+<li>Home Assistant. Sadly, it doesn't have installation instructions
+not involving installation of a special operating system (Home
+Assistant Operating System) on the server or using Docker — these
+instruction <a href="https://www.home-assistant.io/blog/2025/05/22/deprecating-core-and-supervised-installation-methods-and-32-bit-systems">were deprecated</a> at May 2025. So this software can't be
+used with BSD.</li>
+<li><a href="https://fhem.de/">FHEM</a> — looks like interesting, at least it have normal installation
+instructions. But it is written in the Perl, which I don't know.</li>
+<li>And the OpenHAB — proper installation instructions exists and also
+it written in Java, which is a big plus for me. Since I'm a Java
+programmer, I will be able to properly handle and maintain this
+software.</li>
+</ol>
+
+<p>
+This post is based on the <a href="https://community.openhab.org/t/how-to-install-openhab4-in-the-netbsd/167077">mine post</a> in the OpenHAB forum.
+</p>
+<div class="outline-2">
+<h2>TOC&#xa0;&#xa0;&#xa0;<span class="tag"></span></h2>
+<div class="outline-text-2">
+<ul class="org-ul">
+<li><a href="#installation">Installation (in the sandbox)</a></li>
+<li><a href="#fix-jna-problem">Fix problem with JNA</a></li>
+<li><a href="#startup-script">Startup script</a></li>
+<li><a href="#notes">Notes</a></li>
+</ul>
+</div>
+</div>
+<div id="outline-container-installation" class="outline-2">
+<h2 id="installation">Installation (in the sandbox)</h2>
+<div class="outline-text-2" id="text-installation">
+<p>
+I will describe how to install OpenHAB inside the sandbox (you can
+read more about <code>sandboxctl</code> in the another post from this blog: <a href="https://eugene-andrienko.com/it/2025/09/15/sandboxctl-netbsd-little-howto.html">"Using
+sandboxctl for program sandboxing in NetBSD"</a>). The installation
+process doesn't differ a lot from the <a href="https://www.openhab.org/docs/installation/linux.html#manual-installation">official installation
+instructions</a>, just a minor differences:
+</p>
+<ul class="org-ul">
+<li>Instead of <code>adduser</code> the <code>useradd</code> should be used.</li>
+<li>The login for <code>openhab</code> user shouldn't be disabled, because then the
+<code>su - openhab -c "cmd"</code> will not work.</li>
+<li>Group <code>openhab</code> should be created manually.</li>
+</ul>
+
+<p>
+Since I'm using the <code>sandboxctl</code>, all the commands below will be
+prepended with <code>sandboxctl -c openhab run</code>. To install OpenHAB not
+inside the sandbox but "bare-metal", just remove this prefix from the
+commands.
+</p>
+
+<p>
+First, in the <code>sandboxctl</code> configuration script for <code>openhab</code> sandbox, I
+spin up the NetBSD release with <code>xbase</code> set, because the libraries
+inside this set are necessary for JVM:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr">1: </span><span style="color: #909995;"># </span><span style="color: #909995;">Configuration file for OpenHAB sandboxctl(8).</span>
+<span class="linenr">2: </span>
+<span class="linenr">3: </span><span style="color: #0072d4;">SANDBOX_NAME</span>=openhab
+<span class="linenr">4: </span><span style="color: #0072d4;">SANDBOX_TYPE</span>=netbsd-release
+<span class="linenr">5: </span><span style="color: #0072d4;">SANDBOX_ROOT</span>=/var/chroot/sandboxctl/$<span style="color: #0072d4;">SANDBOX_NAME</span>
+<span class="linenr">6: </span>
+<span class="linenr">7: </span><span style="color: #0072d4;">NETBSD_RELEASE_RELEASEDIR</span>=<span style="color: #009c8f;">"/root/netbsd-release"</span>
+<span class="linenr">8: </span><span style="color: #0072d4;">NETBSD_RELEASE_SETS</span>=<span style="color: #009c8f;">"base etc xbase"</span>
+</pre>
+</div>
+
+<p>
+Then, during the sandbox creation, the timezone will be set and
+certificates, and <code>pkgin</code> will be installed inside:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr">10: </span><span style="color: #0072d4;">post_create_hook</span>() {
+<span class="linenr">11: </span>    <span style="color: #909995;"># </span><span style="color: #909995;">Setup timezone</span>
+<span class="linenr">12: </span>    rm -v $<span style="color: #0072d4;">SANDBOX_ROOT</span>/etc/localtime
+<span class="linenr">13: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run ln -s /usr/share/zoneinfo/Europe/Moscow /etc/localtime
+<span class="linenr">14: </span>
+<span class="linenr">15: </span>    <span style="color: #0072d4;">PKG_PATH</span>=https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All
+<span class="linenr">16: </span>    <span style="color: #53676d; font-weight: bold;">export</span> PKG_PATH
+<span class="linenr">17: </span>    pkg_add -I -P $<span style="color: #0072d4;">SANDBOX_ROOT</span> ca-certificates
+<span class="linenr">18: </span>    mkdir $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/
+<span class="linenr">19: </span>    cp -v $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/share/examples/ca-certificates/ca-certificates.conf $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/
+<span class="linenr">20: </span>    sed -r <span style="color: #009c8f;">'s/^#(ETCCERTSDIR=\/etc\/openssl\/certs)/\1/'</span> <span style="color: #ad8900; font-weight: bold;">\</span>
+<span class="linenr">21: </span>        $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/share/examples/ca-certificates/ca-certificates-dir.conf &gt; <span style="color: #ad8900; font-weight: bold;">\</span>
+<span class="linenr">22: </span>        $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/ca-certificates-dir.conf
+<span class="linenr">23: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run update-ca-certificates
+<span class="linenr">24: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run sh -c <span style="color: #009c8f;">"PKG_PATH=$PKG_PATH pkg_add pkgin"</span>
+</pre>
+</div>
+
+<p>
+To launch OpenHAB I'll install the OpenJDK 17. Yes, the OpenJDK 21
+exists in the NetBSD repositories and the OpenHAB 5.x.x uses it. But
+the <code>java-jna</code> package for now built only for 17 version of Java.
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr">26: </span><span style="color: #909995;"># </span><span style="color: #909995;">Install Java 17</span>
+<span class="linenr">27: </span>sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run pkgin -y install openjdk17 java-jna
+</pre>
+</div>
+
+<p>
+Then, some system configuration from official documentation, adapted
+for NetBSD:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr">29: </span><span style="color: #909995;"># </span><span style="color: #909995;">Prepare system for OpenHAB</span>
+<span class="linenr">30: </span>sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run pkgin -y install curl unzip
+<span class="linenr">31: </span>sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run mkdir /opt
+<span class="linenr">32: </span>sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run groupadd openhab
+<span class="linenr">33: </span>sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run useradd -s /bin/sh -g openhab -b /opt/ -m openhab
+<span class="linenr">34: </span><span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">'JAVA_HOME=/usr/pkg/java/openjdk17'</span> &gt;&gt; $<span style="color: #0072d4;">SANDBOX_ROOT</span>/opt/openhab/.profile
+<span class="linenr">35: </span><span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">'export JAVA_HOME'</span> &gt;&gt; $<span style="color: #0072d4;">SANDBOX_ROOT</span>/opt/openhab/.profile
+<span class="linenr">36: </span><span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">'PATH=$PATH:/usr/pkg/java/openjdk17/bin'</span> &gt;&gt; $<span style="color: #0072d4;">SANDBOX_ROOT</span>/opt/openhab/.profile
+<span class="linenr">37: </span><span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">'export PATH'</span> &gt;&gt; $<span style="color: #0072d4;">SANDBOX_ROOT</span>/opt/openhab/.profile
+</pre>
+</div>
+
+<p>
+Here I just create the <code>/opt</code> directory, which is Linux-specific and
+doesn't exist in BSD. Then, create necessary group and user, and setup
+few environment variables to let the <code>openhab</code> user operate with JVM.
+</p>
+
+<p>
+The last part — OpenHAB installation. I use the 4.3.8 (latest for now)
+version, since the 4th major version works with OpenJDK 17. Also, I
+install addons:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr">39: </span>    <span style="color: #909995;"># </span><span style="color: #909995;">Install OpenHAB</span>
+<span class="linenr">40: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run curl -L --output /tmp/openhab-download.zip https://github.com/openhab/openhab-distro/releases/download/4.3.8/openhab-4.3.8.
+<span class="linenr">41: </span>zip
+<span class="linenr">42: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run unzip /tmp/openhab-download.zip -d /opt/openhab
+<span class="linenr">43: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run rm -vf /tmp/openhab-download.zip
+<span class="linenr">44: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run curl -L --output /opt/openhab/addons/openhab-addons-4.3.8.kar https://github.com/openhab/openhab-distro/releases/download/4
+<span class="linenr">45: </span>.3.8/openhab-addons-4.3.8.kar
+<span class="linenr">46: </span>    sandboxctl -c $<span style="color: #0072d4;">SANDBOX_NAME</span> run chown -hR openhab:openhab /opt/openhab
+<span class="linenr">47: </span>}
+</pre>
+</div>
+
+<p>
+Done! After the sandbox was created with this configuration, the
+OpenHAB installation is (almost) complete.
+</p>
+
+<p>
+The complete <code>openhab.conf</code> can be downloaded <a href="/assets/static/openhab.conf.txt">here</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-fix-jna-problem" class="outline-2">
+<h2 id="fix-jna-problem">Fix problem with JNA</h2>
+<div class="outline-text-2" id="text-fix-jna-problem">
+<p>
+The OpenHAB could be started with the <code>/opt/openhab/start.sh openhab</code>
+command, like stated in the documentation. But it just opens the
+console and spew the next error:
+</p>
+<pre class="example">
+2025-11-04 17:00:41.761 [ERROR] [ternal.service.BootFeaturesInstaller] - Error installing boot features
+org.apache.karaf.features.internal.util.MultiException: Error restarting bundles:
+        Could not resolve module: com.sun.jna [41]
+  Unresolved requirement: Require-Capability: osgi.native; native.paths.8:List&lt;String&gt;="com/sun/jna/sunos-x86-64/libjnidispatch.so"; native.paths.17:List&lt;String&gt;="com/sun/jna/linux-x86-64/libjnidispatch.so"; native.paths.7:List&lt;String&gt;="com/sun/jna/sunos-x86/libjnidispatch.so"; native.paths.16:List&lt;String&gt;="com/sun/jna/linux-x86/libjnidispatch.so"; native.paths.19:List&lt;String&gt;="com/sun/jna/linux-arm/libjnidispatch.so"; native.paths.9:List&lt;String&gt;="com/sun/jna/sunos-sparc/libjnidispatch.so"; native.paths.18:List&lt;String&gt;="com/sun/jna/linux-arm/libjnidispatch.so"; native.paths.13:List&lt;String&gt;="com/sun/jna/linux-ppc/libjnidispatch.so"; native.paths.35:List&lt;String&gt;="com/sun/jna/darwin-aarch64/libjnidispatch.jnilib"; native.paths.12:List&lt;String&gt;="com/sun/jna/aix-ppc64/libjnidispatch.a"; native.paths.34:List&lt;String&gt;="com/sun/jna/darwin-x86-64/libjnidispatch.jnilib"; native.paths.15:List&lt;String&gt;="com/sun/jna/linux-ppc64le/libjnidispatch.so"; native.paths.14:List&lt;String&gt;="com/sun/jna/linux-ppc64/libjnidispatch.so"; native.paths.31:List&lt;String&gt;="com/sun/jna/darwin-ppc/libjnidispatch.jnilib"; native.paths.30:List&lt;String&gt;="com/sun/jna/openbsd-x86-64/libjnidispatch.so"; native.paths.11:List&lt;String&gt;="com/sun/jna/aix-ppc/libjnidispatch.a"; native.paths.33:List&lt;String&gt;="com/sun/jna/darwin-x86/libjnidispatch.jnilib"; native.paths.10:List&lt;String&gt;="com/sun/jna/sunos-sparcv9/libjnidispatch.so"; native.paths.32:List&lt;String&gt;="com/sun/jna/darwin-ppc64/libjnidispatch.jnilib"; native.paths.28:List&lt;String&gt;="com/sun/jna/freebsd-x86-64/libjnidispatch.so"; native.paths.27:List&lt;String&gt;="com/sun/jna/freebsd-x86/libjnidispatch.so"; native.paths.29:List&lt;String&gt;="com/sun/jna/openbsd-x86/libjnidispatch.so"; native.paths.24:List&lt;String&gt;="com/sun/jna/linux-mips64el/libjnidispatch.so"; native.paths.23:List&lt;String&gt;="com/sun/jna/linux-sparcv9/libjnidispatch.so"; native.paths.26:List&lt;String&gt;="com/sun/jna/linux-loongarch64/libjnidispatch.so"; native.paths.25:List&lt;String&gt;="com/sun/jna/linux-s390x/libjnidispatch.so"; native.paths.20:List&lt;String&gt;="com/sun/jna/linux-armel/libjnidispatch.so"; native.paths.22:List&lt;String&gt;="com/sun/jna/linux-ia64/libjnidispatch.so"; native.paths.21:List&lt;String&gt;="com/sun/jna/linux-aarch64/libjnidispatch.so"; native.paths.0:List&lt;String&gt;="com/sun/jna/win32-x86/jnidispatch.dll"; native.paths.2:List&lt;String&gt;="com/sun/jna/win32-aarch64/jnidispatch.dll"; native.paths.1:List&lt;String&gt;="com/sun/jna/win32-x86-64/jnidispatch.dll"; native.paths.4:List&lt;String&gt;="com/sun/jna/win32-x86-64/jnidispatch.dll"; native.paths.3:List&lt;String&gt;="com/sun/jna/win32-x86/jnidispatch.dll"; native.paths.6:List&lt;String&gt;="com/sun/jna/w32ce-arm/jnidispatch.dll"; native.paths.5:List&lt;String&gt;="com/sun/jna/win32-aarch64/jnidispatch.dll"; filter:="(|(&amp;(osgi.native.osname~=win32)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=win32)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=win32)(osgi.native.processor~=aarch64))(&amp;(osgi.native.osname~=win)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=win)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=win)(osgi.native.processor~=aarch64))(&amp;(osgi.native.osname~=wince)(osgi.native.processor~=arm))(&amp;(osgi.native.osname~=sunos)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=sunos)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=sunos)(osgi.native.processor~=sparc))(&amp;(osgi.native.osname~=sunos)(osgi.native.processor~=sparcv9))(&amp;(osgi.native.osname~=aix)(osgi.native.processor~=ppc))(&amp;(osgi.native.osname~=aix)(osgi.native.processor~=ppc64))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=ppc))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=ppc64))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=ppc64le))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=arm))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=arm_le))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=armel))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=aarch64))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=ia64))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=sparcv9))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=mips64el))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=S390x))(&amp;(osgi.native.osname~=linux)(osgi.native.processor~=loongarch64))(&amp;(osgi.native.osname~=freebsd)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=freebsd)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=openbsd)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=openbsd)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=macosx)(osgi.native.processor~=ppc))(&amp;(osgi.native.osname~=macosx)(osgi.native.processor~=ppc64))(&amp;(osgi.native.osname~=macosx)(osgi.native.processor~=x86))(&amp;(osgi.native.osname~=macosx)(osgi.native.processor~=x86-64))(&amp;(osgi.native.osname~=macosx)(osgi.native.processor~=aarch64)))"
+
+        Could not resolve module: io.methvin.directory-watcher [46]
+  Unresolved requirement: Import-Package: com.sun.nio.file; resolution:="optional"
+  Unresolved requirement: Import-Package: com.sun.jna.ptr
+    -&gt; Export-Package: com.sun.jna.ptr; bundle-symbolic-name="com.sun.jna"; bundle-version="5.14.0"; version="5.14.0"; uses:="com.sun.jna"
+       com.sun.jna [41]
+         Unresolved requirement: Require-Capability: osgi.native; native.paths.8:List&lt;String&gt;="com/sun/jna/sunos-x86-64/libjnidispatch.so"; native.paths.17
+</pre>
+
+<p>
+As visible from the <code>native.paths</code> list, the bundled JNA module could
+not be loaded, because it knows nothing about NetBSD — only about
+FreeBSD, OpenBSD and DragonFlyBSD. So the module, shipped within
+<code>java-jna</code>, should be used.
+</p>
+
+<p>
+First, remove the bundled module right from the previously opened
+console:
+</p>
+<pre class="example">
+openhab&gt; bundle:list | grep jna
+ 41 │ Installed │  80 │ 5.14.0                │ jna
+openhab&gt; bundle:uninstall 41
+</pre>
+
+<p>
+Second, install the JARs shipped with <code>java-jna</code> package:
+</p>
+<pre class="example">
+openhab&gt; bundle:install //usr/pkg/lib/java/jna/jna.jar
+openhab&gt; bundle:install //usr/pkg/lib/java/jna/jna-platform.jar
+openhab&gt; bundle:list | grep jna
+ 254 │ Installed │  80 │ 5.15.0                │ jna
+ 270 │ Resolved  │  80 │ 5.15.0                │ jna-platform
+openhab&gt; bundle:start 254
+openhab&gt; bundle:start 270
+</pre>
+
+<p>
+After these actions the OpenHAB will use the right JNA version and
+start without beforementioned exception.
+</p>
+</div>
+</div>
+<div id="outline-container-startup-script" class="outline-2">
+<h2 id="startup-script">Startup script</h2>
+<div class="outline-text-2" id="text-startup-script">
+<p>
+To start sandboxed OpenHAB I wrote the next simple startup script:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span class="linenr"> 1: </span><span style="color: #909995;">#</span><span style="color: #909995;">!/bin/</span><span style="color: #489100; font-weight: bold;">sh</span>
+<span class="linenr"> 2: </span>
+<span class="linenr"> 3: </span><span style="color: #909995;"># </span><span style="color: #909995;">PROVIDE: openhab</span>
+<span class="linenr"> 4: </span><span style="color: #909995;"># </span><span style="color: #909995;">REQUIRE: DAEMON NETWORKING mountall npfd pgsql</span>
+<span class="linenr"> 5: </span><span style="color: #909995;"># </span><span style="color: #909995;">BEFORE: LOGIN</span>
+<span class="linenr"> 6: </span><span style="color: #909995;"># </span><span style="color: #909995;">KEYWORD: nojail shutdown</span>
+<span class="linenr"> 7: </span>
+<span class="linenr"> 8: </span>$<span style="color: #0072d4;">_rc_subr_loaded</span> . /etc/rc.subr
+<span class="linenr"> 9: </span>
+<span class="linenr">10: </span><span style="color: #0072d4;">name</span>=<span style="color: #009c8f;">"openhab"</span>
+<span class="linenr">11: </span><span style="color: #0072d4;">rcvar</span>=$<span style="color: #0072d4;">name</span>
+<span class="linenr">12: </span><span style="color: #0072d4;">start_cmd</span>=<span style="color: #009c8f;">"openhab_start"</span>
+<span class="linenr">13: </span><span style="color: #0072d4;">stop_cmd</span>=<span style="color: #009c8f;">"openhab_stop"</span>
+<span class="linenr">14: </span><span style="color: #0072d4;">restart_cmd</span>=<span style="color: #009c8f;">"openhab_restart"</span>
+<span class="linenr">15: </span><span style="color: #0072d4;">status_cmd</span>=<span style="color: #009c8f;">"openhab_status"</span>
+<span class="linenr">16: </span><span style="color: #0072d4;">extra_commands</span>=<span style="color: #009c8f;">"status"</span>
+<span class="linenr">17: </span>
+<span class="linenr">18: </span><span style="color: #0072d4;">openhab_start</span>()
+<span class="linenr">19: </span>{
+<span class="linenr">20: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Starting OpenHAB..."</span>
+<span class="linenr">21: </span>    /usr/pkg/sbin/sandboxctl -c openhab mount
+<span class="linenr">22: </span>    /usr/pkg/sbin/sandboxctl -c openhab run su - openhab -c <span style="color: #009c8f;">'/opt/openhab/runtime/bin/karaf daemon &amp;'</span>
+<span class="linenr">23: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"OpenHAB started"</span>
+<span class="linenr">24: </span>}
+<span class="linenr">25: </span>
+<span class="linenr">26: </span><span style="color: #0072d4;">openhab_stop</span>()
+<span class="linenr">27: </span>{
+<span class="linenr">28: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Stopping OpenHAB..."</span>
+<span class="linenr">29: </span>    /usr/pkg/sbin/sandboxctl -c openhab run su - openhab -c <span style="color: #009c8f;">'/opt/openhab/runtime/bin/karaf stop'</span>
+<span class="linenr">30: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">31: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"."</span>
+<span class="linenr">32: </span>        sleep 5
+<span class="linenr">33: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">34: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">35: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"."</span>
+<span class="linenr">36: </span>        sleep 10
+<span class="linenr">37: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">38: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">39: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"."</span>
+<span class="linenr">40: </span>        pkill -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span>
+<span class="linenr">41: </span>        sleep 5
+<span class="linenr">42: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">43: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">44: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"."</span>
+<span class="linenr">45: </span>        pkill -9 -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span>
+<span class="linenr">46: </span>        sleep 5
+<span class="linenr">47: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">48: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">49: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">'Failed to stop OpenHAB!'</span>
+<span class="linenr">50: </span>        <span style="color: #489100; font-weight: bold;">exit</span> 1
+<span class="linenr">51: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">52: </span>
+<span class="linenr">53: </span>    /usr/pkg/sbin/sandboxctl -c openhab unmount
+<span class="linenr">54: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"OpenHAB stopped"</span>
+<span class="linenr">55: </span>}
+<span class="linenr">56: </span>
+<span class="linenr">57: </span><span style="color: #0072d4;">openhab_restart</span>()
+<span class="linenr">58: </span>{
+<span class="linenr">59: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Restarting OpenHAB..."</span>
+<span class="linenr">60: </span>    openhab_stop
+<span class="linenr">61: </span>    openhab_start
+<span class="linenr">62: </span>    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"OpenHAB restarted"</span>
+<span class="linenr">63: </span>}
+<span class="linenr">64: </span>
+<span class="linenr">65: </span><span style="color: #0072d4;">openhab_status</span>()
+<span class="linenr">66: </span>{
+<span class="linenr">67: </span>    <span style="color: #489100; font-weight: bold;">if</span> pgrep -f <span style="color: #009c8f;">'/usr/pkg/java/openjdk17/bin/java.+openhab.+'</span> 2&gt;&amp;1 &gt; /dev/null; <span style="color: #489100; font-weight: bold;">then</span>
+<span class="linenr">68: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"OpenHAB is running"</span>
+<span class="linenr">69: </span>    <span style="color: #489100; font-weight: bold;">else</span>
+<span class="linenr">70: </span>        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"OpenHAB is stopped"</span>
+<span class="linenr">71: </span>    <span style="color: #489100; font-weight: bold;">fi</span>
+<span class="linenr">72: </span>}
+<span class="linenr">73: </span>
+<span class="linenr">74: </span>load_rc_config $<span style="color: #0072d4;">name</span>
+<span class="linenr">75: </span>run_rc_command <span style="color: #009c8f;">"$1"</span>
+</pre>
+</div>
+
+<p>
+It depends on the <code>pgsql</code> service, since I'm using PostgreSQL for
+persistence. The <code>start</code>, <code>restart</code> and <code>status</code> are pretty simple and using
+well-known Unix (or Sun Solaris 7) utilities to determine OpenHAB
+status.
+</p>
+
+<p>
+To launch OpenHAB sandbox, first the necessary filesystems for <code>openhab</code>
+sandbox are mounted. Then the <code>karaf</code> daemon is launched, like it's
+stated in the documentation.
+</p>
+
+<p>
+The code for <code>stop</code> function is slightly complex:
+</p>
+<ol class="org-ol">
+<li>It stops the daemon as usual.</li>
+<li>If daemon is still running — just wait 5 seconds — it is a big Java
+application, so possibly it still stopping.</li>
+<li>If daemon is still running — just wait 10 more seconds.</li>
+<li>If it is still running — kill it with <code>SIGTERM</code>.</li>
+<li>If it is <b>still</b> running — kill it with <del>fire</del> <code>SIGKILL</code>.</li>
+<li>If it doesn't help — show error to the user.</li>
+<li>Then, if all is OK — just umount the filesystems, used by <code>openhab</code>
+sandbox.</li>
+</ol>
+
+<p>
+Startup script can be downloaded <a href="/assets/static/openhab.txt">here</a>.
+</p>
+</div>
+</div>
+<div id="outline-container-notes" class="outline-2">
+<h2 id="notes">Notes</h2>
+<div class="outline-text-2" id="text-notes">
+</div>
+</div>
+<div id="footnotes">
+
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.jna" class="footnum" href="#fnr.jna" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+JNA: <a href="https://github.com/java-native-access/jna">Java Native Access library</a>. Used to access native shared
+libraries without JNI code.
+</p></div></div>
+
+
+</div>
+</div>

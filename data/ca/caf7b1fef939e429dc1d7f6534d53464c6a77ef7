@@ -1,0 +1,77 @@
+<p>I thought I would share a little bit of elisp that I&rsquo;ve been using for a while now that allows me to quickly find a file. It leverages <code>completing-read</code>, allows the selection of the find method and will search recursively.</p>
+<p>When called you can select which search type you prefer:</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20240804075952-emacs--Finding-Files-Using-Completing-Read.jpg" width="100%">
+</figure>
+
+<p>You can select the built-in <code>find-name-dired</code> but as you see I can also choose an external find tool such as <code>find</code>, <code>fd</code> or <code>rg</code> and it should be flexible enough to add in any others by expanding <code>find-options</code> in the function below:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/find-file ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Find file from current directory in many different ways.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (let* ((find-options <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;find -type f -printf \&#34;$PWD/%p\\0\&#34;&#34;</span> <span style="color:#f92672">.</span> :string)
+</span></span><span style="display:flex;"><span>                          (<span style="color:#e6db74">&#34;fd --absolute-path --type f -0&#34;</span> <span style="color:#f92672">.</span> :string)
+</span></span><span style="display:flex;"><span>                          (<span style="color:#e6db74">&#34;rg --follow --files --null&#34;</span> <span style="color:#f92672">.</span> :string)
+</span></span><span style="display:flex;"><span>                          (<span style="color:#e6db74">&#34;find-name-dired&#34;</span> <span style="color:#f92672">.</span> :command)))
+</span></span><span style="display:flex;"><span>          (selection (<span style="color:#a6e22e">completing-read</span> <span style="color:#e6db74">&#34;Select : &#34;</span> find-options))
+</span></span><span style="display:flex;"><span>          (metadata <span style="color:#f92672">&#39;</span>((category <span style="color:#f92672">.</span> file)))
+</span></span><span style="display:flex;"><span>          (file-list)
+</span></span><span style="display:flex;"><span>          (file))
+</span></span><span style="display:flex;"><span>    (pcase (alist-get selection find-options <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">nil</span> <span style="color:#a6e22e">#&#39;</span>string=)
+</span></span><span style="display:flex;"><span>      (:command
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">call-interactively</span> (<span style="color:#a6e22e">intern</span> selection)))
+</span></span><span style="display:flex;"><span>      (:string
+</span></span><span style="display:flex;"><span>        (setq file-list (split-string (shell-command-to-string selection) <span style="color:#e6db74">&#34;\0&#34;</span> <span style="color:#66d9ef">t</span>))
+</span></span><span style="display:flex;"><span>        (setq file (<span style="color:#a6e22e">completing-read</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Find file in %s: &#34;</span> (abbreviate-file-name default-directory))
+</span></span><span style="display:flex;"><span>                     (lambda (str pred action)
+</span></span><span style="display:flex;"><span>                       (if (<span style="color:#a6e22e">eq</span> action <span style="color:#e6db74">&#39;metadata</span>)
+</span></span><span style="display:flex;"><span>                         <span style="color:#f92672">`</span>(metadata <span style="color:#f92672">.</span> <span style="color:#f92672">,</span>metadata)
+</span></span><span style="display:flex;"><span>                         (complete-with-action action file-list str pred)))
+</span></span><span style="display:flex;"><span>                     <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;file-name-history</span>)))
+</span></span><span style="display:flex;"><span>      (when file (find-file (<span style="color:#a6e22e">expand-file-name</span> file))))))
+</span></span></code></pre></div><p>To be completely honest, I don&rsquo;t really use Emacs&rsquo; built-in find functions, such as <code>find-file</code> and <code>find-name-dired</code>. Here are a few reasons why:</p>
+<ul>
+<li>Speed and Efficiency
+<ul>
+<li>Tools like <code>fd</code> and <code>rg</code> are incredibly fast and efficient.</li>
+<li>They allow easy filtering through a simple <code>.ignore</code> file configuration.</li>
+</ul>
+</li>
+</ul>
+<!--listend-->
+<ul>
+<li>Enhanced File Search
+<ul>
+<li>I can leverage <code>completing-read</code> to process the file list.</li>
+<li>Using <code>vertico</code>, I gain the advantage of fuzzy completion, making file search more efficient and user-friendly.</li>
+</ul>
+</li>
+</ul>
+<!--listend-->
+<ul>
+<li>Alternative Methods
+<ul>
+<li>I seldom need to find a single file using <code>find-file</code></li>
+<li>Instead, I rely on bookmarks, <code>dired</code> and <code>recentf</code></li>
+</ul>
+</li>
+</ul>
+<!--listend-->
+<ul>
+<li>Dired Benefits
+<ul>
+<li>While <code>find-name-dired</code> offers the benefits of a <code>dired</code> buffer, I generally don&rsquo;t need to perform specific actions on files found this way.</li>
+<li>Most of the time, I just need to jump to a file quickly.</li>
+<li>A dired bufer can be generated through <code>embark-export</code> anyway when going through a file fuzzy search at any point.</li>
+</ul>
+</li>
+</ul>
+<!--listend-->
+<ul>
+<li>Customization and Flexibility
+<ul>
+<li>External tools often provide more customization options, which align better with my workflow.</li>
+<li>These tools integrate seamlessly with my Emacs setup, enhancing my overall productivity.</li>
+</ul>
+</li>
+</ul>
+<p>By considering these reasons, I&rsquo;ve found that external tools better fit my workflow compared to the built-in Emacs find functions when wanting to find a file quickly.</p>
+<p><strong>P.S.</strong> I still have a fondness for the basic <code>find</code> command, which I continue to use, particularly on the command line and especially when operating through SSH. However, I still can&rsquo;t remember how to prune directories!, but then who can? 😀</p>

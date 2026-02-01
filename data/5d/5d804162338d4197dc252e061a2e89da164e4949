@@ -1,0 +1,30 @@
+<p><img src="https://xenodium.github.io/images/open-emacs-elfeed-links-in-background/background-browse.gif" alt=""></p>
+<p>Christopher Wellons's <a href="https://github.com/skeeto/elfeed">elfeed</a> is a wonderful Emacs rss reader. In Mike Zamansky's <a href="https://cestlaz.github.io/post/using-emacs-72-customizing-elfeed/">Using Emacs 72 - Customizing Elfeed</a> video, he highlights a desire to open elfeed entries in the background. That is, open the current rss entry (or selected entries) without shifting focus from Emacs to your browser. This behaviour is somewhat analogous to ⌘-clicking/ctrl-clicking on multiple links in the browser without losing focus.</p>
+<p>I've been wanting elfeed to open links in the background for some time. Zamansky's post was a great nudge to look into it. He points to the relevant <a href="https://github.com/skeeto/elfeed/blob/58ab1f8bcc3014206db42a7a26f3120ba5de4ca6/elfeed-search.el#L783">elfeed-search-browse-url</a> function, re-implemented to suit his needs. In a similar spirit, I wrote a function to open the current rss entry (or selected entries) in the background.</p>
+<p>I'm running macOS, so I took a look at [browse-url-default-macosx-browser](https://github.com/emacs-mirror/emacs/blob/d714aa753b744c903d149a1f6c69262d958c313e/lisp/net/browse-url.el#L1018  I ) to get an idea of how URLs are opened. Simple. It let's macOS handle it via the &quot;open&quot; command, invoked through <em>start process</em>. Looking at open's command-line options, we find <em>–background</em> which &quot;does not bring the application to the foreground.&quot;</p>
+<pre><code class="language-{.commonlisp">open --background http://xenodium.com
+</code></pre>
+<p>&quot;b&quot; is already bound to <em>elfeed-search-browse-url</em>, so in our snippet we'll bind &quot;B&quot; to our new background function, giving us some flexibility:</p>
+<pre><code class="language-{.commonlisp">(use-package elfeed
+  :ensure t
+  :bind (:map elfeed-search-mode-map
+              (&quot;B&quot; . ar/elfeed-search-browse-background-url))
+  :config
+  (defun ar/elfeed-search-browse-background-url ()
+    &quot;Open current `elfeed' entry (or region entries) in browser without losing focus.&quot;
+    (interactive)
+    (let ((entries (elfeed-search-selected)))
+      (mapc (lambda (entry)
+              (assert (memq system-type '(darwin)) t &quot;open command is macOS only&quot;)
+              (start-process (concat &quot;open &quot; (elfeed-entry-link entry))
+                             nil &quot;open&quot; &quot;--background&quot; (elfeed-entry-link entry))
+              (elfeed-untag entry 'unread)
+              (elfeed-search-update-entry entry))
+            entries)
+      (unless (or elfeed-search-remain-on-entry (use-region-p))
+        (forward-line)))))
+</code></pre>
+<p>Maybe xdg-open does a similar thing on linux (I've not looked). Ping me if you have a linux solution and I can update the function.</p>
+<p>Happy Emacsing.</p>
+<p>ps. I noticed elfeed uses <em>browse-url-generic</em> if <em>elfeed-search-browse-url</em>'s is invoked with a prefix. Setting <a href="https://github.com/emacs-mirror/emacs/blob/d0e2a341dd9a9a365fd311748df024ecb25b70ec/lisp/net/browse-url.el#L534">browse-url-generic-program</a> and <a href="https://github.com/emacs-mirror/emacs/blob/d0e2a341dd9a9a365fd311748df024ecb25b70ec/lisp/net/browse-url.el#L539">browse-url-generic-args</a> to use background options may be a more generic solution. For now, a custom function does the job.</p>
+<p>comments on <a href="https://twitter.com/xenodium/status/1263839324023525376">twitter</a>.</p>

@@ -1,0 +1,44 @@
+<p>Or, <code>constantp</code> is not enough.</p>
+<!-- more-->
+
+<p>Because I do a lot of things with <a href="https://www.tfeb.org/fragments/documentation/star.html" title="&#352;tar">&#352;tar</a>, and for other reasons, I spend a fair amount of time writing various compile-time optimizers for things which have the semantics of function calls. You can think of iterator optimizers in &#352;tar as being a bit like compiler macros: the aim is to take a function call form and to turn it, in good cases, into something quicker<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-1-definition" name="2025-12-04-literals-and-constants-in-common-lisp-footnote-1-return">1</a></sup>. One important way of doing this is to be able to detect things which are known at compile-time: constants and literals, for instance.</p>
+
+<p>One of the things this has made clear to me is that, like John Peel, <code>constantp</code> is not enough. Here&rsquo;s an example.</p>
+
+<p><code>(in-row-major-array a :simple t :element-type 'fixnum)</code> is a function call whose values &#352;tar can use to tell it how to iterate (via <code>row-major-aref</code>) over an array. When used in a <code>for</code> form, its optimizer would like to be able to expand into something involving <code>(declare (type (simple-array fixnum *) ...)</code>, so that the details of the array are known to the compiler, which can then generate fast code for <code>row-major-aref</code>. This makes a great deal of difference to performance: array access to simple arrays of known element types is usually much faster than to general arrays.</p>
+
+<p>In order to do this it needs to know two things:</p>
+
+<ul>
+ <li>that the values of the <code>simple</code> and <code>element-type</code> keyword arguments are compile-time constants;</li>
+ <li><em>what their values are</em>.</li></ul>
+
+<p>You might say, well, that&rsquo;s what <code>constantp</code> is for<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-2-definition" name="2025-12-04-literals-and-constants-in-common-lisp-footnote-2-return">2</a></sup>. It&rsquo;s not: <code>constantp</code> tells you only the <em>first</em> of these, and you need both.</p>
+
+<p>Consider this code, in a file to be compiled:</p>
+
+<pre class="brush: lisp"><code>(defconstant et 'fixnum)
+
+(defun ... ...
+  (for ((e (in-array a :element-type et)))
+    ...)
+  ...)</code></pre>
+
+<p>Now, <code>constantp</code>will tell you that <code>et</code> is indeed a compile-time constant. <em>But it won&rsquo;t tell you its value</em>, and in particular nothing says it needs to be bound at compile-time at all: <code>(symbol-value 'et)</code> may well be an error at compile-time.</p>
+
+<p><code>constantp</code> is not enough<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-3-definition" name="2025-12-04-literals-and-constants-in-common-lisp-footnote-3-return">3</a></sup>! instead you need a function that tells you &lsquo;yes, this thing is a compile-time constant, and its value is &hellip;&rsquo;. This is what <code>literal</code> does<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-4-definition" name="2025-12-04-literals-and-constants-in-common-lisp-footnote-4-return">4</a></sup>: it conservatively answers the question, and tells you the value if so. In particular, an expression like <code>(literal '(quote fixnum))</code> will return <code>fixnum</code>, the value, and <code>t</code> to say yes, it is a compile-time constant. It can&rsquo;t do this for things defined with <code>defconstant</code>, and it may miss other cases, but when it says something is a compile-time constant, it is. In particular it works for actual literals (hence its name), and for forms whose macroexpansion is a literal.</p>
+
+<p>That is enough in practice.</p>
+
+<hr />
+
+<div class="footnotes">
+ <ol>
+  <li class="footnote-definition" id="2025-12-04-literals-and-constants-in-common-lisp-footnote-1-definition">
+   <p>&#346;tar&rsquo;s iterator optimizers are not compiler macros, because the code they write is inserted in various places in the iteration construct, but they&rsquo;re doing a similar job: turning a construct involving many function calls into one requiring fewer or no function calls.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-1-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-12-04-literals-and-constants-in-common-lisp-footnote-2-definition">
+   <p>And you may ask yourself, &ldquo;How do I work this?&rdquo; / And you may ask yourself, &ldquo;Where is that large automobile?&rdquo; / And you may tell yourself, &ldquo;This is not my beautiful house&rdquo; / And you may tell yourself, &ldquo;This is not my beautiful wife&rdquo;&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-2-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-12-04-literals-and-constants-in-common-lisp-footnote-3-definition">
+   <p>Here&rsquo;s something that staryed as a mail message which tries to explain this in some more detail. In the case of variables <code>defconstant</code> is required to tell <code>constantp</code> that a variable is a constant at compile-time but is not required (and should not be required) to evaluate the initform, let alone actually establish a binding at that time. In SBCL it does both (SBCL doesn&rsquo;t really have a compilation environment). In LW, say, it at least does not establish a binding, because LW does have a compilation environment. That means that in LW compiling a file has fewer compile-time side-effects than it does in SBCL. Outside of variables, it&rsquo;s easily possible that a compiler might be smart enough to know that, given <code>(defun c (n) (+ n 15))</code>, then <code>(constantp '(c 1) &lt;compilation environment&gt;)</code> is true. But you can&rsquo;t evaluate <code>(c 1)</code> at compile-time at all. <code>constantp</code> tells you that you don&rsquo;t need to bind variables to prevent multiple evaluation, it doesn&rsquo;t, and can&rsquo;t, tell you what their values will be.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-3-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-12-04-literals-and-constants-in-common-lisp-footnote-4-definition">
+   <p>Part of the <code>org.tfeb.star/utilities</code> package.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-12-04-literals-and-constants-in-common-lisp-footnote-4-return">&#8617;</a></p></li></ol></div>

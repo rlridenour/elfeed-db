@@ -1,0 +1,272 @@
+<p>Near the end of <a href="https://leancrew.com/all-this/2025/04/adding-books-to-my-library-database/">my last post</a>, there was a link to <a href="https://leancrew.com/all-this/man/man1/xargs.html">the <code>xargs</code> man page</a>. If you followed that link, you saw something like this:</p>
+<p><img alt="Screenshot of HTML man page for xargs" class="ss" src="https://leancrew.com/all-this/images2025/20250414-Screenshot%20of%20HTML%20man%20page%20for%20xargs.png" title="Screenshot of HTML man page for xargs" width="100%"/></p>
+<p>It’s a web page, hosted here at leancrew.com, with what almost looks like a plain text version of the <code>xargs</code> man page you’d see if you ran</p>
+<pre><code>man xargs
+</code></pre>
+<p>at the Terminal. Some things that would typically be in bold aren’t, but more importantly, the reference to the <code>find</code> command down near the bottom of the window looks like a link. And it is. If you were to click on it, you’d be taken to a similar web page, but for <code>find</code>. Disgusted with Apple’s decision, made many years ago, to remove all the man pages from its website, I decided to bite the bullet. I built a set of interlinked web pages, over 4,000 of them, that cover all of the man pages I’m ever likely to refer to here on ANIAT. They’re hosted on leancrew.com with URLs like</p>
+<pre><code>https://leancrew.com/all-this/man/man1/xargs.html
+</code></pre>
+<p>This structure mimics the usual directory structure in which man pages are stored on Unix/Linux computers. This post will explain how I made them.</p>
+<p>To start off, here’s how I <em>didn’t</em> make them. Man pages are built using the old Unix <a href="https://troff.org/"><code>nroff</code>/<code>troff</code> text formatting system</a>. Historically, the <code>nroff</code> command formatted text for terminal display, while <code>troff</code> formatted it for typesetters. Nowadays, people use the GNU system known as <a href="https://www.gnu.org/software/groff/"><code>groff</code></a>, which can output formatted text in a <a href="https://www.gnu.org/software/groff/manual/groff.html.node/Output-Device-Intro.html#Output-Device-Intro">variety of forms</a>, including HTML. This would seem like an ideal way to make HTML versions of man pages, but it isn’t.</p>
+<p>The problem is that <code>groff</code>-generated HTML output doesn’t make links. If you run</p>
+<pre><code>groff -mandoc -Thtml /usr/share/man/man1/xargs.1 &gt; xargs.html
+</code></pre>
+<p>you’ll get a decent-looking HTML page, but it won’t make a link to the <code>find</code> command (or any of the other referenced commands). I’ve seen some projects that try to do a better job—Keith Smiley’s <a href="https://github.com/keith/xcode-man-pages?tab=readme-ov-file">xcode-man-pages</a>, for instance—but I’ve never found one that does what I want. Hence the set of scripts described below.</p>
+<p>I’ve mentioned in other posts that you can get a plain text version of a man page through this pipeline</p>
+<pre><code>man xargs | col -bx
+</code></pre>
+<p>The <code>-b</code> option to the <a href="https://leancrew.com/all-this/man/man1/col.html"><code>col</code> command</a> turns off the generation of backspaces, which is how bold text is produced. The <code>-x</code> option converts tabs to spaces in the output. The combination gives you plain text in which everything lines up vertically if you use a monospaced font. This will be our starting point.</p>
+<p>The key script for turning the plain text into HTML is <code>htmlman</code>. The goals of <code>htmlman</code> are as follows:</p>
+<ol>
+<li>Replace any reference to another command—which are the command name followed by the section number in parentheses—with a link to the HTML page for that command.</li>
+<li>Replace any less-than, greater-than, or ampersand symbol with its corresponding HTML entity.</li>
+<li>Replace any URL in the man page with a link to that URL.</li>
+<li>Collect all the references to other commands described Item 1.</li>
+<li>Add code before and after the man page to make it valid HTML and set the format.</li>
+</ol>
+<p>Item 4 needs a little more explanation. I don’t intend to generate HTML pages for <em>all</em> the man pages on my Mac. That would be, I think, over 15,000 pages, most of which I would never link to here. So I’ve decided to limit myself to these man pages:</p>
+<ul>
+<li>Those in Section 1, which covers general commands.</li>
+<li>Those in Section 8, which covers system administration commands.</li>
+<li>Those referenced in the man pages of Section 1 and Section 8.</li>
+</ul>
+<p>I think of the pages in the first two groups as the “top level.” They’re the commands that are most likely to appear in my scripts, so they’re the ones I’m most likely to link to. The third group are “one level deep” from Sections 1 and 8. Readers who follow a top level link may see a reference in that man page to another command and want to follow up. That’s where the chain stops, though. Links to referenced man pages that are in Sections 1 and 8 can, of course, be followed, but other links are not guaranteed to have an HTML man page.</p>
+<p>So when <code>htmlman</code> is making HTML for Section 1 and Section 8 commands, it’s also making a list of commands referenced by those top level pages. I later run <code>htmlman</code> on all of those second-level pages but ignore the references therein. You’ll see how that works in a bit.</p>
+<p>Here’s the Python code for <code>htmlman</code>:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import re
+ 4:  import sys
+ 5:  
+ 6:  # Regular expressions for references and HTML entities.
+ 7:  manref = re.compile(r'([0-9a-zA-Z_.:+-]+?)\(([1-9][a-zA-Z]*?)\)')
+ 8:  entity = re.compile(r'&lt;|&gt;|&amp;')
+ 9:  
+10:  # Regular expression for bare URLs taken from
+11:  # https://stackoverflow.com/questions/3809401/what-is-a-good-regular-expression-to-match-a-url
+12:  # I removed the &amp; from the last character class to avoid interference
+13:  # with HTML entities. I don't think there will be any URLs with ampersands
+14:  # in the man pages.
+15:  url = re.compile(r'''https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?//=]*)''')
+16:  
+17:  # Functions for substitution.
+18:  def manrepl(m):
+19:    'Replace man page references with links'
+20:    return f'&lt;a href="../man{m.group(2)}/{m.group(1)}.html"&gt;{m.group(1)}({m.group(2)})&lt;/a&gt;'
+21:  
+22:  def entityrepl(m):
+23:    'Replace HTML special characters with entities'
+24:    e = {'&lt;': '&amp;lt;', '&gt;': '&amp;gt;', '&amp;': '&amp;amp;'}
+25:    return e[m.group(0)]
+26:  
+27:  def urlrepl(m):
+28:    'Replace http and https URLs with links'
+29:    return f'&lt;a href="{m.group(0)}"&gt;{m.group(0)}&lt;/a&gt;'
+30:  
+31:  # Beginning and ending of HTML file.
+32:  header = r'''&lt;html&gt;
+33:  &lt;head&gt;
+34:  &lt;link rel="stylesheet" href="../man.css" /&gt;
+35:  &lt;title&gt;{0} man page&lt;/title&gt;
+36:  &lt;/head&gt;
+37:  &lt;body&gt;
+38:  &lt;pre&gt;'''
+39:  
+40:  footer = r'''&lt;/pre&gt;
+41:  &lt;/body&gt;
+42:  &lt;/html&gt;'''
+43:  
+44:  # Initialize.
+45:  html = []
+46:  refs = set()
+47:  
+48:  # The man page section and name are the first and second arguments.
+49:  section = sys.argv[1]
+50:  name = sys.argv[2]
+51:  title = f'{name}({section})'
+52:  
+53:  # Read the plain text man page contents from standard input.
+54:  # into a list of lines
+55:  text = sys.stdin.readlines()
+56:  
+57:  # Convert references to other man pages to links,
+58:  # change &lt;, &gt;, and &amp; into HTML entities, and
+59:  # turn bare URLs into links.
+60:  # Build list of man pages referred to.
+61:  # Leave the first and last lines as-is.
+62:  html.append(text[0])
+63:  for line in text[1:-1]:
+64:    for m in manref.finditer(line):
+65:      refs.add(f'{m.group(2)[0]} {m.group(1)}')
+66:    line = entity.sub(entityrepl, line)
+67:    line = url.sub(urlrepl, line)
+68:    html.append(manref.sub(manrepl, line))
+69:  html.append(text[-1])
+70:  
+71:  # Print the HTML.
+72:  print(header.format(title))
+73:  print(''.join(html))
+74:  print(footer)
+75:  
+76:  # Write the references to stderr.
+77:  if len(refs) &gt; 0:
+78:    sys.stderr.write('\n'.join(refs) + '\n')
+</code></pre>
+<p><code>htmlman</code> is intended to be called like this:<sup id="fnref:dir"><a href="#fn:dir" rel="footnote">1</a></sup></p>
+<pre><code>man 1 xargs | col -bx | ./htmlman 1 xargs
+</code></pre>
+<p>It takes two arguments, the section number and command name, and gets the plain text of the man page fed to it through standard input.</p>
+<p>I know I usually give explanations of my code, but I really think <code>htmlman</code> is pretty self-explanatory. Only a few things need justifying.</p>
+<p>First, the goal is to put the HTML man pages into the appropriate subfolders of this directory structure:</p>
+<p><img alt="Man page folder organization" class="ss" src="https://leancrew.com/all-this/images2025/20250414-Man%20page%20folder%20organization.png" title="Man page folder organization" width="100%"/></p>
+<p>To make it easy if I ever decide to move this directory structure, the links to other man pages are relative. Their <code>href</code> attributes go up one directory and then back down. For example the links on the <code>xargs</code> page are</p>
+<pre><code>&lt;a href="../man1/find.html"&gt;find(1)&lt;/a&gt;
+&lt;a href="../man1/echo.html"&gt;echo(1)&lt;/a&gt;
+&lt;a href="../man5/compat.html"&gt;compat(5)&lt;/a&gt;
+&lt;a href="../man3/execvp.html"&gt;execvp(3)&lt;/a&gt;
+</code></pre>
+<p>You see this on Line 20 in the <code>manrepl</code> function.</p>
+<p>Second, you may be wondering about the comment on Line 61 about leaving the first and last lines as-is. I leave them alone because the first line of a man page usually has text that would match the <code>manref</code> regex:</p>
+<pre><code>XARGS(1)                    General Commands Manual                   XARGS(1)
+</code></pre>
+<p>It would be silly to turn <code>XARGS(1)</code> into a link on the <code>xargs</code> man page itself. Sometimes the last line of a man page has a similar line (not for <code>xargs</code>, though), and the same logic applies there.</p>
+<p>Finally, <code>htmlman</code> prints the HTML to standard output (Lines 71–74) and the list of references to other man pages to standard error (Lines 76–78). This list is a series of lines with the section followed by the command name. For <code>xargs</code> the list of references sent to standard error is</p>
+<pre><code>1 find
+3 execvp
+5 compat
+1 echo
+</code></pre>
+<p>You may feel this is an abuse of stderr, and I wouldn’t disagree. But I decided to use stderr for something that’s not an error because it makes the shell scripts that use <code>htmlman</code> <em>so</em> much easier to write. Sue me.</p>
+<p>With <code>htmlman</code> in hand, it’s time to gather the names of all the commands in Sections 1 and 8. This is done with another Python script, <code>list-mans</code>. It’s called this way:</p>
+<pre><code>./list-mans 1 &gt; man1-list.txt
+./list-mans 8 &gt; man8-list.txt
+</code></pre>
+<p>The first of these looks through all the Section 1 man page directories and produces output that looks like this:</p>
+<pre><code>[…]
+1 cal
+1 calendar
+1 cancel
+1 cap_mkdb
+1 captoinfo
+1 case
+1 cat
+1 cc
+1 cc_fips_test
+1 cd
+[…]
+</code></pre>
+<p>This is the same format that <code>htmlman</code> sends to stderr, which is not a coincidence. The second command above does the same thing, but with the Section 8 directories. Here’s the code for <code>list-mans</code>:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import os
+ 4:  import os.path
+ 5:  import subprocess
+ 6:  import sys
+ 7:  
+ 8:  def all_mans(d, s):
+ 9:    'Return a set of all available "section name" arguments for the man command'
+10:  
+11:    comp_extensions = ['.Z', '.gz', '.zip', '.bz2']
+12:    man_args = set()
+13:    for fname in os.listdir(d):
+14:      # Skip files that aren't man pages
+15:      if fname == '.DS_Store' or fname == 'README.md':
+16:        continue
+17:      # Strip any compression extensions
+18:      bname, ext = os.path.splitext(fname)
+19:      if ext in comp_extensions:
+20:        fname = bname
+21:      # Strip the remaining extension
+22:      page_name, ext = os.path.splitext(fname)
+23:      # Add "section command" to the set if the extension matches
+24:      if ext[1] == s:
+25:        man_args.add(f"{s} {page_name.replace(' ', '\\ ')}")
+26:  
+27:    return man_args
+28:  
+29:  # Get all the man directories using the `manpath` command
+30:  manpath = subprocess.run('manpath', capture_output=True, text=True).stdout.strip()
+31:  
+32:  # Add the subdirectory given on the command line
+33:  section = sys.argv[1]
+34:  man_dirs = [ p + f'/man{section}' for p in manpath.split(':') ]
+35:  
+36:  
+37:  args = set()
+38:  for d in man_dirs:
+39:    if os.path.isdir(d):
+40:      args |= all_mans(d, section)
+41:  
+42:  print('\n'.join(sorted(args)))
+</code></pre>
+<p>It uses the <a href="https://docs.python.org/3.13/library/subprocess.html"><code>subprocess</code> library</a> to call <a href="https://leancrew.com/all-this/man/man1/manpath.html"><code>manpath</code></a>, which returns a bunch of colon-separated paths to the top-level   <code>man</code> directories. There are a bunch of them. On my Mac, this is what <code>manpath</code> produces:</p>
+<pre><code>/opt/homebrew/share/man:
+/opt/homebrew/opt/curl/share/man:
+/usr/local/share/man:
+/usr/local/man:
+/System/Cryptexes/App/usr/share/man:
+/usr/share/man:
+/opt/X11/share/man:
+/Library/TeX/texbin/man:
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/share/man:
+/Applications/Xcode.app/Contents/Developer/usr/share/man:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/share/man
+</code></pre>
+<p>where I’ve put the directories on separate (sometimes very long) lines. There’s a set of <code>man1</code>, <code>man2</code>, etc. subdirectories under each of these.</p>
+<p><code>list-mans</code> uses the <a href="https://docs.python.org/3.13/library/os.path.html"><code>os.path</code> library</a> to pull out all the files in the <code>manX</code> subdirectories, where <code>X</code> is the argument given to it. The only thing that isn’t straightforward about this is that some man page files are compressed, and the <code>all_mans</code> function (Lines 8–27) has to account for common compression extensions when pulling out the base of each filename. Also, there are the ubiquitous <code>.DS_Store</code> files and an occasional <code>README</code> that have to be skipped over.</p>
+<p>With <code>man1-list.txt</code> and <code>man8-list.txt</code> in hand, I run</p>
+<pre><code>cat man1-list.txt man8-list.txt | ./build-man-refs
+</code></pre>
+<p>to build all the Section 1 and Section 8 man pages and create a file, <code>allref-list.txt</code>, with a list of all the references to other man pages. Here’s the code for <code>build_man_refs</code>:</p>
+<pre><code>bash:
+1:  #!/usr/bin/env bash
+2:  
+3:  while read sec cmd; do
+4:    man $sec "$cmd" 2&gt; /dev/null |\
+5:    col -bx |\
+6:    ./htmlman $sec "$cmd" &gt; "man/man$sec/$cmd.html" 2&gt;&gt;allref-list.txt
+7:  done
+</code></pre>
+<p>For each line of input, it reads the section number and command name and then executes the <code>man</code> command with those as arguments. Any error messages from this go to <code>/dev/null</code>. The man page is then piped through <code>col -bx</code> as discussed above, and then through <code>htmlman</code>. Standard output (the HTML) is saved to the appropriate <code>man</code> subdirectory, and standard error (the list of referenced man pages) is added to the end of <code>allref-list.txt</code>.</p>
+<p>At this point, all the Section 1 and Section 8 man pages are built and we have a file with a list with all the referenced man pages. This list will have a lot of repetition (e.g., many man pages refer to <code>find</code>) and it will have many entries for man pages we’ve already built. These three commands get rid of the duplicates and the entries for Section 1 and Section 8 pages:</p>
+<pre><code>sort -u allref-list.txt | pbcopy
+pbpaste &gt; allref-list.txt
+sed -i.bak '/^[18] /d' allref-list.txt
+</code></pre>
+<p>Now we have a list of sections and commands that we want to make HTML pages from. Almost. It turns out that many of these referenced man pages don’t exist. Presumably Apple—who didn’t write most of the man pages itself, but took them from the FreeBSD and GNU projects—decided not to include lots of man pages in macOS but didn’t remove references to them from the man pages they did include. That would be a lot of work, and you can’t expect a $3 trillion company to put in that much effort.</p>
+<p>So, I run a filter, <code>good-refs</code>, to get rid of the references to non-existent pages:</p>
+<pre><code>./goodrefs &lt; allref-list.txt &gt; goodref-list.txt
+</code></pre>
+<p>Here’s the code for <code>good-refs</code>:</p>
+<pre><code>bash:
+1:  #!/usr/bin/env bash
+2:  
+3:  while read sec cmd; do
+4:    man $sec $cmd &amp;&gt; /dev/null &amp;&amp; echo "$sec $cmd"
+5:  done
+</code></pre>
+<p>It uses the <a href="https://en.wikipedia.org/wiki/Short-circuit_evaluation">short-circuiting</a> feature of <code>&amp;&amp;</code>. The <code>echo</code> part of the command runs only if the <code>man</code> part was successful.</p>
+<p>Now it’s time to make HTML man pages for all the commands listed in <code>goodref-list.txt</code>. Recall, though, that this time we’re <em>not</em> going to collect the references to other man pages. So we run</p>
+<pre><code>./build-man-norefs &lt; goodref-list.txt
+</code></pre>
+<p>where <code>build-man-norefs</code> is basically the same as <code>build-man-refs</code>, but the redirection of stderr goes to <code>/dev/null</code> instead of a file:</p>
+<pre><code>bash:
+1:  #!/usr/bin/env bash
+2:  
+3:  while read section command; do
+4:    man $section "$command" 2&gt; /dev/null |\
+5:    col -bx |\
+6:    ./htmlman $section "$command" &gt; "man/man$section/$command.html" 2&gt; /dev/null
+7:  done
+</code></pre>
+<p>And with that, all the HTML man pages I want have been made and are in a nice directory structure that I can upload to the leancrew server. According to my notes, the whole process of building these pages takes about six minutes on my M4 MacBook Pro. That’s a long time, but I don’t expect to rebuild the pages more than once a year, whenever there’s a new major release of macOS.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:dir">
+<p>All of the scripts in this post are kept in a directory called <code>man-pages</code>, and all the commands described here are executed within that directory. Because <code>man-pages</code> is not in my <code>$PATH</code>, I use the <code>./</code> prefix when calling the scripts. <a href="#fnref:dir" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

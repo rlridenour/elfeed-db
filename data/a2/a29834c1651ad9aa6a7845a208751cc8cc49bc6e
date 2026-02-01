@@ -1,0 +1,209 @@
+
+        <p>Related Links :: <span class="label">Tags:</span> <span role="list" aria-label="Tags for “Extending Core Emacs Bookmark Package”">
+<span role="listitem" aria-label="&ldquo;emacs&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/09/extending-emacs-to-play-mythic-bastionland/" aria-label="Previous post tagged with &ldquo;emacs&rdquo; is &ldquo;Extending Emacs to Play Mythic Bastionland&rdquo;" title="Older post tagged with &ldquo;emacs&rdquo; is &ldquo;Extending Emacs to Play Mythic Bastionland&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/emacs/" class="p-category" aria-label="All posts tagged with &ldquo;emacs&rdquo;" title="All posts tagged with &ldquo;emacs&rdquo;">emacs</a> <a href="https://takeonrules.com/2025/12/16/mythic-bastionland-map-play-aid-emacs-package/" aria-label="Next post tagged with &ldquo;emacs&rdquo; is &ldquo;Mythic Bastionland Map Play Aid Emacs Package&rdquo;" title="Newer post tagged with &ldquo;emacs&rdquo; is &ldquo;Mythic Bastionland Map Play Aid Emacs Package&rdquo;"><small>&gt;</small></a>
+</span><span aria-hidden=true> &middot; </span>
+<span role="listitem" aria-label="&ldquo;programming&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/09/extending-emacs-to-play-mythic-bastionland/" aria-label="Previous post tagged with &ldquo;programming&rdquo; is &ldquo;Extending Emacs to Play Mythic Bastionland&rdquo;" title="Older post tagged with &ldquo;programming&rdquo; is &ldquo;Extending Emacs to Play Mythic Bastionland&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/programming/" class="p-category" aria-label="All posts tagged with &ldquo;programming&rdquo;" title="All posts tagged with &ldquo;programming&rdquo;">programming</a> <a href="https://takeonrules.com/2025/12/23/serializing-somewhat-large-emacs-alists/" aria-label="Next post tagged with &ldquo;programming&rdquo; is &ldquo;Serializing Somewhat Large Emacs Alists&rdquo;" title="Newer post tagged with &ldquo;programming&rdquo; is &ldquo;Serializing Somewhat Large Emacs Alists&rdquo;"><small>&gt;</small></a>
+</span></span>
+
+</p/><p><strong>Summary: </strong>
+Revisiting yesterday’s implementation and refactoring towards a bookmark implementation.
+</p>
+        <p><time datetime="2025-12-09" title="2025-12-09">Yesterday</time> I wrote <a href="https://takeonrules.com/2025/12/09/extending-emacs-to-play-mythic-bastionland/">Extending Emacs to Play Mythic Bastionland</a> and as I thought
+about it, I realized that I was coming very close to re-implementing bookmarks.
+What I had worked.  But lacked the elegance of the bookmark ecosystem when
+adding to the PDF list.</p>
+<p>And for those who took heart of what I did yesterday, read on, I found some bugs
+and fixed them.</p>
+<p>So with time to think about it, I set about exploring how I might open a PDF to
+a random page (from a list of possible pages).  Also, how I could capture that I
+want this bookmark to be a random page.</p>
+<p>I also thought about how I might generalize my “starting and stopping” game
+play.  After all, I have a few solo games that I might pick up.</p>
+<h2 id="bookmarks">Bookmarks</h2>
+<p>What follows almost completely replaces the previous implementation; except I
+don’t have a nifty re-roll a random table keybinding.</p>
+<p>I had previously written a bookmark handler, so set about writing another one.</p>
+<p>First, we should understand the structure of a PDF bookmark in <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-EMACS">&#128214;</a></small>
+:</p>
+<pre><code class="language-emacs-lisp"> (&quot;Tangled Seer&quot;
+(filename . &quot;~/mythic=bastionland--core-rules__rules_systems.pdf&quot;)
+(position . 1)
+(last-modified 26934 62792 320522 78000)
+(page . 104)
+(slice)
+(size . fit-page)
+(origin 0.0 . 0.0)
+(handler . pdf-view-bookmark-jump-handler))
+</code></pre>
+<p>The <code>pdf-view-bookmark-jump-handler:random</code> function first checks if there’s an
+associated <code>pages</code> value.  If so, it picks one at random, sets the <code>page</code> value and
+passes it along to the <code>pdf-view-bookmark-jump-handler</code>.</p>
+<pre><code class="language-emacs-lisp">  (defun pdf-view-bookmark-jump-handler:random (bmk)
+    &quot;A handler-function implementing interface for bookmark PDF BMK.
+
+When the handler has a 'pages property, which is assumed to be a list,
+pick one from that.  Otherwise fallack to the 'page property.
+
+See also `pdf-view-bookmark-jump-handler' and
+`pdf-view-bookmark-make-record'.&quot;
+    (let ((pages
+            (bookmark-prop-get bmk 'pages)))
+      (bookmark-prop-set bmk 'page
+        (or (seq-random-elt pages) (bookmark-prop-get bmk 'page)))
+      (pdf-view-bookmark-jump-handler bmk)))
+</code></pre>
+<p>To test, I backed-up my bookmarks, and manually changed the handler to and added
+a <code>pages</code> attribute.  I reloaded that file, and everything worked.  Next, how
+could I avoid manually editing the file?don’t</p>
+<p>I don’t want to <em>always</em> have my PDF bookmarks to be random tables.  So
+I figured I would again repurpose the existing PDF bookmark making.  This time
+with using an advising function.</p>
+<p>First, I call the original <code>pdf-view-bookmark-make-record</code>; then if I have
+enabled 1) prompting for random pages and 2) said I want to specify the pages,
+then I prompt for the pages to use in randomization (yup, I had to manually
+enter those pages…or at least generate that list of pages programmatically, add
+it to the kill ring, then yank it into the prompt).</p>
+<p>Once I had the list of pages, I change the handler from
+<code>pdf-view-bookmark-jump-handler</code> to <code>pdf-view-bookmark-jump-handler:random</code>.  And
+returned the modified bookmark.</p>
+<pre><code class="language-emacs-lisp">  (defun pdf-view-bookmark-make-record:with-randomizer (&amp;rest app)
+    &quot;Conditionally randomize which page we'll open in a PDF.
+
+See `pdf-view-bookmark-make-record:prompt-for-random'.&quot;
+    (let ((bmk
+            (apply app)))
+      (if (and
+            pdf-view-bookmark-make-record:prompt-for-random
+            (yes-or-no-p &quot;Specify Random Pages?&quot;))
+        (let* ((attributes
+                (cdr bmk))
+               (integers-as-string
+                 (split-string
+                   (read-string &quot;Enter pages (comma-separated): &quot;
+                     (format &quot;%s,&quot; (alist-get 'page attributes)))
+                   &quot;[,; ]+&quot; t &quot;[[:space:]]+&quot;)))
+          ;; We clobber the existing handler replacing it with one of
+          ;; our own devising.
+          (setcdr (assoc 'handler attributes)
+            'pdf-view-bookmark-jump-handler:random)
+          (add-to-list 'attributes
+            (cons 'pages
+              (mapcar #'string-to-number integers-as-string)))
+          ;; We need to return an object of the same form (e.g. a `cons'
+          ;; cell).
+          (cons (car bmk) attributes))
+        bmk)))
+
+  (advice-add #'pdf-view-bookmark-make-record
+    :around #'pdf-view-bookmark-make-record:with-randomizer)
+
+  (defvar pdf-view-bookmark-make-record:prompt-for-random
+    nil
+    &quot;When non-nil, prompt as to whether or not to create a bookmark
+that is randomization.&quot;)
+</code></pre>
+<p>Next, I wanted to continue popping those pages into a dedicated side window.
+Enter some more advice.  This time, advising the <code>bookmark-jump</code>.  Reading that
+implementation, I was surprised that the default wasn’t a variable; which might
+have made things easier.</p>
+<pre><code class="language-emacs-lisp">(defvar default-bookmark-display-function
+  nil
+  &quot;When non-nil, favor opening bookmarks with this function.&quot;)
+
+(defun bookmark-jump-with-display (fn bookmark &amp;optional display-func)
+  (let ((display-func
+          (or display-func
+            default-bookmark-display-function
+            (when current-prefix-arg 'switch-to-buffer-side-window))))
+    (funcall fn bookmark display-func)))
+(advice-add #'bookmark-jump :around #'bookmark-jump-with-display)
+
+</code></pre>
+<p>And last, a little bit of glamour.  I visually show that the bookmark will be
+randomized by showing a the 6-face of a die with the word PDF.</p>
+<pre><code class="language-emacs-lisp">;; Show that I'll be opening this PDF to a random page.
+(put 'pdf-view-bookmark-jump-handler:random 'bookmark-handler-type &quot;⚅PDF&quot;)
+
+</code></pre>
+<h2 id="starting-and-stopping">Starting and Stopping</h2>
+<p>With the new bookmark handling, I set about rethinking the implementation.  As I
+needed to and unset more values, the <code>lambda</code> approach seemed cumbersome and
+repetitive.  Also, in my experimentation, I wasn’t properly changing bookmarks
+files.  The result was a steady appending to my default bookmarks.</p>
+<p>What follows addresses that issue.  First a variable of no significant insight.</p>
+<pre><code class="language-emacs-lisp">(defvar playing-a-game nil
+  &quot;When non-nil, indicates that I'm playing a game.
+
+See `playing-a-game-candidates' and `start-playing'.&quot;)
+
+</code></pre>
+<p>Next, I define what it means to start and stop playing my <a href="https://takeonrules.com/series/forged-from-the-worst/">Forged from the Worst</a>;
+using keywords.</p>
+<pre><code class="language-emacs-lisp">(defvar playing-a-game-candidates
+  `(
+     (&quot;Forged from the Worst (Mythic Bastionland)&quot; .
+       ((start .
+          ((bmk-display-func . switch-to-buffer-side-window)
+            (bmk-prompt-for-random . t)
+            (bmk-file . &quot;~/forged=from=the=worst--bookmarks.el&quot;)))
+         (stop .
+           ((bookmark-display-function . nil)))))
+     )
+  &quot;Possible games I might be playing via Emacs.  A game you are playing
+should have both a 'start' and 'stop' property.&quot;)
+</code></pre>
+<p>And then the function that prompts for the game played and applies the
+configuration; first stopping the previous game.</p>
+<pre><code class="language-emacs-lisp">(defun start-playing (game)
+  &quot;Start playing the GAME; stopping any currently played game.
+
+A GAME has a 'start' and 'stop' property, that is an alist.  That alist
+has the following properties:
+
+- 'bmk-file' :: what file we'll find our working bookmarks.
+- 'bmk-display-func' :: the function we use to display bookmarks.
+- 'bmk-prompt-for-random' :: if we'll prompt for possible random pages
+  in PDF bookmarks.
+
+When a property is not provided, \&quot;suitable\&quot; defaults are assigned.&quot;
+  (interactive
+    (list
+      (let ((handle
+              (completing-read &quot;Start Playing: &quot;
+                playing-a-game-candidates nil t)))
+        (alist-get handle playing-a-game-candidates nil nil #'string=))))
+  ;; Stop playing what we were playing...if anything
+  ;; Then start playing what we are playing...if anything
+  (dolist (config (list playing-a-game (alist-get 'start game)))
+    (when config
+      (let ((file
+              (or
+                (alist-get 'bmk-file config)
+                fallback-bookmark-file)))
+        (setq default-bookmark-display-function
+          (alist-get 'bmk-display-func config))
+        (setq pdf-view-bookmark-make-record:prompt-for-random
+          (alist-get 'bmk-prompt-for-random config))
+        (bookmark-save)
+        (setopt bookmark-default-file file)
+        (bookmark-load file t nil t))))
+  ;; Last register how to stop playing.
+  (setq playing-a-game (alist-get 'stop game)))
+</code></pre>
+<p>And for symmetry and ease of thinking, I have added the related <code>stop-playing</code>.</p>
+<pre><code class="language-emacs-lisp">(defun stop-playing ()
+  &quot;Stop playing a game.&quot;
+  (interactive)
+  (start-playing '(&quot;Nothing&quot; . nil)))
+
+</code></pre>
+<h2 id="conclusion">Conclusion</h2>
+<p>Consolidating file lookup functions feels like the correct path.  That is reduce
+the number of ways I’m opening up files.  And extending existing functionality.
+Also learn a bit more about that implementation.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Extending%20Core%20Emacs%20Bookmark%20Package">Reply by Email</a></p>
+
+      

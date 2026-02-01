@@ -1,0 +1,111 @@
+<p>Early this year, I shared <a href="https://christiantietze.de/posts/2022/02/emacs-tab-bar-numbered-tabs/">my setup to get tab numbers</a> in the form of Unicode characters like “<code>⓪</code>”.</p>
+
+<p>This week, I reduced the font size in the tab bar to 80% of the main font and make the tab bar stand out less in general. The numbers in circled didn’t look so great then anymore, and the baseline looked off.</p>
+
+<p>I know that SF Symbols has a couple of numbers in various boxes, so I wanted to try these. SF Symbol’s number in a circle render much sharper than the old unicode numbers, but I actually prefer the numbers in boxes.</p>
+
+<figure><a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/sf-symbols.png"><img alt="" src="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/sf-symbols.png" /></a><figcaption>For some numbers, like "4", there are even alternative styles where the upper part of the number is open</figcaption></figure>
+
+<p>Glyphs for special characters like emoji are taken from fallback fonts, like the <code>"AppleEmoji"</code> font, or <code>"ZapfDingbats"</code> for other special characters. It’s the same for SF Symbols: after some digging in how the macOS text system treats SF Symbol code points, I found that they are displayed using the “<code>SFCompact</code>” font family.</p>
+
+<p>And sure enough, that also works in Emacs: Change the text’s ‘face’ to <code>"SF Compact"</code> and then you can copy and paste SF Symbols, and they’ll actually render.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">defface</span> <span class="nv">ct/tab-bar-numbers</span>
+  <span class="o">'</span><span class="p">((</span><span class="no">t</span>
+     <span class="ss">:inherit</span> <span class="nv">tab-bar</span>
+     <span class="ss">:family</span> <span class="s">"SF Compact"</span>
+     <span class="ss">:weight</span> <span class="nv">light</span><span class="p">))</span>  <span class="c1">;; Looks better at smaller sizes IMHO than regular</span>
+  <span class="s">"Face for tab numbers in both active and inactive tabs."</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>In my case I don’t want <i>San Francisco Compact</i> for the whole tab bar; that’s too, well, <em>compact</em> for my taste. So the following addresses how I limit this to the actual number, demonstrating the use of <code>propertize</code> to set the face of a substring along the way.</p>
+
+<p><strong>Update 2022-12-31:</strong> I figured out that <i>SF Pro Display</i> also works. Every “SF Pro” font might work – but <i>SF UI Display</i> doesn’t, which was my variable pitch font of choice until now. <i>SF Mono</i> doesn’t work, either. So you can’t simply change your fonts to the SF family and paste symbols in your text just yet. (A minor mode would help that applies an SF Pro font to characters in the SF Symbols range of Unicode characters.)</p>
+
+<p>In my original post, I defined <code>ct/tab-bar-tab-name-format-default</code> and used it as the “tab name format function” that produces a (styled) string for each tab. It’s set via <code>tab-bar-tab-name-format-function</code>.</p>
+
+<p>Before we get there, here’s the new set of numbers:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">ct/box-numbers-alist</span>
+  <span class="o">'</span><span class="p">((</span><span class="mi">1</span> <span class="o">.</span> <span class="s">"􀃊"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">2</span> <span class="o">.</span> <span class="s">"􀃌"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">3</span> <span class="o">.</span> <span class="s">"􀃎"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">4</span> <span class="o">.</span> <span class="s">"􀘙"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">5</span> <span class="o">.</span> <span class="s">"􀃒"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">6</span> <span class="o">.</span> <span class="s">"􀑵"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">7</span> <span class="o">.</span> <span class="s">"􀃖"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">8</span> <span class="o">.</span> <span class="s">"􀃘"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">9</span> <span class="o">.</span> <span class="s">"􀑷"</span><span class="p">)</span>
+    <span class="p">(</span><span class="mi">0</span> <span class="o">.</span> <span class="s">"􀃈"</span><span class="p">))</span>
+  <span class="s">"Alist of integers to strings of SF Symbols with numbers in boxes."</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>These likely don’t render outside of macOS at all – but don’t fret, they also don’t render in my monospace font in Emacs, either :)</p>
+
+<p>You have to trust me that these unicode graphemes correspond to the “number in a box” SF Symbol. Here’s a screenshot of a manually propertized string for these numbers in <code>fundamental-mode</code> (where, unlike programming modes, the properties remain):</p>
+
+<figure><a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/evidence.png"><img alt="" src="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/evidence.png" /></a><figcaption></figcaption></figure>
+
+<p>With that in place, here’s the function to render tab names:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/tab-bar-tab-name-format-default</span> <span class="p">(</span><span class="nv">tab</span> <span class="nv">i</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">current-p</span> <span class="p">(</span><span class="nb">eq</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">tab</span><span class="p">)</span> <span class="ss">'current-tab</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">concat</span>
+     <span class="c1">;; First, add the tab number with a custom face</span>
+     <span class="p">(</span><span class="nv">propertize</span>
+      <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">and</span> <span class="nv">tab-bar-tab-hints</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">i</span> <span class="mi">10</span><span class="p">))</span> <span class="p">(</span><span class="nv">alist-get</span> <span class="nv">i</span> <span class="nv">ct/box-numbers-alist</span><span class="p">))</span>
+      <span class="ss">'face</span> <span class="ss">'ct/tab-bar-numbers</span><span class="p">)</span>
+     <span class="c1">;; Add a space (unstyled)</span>
+     <span class="s">" "</span>
+     <span class="c1">;; Add tab name with the face returned by tab-bar-tab-face-function</span>
+     <span class="p">(</span><span class="nv">propertize</span>
+      <span class="p">(</span><span class="nv">concat</span> <span class="p">(</span><span class="nv">alist-get</span> <span class="ss">'name</span> <span class="nv">tab</span><span class="p">)</span>
+	          <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">and</span> <span class="nv">tab-bar-close-button-show</span>
+			           <span class="p">(</span><span class="nb">not</span> <span class="p">(</span><span class="nb">eq</span> <span class="nv">tab-bar-close-button-show</span>
+				                <span class="p">(</span><span class="k">if</span> <span class="nv">current-p</span> <span class="ss">'non-selected</span> <span class="ss">'selected</span><span class="p">)))</span>
+			           <span class="nv">tab-bar-close-button</span><span class="p">)</span>
+		          <span class="s">""</span><span class="p">))</span>
+      <span class="ss">'face</span> <span class="p">(</span><span class="nb">funcall</span> <span class="nv">tab-bar-tab-face-function</span> <span class="nv">tab</span><span class="p">))</span>
+     <span class="c1">;; Add trailing space (unstyled)</span>
+     <span class="s">" "</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The result, with the actual tab font applied only to the tab’s actual name, but neither to the spaces nor to the leading number, I can change the default <code>tab-bar-tab</code> and <code>tab-bar-tab-inactive</code> faces to e.g. use underline decorations without looking like crap.</p>
+
+<p>I’m okay with the result:</p>
+
+<figure><a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/screenshot.png"><img alt="" src="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/screenshot.png" /></a><figcaption></figcaption></figure>
+
+<p>The tab’s don’t jump out at me but fade into the background a bit more. That’s quite nice for a change!</p>
+
+<p>One thing that somewhat annoys me is that at 80% height and variable width, the battery indicator and clock in the top-right corner don’t right-align properly. Then again, since macOS Monterey, I can’t remove the system clock from the main menu anymore, so I might as well remove the Emacs clock completely.</p>
+
+<p>For completion, here’s the function I use to adjust the tab colors within the <code>modus-themes</code> colors:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/modus-themes-tab-bar-colors</span> <span class="p">()</span>
+  <span class="s">"Override `modus-themes-tab-*' to have even less variety"</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">bg-color</span> <span class="p">(</span><span class="nv">modus-themes-color</span> <span class="ss">'bg-main</span><span class="p">))</span>
+         <span class="c1">;; Additional padding between tabs</span>
+         <span class="p">(</span><span class="nv">box</span> <span class="o">`</span><span class="p">(</span><span class="ss">:line-width</span>
+                <span class="p">(</span><span class="mi">2</span> <span class="o">.</span> <span class="mi">-1</span><span class="p">)</span>  <span class="c1">;; -1 for no vertical space</span>
+                <span class="ss">:color</span> <span class="o">,</span><span class="nv">bg-color</span> <span class="ss">:style</span> <span class="nv">flat-button</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">active-accent-color</span> <span class="p">(</span><span class="nv">modus-themes-color</span> <span class="ss">'blue-active</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'tab-bar</span> <span class="no">nil</span>
+                        <span class="ss">:height</span> <span class="mf">0.8</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'modus-themes-tab-backdrop</span> <span class="no">nil</span>
+                        <span class="ss">:background</span> <span class="nv">bg-color</span>
+                        <span class="ss">:box</span> <span class="no">nil</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'modus-themes-tab-inactive</span> <span class="no">nil</span>
+                        <span class="ss">:background</span> <span class="nv">bg-color</span>
+                        <span class="ss">:box</span> <span class="nv">box</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'modus-themes-tab-active</span> <span class="no">nil</span>
+                        <span class="ss">:background</span> <span class="nv">bg-color</span>
+                        <span class="ss">:underline</span> <span class="o">`</span><span class="p">(</span><span class="ss">:color</span> <span class="o">,</span><span class="nv">active-accent-color</span> <span class="ss">:style</span> <span class="nv">line</span><span class="p">)</span>
+                        <span class="ss">:box</span> <span class="nv">box</span><span class="p">)))</span>
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'modus-themes-after-load-theme-hook</span> <span class="nf">#'</span><span class="nv">ct/modus-themes-tab-bar-colors</span><span class="p">)</span>
+
+</code></pre></div></div>
+
+<p><strong>Update 2022-12-31</strong>: <a href="https://xenodium.com/emacs-macro-me-some-sf-symbols/">Álvaro Ramírez
+created an SF Symbol picker</a> that’s super nice! Its job is to insert the symbol names for images in e.g. SwiftUI code. But this could also be adapted to work like Emoji pickers, inserting the symbol, not its name; that would require your font to be an SF Pro variant, though.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

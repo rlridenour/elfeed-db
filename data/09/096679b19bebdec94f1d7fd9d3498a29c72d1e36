@@ -1,0 +1,75 @@
+<p>Redditor <a href="https://www.reddit.com/user/sauntcartas/">sauntcartas</a> offers a nice solution for <a href="https://www.reddit.com/r/emacs/comments/1m6qode/getting_filenames_from_a_dired_buffer_in_an/">getting Emacs dired filenames in an arbitrary order</a>. I have to say, while relatively rare, this is something I need from time to time. You see, I like to apply batch file operations from the comfort of <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> buffers (via <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>).</p>
+<p>Take, for example, <code>M-x dwim-shell-commands-join-images-horizontally</code>. It does what it says on the tin. I can mark a handful of image files via <code>dired</code> and easily join them into a single file. The problem is that the file listing isn't always in the desired order, so this is where custom ordering comes in handy.</p>
+<p>I wanted an interactive way of reordering <code>dired</code> items. While <a href="https://www.reddit.com/r/emacs/comments/1m6qode/comment/n4pso9o/?utm_source=share&amp;utm_medium=web3x&amp;utm_name=web3xcss&amp;utm_term=1&amp;utm_content=share_button">bouncing ideas</a> with <a href="https://www.reddit.com/user/arthurno1/">arthurno1</a>, it led us to a <a href="https://github.com/rejeep/drag-stuff.el">drag-stuff</a> experience, which I'm already a fan of. While <code>drag-stuff</code> works in most editable buffers, it breaks on <code>dired</code>. For now, I figured I could just write a couple of dired-specific interactive commands to provide a similar dragging experience, and so I did.</p>
+<p>We can likely improve the commands a bit, but hey they do the job as is…</p>
+<pre><code class="language-{.commonlisp">(defun ar/dired-drag-item-up ()
+  &quot;Drag dired item down in buffer.&quot;
+  (interactive)
+  (unless (dired-get-filename nil t)
+    (error &quot;Not a dired draggable item&quot;))
+  (when (= (line-number-at-pos) 2)
+    (error &quot;Already at top&quot;))
+  (let* ((inhibit-read-only t)
+         (col (current-column))
+         (item-start (line-beginning-position))
+         (item-end (1+ (line-end-position)))
+         (item (buffer-substring item-start item-end)))
+    (delete-region item-start item-end)
+    (forward-line -1)
+    (beginning-of-line)
+    (insert item)
+    (forward-line -1)
+    (move-to-column col)))
+
+(defun ar/dired-drag-item-down ()
+  &quot;Drag dired item down in buffer.&quot;
+  (interactive)
+  (unless (dired-get-filename nil t)
+    (error &quot;Not a dired draggable item&quot;))
+  (when (save-excursion
+          (forward-line 1)
+          (eobp))
+    (error &quot;Already at bottom&quot;))
+  (let* ((inhibit-read-only t)
+         (col (current-column))
+         (item-start (line-beginning-position))
+         (item-end (1+ (line-end-position)))
+         (item (buffer-substring item-start item-end)))
+    (delete-region item-start item-end)
+    (forward-line 1)
+    (beginning-of-line)
+    (insert item)
+    (forward-line -1)
+    (move-to-column col)))
+</code></pre>
+<p>I gotta say, these <code>dired</code> dragging commands work great with <code>M-x dwim-shell-commands-join-images-horizontally</code>. I bind them to <code>M-&lt;up&gt;</code> and <code>M-&lt;down&gt;</code> same as <code>drag-stuff</code> elsewhere (already in my <a href="https://github.com/xenodium/dotsies/commit/a183363f20118b7cc527e48b36620034a64e2ec9">config</a>).</p>
+<pre><code class="language-{.commonlisp">(use-package dired
+  :bind (:map dired-mode-map
+              (&quot;M-&lt;up&gt;&quot; . ar/dired-drag-item-up)
+              (&quot;M-&lt;down&gt;&quot; . ar/dired-drag-item-down)))
+</code></pre>
+<p>You can see the new <code>dired</code> commands in action.</p>
+<p><img src="https://xenodium.github.io/images/interactive-ordering-of-dired-items/dired-reordering.gif" alt=""></p>
+<h2>Bonus</h2>
+<p>While bouncing ideas with <code>arthurno1</code>, we also came up with another helper to create new <code>dired</code> buffers populated from marked items, maybe needed for those times you want a more focused experience.</p>
+<pre><code class="language-{.commonlisp">(defun ar/dired-from-marked-items ()
+  &quot;Create a new dired buffer containing only the marked files.
+
+Also allow dragging items up and down via M-&lt;up&gt; and M-x&lt;down&gt;.&quot;
+  (interactive)
+  (let ((marked-files (dired-get-marked-files))
+        (buffer-name (generate-new-buffer-name
+                      (format &quot;*%s (selection)*&quot;
+                              (file-name-nondirectory
+                               (directory-file-name default-directory))))))
+    (unless marked-files
+      (error &quot;No dired marked files&quot;))
+    (dired (cons buffer-name
+                 (mapcar (lambda (path)
+                           (file-relative-name path default-directory))
+                         marked-files)))))
+</code></pre>
+<p><img src="https://xenodium.github.io/images/interactive-ordering-of-dired-items/new-from-marked.gif" alt=""></p>
+<h2>Make it all sustainable</h2>
+<p>Learned something new? Enjoying this <a href="https://xenodium.com/">blog</a> or <a href="https://github.com/xenodium">my projects</a>? Help make it sustainable by ✨<a href="https://github.com/sponsors/xenodium">sponsoring</a>✨</p>
+<p>Need a blog? <a href="https://lmno.lol">I can help with that</a>. Maybe buy my <a href="https://apps.apple.com/us/developer/xenodium-ltd/id304568690">iOS apps</a> too ;)</p>

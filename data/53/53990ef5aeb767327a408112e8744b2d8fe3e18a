@@ -1,0 +1,47 @@
+<p>The Planet Lisp twitter fix involved tracking post status with a
+file. Although it&rsquo;s not 100% bulletproof, there&rsquo;s a trick when using
+files to reduce races.</p>
+
+<p>Here&rsquo;s a naive approach:</p>
+
+<ol>
+<li>Assign a Planet Lisp post a unique pathname</li>
+<li>If that pathname exists, do nothing</li>
+<li>Otherwise, send a tweet for the post and save its details to the
+pathname</li>
+</ol>
+
+<p>The problem is between 2 and 3 - another process could post the tweet
+first.</p>
+
+<p>There&rsquo;s another option:</p>
+
+<ol>
+<li>Assign a Planet Lisp post a unique pathname</li>
+<li>Attempt to <a href="https://linux.die.net/man/3/open">open</a> the file with
+<code>O_EXCL|O_CREAT</code> mode</li>
+<li>If the attempt succeeds, send a tweet for the post and save its
+details to the pathname</li>
+</ol>
+
+<p>The key bit is <code>O_EXCL|O_CREAT</code> mode, a Unix option that means <code>open</code>
+will fail if the file exists, and succeed atomically
+otherwise. Specifically:</p>
+
+<blockquote>
+  <p>The check for the existence of the file and the creation of the file
+  if it does not exist shall be atomic with respect to other threads
+  executing open() naming the same filename in the same directory with
+  O_EXCL and O_CREAT set.</p>
+</blockquote>
+
+<p>In SBCL, <a href="https://github.com/sbcl/sbcl/blob/master/src/code/fd-stream.lisp#L2423">you can
+get</a>
+ <code>O_EXCL|O_CREAT</code> semantics by specifing <code>:direction :output</code> and
+<code>NIL</code>, <code>:error</code>, or <code>:new-version</code> as the <code>:if-exists</code> argument to
+<a href="http://l1sp.org/cl/open">CL:OPEN</a>. For <code>NIL</code>, you can check to see if
+the returned value is NIL, instead of a stream, to know if you have
+successfully exclusively opened the file and can proceed. I <a href="https://github.com/xach/planetfeed/blob/ae06d0d8946c18cea95dda4f2523724f81761b75/planetfeed.lisp#L105">used the
+NIL
+approach</a>
+in the Planet Lisp twitter gateway.</p>

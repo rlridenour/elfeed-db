@@ -1,0 +1,42 @@
+<p>Given my recent forays into the world of grepping in emacs using <code>deadgrep</code> (and hence ripgrep) and my use of <code>find-file-rg</code> which feeds into my current completion system of <strong>ivy</strong> I think the next step is to try to set up a project and to see if I can gain any advantages in my workflow.</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20230124195440-emacs--My-Tentative-Steps-to-Working-With-Projects.jpg">
+</figure>
+
+<p>I am not yet going to dive head first into <code>projectile</code> but dangle a tentative pinky into the deep project pools of the built in project system, namely EDE (Emacs Development Environment).</p>
+<p>As I have mentioned before I typically would only be working within a single directory hierarchy, hence my previous <code>deadgrep</code> enhancement of using a defined <code>setq home-dir</code> variable, but I think it might be an enhancement if I could leverage <code>deadgreps</code> use of projects; for example, wandering around the deadgrep code I found the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun deadgrep--project-root ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Guess the project root of the given FILE-PATH.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let ((root default-directory)
+</span></span><span style="display:flex;"><span>         (project (project-current)))
+</span></span><span style="display:flex;"><span>    (when project
+</span></span><span style="display:flex;"><span>      (cond ((<span style="color:#a6e22e">fboundp</span> <span style="color:#e6db74">&#39;project-root</span>)
+</span></span><span style="display:flex;"><span>              <span style="color:#75715e">;; This function was defined in Emacs 28.</span>
+</span></span><span style="display:flex;"><span>              (setq root (project-root project)))
+</span></span><span style="display:flex;"><span>        (<span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#75715e">;; Older Emacsen.</span>
+</span></span><span style="display:flex;"><span>          (-when-let (roots (project-roots project))
+</span></span><span style="display:flex;"><span>            (setq root (<span style="color:#a6e22e">car</span> roots))))))
+</span></span><span style="display:flex;"><span>    (when root
+</span></span><span style="display:flex;"><span>      (deadgrep--lookup-override root))))
+</span></span></code></pre></div><p>as far as I can tell the default-directory is the current directory of the buffer which can be displayed by <code>M-x pwd</code> but it is the (project-current) that I am more interested in.</p>
+<p>A quick investigation and it seems I need to turn on <strong>global-ede-mode</strong> and then run <strong>ede-new</strong> in the top level directory of my prospective project.  This results in the creation of a Project.ede file containing some project information allowing the setting up of a collection of source files and instructions on how to build them.  For the moment I&rsquo;m not too interested in building anything, but more on how to trigger <code>deadgreps</code> project logic by enabling this directory hierarchy as a project.</p>
+<p>As part of creating this project file it seems <strong>ede-project-directories</strong> has also been added to my init file and an extra menu has appeared on the menu bar called <strong>Development</strong></p>
+<p>Is this all I need?, well lets evaluate the following in the top level folder:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(project-current)
+</span></span></code></pre></div><p>I seem to get a long list of project information, including the project top level directory.  Moving down the directory hierarchy and reevaluating the same expression gives me the same directory!</p>
+<p>So I am assuming that in <strong>my/deadgrep</strong> bespoke wrapper, if I now replace:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(deadgrep search-term home-dir)
+</span></span></code></pre></div><p>with:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(deadgrep search-term)
+</span></span></code></pre></div><p>if I create a project in my former <strong>home-dir</strong> directory location then my former functionality will have been preserved but with the added flexibility of being able to define other project locations, and also apparently subdirectories!  this is actually pretty neat :)</p>
+<p>Now I have defined a rudimentary project and seems to work well with <code>deadgrep</code> will it work well with my other favourite <code>ripgrep</code> wrapper, namely <code>find-file-rg</code>?  Well there does seem to be some code to accommodate projects too, namely:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(let* ((dir (if current-prefix-arg
+</span></span><span style="display:flex;"><span>              (find-file-rg--read-dir)
+</span></span><span style="display:flex;"><span>              (or (let ((project (project-current)))
+</span></span><span style="display:flex;"><span>                    (when project
+</span></span><span style="display:flex;"><span>                      (if (<span style="color:#a6e22e">fboundp</span> <span style="color:#e6db74">&#39;project-root</span>)
+</span></span><span style="display:flex;"><span>                        (project-root project)
+</span></span><span style="display:flex;"><span>                        (<span style="color:#a6e22e">cdr</span> project))))
+</span></span></code></pre></div><p>and yes, it works!, so anywhere I am within the hierarchy of a project I can call up a list of files fed from <strong>ripgrep &ndash;files</strong> into <strong>ivy</strong> and complete as normal.</p>
+<p>As a bonus <code>find-file-rg</code> allows the passing of a universal argument and a <strong>current-prefix-arg</strong> check enables the navigation to any directory.</p>
+<p>In summary then, I can now define a project, I can grep throughout the project from any file / directory within that project and I can pull up a list of files within the project all leveraging the power of <strong>ripgrep</strong> through <code>deadgrep</code> and <code>find-file-rg</code>!</p>

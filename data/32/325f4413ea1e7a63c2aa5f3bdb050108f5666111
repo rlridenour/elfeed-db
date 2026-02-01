@@ -1,0 +1,88 @@
+<p>The winget utility on Windows 11 is a revelation. Here&#8217;s how I set it up.</p>
+<p>in my main init.el:</p>
+<p><code>;; Check spelling with flyspell and hunspell<br />
+;; https://endlessparentheses.com/ispell-and-abbrev-the-perfect-auto-correct.html</code></p>
+<p><code>(use-package flyspell<br />
+:bind<br />
+("C-c w s s" . ispell)<br />
+("C-c w s i" . endless/ispell-word-then-abbrev)<br />
+("C-;" . flyspell-auto-correct-previous-word)<br />
+(:map ctl-x-map<br />
+("C-i" . endless/ispell-word-then-abbrev) ; see<br />
+)<br />
+:custom<br />
+(ispell-dictionary ews-hunspell-dictionaries)<br />
+(flyspell-mark-duplications-flag nil) ;; Writegood mode does this<br />
+(org-fold-core-style 'overlays) ;; Fix Org mode bug<br />
+(flyspell-prog-text-faces '(font-lock-comment-face font-lock-doc-face))<br />
+:defer t<br />
+:hook<br />
+(text-mode . flyspell-mode)<br />
+)</code></p>
+<p>This code from <a href="https://endlessparentheses.com/ispell-and-abbrev-the-perfect-auto-correct.html" target="_blank" rel="noopener">endlesspraentheses</a> goes in my ews.el library:</p>
+<p><code>;; ispell and abbrev, the Perfect™ auto-correct<br />
+;; </code></p>
+<p>(add-to-list &#8216;ispell-skip-region-alist &#8216;(&#8220;^\s*:PROPERTIES\:$&#8221; . &#8220;^\s*:END\:$&#8221;))</p>
+<p>(defun endless/simple-get-word ()<br />
+(car-safe (save-excursion (ispell-get-word nil)))<br />
+)</p>
+<p>(defun endless/ispell-word-then-abbrev (p)<br />
+&#8220;Call `ispell-word&#8217;, then create an abbrev for it.<br />
+With prefix P, create local abbrev. Otherwise it will<br />
+be global.<br />
+If there&#8217;s nothing wrong with the word at point, keep<br />
+looking for a typo until the beginning of buffer. You can<br />
+skip typos you don&#8217;t want to fix with `SPC&#8217;, and you can<br />
+abort completely with `C-g&#8217;.&#8221;<br />
+(interactive &#8220;P&#8221;)<br />
+(let (bef aft)<br />
+(save-excursion<br />
+(while (if (setq bef (endless/simple-get-word))<br />
+;; Word was corrected or used quit.<br />
+(if (ispell-word nil &#8216;quiet)<br />
+nil ; End the loop.<br />
+;; Also end if we reach `bob&#8217;.<br />
+(not (bobp)))<br />
+;; If there&#8217;s no word at point, keep looking<br />
+;; until `bob&#8217;.<br />
+(not (bobp)))<br />
+(backward-word)<br />
+(backward-char))<br />
+(setq aft (endless/simple-get-word)))<br />
+(if (and aft bef (not (equal aft bef)))<br />
+(let ((aft (downcase aft))<br />
+(bef (downcase bef)))<br />
+(define-abbrev<br />
+(if p local-abbrev-table global-abbrev-table)<br />
+bef aft)<br />
+(message &#8220;\&#8221;%s\&#8221; now expands to \&#8221;%s\&#8221; %sally&#8221;<br />
+bef aft (if p &#8220;loc&#8221; &#8220;glob&#8221;)))<br />
+(user-error &#8220;No typo at or before point&#8221;)))<br />
+)</p>
+<p>Emacs on Mac, be it NS or Cocoa, works well with the brew installed hunspell.</p>
+<p><code>brew install hunspell</code></p>
+<p>In my mac-ns.el (which loads in my init.el):</p>
+<p><code>(use-package flyspell<br />
+:custom<br />
+(ispell-program-name            "hunspell")<br />
+)</code></p>
+<p>All I do here is set the hunspell executable.</p>
+<p>In Windows 11 as administrator I run the following:</p>
+<p><code>winget install fsfhu.hunspell</code></p>
+<p>&#8230; and download the dictionaries as described <a href="https://vxlabs.com/2023/11/14/fixing-hunspell-1.7.0-for-emacs-29-on-windows/" target="_blank" rel="noopener">by VXLabs here</a>. I placed the extracted files in a synced dict directory linked to from my home.</p>
+<p><code>(use-package flyspell<br />
+:custom<br />
+(ispell-program-name            "~/AppData/Local/Microsoft/WinGet/Links/hunspell.exe")<br />
+(ispell-local-dictionary "en_US")<br />
+(ispell-local-dictionary-alist '(("en_US" "[[:alpha:]]" "[^[:alpha:]]" "[']" nil ("-d" "en_US") nil utf-8)))<br />
+:init<br />
+(setopt<br />
+ispell-hunspell-dict-paths-alist '(("en_US" "~/plrjorg/dict/en_US.aff"))<br />
+)<br />
+)</code></p>
+<p>For completion&#8217;s sake, here&#8217;s the one little defcustom from Emacs Writing Studio:</p>
+<p><code>(defcustom ews-hunspell-dictionaries "en_US"<br />
+"Comma-separated list of Hunspell dictionaries."<br />
+:group 'ews<br />
+:type 'list)</code></p>
+<p>Apologies for the janky formatting yet again.</p>

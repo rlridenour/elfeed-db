@@ -1,0 +1,176 @@
+<p>This is the fifth post in the <a href="/blog/fastmail-advent-2024/">Fastmail Advent 2024</a> series. The previous post was <a href="/blog/meet-the-team-bek/">Dec 4: Meet the team — Bek</a>. The next post is <a href="/blog/twoskip-and-more/">Dec 6: Twoskip and more</a>.</p><p>This is a technical post about an aspect of MySQL InnoDB and transaction ids.</p><p>One of the features of <a href="https://datatracker.ietf.org/doc/html/rfc8620" target="_blank" rel="noopener">JMAP</a> is that it allows a client to <a href="https://datatracker.ietf.org/doc/html/rfc8620#section-5.2" target="_blank" rel="noopener">fetch changes</a> that have occurred on the server since the client last synced with the server. This is done with a <code>sinceState</code> string. Although no specific implementation is required, we’ve found that using a system based on “modification sequences” (aka MODSEQs) as originally described in the <a href="https://datatracker.ietf.org/doc/html/rfc4551" target="_blank" rel="noopener">IMAP CONDSTORE</a> extension works well.</p><p>I have been doing some work internally to allow us to calculate MODSEQs for all JMAP objects stored in our MySQL database. The basic idea was to setup triggers on any INSERT/UPDATE/DELETE actions to update the appropriate MODSEQ on the corresponding table row. The exact structures required for implementing the JMAP /changes method on all database tables is something for another blog post, but this post is more about an unexpected oddity I found while trying to do this.</p><p>Conceptually what I need is reasonably straightforward. There is a table to store all the current MODSEQs for each User owned table tuple.</p><pre><code>CREATE TABLE UserModSeqs (
+  UserId INT NOT NULL,
+  TableName VARCHAR(255) NOT NULL,
+  CurrentModSeq BIGINT NOT NULL DEFAULT 0,
+  HighestPurgedModseq BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (UserId, TableName),
+  CONSTRAINT UserModSeqsFK FOREIGN KEY (UserId)
+    REFERENCES Users (UserId) ON DELETE CASCADE
+);
+</code></pre><p>There is a generic “bump” function to increment the current MODSEQ for a particular User/table</p><pre><code>CREATE FUNCTION BumpUserModSeq (ModSeqOwnerValue INT, DataTableName VARCHAR(255))
+RETURNS BIGINT
+BEGIN
+  DECLARE NewModSeq BIGINT;
+
+  INSERT INTO UserModSeqs
+    (UserId, TableName, CurrentModSeq, HighestPurgedModseq)
+  VALUES
+    (ModSeqOwnerValue, DataTableName, 1, 0)
+  ON DUPLICATE KEY UPDATE
+    CurrentModSeq = CurrentModSeq + 1;
+
+  SELECT CurrentModSeq
+  FROM UserModSeqs
+  WHERE UserId = ModSeqOwnerValue
+    AND TableName = DataTableName
+  INTO NewModSeq;
+
+  RETURN NewModSeq;
+END
+</code></pre><p>And then the actual trigger which looks something like:</p><pre><code>CREATE TRIGGER ${table}UpdateModSeq
+BEFORE UPDATE ON $table
+FOR EACH ROW
+BEGIN
+  SET NEW.UpdatedModSeq = BumpUserModSeq(&quot;UserId&quot;, &quot;$table&quot;);
+END
+</code></pre><p>That you’d create for each <code>$table</code> that’s “owned” by a User (i.e. has foreign key UserId to the Users table).</p><p>One of the issues with this is that every single row updated on a table generates a new MODSEQ for each updated row.</p><p>I had an idea to make it so we only bump the modseq number once for each transaction rather than each row. Searching around you can find that the <code>information_schema.innodb_trx</code> table has a <code>trx_id</code> field, so a query like:</p><pre><code>SELECT trx_id
+FROM information_schema.innodb_trx
+WHERE trx_mysql_thread_id = connection_id()
+</code></pre><p>Will get the transaction id of your current session, great. So we can create a function like:</p><pre><code>CREATE FUNCTION GetCurrentTrxId ()
+RETURNS BIGINT UNSIGNED
+BEGIN
+  DECLARE CurrentTrxId BIGINT UNSIGNED;
+
+  SELECT trx_id
+  FROM information_schema.innodb_trx
+  WHERE trx_mysql_thread_id = connection_id()
+  INTO CurrentTrxId;
+
+  RETURN CurrentTrxId;
+END
+</code></pre><p>And then change the “bump” function to:</p><pre><code>CREATE FUNCTION BumpUserModSeq (ModSeqOwnerValue INT, DataTableName VARCHAR(255))
+RETURNS BIGINT
+BEGIN
+  DECLARE NewModSeq BIGINT;
+  DECLARE CurrentTrxId BIGINT UNSIGNED DEFAULT GetCurrentTrxId();
+
+  IF CurrentTrxId IS NULL OR
+     @LastBumpUserModSeqTrxId IS NULL OR
+     @LastBumpModSeqOwnerValue IS NULL OR
+     @LastBumpDataTableName IS NULL OR
+     @LastBumpUserModSeqTrxId &lt;&gt; CurrentTrxId OR
+     @LastBumpModSeqOwnerValue &lt;&gt; ModSeqOwnerValue OR
+     @LastBumpDataTableName &lt;&gt; DataTableName
+    THEN
+
+    INSERT INTO UserModSeqs
+      (UserId, TableName, CurrentModSeq, HighestPurgedModseq)
+    VALUES
+      (ModSeqOwnerValue, DataTableName, 1, 0)
+    ON DUPLICATE KEY UPDATE
+      CurrentModSeq = CurrentModSeq + 1;
+
+    # InnoDB may only create trx_id on first write (which we just did)
+    SET @LastBumpUserModSeqTrxId = IFNULL(CurrentTrxId, GetCurrentTrxId());
+    SET @LastBumpModSeqOwnerValue = ModSeqOwnerValue;
+    SET @LastBumpDataTableName = DataTableName;
+  END IF;
+
+  SELECT CurrentModSeq
+  FROM UserModSeqs
+  WHERE UserId = ModSeqOwnerValue
+    AND TableName = DataTableName
+  INTO NewModSeq;
+
+  RETURN NewModSeq;
+END
+</code></pre><p>That way we bump the MODSEQ for the given object and user if it’s a new transaction, but use the existing value if we’re in a transaction where we already bumped the MODSEQ.</p><p>Now if you try this by hand a bit, it all seems to work great.</p><p>But, if you start trying to write tests for this, you start noticing it doesn’t always work as expected. Multiple updates in quick succession don’t bump the modseq correctly.</p><p>And so down the rabbit hole you go.</p><p>The first thing you learn is that InnoDB has an optimisation where it won’t generate a transaction id until you actually perform either a write statement or a <code>SELECT ... FOR UPDATE</code> (that’s the “InnoDB may only create trx_id on first write (which we just did)” comment in the above code).</p><pre><code>mysql (root@127.0.0.1) [fastmail]&gt; begin; select GetCurrentTrxId(); commit;
+Query OK, 0 rows affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|              NULL |
++-------------------+
+1 row in set (0.00 sec)
+</code></pre><pre><code>mysql (root@127.0.0.1) [fastmail]&gt; begin; select count(*) from Users where UserId=7 for update into @foo; select GetCurrentTrxId(); commit;
+Query OK, 0 rows affected (0.00 sec)
+
+Query OK, 1 row affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|           4769402 |
++-------------------+
+1 row in set (0.00 sec)
+</code></pre><p>Fine, but then you notice strange behavior like.</p><pre><code>mysql (root@127.0.0.1) [fastmail]&gt; begin; select GetCurrentTrxId(); select count(*) from Users where UserId=7 for update into @foo; select GetCurrentTrxId(); commit;
+Query OK, 0 rows affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|              NULL |
++-------------------+
+1 row in set (0.00 sec)
+
+Query OK, 1 row affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|              NULL |
++-------------------+
+1 row in set (0.01 sec)
+
+Query OK, 0 rows affected (0.00 sec)
+</code></pre><p>So even though a <code>SELECT ... FOR UPDATE</code> should create a transaction id, the subsequent call to <code>GetCurrentTrxId()</code> still didn’t return one.</p><p>But then if you try.</p><pre><code>mysql (root@127.0.0.1) [fastmail]&gt; begin; select GetCurrentTrxId(); select sleep(1) into @foo; select count(*) from Users where UserId=7 for update into @foo; select GetCurrentTrxId(); commit;
+Query OK, 0 rows affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|              NULL |
++-------------------+
+1 row in set (0.00 sec)
+
+Query OK, 1 row affected (1.00 sec)
+
+Query OK, 1 row affected (0.00 sec)
+
++-------------------+
+| GetCurrentTrxId() |
++-------------------+
+|           4770035 |
++-------------------+
+1 row in set (0.00 sec)
+
+Query OK, 0 rows affected (0.00 sec)
+</code></pre><p>So putting a sleep between them, suddenly you do get a new transaction id.</p><p>Digging into MySQL code you end up finding</p><p><a href="https://github.com/mysql/mysql-server/blob/61a3a1d8ef15512396b4c2af46e922a19bf2b174/storage/innobase/handler/i_s.cc#L751" target="_blank" rel="noopener">i_s.cc#L751</a></p><pre><code>/** Common function to fill any of the dynamic tables:
+ INFORMATION_SCHEMA.innodb_trx
+ @return 0 on success */
+static int trx_i_s_common_fill_table(
+...
+  /* update the cache */
+  trx_i_s_cache_start_write(cache);
+  trx_i_s_possibly_fetch_data_into_cache(cache);
+</code></pre><p><a href="https://github.com/mysql/mysql-server/blob/61a3a1d8ef15512396b4c2af46e922a19bf2b174/storage/innobase/trx/trx0i_s.cc#L817" target="_blank" rel="noopener">trx0i_s.cc#L817</a></p><pre><code>int trx_i_s_possibly_fetch_data_into_cache(
+    trx_i_s_cache_t *cache) /*!&lt; in/out: cache */
+{
+  if (!can_cache_be_updated(cache)) {
+    return (1);
+  }
+</code></pre><p><a href="https://github.com/mysql/mysql-server/blob/61a3a1d8ef15512396b4c2af46e922a19bf2b174/storage/innobase/trx/trx0i_s.cc#L681" target="_blank" rel="noopener">trx0i_s.cc#L681</a></p><pre><code>static bool can_cache_be_updated(trx_i_s_cache_t *cache) /*!&lt; in: cache */
+{
+...
+  /** The minimum time that a cache must not be updated after it has been
+  read for the last time. We use this technique to ensure that SELECTs which
+  join several INFORMATION SCHEMA tables read the same version of the cache. */
+  constexpr std::chrono::milliseconds cache_min_idle_time{100};
+
+  return std::chrono::steady_clock::now() - cache-&gt;last_read.load() &gt;
+         cache_min_idle_time;
+</code></pre><p>So the <code>information_schema.innodb_trx</code> table is cached internally for 100ms, so trying to use it to fetch the transaction for the current connection is not guaranteed to be up to date. Ouch! This does not appear to be documented anywhere obvious that I could find.</p><p>Unfortunately I can’t see any way to <em>reliably</em> find out if you’re in a transaction or way to identify the current transaction id.</p><p>In the end, I had to resort to something at the application level. Internally our DB library encourages you to use a guard object to start and end transactions.</p><pre><code>my $committer = $dbh-&gt;begin_work_auto();
+$dbh-&gt;do(...);
+$committer-&gt;commit();
+</code></pre><p>The <code>-&gt;begin_work_auto()</code> call starts a transaction and returns a guard object. If the <code>$committer</code> guard object is destroyed before the <code>-&gt;commit()</code> call, then it will automatically rollback the transaction in progress.</p><p>I added a small bit of code in <code>begin_work_auto()</code> to do <code>$self-&gt;do('SET @CurrentTrxId=?', {}, ++$count);</code>, and then set it back to NULL when we commit/rollback. That simulates a guaranteed changing transaction id within each MySQL session as long as you use the <code>begin_work_auto()</code> guard method which most code does when using transactions. Anything that doesn’t use <code>begin_work_auto()</code> leaves <code>@CurrentTrxId</code> as NULL.</p><p>The <code>BumpUserModSeq</code> function used in the trigger checks the <code>@CurrentTrxId</code> session variable to see if it’s NULL or has been incremented from it’s last value to decide whether to bump the MODSEQ or not.</p><p>So transactions that use <code>begin_work_auto()</code> get optimised MODSEQ bumping (a single update to the modseq table for all rows added/updated/deleted for a user within the transaction), and everything else falls back to still working correctly but with a bit more overhead (an update to the modseq table for every single row added/updated/deleted).</p>

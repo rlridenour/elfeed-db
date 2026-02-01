@@ -1,0 +1,294 @@
+<p>Iteration forms and forms which accumulate values don&rsquo;t have to be the same thing. I think that it turns out that separating them works rather well.</p>
+<!-- more-->
+
+<p>There&rsquo;s no one true way to write programs, especially in Lisp<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-1-definition" name="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-1-return">1</a></sup>: a language whose defining feature is that it supports and encourages the seamless construction of new programming languages<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-2-definition" name="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-2-return">2</a></sup>. In particular there are plenty of different approaches to iteration, and to accumulating values during iteration. In CL there are at least three approaches in the base language:</p>
+
+<ul>
+ <li>constructs which map a function over some &lsquo;iterable&rsquo; object, often a list or a sequence of some other kind, to build another object with the results, as by <code>mapcar</code> for instance;</li>
+ <li>constructs which just iterate, as by <code>dotimes</code>;</li>
+ <li>iteration constructs which combine iteration with possible value accumulation, such as <code>do</code> and of course <code>loop</code>.</li></ul>
+
+<p>What CL <em>doesn&rsquo;t</em> have is any constructs which simply accumulate values. So, for instance, if you wanted to acquire the even numbers from a list with <code>dolist</code> you might write</p>
+
+<pre class="brush: lisp"><code>(let ((evens '()))
+  (dolist (e l (nreverse evens))
+    (when (and (realp e) (evenp e))
+      (push e evens))))</code></pre>
+
+<p>Of course you could do this with <code>loop</code>:</p>
+
+<pre class="brush: lisp"><code>(loop for e in l
+      when (and (realp e) (evenp e)) collect e)</code></pre>
+
+<p>but <code>loop</code> is a construct which combines iteration and value collection.</p>
+
+<p>It&rsquo;s tempting to say that, well, can&rsquo;t you turn <em>all</em> iteration into mapping? Python sort of does this: objects can be &lsquo;iterable&rsquo;, and you can iterate over anything iterable, and then comprehensions let you accumulate values. But in general this doesn&rsquo;t work very well: consider a file which you want to iterate over. But <em>how</em>? Do you want to iterate over its characters, its bytes, its lines, its words, over some other construct in the file? You can&rsquo;t just say &lsquo;a file is iterable&rsquo;: it is, but you have to specify the intent before iterating over it<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-3-definition" name="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-3-return">3</a></sup>. You also have the problem that you very often only want to return <em>some</em> values, so the notion of &lsquo;mapping&rsquo; is not very helpful. If you try and make everything be mapping you end up with ugly things like <code>mapcan</code>.</p>
+
+<p>You do need general iteration constructs, I think: constructs which say &lsquo;is there more? if there is give me the next thing&rsquo;. In CL both the standard general iteration constructs combine, or can combine, iteration with accumulation: there is no pure general iteration construct. And there are no pure value accumulation constructs at all.</p>
+
+<h2 id="from-maclisp-to-cl">From Maclisp to CL</h2>
+
+<p>An interesting thing happened in the transition from Maclisp to CL.</p>
+
+<p>Maclisp had <a href="https://www.maclisp.info/pitmanual/contro.html#5.9.1"><code>prog</code></a>, which was a special operator (it would have called it a special form), and which combined the ability to use <code>go</code> and to say <code>return</code>. This is a construct which dates back to the very early days of Lisp.</p>
+
+<p>Common Lisp also has <a href="https://www.lispworks.com/documentation/HyperSpec/Body/m_prog_.htm" title="prog"><code>prog</code></a>, but now it&rsquo;s a macro, not a special operator. The reason its a macro is that CL has split the functionality of <code>prog</code> into three parts (four parts if you include variable binding):</p>
+
+<ul>
+ <li><a href="https://www.lispworks.com/documentation/HyperSpec/Body/s_progn.htm" title="progn"><code>progn</code></a> is a special operator which evaluates the forms in its body in order;</li>
+ <li><a href="https://www.lispworks.com/documentation/HyperSpec/Body/s_tagbod.htm" title="tagbody"><code>tagbody</code></a> is a special operator whch allows tags and <code>go</code> in its body;</li>
+ <li><a href="https://www.lispworks.com/documentation/HyperSpec/Body/s_block.htm" title="block"><code>block</code></a> is a special operator which supports <code>return</code> and <code>return-from</code></li>
+ <li>and of course <a href="https://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm" title="let"><code>let</code></a> provides binding of variables.</li></ul>
+
+<p>Maclisp had <code>let</code> and <code>progn</code>: what it <em>didn&rsquo;t</em> have was <code>tagbody</code> and <code>block</code>.</p>
+
+<p>These can be combined (you don&rsquo;t in fact need <code>progn</code> in this case) to form <code>prog</code>, which is something like</p>
+
+<pre class="brush: lisp"><code>(defmacro prog ((&amp;rest bindings)
+                &amp;body tags/forms)
+  `(block nil
+     (let ,@bindings
+       (tagbody
+        ,@tags/forms)
+       nil)))</code></pre>
+
+<p>So what CL has done is to divide <code>prog</code> into its component parts, which then can be used individually in other ways: it has provided the components of <code>prog</code> as individual constructs. You can build <code>prog</code> from these, but you can build other things as well (<code>defun</code> expands to something involving <code>block</code>, for instance), including things which don&rsquo;t exist in base CL.</p>
+
+<h2 id="a-linguistic-separation-of-concerns">A linguistic separation of concerns</h2>
+
+<p>What CL has achieved is a <em>separation of concerns</em> at the language level: it has reduced the number of concerns addressed by each construct. It hasn&rsquo;t done this completely: <code>progn</code> is not the only special operator which sequences the forms in its body, for instance, and <code>let</code> is not a macro defined in terms of <code>lambda</code>. But it&rsquo;s taken steps in this direction compared to Maclisp.</p>
+
+<p>This approach is really only viable for languages which have powerful macro systems where macros are not syntactically distinguished. Without a macro system then separating concerns at the language level would make almost all programs more verbose since constructs which combine lower-level ones can&rsquo;t be created. With a macro system where macros are syntactically distinguished, such as Julia&rsquo;s, then such constructs are always second-class citizens. With a macro system like CL&rsquo;s this is no longer a problem: CL has <code>prog</code>, for instance, but it&rsquo;s now a macro.</p>
+
+<p>It seems to me that the only reason <em>not</em> to take this process as far as it can go in Lisps is if it makes the compiler&rsquo;s job unduly hard. It makes no difference to users of the language, so long as it provides, as CL does the old, unseparated, convenient constructs.</p>
+
+<h2 id="from-cl-to-here-knows-when">From CL to here knows when</h2>
+
+<p>I can&rsquo;t redesign CL and don&rsquo;t want to do that. But I can experiment with building a language I&rsquo;d like to use on top of it.</p>
+
+<p>In particular CL has already provided the separated constructs you need to build your own iteration constructs, and no CL iteration constructs are special operators. Just as <code>do</code> is constructed from (perhaps) <code>let</code>, <code>block</code> and <code>tagbody</code>, and <code>loop</code> is constructed from some horrid soup if the same things, you can build your own iteration constructs this way. And the same is true for value accumulation constructs. And you can reasonably expect these to perform as well as the ones in the base language.</p>
+
+<p>This is what I&rsquo;ve done, several times in fact.</p>
+
+<p>The first thing I built, long ago, was a list accumulation construct called <code>collecting</code>: within its body there is a local function, <code>collect</code>, which will accumulate a value onto the list returned from <code>collecting</code>. It secretly maintains a tail-pointer to the list so accumulation is constant-time. This was originally built to make it simpler to accumulate values when traversing tree or graph structures, to avoid the horrid and, in those days, slow explicit <code>push</code> &hellip; <code>nreverse</code> idiom.</p>
+
+<p>So, for instance</p>
+
+<pre class="brush: lisp"><code>(collecting
+  (labels ((walk (node)
+             ...
+             (when ... (collect thing))
+             ...
+             (dolist (...) (walk ...))))
+    (walk ...)))</code></pre>
+
+<p>might walk over some structure, collecting interesting things, and returning a list of them.</p>
+
+<p><a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html#collecting-lists-forwards-and-accumulating-collecting" title="Collecting"><code>collecting</code></a> was originally based on some ideas in Interlisp-D, and has since metastasized into a, well, collection of related constructs: multiple named collectors (<code>collecting</code> itself is now defined in terms of this construct), explicit collector objects, general accumulators and most recently a construct which accumulates values into vectors. It works pretty well.</p>
+
+<p>The second part of the story is high-performance iteration constructs which just iterate, which are general, which are pleasant to use and have semantics which are easy to understand. Both <code>loop</code>and <code>do</code> fail the first three of these conditions for me, and <code>loop</code> fails the fourth as well.</p>
+
+<p>Well, I&rsquo;ve written a number of iteration constructs and constructs related to iteration. Finally, last year, my friend Zyni &amp; I (the ideas are largely hers, I wrote most of the code I think) came up with <a href="https://tfeb.org/fragments/documentation/star.html" title="&#352;tar">&#352;tar</a> which we&rsquo;ve described as &lsquo;a simple and extensible iteration construct&rsquo;. Lots of other people have written iteration constructs for CL: &#352;tar occupies a position which tries to be as extreme as possible while remaining pleasant to use. There are no special keywords, the syntax is pretty much that of <code class="brush: ^4">let</code> and there is no value accumulation: all it does is iterate. The core of &#352;tar exports six names, of which the three that support nested iteration are arguably unneeded in the same way that <code>let*</code> is. Teaching it how to iterate over things is simple, teaching it how to optimize such iterations is usually simple enough to do when it&rsquo;s worth it. And it&rsquo;s within $\varepsilon$ of anything in terms of performance.</p>
+
+<p>It&rsquo;s simple (at least in interface) and quick because it hardly does anything, of course: it relies entirely on iterators to do anything at all and iterator optimizers to do anything quickly. Even then all it does is, well, iterate.</p>
+
+<p>These two components are thus attempts at separating the two parts of something like <code>loop</code>, <a href="https://iterate.common-lisp.dev" title="Iterate">Iterate</a> or <a href="https://github.com/Shinmera/for" title="For">For</a>, or other constructs which combine iteration and value accumulation: they are to these constructs what <code>tagbody</code> and <code>block</code> are to <code>prog</code>.</p>
+
+<h2 id="reinventing-the-wheel">Reinventing the wheel</h2>
+
+<p>I used to ride bicycles a lot. And I got interested in the surprisingly non-obvious way that bicycle wheels work. After reading <a href="https://en.wikipedia.org/wiki/The_Bicycle_Wheel" title="The bicycle wheel"><em>The bicycle wheel</em></a> I decided that I could make wheels, and I did do that.</p>
+
+<p>And a strange thing happened: although I rationally understood that the wheels I had made were as good or better than any other wheel, for the first little while after building them I was terrified that they would bend or, worse, collapse. There was no rational reason for this: it was just that for some reason I trusted my own workmanship less than I trusted whoever had made the off-the-shelf wheels they&rsquo;d replaced (and, indeed, some of whose parts I had cannibalised to make them).</p>
+
+<p>Of course they didn&rsquo;t bend or collapse, and I still rode on one of them until quite recently.</p>
+
+<p>The same thing happened with &#352;tar: for quite a while after finishing it I had to work hard to force myself to use it: even though I knew it was fast and robust. It wasn&rsquo;t helped that one of the basic early iterators was overcomplex and had somewhat fragile performance. It wasn&rsquo;t until I gave up on it and replaced it by a much simpler and more limited one, while also making a much more general iterator fast enough to use for the complicated cases that it felt comfortable.</p>
+
+<p>This didn&rsquo;t happen with <code>collecting</code>: I think that&rsquo;s because it did something CL didn&rsquo;t already have versions of, while it&rsquo;s very often possible to replace a construct using &#352;tar with some nasty thing involving <code>do</code> or some other iteration construct. Also &#352;tar is much bigger than <code>collecting</code> and it&rsquo;s hard to remember that I&rsquo;m not using a machine with a few MB of memory any more. Perhaps it&rsquo;s also because I first wrote <code>collecting</code> a very long time ago.</p>
+
+<p>But I got over this, and now almost the only times I&rsquo;d use any other iteration construct are either when <code>mapcar</code> &amp;c are obviously right, or when I&rsquo;m writing code for someone else to look at.</p>
+
+<p>And writing iterators is easy, especially given that you very often do not need optimizers for them: if you&rsquo;re iterating over the lines in a file two function calls per line is not hurting much. Iterators, of course, can also iterate over recursively-defined structures such as trees or DAGs: it&rsquo;s easy to say <code>(for ((leaf (in-graph ... :only-leaves t))) ...)</code>.</p>
+
+<h2 id="would-it-help">Would it help?</h2>
+
+<p>In my biased experience, yes, quite a lot. I now much prefer writing and reading code that uses <code>for</code> to code that uses almost any of the standard iteration constructs, and <code>collecting</code>, together with its friends, simply does not have a standard equivalent at all: if you don&rsquo;t have it, you need either to write it, or implement it explicitly each time.</p>
+
+<p>But my experience is very biased: I have hated <code>loop</code> almost since it arrived in CL, and I find using <code>do</code> for anything non-trivial clumsy enough that I&rsquo;ve previously written <a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html#decomposing-iteration-simple-loops" title="Simple loops">versions of it which require less repetition</a>. And of course I was quite involved in the design and implementation of &#352;tar, so it&rsquo;s not surprising that I like it.</p>
+
+<p>I&rsquo;m also <a href="https://tfeb.org/fragments/2022/10/03/bradshaw-s-laws/" title="Bradshaw's laws">very comfortable</a> with the idea that Lisp is about language design &mdash; in 2025 I don&rsquo;t see any compelling advantage of Lisp <em>other</em> than constructing languages &mdash; and that people who write Lisp end up writing in their own idiolects. The argument against doing this seems to be that every Lisp project ends up being its own language and this means that it is hard to recruit people. I can only assume that the people who say that have never worked on any large system written in languages other than Lisp<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-4-definition" name="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-4-return">4</a></sup>: <a href="https://en.wikipedia.org/wiki/Greenspun's_tenth_rule" title="Greenspun's tenth rule">Greenspun&rsquo;s tenth rule</a> very much applies to these systems.</p>
+
+<p>In summary: yes, it would help.</p>
+
+<hr />
+
+<h2 id="an-example">An example</h2>
+
+<p>In the examples directory for &#352;tar there is an iterator called <code>in-graph</code> which can iterate over any graph, if it knows how to find the neighbours of a node. For instance:</p>
+
+<pre class="brush: lisp"><code>&gt; (for ((n (in-graph (list '(a b (c b) d))
+                     (lambda (n)
+                       (if (atom n) '() (cdr n))))))
+    (print n))
+
+(a b (c b) d) 
+b 
+(c b) 
+b 
+d 
+nil
+
+&gt; (for ((n (in-graph (list '(a b (c b) d))
+                     (lambda (n)
+                       (if (atom n) '() (cdr n)))
+                     :unique t)))
+    (print n))
+
+(a b (c b) d) 
+b 
+(c b) 
+d 
+nil
+
+&gt; (for ((n (in-graph (list '(a b (c b) d))
+                     (lambda (n)
+                       (if (atom n) '() (cdr n)))
+                     :order :breadth-first)))
+    (print n))
+
+(a b (c b) d) 
+b 
+(c b) 
+d 
+b 
+nil
+
+&gt; (collecting (for ((n (in-graph (list '(a b (c b) d))
+                                 (lambda (n)
+                                   (if (atom n) '() (cdr n)))
+                                 :unique t
+                                 :only-leaves t)))
+                (collect n)))
+(b d)</code></pre>
+
+<p>or</p>
+
+<pre class="brush: lisp"><code>&gt; (setf *print-circle* t)
+t
+
+&gt; (for ((n (in-graph (list '#1=(a #2=(b c #1#) d #2#))
+                     (lambda (n)
+                       (if (atom n) '() (cdr n)))
+                     :unique t)))
+    (print n))
+
+#1=(a #2=(b c #1#) d #2#) 
+#1=(b c (a #1# d #1#)) 
+c 
+d 
+nil</code></pre>
+
+<p>or</p>
+
+<pre class="brush: lisp"><code>&gt; (for ((p (in-graph (list *package*) #'package-use-list
+                     :unique t :order :breadth-first)))
+    (format t "~&amp;~A~%" (package-name p)))
+COMMON-LISP-USER
+ORG.TFEB.DSM
+ORG.TFEB.HAX.ITERATE
+ORG.TFEB.HAX.COLLECTING
+ORG.TFEB.STAR
+ORG.TFEB.TOOLS.REQUIRE-MODULE
+COMMON-LISP
+HARLEQUIN-COMMON-LISP
+LISPWORKS
+ORG.TFEB.HAX.UTILITIES
+ORG.TFEB.HAX.SIMPLE-LOOPS
+ORG.TFEB.HAX.SPAM
+ORG.TFEB.DSM/IMPL
+nil</code></pre>
+
+<p><code>in-graph</code> is fairly simple, and uses both collectors and &#352;tar in its own implementation:</p>
+
+<pre class="brush: lisp"><code>(defun in-graph (roots node-neighbours &amp;key
+                       (only-leaves nil)
+                       (order ':depth-first)
+                       (unique nil)
+                       (test #'eql)
+                       (key #'identity))
+  ;; Preorder / postorder would be nice to have
+  "Iterate over a graph
+
+- ROOTS are the nodes to start from.
+- NODE-NEIGHBOURS is a function which, given a node, returns its
+  neighbours if any.
+- ORDER may be :DEPTH-FIRST (default) or :BREADTH-FIRST.
+- UNIQUE, if given, will iterate nodes uniquely.
+- TEST is the comparison test for nodes: it must be something
+  acceptable to MAKE-HASH-TABLE.  Default is #'EQL.
+- KEY, if given, extracts a key from a node for comparison in the
+  usual way.
+
+There is no optimizer.
+
+If the graph is cyclic an iteration using this will not terminate
+unless UNIQUE is true, unless some other clause stops it.  If the
+graph is not directed you also need to use UNIQUE."
+  (check-type order (member :depth-first :breadth-first))
+  (let ((agenda (make-collector :initial-contents roots))
+        (duplicate-table (if unique (make-hash-table :test test) nil))
+        (this nil))
+    (values
+     (thunk                             ;predicate does all the work
+       (if (collector-empty-p agenda)
+           nil
+         (for ((it (stepping (it :as (pop-collector agenda)))))
+           (let ((neighbours (funcall node-neighbours it))
+                 (k (and unique (funcall key it))))
+             (cond
+              ((and unique (gethash k duplicate-table))
+               ;; It's a duplicate: skip
+               (if (collector-empty-p agenda)
+                   (final nil)
+                 (next)))
+              ((null neighbours)
+               ;; Leaf, add it to the duplicate table if need be and say we found something
+               (when unique
+                 (setf (gethash k duplicate-table) t))
+               (setf this it)
+               (final t))
+              (t
+               ;; Not a leaf: update the agenda ...
+               (setf agenda
+                     (case order
+                       (:depth-first
+                        (nconc-collectors (make-collector :initial-contents neighbours) agenda))
+                       (:breadth-first
+                        (nconc-collectors agenda (make-collector :initial-contents neighbours)))))
+               ;; .. add it to the duplicate table if need be so it's
+               ;; skipped next time ...
+               (when unique               
+                 (setf (gethash k duplicate-table) t))
+               ;; ... and decide if we found something
+               (cond
+                (only-leaves
+                 (if (collector-empty-p agenda)
+                     (final nil)
+                   (next)))
+                 (t
+                  (setf this it)
+                  (final t)))))))))
+     (thunk this))))</code></pre>
+
+<hr />
+
+<div class="footnotes">
+ <ol>
+  <li class="footnote-definition" id="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-1-definition">
+   <p>&lsquo;Lisp&rsquo; here will usually mean &lsquo;Common Lisp&rsquo;.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-1-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-2-definition">
+   <p>Although if you use <code>loop</code> you must accept that you will certainly suffer eternal damnation. Perhaps that&rsquo;s worth it: Robert Johnson thought so, anyway.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-2-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-3-definition">
+   <p>This is the same argument that explains why a universal equality predicate is nonsensical: equality of objects depends on what they are equal <em>as</em> and that is often not implicit in the objects.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-3-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2025-10-31-disentangling-iteration-from-value-accumulation-footnote-4-definition">
+   <p>Or in Lisp, more than likely.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2025-10-31-disentangling-iteration-from-value-accumulation-footnote-4-return">&#8617;</a></p></li></ol></div>

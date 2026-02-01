@@ -1,0 +1,63 @@
+<p>Just the other day, <a href="https://github.com/gvoysey">Graham Voysey</a> filed an <a href="https://github.com/xenodium/dwim-shell-command/issues/3">escaping bug</a> against <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>. Once he verified the the fix, he also posted <a href="https://github.com/xenodium/dwim-shell-command/issues/3#issuecomment-1272413459">two uses</a> of <code>dwim-shell-command-on-marked-files</code>. I've made some small tweaks, but here's the gist of it:</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-feh-marked-files ()
+  &quot;View all marked files with feh.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;View with feh&quot;
+   &quot;feh --auto-zoom --scale-down '&lt;&lt;*&gt;&gt;'&quot;
+   :silent-success t
+   :utils &quot;feh&quot;))
+
+(defun dwim-shell-commands-dragon-marked-files ()
+  &quot;Share all marked files with dragon.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;View with dragon&quot;
+   &quot;dragon --on-top '&lt;&lt;*&gt;&gt;'&quot;
+   :silent-success t
+   :utils &quot;dragon&quot;))
+</code></pre>
+<p>I love seeing what others get up to by using <code>dwim-shell-command</code>. Are there new magical command-line utilities out there I don't know about? In this instance, I got to learn about <a href="https://feh.finalrewind.org/">feh</a> and <a href="https://github.com/mwh/dragon">dragon</a>.</p>
+<p><a href="https://feh.finalrewind.org/">feh</a> is a no-frills image viewer for console users while <a href="https://github.com/mwh/dragon">dragon</a> is a simple drag-and-drop source/sink for X or Wayland. Both utilities are great uses of <code>dwim-shell-command</code>, enabling a seamless transition from Emacs to the <em>outside world</em>. These days I'm rarely on a linux box, so I was keen to ensure macOS had these cases covered.</p>
+<p><a href="https://en.wikipedia.org/wiki/Preview_(macOS)">Preview</a> is a solid macOS equivalent to <a href="https://feh.finalrewind.org/">feh</a>. <code>Preview</code> is already macOS's default image viewer. A simple <code>open '&lt;&lt;f&gt;&gt;'</code> would do the job, but if we'd like to make this command more portable, we can accomodate as follows:</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-open-externally ()
+  &quot;Open file(s) externally.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Open externally&quot;
+   (if (eq system-type 'darwin)
+       &quot;open '&lt;&lt;f&gt;&gt;'&quot;
+     &quot;xdg-open '&lt;&lt;f&gt;&gt;'&quot;)
+   :silent-success t
+   :utils &quot;open&quot;))
+</code></pre>
+<p>Special mention goes to Bozhidar Batsov's <a href="https://github.com/bbatsov/crux">crux</a> which achieves similar functionality via <code>crux-open-with</code>. <a href="https://github.com/bbatsov/crux">crux</a> provides a bunch of other useful functions. Some of my favourites being <code>crux-duplicate-current-line-or-region</code>, <code>crux-transpose-windows</code>, <code>crux-delete-file-and-buffer</code>, and <code>crux-rename-buffer-and-file</code>, but I digress.</p>
+<p>Moving on to a <a href="https://github.com/mwh/dragon">dragon</a> equivalent on macOS, I thought I had it covered via <a href="https://github.com/kaz-yos/reveal-in-osx-finder">reveal-in-osx-finder</a> or <a href="https://github.com/jcs-elpa/reveal-in-folder">reveal-in-folder</a>. Turns out, neither of these reveal multiple <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a>-selected files within <a href="https://en.wikipedia.org/wiki/Finder_(software)">Finder</a>. At first, I thought this could be easily achieved by passing additional flags/params to macOS's <code>open</code> command, but it doesn't seem to be the case. Having said that, this <a href="https://stackoverflow.com/questions/7652928/launch-finder-window-with-specific-files-selected">Stack Overflow post</a>, has a solution in Objective-C, which is where things got a little more interesting. You see, back in July I <a href="https://xenodium.com/emacs-dwim-shell-command-multi-language/">added multi-language support</a> to <a href="https://xenodium.com/emacs-dwim-shell-command-multi-language/">dwim-shell-command</a> and while it highlighted language flexibility, I hadn't yet taken advantage of this feature myself. That is, until today.</p>
+<p>The Objective-C snippet from the Stack Overflow post can be written as a Swift one-liner. Ok I lie. It's actually two lines, counting the import, but you can see that this multi-language Emacs transition/integration is pretty easy to add.</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-macos-reveal-in-finder ()
+  &quot;Reveal selected files in macOS Finder.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Reveal in Finder&quot;
+   &quot;import AppKit
+    NSWorkspace.shared.activateFileViewerSelecting([\&quot;&lt;&lt;*&gt;&gt;\&quot;].map{URL(fileURLWithPath:$0)})&quot;
+   :join-separator &quot;, &quot;
+   :silent-success t
+   :shell-pipe &quot;swift -&quot;))
+</code></pre>
+<p><code>&lt;&lt;*&gt;&gt;</code> is the centrepiece of the snippet above. It gets instantiated with a list of files joined using the <code>&quot;, &quot;</code> separator.</p>
+<pre><code class="language-swift">NSWorkspace.shared.activateFileViewerSelecting([&quot;/path/to/file1&quot;, &quot;/path/to/file2&quot;].map { URL(fileURLWithPath: $0) })
+</code></pre>
+<p>The proof of the pudding is of course in the eating, so ummm let's show it in action:</p>
+<p><img src="https://xenodium.github.io/images/emacs-reveal-in-finder-dwim-style/dwim-reveal.webp" alt=""></p>
+<p>I should mention the webp animation above was also created using my trusty <code>dwim-shell-commands-video-to-webp</code> also backed by <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>.</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-video-to-webp ()
+  &quot;Convert all marked videos to webp(s).&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Convert to webp&quot;
+   &quot;ffmpeg -i '&lt;&lt;f&gt;&gt;' -vcodec libwebp -filter:v fps=fps=10 -compression_level 3 -lossless 1 -loop 0 -preset default -an -vsync 0 '&lt;&lt;fne&gt;&gt;'.webp&quot;
+   :utils &quot;ffmpeg&quot;))
+</code></pre>
+<p><a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a> is available on <a href="https://melpa.org/#/dwim-shell-command">melpa</a>. What other uses can you find for it?</p>
+<p>UPDATE: Most DWIM shell commands I use are available as part of <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-commands.el">dwim-shell-commands.el</a>. See <code>dwim-shell-command</code>'s <a href="https://github.com/xenodium/dwim-shell-command#install-command-line-utilities">install command line utilities</a>.</p>

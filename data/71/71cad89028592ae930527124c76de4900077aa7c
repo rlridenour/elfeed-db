@@ -1,0 +1,216 @@
+
+	
+<p>
+Part of my job at a regional water utility involves visualising operational data. We manage water and sewerage services for a large number of small and medium-sized towns in regional Victoria (Australia).  Traditionally, performance reports consist of extensive tables filled with numbers with a line for each city. To make this data easier to consume, I developed the cheesecake diagram to spatially visualise performance data. A cheesecake diagram is just like a pie chart, but different.</p>
+<p>
+The code for this article is available on GitHub:</p>
+<p>
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Reporting performance spatially
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>Displaying geographic performance requires geometric objects at appropriate locations. The  <a href="https://lucidmanager.org/data-science/geographic-bubble-chart/">geographic bubble chart</a> visualises a single quantitative variable through the size of the circles, plus a second qualitative variable through the colour.</p>
+<p>
+The performance data is randomised for the purpose of this example. Performance is measured using four aggregated parameters. My paper on <a href="https://www.researchgate.net/publication/326533569_Visualising_water_quality_A_graphical_index_for_drinking_water_system_performance">visualising water quality performance</a>  describes the algorithm in detail.</p>
+<p>
+The size of the bubbles in the diagram below communicates the consumed volume of water. Due to the orders of magnitude difference in town size, the area is transformed with the square root. The colour of the bubble communicates a random level of performance.</p>
+<p>
+In most traffic-light reporting systems, the colour for negative performance is red and excellent performance is green. This combination is, however, not useful for the 8% of men who struggle to see the difference between red and green. The <a href="https://cran.r-project.org/web/packages/RColorBrewer/index.html">RColorBrewer</a> package provides several diverging colourblind-safe colour palates.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/bubble-chart-performance.png" alt="Visualising a single qualitative value with a bubble chart" title="Visualising a single qualitative value with a bubble chart"/>
+<figcaption>
+Visualising a single qualitative value with a bubble chart.
+</figcaption>
+</figure>
+<p>
+The first part of the code creates mock performance data. The <a href="https://lucidmanager.org/data-science/geocoding-with-ggmap/">geocode function of the ggmap package</a> provides the latitude and longitude for each location. The consumption data is taken from the 2019 Coliban Water annual report. The data has a row for each location, the total consumption, four performance variables and the average over these four.</p>
+<p>
+The background map comes from <a href="https://stamen.com/">Stamen Design</a>, under <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>. Data by <a href="https://www.openstreetmap.org/">OpenStreetMap</a>, under <a href="https://www.openstreetmap.org/copyright">ODbL</a>. The second part of the code projects the point geometry on the map and sets the scales and labels. The toner version of the Stamen maps is ideal for this visualisation because of its sparse background.</p>
+<p>
+The next section shows how to split these bubbles into quadrants to separately visualise each variable.</p>
+<p>
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Cheesecake diagram</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggmap)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(RColorBrewer)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Register Google Maps API</span>
+</span></span><span style="display:flex;"><span>  api <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">readLines</span>(<span style="background-color:#fff0f0">&#34;case-studies/google-maps.api&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">register_google</span>(key <span style="color:#333">=</span> api)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Create mock performance data</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Towns with water treatment plants</span>
+</span></span><span style="display:flex;"><span>  towns <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;Bendigo&#34;</span>, <span style="background-color:#fff0f0">&#34;Boort&#34;</span>, <span style="background-color:#fff0f0">&#34;Bridgewater&#34;</span>, <span style="background-color:#fff0f0">&#34;Castlemaine&#34;</span>, <span style="background-color:#fff0f0">&#34;Cohuna&#34;</span>, <span style="background-color:#fff0f0">&#34;Echuca&#34;</span>, <span style="background-color:#fff0f0">&#34;Elmore&#34;</span>, <span style="background-color:#fff0f0">&#34;Goornong&#34;</span>, <span style="background-color:#fff0f0">&#34;Gunower&#34;</span>, <span style="background-color:#fff0f0">&#34;Heathcote&#34;</span>, <span style="background-color:#fff0f0">&#34;Korong Vale&#34;</span>, <span style="background-color:#fff0f0">&#34;Kyneton&#34;</span>, <span style="background-color:#fff0f0">&#34;Laanecoorie&#34;</span>, <span style="background-color:#fff0f0">&#34;Leitchville&#34;</span>, <span style="background-color:#fff0f0">&#34;Lockington&#34;</span>, <span style="background-color:#fff0f0">&#34;Pyramid Hill&#34;</span>, <span style="background-color:#fff0f0">&#34;Rochester&#34;</span>, <span style="background-color:#fff0f0">&#34;Serpentine&#34;</span>, <span style="background-color:#fff0f0">&#34;Trentham&#34;</span>)
+</span></span><span style="display:flex;"><span>  t <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">length</span>(towns)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Volume produced</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## https://www.coliban.com.au/files/2019-10/FINAL_CW_AnnualReport2019_200919pm.pdf p. 24</span>
+</span></span><span style="display:flex;"><span>  consumption <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">11682</span>, <span style="color:#60e;font-weight:bold">138</span>, <span style="color:#60e;font-weight:bold">141</span>, <span style="color:#60e;font-weight:bold">2064</span>, <span style="color:#60e;font-weight:bold">610</span>, <span style="color:#60e;font-weight:bold">3017</span>, <span style="color:#60e;font-weight:bold">106</span>, <span style="color:#60e;font-weight:bold">44</span>, <span style="color:#60e;font-weight:bold">48</span>, <span style="color:#60e;font-weight:bold">243</span>, <span style="color:#60e;font-weight:bold">117</span>, <span style="color:#60e;font-weight:bold">862</span>, <span style="color:#60e;font-weight:bold">106</span>, <span style="color:#60e;font-weight:bold">161</span>, <span style="color:#60e;font-weight:bold">55</span>, <span style="color:#60e;font-weight:bold">84</span>, <span style="color:#60e;font-weight:bold">857</span>, <span style="color:#60e;font-weight:bold">17</span>, <span style="color:#60e;font-weight:bold">94</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">set.seed</span>(<span style="color:#60e;font-weight:bold">1969</span>)
+</span></span><span style="display:flex;"><span>  performance <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(Town <span style="color:#333">=</span> towns) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">bind_cols</span>(<span style="color:#06b;font-weight:bold">geocode</span>(<span style="color:#06b;font-weight:bold">paste</span>(towns, <span style="background-color:#fff0f0">&#34;Victoria, Australia&#34;</span>))) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">mutate</span>(Consumption <span style="color:#333">=</span> consumption,
+</span></span><span style="display:flex;"><span>             Treatment <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">0</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">100</span>, t),
+</span></span><span style="display:flex;"><span>             Network <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">0</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">100</span>, t),
+</span></span><span style="display:flex;"><span>             Regulation <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">0</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">100</span>, t),
+</span></span><span style="display:flex;"><span>             Perception <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">0</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">100</span>, t),
+</span></span><span style="display:flex;"><span>             Performance <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">round</span>((Treatment <span style="color:#333">+</span> Network <span style="color:#333">+</span> Regulation <span style="color:#333">+</span> Perception) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">4</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Get map</span>
+</span></span><span style="display:flex;"><span>  bbox <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">make_bbox</span>(<span style="color:#06b;font-weight:bold">range</span>(performance<span style="color:#333">$</span>lon), <span style="color:#06b;font-weight:bold">range</span>(performance<span style="color:#333">$</span>lat), f <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>)
+</span></span><span style="display:flex;"><span>  map <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">get_stamenmap</span>(bbox, maptype <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;toner-hybrid&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Single variable</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggmap</span>(map, extent <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;device&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> performance,
+</span></span><span style="display:flex;"><span>                 <span style="color:#06b;font-weight:bold">aes</span>(lon, lat, size <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sqrt</span>(Consumption), col <span style="color:#333">=</span> Performance),
+</span></span><span style="display:flex;"><span>                 alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.9</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">scale_size_area</span>(max_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">24</span>, guide <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;none&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">scale_color_gradientn</span>(colors <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">brewer.pal</span>(<span style="color:#60e;font-weight:bold">7</span>, <span style="background-color:#fff0f0">&#34;RdYlBu&#34;</span>)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;System Performance&#34;</span>,
+</span></span><span style="display:flex;"><span>           subtitle <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Simulated data&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">theme_void</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">8</span>)</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Introducing the Cheesecake Diagram 
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>If we want to report more than one variable per location, the circle needs to he divided into two or more sectors. While this might sound like a pie chart, it is not. A pie chart visualises information through the size of the sectors in the diagram. The colours of the sectors communicate the data categories. Visualisation experts generally discourage using pie charts because they are not easy to interpret, but cheesecake diagrams are different.</p>
+<p>
+A cheesecake diagram visualises information through the size of the circle and the colour of the sectors. The size of the sector is the same for each. A cheesecake diagram is a type of pie chart, but with a different flavour. The cheesecake diagram should not be used for more than four slices to ensure it remains readable.</p>
+<p>
+The <a href="https://cran.r-project.org/web//packages/scatterpie/index.html">Scatterpie</a> package provides functionality to plot pie charts on a map, but it does not allow you to link the colours to the aesthetics. The code below uses the powerful <a href="https://ggforce.data-imaginist.com/">ggforce package</a> to construct the cheesecakes from four circle sectors. To create the sectors, the <code class="verbatim">performance</code> data frame is pivoted, and each sector is defined by its starting and ending angle, being 90 degrees ($\pi/2$ radians). Because the circle now contains information, it is not sized to the level of consumption to keep the sectors clearly visible.</p>
+<p>
+Adding the legend is a bit finicky. The <code class="verbatim">annotation_custom()</code> function allows you to plot two ggplot graphs on top of each other. In this case we need to transform the coordinate systems to match as the map is in latitude /longitude and the legend .</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/cheesecake-performance.png" alt="Cheesecake diagram with randomised variables" title="Cheesecake diagram with randomised variables"/>
+<figcaption>
+Cheesecake diagram with randomised variables.
+</figcaption>
+</figure>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Cheesecake diagram</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggforce)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(gridExtra)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Convert data</span>
+</span></span><span style="display:flex;"><span>  cheesecake <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">pivot_longer</span>(performance, <span style="color:#60e;font-weight:bold">-1</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">-4</span>,
+</span></span><span style="display:flex;"><span>                            names_to <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Aspect&#34;</span>,
+</span></span><span style="display:flex;"><span>                            values_to <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Performance&#34;</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(Aspect <span style="color:#333">!=</span> <span style="background-color:#fff0f0">&#34;Performance&#34;</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(start <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(<span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">*</span> <span style="color:#080;font-weight:bold">pi</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">5</span>)[<span style="color:#60e;font-weight:bold">-5</span>], t),
+</span></span><span style="display:flex;"><span>           end <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(<span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">*</span> <span style="color:#080;font-weight:bold">pi</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">5</span>)[<span style="color:#60e;font-weight:bold">-1</span>], t))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Legend</span>
+</span></span><span style="display:flex;"><span>  cheesecake_legend <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(x0 <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">.1</span>, <span style="color:#60e;font-weight:bold">.1</span>, <span style="color:#60e;font-weight:bold">-.1</span>, <span style="color:#60e;font-weight:bold">-.1</span>),
+</span></span><span style="display:flex;"><span>                              y0 <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">.1</span>, <span style="color:#60e;font-weight:bold">-.1</span>, <span style="color:#60e;font-weight:bold">-.1</span>, <span style="color:#60e;font-weight:bold">.1</span>),
+</span></span><span style="display:flex;"><span>                              start <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">*</span> <span style="color:#080;font-weight:bold">pi</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">5</span>)[<span style="color:#60e;font-weight:bold">-5</span>],
+</span></span><span style="display:flex;"><span>                              end <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">*</span> <span style="color:#080;font-weight:bold">pi</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">5</span>)[<span style="color:#60e;font-weight:bold">-1</span>],
+</span></span><span style="display:flex;"><span>                              dimension <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">unique</span>(cheesecake<span style="color:#333">$</span>Aspect))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  l <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ggplot</span>(cheesecake_legend) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">aes</span>(x0 <span style="color:#333">=</span> x0, y0 <span style="color:#333">=</span> y0, r0 <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0</span>, r <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>, start <span style="color:#333">=</span> start, end <span style="color:#333">=</span> end) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_arc_bar</span>(col <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>, fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;lightgrey&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_text</span>(<span style="color:#06b;font-weight:bold">aes</span>(x0 <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">6</span>, y0 <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">6</span>,
+</span></span><span style="display:flex;"><span>                  label <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">unique</span>(cheesecake<span style="color:#333">$</span>Aspect)), size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_void</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">coord_equal</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Visualise</span>
+</span></span><span style="display:flex;"><span>  m <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ggmap</span>(map, extent <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;device&#34;</span>,
+</span></span><span style="display:flex;"><span>             base_layer <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">ggplot</span>(data <span style="color:#333">=</span> cheesecake,
+</span></span><span style="display:flex;"><span>                                 <span style="color:#06b;font-weight:bold">aes</span>(x0 <span style="color:#333">=</span> lon,
+</span></span><span style="display:flex;"><span>                                     y0 <span style="color:#333">=</span> lat,
+</span></span><span style="display:flex;"><span>                                     r0 <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0</span>,
+</span></span><span style="display:flex;"><span>                                     r <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.05</span>,
+</span></span><span style="display:flex;"><span>                                     start <span style="color:#333">=</span> start,
+</span></span><span style="display:flex;"><span>                                     end <span style="color:#333">=</span> end,
+</span></span><span style="display:flex;"><span>                                     fill <span style="color:#333">=</span> Performance))) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_arc_bar</span>(col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;darkgrey&#34;</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_size_area</span>(max_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">12</span>, guide <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">FALSE</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_fill_gradientn</span>(colors <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">brewer.pal</span>(<span style="color:#60e;font-weight:bold">7</span>, <span style="background-color:#fff0f0">&#34;RdYlBu&#34;</span>)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;System Performance&#34;</span>,
+</span></span><span style="display:flex;"><span>         subtitle <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Simulated data&#34;</span>)  <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_void</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">4</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  m <span style="color:#333">+</span> <span style="color:#06b;font-weight:bold">coord_cartesian</span>() <span style="color:#333">+</span> <span style="color:#06b;font-weight:bold">coord_equal</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">annotation_custom</span>(grob <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">ggplotGrob</span>(l),
+</span></span><span style="display:flex;"><span>                      xmin <span style="color:#333">=</span> bbox[3] <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">.3</span>, xmax <span style="color:#333">=</span> bbox[3],
+</span></span><span style="display:flex;"><span>                      ymin <span style="color:#333">=</span> bbox[4] <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">.3</span>, ymax <span style="color:#333">=</span> bbox[4])</span></span></code></pre></div>
+</div>
+<p>
+
+  <div class="box">
+    <div class="media">
+      <figure class="media-left">
+        <p class="image is-128x128">
+          <img src="https://lucidmanager.org/images/books/2023_ds4wu.jpg" alt = "Data Science for Water Utilities" title = "Data Science for Water Utilities">
+        </p>
+      </figure>
+      <div class="media-content">
+        <div class="content">
+          <p class="is-size-5 has-text-weight-bold">Data Science for Water Utilities</p>
+          <p class="mb-2">Data Science for Water Utilities published by CRC Press is an applied, practical guide that shows water professionals how to use data science to solve urban water management problems using the R language for statistical computing.</p>
+          <div class="buttons">
+            <a class="button is-info" href="https://routledge.com/9781032354545" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Routledge</span>
+            </a>
+            <a class="button is-info" href="https://www.amazon.com/Data-Science-Water-Utilities-Chapman/dp/1032354550" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Amazon</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

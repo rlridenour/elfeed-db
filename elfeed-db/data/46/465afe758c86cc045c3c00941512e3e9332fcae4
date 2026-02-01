@@ -1,0 +1,94 @@
+<main id="content" class="content"> <header> <h1 class="title">LaTeX Compilation Scripts</h1>
+ <p class="subtitle" role="doc-subtitle">Jun 09, 2022 00:00</p>
+</header> <p>
+I’m trying to automate LaTeX compilation from Emacs as much as I can. Here are the shell scripts and Emacs functions that I’m using.
+</p>
+ <section id="outline-container-orgfb45534" class="outline-2"> <h2 id="orgfb45534">Shell Scripts</h2>
+ <div class="outline-text-2" id="text-orgfb45534">
+ <p>
+Here are some very simple scripts for compiling LaTeX files with arara and the fish shell. The first, called “mkt” for “make TeX”, runs arara on the source file, then opens the resulting PDF.
+</p>
+
+ <div class="org-src-container">
+ <pre class="src src-nil">function mkt 
+  arara $argv 
+  set output_file (string replace -r tex\$ pdf $argv) 
+  open -g $output_file 
+end
+</pre>
+</div>
+
+ <p>
+The second, called “mktc” for “make TeX continuously”, runs arara, opens the PDF, watches for changes, and runs arara whenever the file is saved.
+</p>
+
+ <div class="org-src-container">
+ <pre class="src src-fish"> <span class="org-keyword">function</span>  <span class="org-function-name">mktc</span>
+   <span class="org-builtin">arara</span>  <span class="org-string">$</span> <span class="org-variable-name">argv</span>
+   <span class="org-keyword">set</span>  <span class="org-variable-name">output_file</span> ( <span class="org-builtin">string</span> replace -r tex <span class="org-negation-char">\</span>$ pdf  <span class="org-string">$</span> <span class="org-variable-name">argv</span>)
+   <span class="org-builtin">open</span> -g  <span class="org-string">$</span> <span class="org-variable-name">output_file</span>
+   <span class="org-builtin">fswatch</span> -o  <span class="org-string">$</span> <span class="org-variable-name">argv</span>  <span class="org-negation-char">|</span>  <span class="org-builtin">xargs</span> -n1 -I{} arara  <span class="org-string">$</span> <span class="org-variable-name">argv</span>
+ <span class="org-keyword">end</span>
+</pre>
+</div>
+</div>
+</section> <section id="outline-container-orgde48fbe" class="outline-2"> <h2 id="orgde48fbe">Emacs</h2>
+ <div class="outline-text-2" id="text-orgde48fbe">
+ <p>
+Here are some functions to use in Emacs to run the scripts.
+</p>
+</div>
+ <div id="outline-container-org2025d7c" class="outline-3">
+ <h3 id="org2025d7c">Auctex</h3>
+ <div class="outline-text-3" id="text-org2025d7c">
+ <div class="org-src-container">
+ <pre class="src src-emacs-lisp">( <span class="org-keyword">defun</span>  <span class="org-function-name">rlr/tex-mkt</span> ()
+   <span class="org-doc">"Compile with arara."</span>
+  ( <span class="org-keyword">interactive</span>)
+  (async-shell-command (concat  <span class="org-string">"mkt "</span> (buffer-file-name))))
+
+( <span class="org-keyword">defun</span>  <span class="org-function-name">rlr/tex-mktc</span> ()
+   <span class="org-doc">"Compile continuously with arara."</span>
+  ( <span class="org-keyword">interactive</span>)
+  (start-process-shell-command (concat  <span class="org-string">"mktc-"</span> (buffer-file-name)) (concat  <span class="org-string">"mktc-"</span> (buffer-file-name)) (concat  <span class="org-string">"mktc "</span> (buffer-file-name))))
+</pre>
+</div>
+
+ <p>
+The first compiles with an asynchronous shell command, so that you can immediately return to editing the file while arara runs. I decided to use  <code>start-process-shell-command</code> instead of  <code>async-shell-command</code> for  <code>mktc</code>, since  <code>mkt</code> runs once and stops, while  <code>mktc</code> keeps running in the background. When  <code>rlr/tex-mktc</code> is called, a process is started that has the same name as the file with “mktc-” prepended it to it. The process is shown in a buffer that has the same name. That way, several files can be compiled at the same time.
+</p>
+</div>
+</div>
+ <div id="outline-container-orgd0842d0" class="outline-3">
+ <h3 id="orgd0842d0">Org Mode</h3>
+ <div class="outline-text-3" id="text-orgd0842d0">
+ <div class="org-src-container">
+ <pre class="src src-emacs-lisp">
+( <span class="org-keyword">defun</span>  <span class="org-function-name">rlr/org-mkt</span> ()
+   <span class="org-doc">"Make PDF with Arara."</span>
+  ( <span class="org-keyword">interactive</span>)
+  (org-latex-export-to-latex)
+  (async-shell-command (concat  <span class="org-string">"mkt "</span> (file-name-sans-extension (buffer-file-name)) <span class="org-string">".tex"</span>)))
+
+( <span class="org-keyword">defun</span>  <span class="org-function-name">rlr/org-mktc</span> ()
+   <span class="org-doc">"Compile continuously with arara."</span>
+  ( <span class="org-keyword">interactive</span>)
+  (org-latex-export-to-latex)
+  (start-process-shell-command (concat  <span class="org-string">"mktc-"</span> (buffer-file-name)) (concat  <span class="org-string">"mktc-"</span> (buffer-file-name)) (concat  <span class="org-string">"mktc "</span> (file-name-sans-extension (buffer-file-name)) <span class="org-string">".tex"</span>)))
+</pre>
+</div>
+
+ <p>
+These functions first export the org file to LaTeX, then compile the corresponding TeX files. All in all, a morning’s worth of work to save a few keystrokes. I run them using  <a href="https://github.com/jerrypnz/major-mode-hydra.el">major mode hydras</a>.
+</p>
+
+
+ <div class="tagline" id="org6ebf88b">
+ <p>
+Tagged:  <a href="../tags/LaTeX.html">Latex</a>  <a href="../tags/emacs.html">Emacs</a>  <a href="../tags/org.html">Org</a>
+</p>
+
+</div>
+</div>
+</div>
+</section></main>

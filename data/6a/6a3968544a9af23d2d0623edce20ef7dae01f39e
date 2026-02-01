@@ -1,0 +1,116 @@
+
+         
+         <p>As part of the current development version of Denote (<code class="language-plaintext highlighter-rouge">3.1.0-dev</code>),
+users can define their own sorting algorithm for each individual file
+name component. This is relevant when (i) using the command
+<code class="language-plaintext highlighter-rouge">denote-sort-dired</code>, which produces a fully fledged Dired buffer with
+only the files that match the search terms, but also (ii) for the Org
+dynamic blocks we provide, which accept optional sorting parameters.</p>
+
+<p>By default, all file name components are sorted with the same
+function: <code class="language-plaintext highlighter-rouge">string-collate-lessp</code>. New user options give us the
+flexibility to define the function to use on a per-file-name-component
+basis. The user options are:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">denote-sort-title-comparison-function</code></li>
+  <li><code class="language-plaintext highlighter-rouge">denote-sort-keywords-comparison-function</code></li>
+  <li><code class="language-plaintext highlighter-rouge">denote-sort-signature-comparison-function</code></li>
+</ul>
+
+<p>In the next section, I show how to have an intuitive sorting scheme
+for Luhmann-style signatures. Remember that the signature file name
+component is an optional free-form field for users to employ as they
+see fit and is not, in any way, enforcing a specific workflow—for
+example, I do not use it (well, except for development purposes).</p>
+
+<h2>Luhmann’s sequence notes and the code we need</h2>
+
+<p>Niklas Luhmann would edit notes to form sequences of thoughts with
+branching paths, such as <code class="language-plaintext highlighter-rouge">1.1</code>, <code class="language-plaintext highlighter-rouge">1.1a</code>, <code class="language-plaintext highlighter-rouge">1.2</code>, <code class="language-plaintext highlighter-rouge">1.2a</code>, <code class="language-plaintext highlighter-rouge">1.2b</code>, etc.
+With the Denote file-naming scheme, we make the word separator in each
+file name component use the same character as the entire field, so
+words in a title have a dash between them and signatures have the
+equals sign. This makes searches unambiguous. Thus, our Luhmann-style
+signatures will be slightly different in their appearance: <code class="language-plaintext highlighter-rouge">1=1</code>,
+<code class="language-plaintext highlighter-rouge">1=1a</code>, <code class="language-plaintext highlighter-rouge">1=2</code>, <code class="language-plaintext highlighter-rouge">1=2a</code>, <code class="language-plaintext highlighter-rouge">1=2b</code>.</p>
+
+<p>When using the <code class="language-plaintext highlighter-rouge">denote-sort-dired</code> command (or any of our Org dynamic
+blocks) with default settings, those Luhmann-style signatures will not
+sort in an intuitive way. This is because they combine numbers and
+letters, which require a different approach than what the default
+sorting function is using. The following will get the job done:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote--split-luhman-sig</span> <span class="p">(</span><span class="nv">signature</span><span class="p">)</span>
+  <span class="s">"Split numbers and letters in Luhmann-style SIGNATURE string."</span>
+  <span class="p">(</span><span class="nv">replace-regexp-in-string</span>
+   <span class="s">"\\([a-zA-Z]+?\\)\\([0-9]\\)"</span> <span class="s">"\\1=\\2"</span>
+   <span class="p">(</span><span class="nv">replace-regexp-in-string</span>
+    <span class="s">"\\([0-9]+?\\)\\([a-zA-Z]\\)"</span> <span class="s">"\\1=\\2"</span>
+    <span class="nv">signature</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote--pad-sig</span> <span class="p">(</span><span class="nv">signature</span><span class="p">)</span>
+  <span class="s">"Create a new signature with padded spaces for all components"</span>
+  <span class="p">(</span><span class="nv">combine-and-quote-strings</span>
+   <span class="p">(</span><span class="nb">mapcar</span>
+    <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="nv">x</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">string-pad</span> <span class="nv">x</span> <span class="mi">5</span> <span class="mi">32</span> <span class="no">t</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">split-string</span> <span class="p">(</span><span class="nv">my-denote--split-luhman-sig</span> <span class="nv">signature</span><span class="p">)</span> <span class="s">"="</span> <span class="no">t</span><span class="p">))</span>
+   <span class="s">"="</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-sort-for-signatures</span> <span class="p">(</span><span class="nv">sig1</span> <span class="nv">sig2</span><span class="p">)</span>
+  <span class="s">"Return non-nil if SIG1 is smaller that SIG2.
+Perform the comparison with `string&lt;'."</span>
+  <span class="p">(</span><span class="nb">string&lt;</span> <span class="p">(</span><span class="nv">my-denote--pad-sig</span> <span class="nv">sig1</span><span class="p">)</span> <span class="p">(</span><span class="nv">my-denote--pad-sig</span> <span class="nv">sig2</span><span class="p">)))</span>
+
+<span class="c1">;; Change the sorting function only when we sort by signature.</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">denote-sort-signature-comparison-function</span> <span class="nf">#'</span><span class="nv">my-denote-sort-for-signatures</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Then continue using <code class="language-plaintext highlighter-rouge">denote-sort-dired</code> or Org dynamic blocks to get
+the expected results.</p>
+
+<h2>Sample of an unsorted Dired listing</h2>
+
+<p><a href="https://protesilaos.com/assets/images/attachments/2024-08-01-denote-luhmann-signatures-unsorted.png"><img alt="Unsorted Dired listing showing notes with Luhmann-style signatures" src="https://protesilaos.com/assets/images/attachments/2024-08-01-denote-luhmann-signatures-unsorted.png" /></a></p>
+
+<h2>A sorted and filtered Dired listing (per <code class="language-plaintext highlighter-rouge">denote-sort-dired</code>)</h2>
+
+<p><a href="https://protesilaos.com/assets/images/attachments/2024-08-01-denote-luhmann-signatures-sorted.png"><img alt="The 'denote-sort-dired' with nicely-sorted Luhmann-style signatures" src="https://protesilaos.com/assets/images/attachments/2024-08-01-denote-luhmann-signatures-sorted.png" /></a></p>
+
+<h2>When will version 3.1.0 be released?</h2>
+
+<p>I expect to release it in mid or late August. There still are some
+quality-of-life refinements I am working on. If you have any thoughts on the ongoing developments, please let me know.</p>
+
+<h2>About Denote</h2>
+
+<p>Denote is a simple note-taking tool for Emacs.  It is based on the idea
+that notes should follow a predictable and descriptive file-naming
+scheme.  The file name must offer a clear indication of what the note is
+about, without reference to any other metadata.  Denote basically
+streamlines the creation of such files while providing facilities to
+link between them.</p>
+
+<p>Denote’s file-naming scheme is not limited to “notes”.  It can be used
+for all types of file, including those that are not editable in Emacs,
+such as videos.  Naming files in a consistent way makes their
+filtering and retrieval considerably easier.  Denote provides relevant
+facilities to rename files, regardless of file type.</p>
+
+<ul>
+  <li>Package name (GNU ELPA): <code class="language-plaintext highlighter-rouge">denote</code></li>
+  <li>Official manual: <a href="https://protesilaos.com/emacs/denote">https://protesilaos.com/emacs/denote</a></li>
+  <li>Change log: <a href="https://protesilaos.com/emacs/denote-changelog">https://protesilaos.com/emacs/denote-changelog</a></li>
+  <li>Git repositories:
+    <ul>
+      <li>GitHub: <a href="https://github.com/protesilaos/denote">https://github.com/protesilaos/denote</a></li>
+      <li>GitLab: <a href="https://gitlab.com/protesilaos/denote">https://gitlab.com/protesilaos/denote</a></li>
+    </ul>
+  </li>
+  <li>Video demo: <a href="https://protesilaos.com/codelog/2022-06-18-denote-demo/">https://protesilaos.com/codelog/2022-06-18-denote-demo/</a></li>
+  <li>Backronyms: Denote Everything Neatly; Omit The Excesses.  Don’t Ever
+Note Only The Epiphenomenal.</li>
+</ul>
+        
+      

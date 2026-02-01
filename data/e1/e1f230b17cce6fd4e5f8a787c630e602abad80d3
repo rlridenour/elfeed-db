@@ -1,0 +1,384 @@
+
+	
+<p>
+The first step in the value chain for water utilities is extracting water from natural sources, such as rivers, groundwater, oceans, or reservoirs. Water managers and the public alike are interested in knowing how much water a reservoir currently holds. This is not an easy problem to solve, as it requires some analysis to move from survey to volume measurement. This article shows how to visualise and analyse bathymetric survey data using the R language and data from the Prettyboy Reservoir in Maryland, USA.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+The Prettyboy reservoir
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>While searching the web for a publicly available bathymetric survey, I stumbled across the Maryland Geological Survey (MGS) website. This organisation investigates the geology and water resources of the American state of Maryland. The Prettyboy Reservoir helps provide water for nearly two million residents in Baltimore City and parts of five neighbouring Maryland counties.</p>
+<p>
+The MGS publishes bathymetric data for their reservoirs, including the <a href="http://www.mgs.md.gov/coastal_geology/prettyboy.html">Prettyboy reservoir</a> in the county of Baltimore.</p>
+<figure>
+<iframe width="600" height="400" style="height:400px !important; border:0;" frameborder="0" scrolling="no" marginheight="0" marginwidth="0" src="https://www.openstreetmap.org/export/embed.html?bbox=-76.79778099%2C39.60%2C-76.684%2C39.66709406770333&amp;layer=mapnik&amp;marker=39.6371580705754%2C-76.74113273620605" style="border: 0px solid black"></iframe><br/><small><a href="https://www.openstreetmap.org/?mlat=39.6372&amp;mlon=-76.7411#map=14/39.6372/-76.7411" target="_blank">View Larger Map</a></small>
+<figcaption>
+Pretty Boy reservoir in Maryland.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Extract, Transfer and Load
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The <a href="http://www.mgs.md.gov/publications/data_pages/reservoir_bathymetry.html">Maryland Geological Survey website</a> hosts the raw data as a zipped CSV file. </p>
+<p>
+The file has a double header, the first row contains the field names and the second row the units. The data has three columns:</p>
+<figure>
+<table>
+<thead>
+<tr>
+<th class="align-right">Easting</th>
+<th class="align-right">Northing</th>
+<th class="align-right">Depth</th>
+</tr>
+<tr>
+<th class="align-right">UTM-NAD83-Meters</th>
+<th class="align-right">UTM-NAD83-Meters</th>
+<th class="align-right">Feet</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="align-right">352606.8</td>
+<td class="align-right">4386507</td>
+<td class="align-right">9.7</td>
+</tr>
+<tr>
+<td class="align-right">352606.8</td>
+<td class="align-right">4386507</td>
+<td class="align-right">8.8</td>
+</tr>
+<tr>
+<td class="align-right">352606.5</td>
+<td class="align-right">4386507</td>
+<td class="align-right">11.4</td>
+</tr>
+</tbody>
+</table>
+<figcaption>
+Prettyboy reservoir bathymetry data structure.
+</figcaption>
+</figure>
+<p>
+The Easting and Northing are in the Universal Transverse Mercator projection. As a demonstration of unit confusion, the reservoir&#39;s depth in feet. As usual in bathymetry surveys, depth is measured from the datum as a positive number. The zero datum is the reservoir&#39;s Full Supply Level.</p>
+<p>
+The script below extracts, transforms and loads (ETL) the data. The file contains duplicates and a zero point at each of the four corners, which are removed from the data. This leaves us a clean file to work from.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Bathymetry visualisation and analysis</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># libraries</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(RColorBrewer)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">rm</span>(list <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">ls</span>())
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Data source</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># http://www.mgs.md.gov/publications/data_pages/reservoir_bathymetry.html</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">if</span> (<span style="color:#333">!</span><span style="color:#06b;font-weight:bold">file.exists</span>(<span style="background-color:#fff0f0">&#34;data/PrettyBoy1998.dat&#34;</span>)) {
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">download.file</span>(<span style="background-color:#fff0f0">&#34;http://www.mgs.md.gov/output/reservoir_bathy/PrettyBoy1998.zip&#34;</span>,
+</span></span><span style="display:flex;"><span>                  destfile <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;data/prettyboy-1998.zip&#34;</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">unzip</span>(<span style="background-color:#fff0f0">&#34;data/prettyboy-1998.zip&#34;</span>, exdir <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;data&#34;</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">file.remove</span>(<span style="background-color:#fff0f0">&#34;data/prettyboy-1998.zip&#34;</span>)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Read data</span>
+</span></span><span style="display:flex;"><span>  rawdata <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read.csv</span>(<span style="background-color:#fff0f0">&#34;data/PrettyBoy1998.dat&#34;</span>, skip <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>  fsl <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">145</span> <span style="color:#888"># Full Supply Level</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Data cleaning</span>
+</span></span><span style="display:flex;"><span>  prettyboy <span style="color:#333">&lt;-</span> rawdata <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">rename</span>(easting <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>, northing <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>, depth_ft <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(<span style="color:#333">!</span><span style="color:#06b;font-weight:bold">duplicated</span>(rawdata) <span style="color:#333">&amp;</span> <span style="color:#333">!</span>(easting <span style="color:#333">%in%</span> <span style="color:#06b;font-weight:bold">range</span>(easting))) <span style="color:#333">|&gt;</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(depth_m <span style="color:#333">=</span> depth_ft <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">0.304</span>)</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-3" class="outline-2">
+<h2 id="headline-3">
+Visualise the Data
+</h2>
+<div id="outline-text-headline-3" class="outline-text-2">
+<p>This visualisation shows the lines that the survey vessel sailed to capture the sonar soundings. The edge of the reservoir was measured with a terrestrial survey and has a depth of zero.</p>
+<p>
+The code defines a colour palette for this data using green and blue. The colours combine two palettes from the green and blue palettes so that only zero values are green and positive values are blue.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Basic Visualisation</span>
+</span></span><span style="display:flex;"><span>  bathymetry_colours <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#06b;font-weight:bold">rev</span>(<span style="color:#06b;font-weight:bold">brewer.pal</span>(<span style="color:#60e;font-weight:bold">3</span>, <span style="background-color:#fff0f0">&#34;Greens&#34;</span>))[<span style="color:#60e;font-weight:bold">-2</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">-3</span>], 
+</span></span><span style="display:flex;"><span>                          <span style="color:#06b;font-weight:bold">brewer.pal</span>(<span style="color:#60e;font-weight:bold">9</span>, <span style="background-color:#fff0f0">&#34;Blues&#34;</span>)[<span style="color:#60e;font-weight:bold">-1</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">-3</span>])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>(prettyboy) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">aes</span>(easting, northing, colour <span style="color:#333">=</span> depth_m) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>(size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_y_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">coord_equal</span>() <span style="color:#333">+</span> <span style="color:#06b;font-weight:bold">labs</span>(colour <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Depth [m]&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_colour_gradientn</span>(colors <span style="color:#333">=</span> bathymetry_colours) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Prettyboy Reservoir Bathymetry (1988)&#34;</span>,
+</span></span><span style="display:flex;"><span>         caption <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Source: Maryland Geological Survey&#34;</span>,
+</span></span><span style="display:flex;"><span>         x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Easting (UTM NAD83)&#34;</span>, y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Northing (UTM NAD83)&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_minimal</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">8</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/prettyboy-bathymetry.png" alt="Prettyboy Reservoir bathymetry" title="Prettyboy Reservoir bathymetry" width="600"/>
+<figcaption>
+Prettyboy Reservoir bathymetry.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-4" class="outline-2">
+<h2 id="headline-4">
+Mapping the data
+</h2>
+<div id="outline-text-headline-4" class="outline-text-2">
+<p>The coordinates are provided in the North American UTM / NAD83 projection. To map this survey data onto a map tile, we need to convert these to longitude and latitudes for the WGS84 spheroid.</p>
+<p>
+The <a href="https://r-spatial.github.io/sf/">SF (Simple Features) package</a> converts the coordinates for use in Google maps. To achieve this we need the CRS (Coordinate Reference System) with number 26918, as Maryland is in zone 18N: <a href="https://spatialreference.org/ref/epsg/26918/">EPSG:26918 NAD83 / UTM zone 18N</a>. The second CRS (4326) is the system used by Google maps: <a href="https://spatialreference.org/ref/epsg/4326/">EPSG:4326 WGS 84</a>.</p>
+<p>
+We can now plot the data on a Google Maps tile using the <a href="https://cran.r-project.org/web/packages/ggmap/index.html">ggmap package</a>. This functionality requires a Google API key, which I am not sharing here. You can also use this data in other spatial systems, such as the interactive tooling in <a href="https://r-charts.com/spatial/interactive-maps-leaflet/">the Leaflet package</a>.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Spatial mapping</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(sf)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Convert prettyboy tibble to an sf object</span>
+</span></span><span style="display:flex;"><span>  prettyboy_sf <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">st_as_sf</span>(prettyboy,
+</span></span><span style="display:flex;"><span>                           coords <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;easting&#34;</span>, <span style="background-color:#fff0f0">&#34;northing&#34;</span>),
+</span></span><span style="display:flex;"><span>                           crs <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">26918</span>)   <span style="color:#888"># NAD83 / UTM zone 18N</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Transform to latitude/longitude (WGS84)</span>
+</span></span><span style="display:flex;"><span>  prettyboy_wgs <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">st_transform</span>(prettyboy_sf, crs <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">4326</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Convert back to tibble with lat/lon columns</span>
+</span></span><span style="display:flex;"><span>  coords <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">st_coordinates</span>(prettyboy_wgs)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  prettyboy_wgs <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">cbind</span>(prettyboy_wgs, coords) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">rename</span>(lon <span style="color:#333">=</span> X, lat <span style="color:#333">=</span> Y) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">st_drop_geometry</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggmap)
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Register Google Maps API</span>
+</span></span><span style="display:flex;"><span>  api <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">readLines</span>(<span style="background-color:#fff0f0">&#34;data/google-maps.api&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">register_google</span>(key <span style="color:#333">=</span> api)
+</span></span><span style="display:flex;"><span>  prettyboy_map <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">get_map</span>(<span style="color:#06b;font-weight:bold">c</span>(<span style="color:#06b;font-weight:bold">mean</span>(prettyboy_wgs<span style="color:#333">$</span>lon), 
+</span></span><span style="display:flex;"><span>                             <span style="color:#06b;font-weight:bold">mean</span>(prettyboy_wgs<span style="color:#333">$</span>lat)),
+</span></span><span style="display:flex;"><span>                           zoom <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">14</span>, color <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;bw&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggmap</span>(prettyboy_map, extent <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;device&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">as_tibble</span>(prettyboy_wgs), 
+</span></span><span style="display:flex;"><span>               <span style="color:#06b;font-weight:bold">aes</span>(lon, lat, col <span style="color:#333">=</span> depth_m), size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.1</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_colour_gradientn</span>(colors <span style="color:#333">=</span> bathymetry_colours, name <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Depth [m]&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Prettyboy Reservoir Bathymetry (1988)&#34;</span>,
+</span></span><span style="display:flex;"><span>         caption <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Source: Maryland Geological Survey&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_void</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/prettyboy-bathymetry-map.png" alt="Prettyboy bathymetry on Google map tile" title="Prettyboy bathymetry on Google map tile" width="400"/>
+<figcaption>
+Prettyboy bathymetry on Google map tile.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-5" class="outline-2">
+<h2 id="headline-5">
+Analyse Bathymetric Survey: Full Supply Volume
+</h2>
+<div id="outline-text-headline-5" class="outline-text-2">
+<p>Two methods are available to estimate the total volume of a reservoir using bathymetric data. The analogue method uses contour lines to draw cross-sections on graph paper at regular intervals. Then use a <a href="https://en.wikipedia.org/wiki/Planimeter">planimeter</a> or the <a href="https://en.wikipedia.org/wiki/Shoelace_formula">shoelace formula</a> to measure the surface area of each section and calculate the total volume by multiplying the surface area by the spacing between sections. I used this method more than thirty years ago when working on dredging projects. But technology has moved on.</p>
+<p>
+The second method is more numeric, and there are two methods: interpolate a grid or build a Triangular Irregular Network.</p>
+<p>
+The bathymetry provides data only for the lines on the map, as visualised above. To estimate the full supply analytically, we can overlay the reservoir with a grid and interpolate the depth for each cell. We can then estimate the Full Supply Volume by summing the product of each cell area and depth for each grid item. When we have a grid with <em>n</em> elements, and <em>x</em> and <em>y</em> indicate the element size and <em>d<sub>i</sub></em> the depth of an element, the volume is calculated with:</p>
+<p>
+$$V = \sum_{i=1}^{n} {x \times y \times d_i}$$</p>
+<p>
+The <a href="https://cran.r-project.org/web/packages/akima/index.html">akima package</a> provides functionality for interpolation of irregularly and regularly spaced data, making it ideal for our problem. First, we set the spacing to 10 meters. The smaller the interval, the more accurate the estimation. But small spacing comes at a cost, as the interpolation will take some time to finalise.</p>
+<p>
+Once we have a grid with a depth for each location, we can estimate the Full Supply Volume by multiplying each location&#39;s depth by its grid area and summing across all grids.</p>
+<p>
+This analysis provides a volume of  71.50 × 10<sup>6</sup> m<sup>3</sup>, which is close to the 19 billion US gallons (71.92 × 10<sup>6</sup> m<sup>3</sup>) reported by the Maryland Geological Survey.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Extrapolate gridded version</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(akima)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Grid size [m]</span>
+</span></span><span style="display:flex;"><span>  dx <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">10</span>
+</span></span><span style="display:flex;"><span>  dy <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">10</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Regular grid coordinates</span>
+</span></span><span style="display:flex;"><span>  x_seq <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#06b;font-weight:bold">min</span>(prettyboy<span style="color:#333">$</span>easting), <span style="color:#06b;font-weight:bold">max</span>(prettyboy<span style="color:#333">$</span>easting), by <span style="color:#333">=</span> dx)
+</span></span><span style="display:flex;"><span>  y_seq <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq</span>(<span style="color:#06b;font-weight:bold">min</span>(prettyboy<span style="color:#333">$</span>northing), <span style="color:#06b;font-weight:bold">max</span>(prettyboy<span style="color:#333">$</span>northing), by <span style="color:#333">=</span> dy)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Interpolate scattered (x, y, depth) -&gt; regular grid</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># no extrapolation outside convex hull</span>
+</span></span><span style="display:flex;"><span>  interp_res <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">with</span>(prettyboy,
+</span></span><span style="display:flex;"><span>                     <span style="color:#06b;font-weight:bold">interp</span>(x <span style="color:#333">=</span> easting,
+</span></span><span style="display:flex;"><span>                            y <span style="color:#333">=</span> northing,
+</span></span><span style="display:flex;"><span>                            z <span style="color:#333">=</span> depth_m,
+</span></span><span style="display:flex;"><span>                            xo <span style="color:#333">=</span> x_seq,
+</span></span><span style="display:flex;"><span>                            yo <span style="color:#333">=</span> y_seq,
+</span></span><span style="display:flex;"><span>                            duplicate <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;strip&#34;</span>,
+</span></span><span style="display:flex;"><span>                            linear <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>,
+</span></span><span style="display:flex;"><span>                            extrap <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">FALSE</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Volume</span>
+</span></span><span style="display:flex;"><span>  prettyboy_grid <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">interp2xyz</span>(interp_res, data.frame <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">as_tibble</span>() <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">rename</span>(easting <span style="color:#333">=</span> x, northing <span style="color:#333">=</span> y, depth_m <span style="color:#333">=</span> z)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  grid_volume_m3 <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sum</span>(prettyboy_grid<span style="color:#333">$</span>depth_m <span style="color:#333">*</span> dx <span style="color:#333">*</span> dy, na.rm <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>)
+</span></span><span style="display:flex;"><span>  grid_volume_m3 <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">100</span>^3</span></span></code></pre></div>
+</div>
+<p>
+We can use the interpolated values to create a nice map of the reservoir with contour lines and cross-sections. The cross sections are taken at four random points in the grid.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Visualise Cross sections</span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">set.seed</span>(<span style="color:#60e;font-weight:bold">1234</span>)
+</span></span><span style="display:flex;"><span>northing_sections <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(prettyboy_grid<span style="color:#333">$</span>northing, <span style="color:#60e;font-weight:bold">4</span>)
+</span></span><span style="display:flex;"><span>prettyboy_sections <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">filter</span>(prettyboy_grid, northing <span style="color:#333">%in%</span> northing_sections)
+</span></span><span style="display:flex;"><span>max_depth <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">round</span>(<span style="color:#06b;font-weight:bold">max</span>(prettyboy_sections<span style="color:#333">$</span>depth_m, na.rm <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>map <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">filter</span>(prettyboy_grid)) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">aes</span>(easting, northing) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">geom_raster</span>(<span style="color:#06b;font-weight:bold">aes</span>(fill <span style="color:#333">=</span> depth_m), interpolate <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">geom_contour</span>(<span style="color:#06b;font-weight:bold">aes</span>(z <span style="color:#333">=</span> depth_m), colour <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;white&#34;</span>, alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.4</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">geom_hline</span>(yintercept <span style="color:#333">=</span> northing_sections, col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;orange&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">coord_equal</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">scale_y_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">scale_fill_gradientn</span>(
+</span></span><span style="display:flex;"><span>    colours <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#080;font-weight:bold">NA</span>, bathymetry_colours[<span style="color:#60e;font-weight:bold">-1</span>]),
+</span></span><span style="display:flex;"><span>    na.value <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;transparent&#34;</span>,
+</span></span><span style="display:flex;"><span>    guide <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">guide_colourbar</span>(reverse <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>),
+</span></span><span style="display:flex;"><span>    name <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Depth [m]&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">theme_minimal</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">28</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Prettyboy Reservoir&#34;</span>,
+</span></span><span style="display:flex;"><span>       caption <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Source: Maryland Geological Survey&#34;</span>,
+</span></span><span style="display:flex;"><span>       x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Easting [m]&#34;</span>, y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Northing [m]&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">theme</span>(legend.position <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;bottom&#34;</span>, 
+</span></span><span style="display:flex;"><span>        legend.key.width <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">unit</span>(<span style="color:#60e;font-weight:bold">2</span>, <span style="background-color:#fff0f0">&#39;cm&#39;</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>sections <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ggplot</span>(prettyboy_sections) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">aes</span>(easting, (fsl <span style="color:#333">-</span> depth_m)) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_area</span>(fill <span style="color:#333">=</span> bathymetry_colours[1], alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.5</span>) <span style="color:#333">+</span>  
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">facet_wrap</span>(<span style="color:#333">~</span><span style="color:#06b;font-weight:bold">rev</span>(northing), ncol <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">coord_cartesian</span>(ylim <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(fsl <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1.1</span> <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">max</span>(prettyboy_sections<span style="color:#333">$</span>depth_m, na.rm <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>), fsl)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_minimal</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">28</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Easting [m]&#34;</span>, y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Elevation [m]&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(gridExtra)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">png</span>(filename <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;prettyboy-sections.png&#34;</span>, width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1920</span>, height <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">940</span>, units <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;px&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">grid.arrange</span>(map, sections, ncol <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">dev.off</span>()</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/prettyboy-sections.png" alt="Prettyboy Reservoir bathemetry and cross sections" title="Prettyboy Reservoir cross sections" width="800"/>
+<figcaption>
+Prettyboy Reservoir cross sections.
+</figcaption>
+</figure>
+<p>
+The second method for calculating the total volume is to use a <a href="https://en.wikipedia.org/wiki/Triangulated_irregular_network">Triangulated Irregular Network</a> (TIN). A TIN is a representation of a surface consisting of triangular facets. The main difference with the interpolated values is that this model is irregular, so each triangle has a different projected area.</p>
+<p>
+The <a href="https://cran.r-project.org/web/packages/geometry/index.html">geometry package</a> implements Delaunay triangulation, where each row contains the indices of three points forming a triangle. In the next step, we use the <code>map_dfr()</code> function to create a data frame with the index number of each triangle, the three coordinates and the associated depths.</p>
+<p>
+To measure the volume, we can use the shoelace formula to calculate the area of each triangle:</p>
+<p>
+$$A_i = \frac{1}{2}| x_{i_1} (y_{1_2} - y_{i_3}) + x_{i_2} (y_{1_3} - y_{i_1}) + x_{i_3} (y_{1_1} - y_{i_2})|$$</p>
+<p>
+The volume of the element is the area multiplied by the average depth:</p>
+<p>
+$$V = \sum{A_i \frac{\sum d_i}{3}}$$</p>
+<p>
+This method provides the same volume but is a bit faster to process because we are not creating new data.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Triangulated Irregular Network</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(geometry) 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(purrr)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># 2D coordinates</span>
+</span></span><span style="display:flex;"><span>  coords2d <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as.matrix</span>(prettyboy[, <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;easting&#34;</span>, <span style="background-color:#fff0f0">&#34;northing&#34;</span>)])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Delaunay triangulation</span>
+</span></span><span style="display:flex;"><span>  tri <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">delaunayn</span>(coords2d)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Convert the triangles into a long data frame for ggplot</span>
+</span></span><span style="display:flex;"><span>  tin_df <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">map_dfr</span>(<span style="color:#06b;font-weight:bold">seq_len</span>(<span style="color:#06b;font-weight:bold">nrow</span>(tri)), <span style="color:#080;font-weight:bold">function</span>(i) {
+</span></span><span style="display:flex;"><span>    idx <span style="color:#333">&lt;-</span> tri[i, ]
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">data.frame</span>(
+</span></span><span style="display:flex;"><span>      tri_id   <span style="color:#333">=</span> i,
+</span></span><span style="display:flex;"><span>      easting  <span style="color:#333">=</span> prettyboy<span style="color:#333">$</span>easting[idx],
+</span></span><span style="display:flex;"><span>      northing <span style="color:#333">=</span> prettyboy<span style="color:#333">$</span>northing[idx],
+</span></span><span style="display:flex;"><span>      depth_m  <span style="color:#333">=</span> prettyboy<span style="color:#333">$</span>depth_m[idx])})
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  triangle_area_shoelace <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(x, y) {
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">abs</span>(x[1] <span style="color:#333">*</span> (y[2] <span style="color:#333">-</span> y[3]) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>        x[2] <span style="color:#333">*</span> (y[3] <span style="color:#333">-</span> y[1]) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>        x[3] <span style="color:#333">*</span> (y[1] <span style="color:#333">-</span> y[2])) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">2</span>}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tin_volume <span style="color:#333">&lt;-</span> tin_df <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    dplyr<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">group_by</span>(tri_id) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    dplyr<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">summarise</span>(
+</span></span><span style="display:flex;"><span>             area       <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">triangle_area_shoelace</span>(easting, northing),
+</span></span><span style="display:flex;"><span>             mean_depth <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">mean</span>(depth_m),
+</span></span><span style="display:flex;"><span>             volume     <span style="color:#333">=</span> area <span style="color:#333">*</span> mean_depth,
+</span></span><span style="display:flex;"><span>             .groups    <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;drop&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tin_volume_m3 <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sum</span>(tin_volume<span style="color:#333">$</span>volume)
+</span></span><span style="display:flex;"><span>  tin_volume_m3 <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">1e6</span></span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-6" class="outline-2">
+<h2 id="headline-6">
+Generate Capacity Charts
+</h2>
+<div id="outline-text-headline-6" class="outline-text-2">
+<p>Last but not least, we need a chart that converts the measured reservoir level to a volume. The easiest method to develop this curve is to use the grid. The TIN becomes mathematically problematic when not all three triangle points are underwater.</p>
+<p>
+While bathymetry measures depth from the top down, with higher numbers indicating greater depth, reservoir levels are expressed in elevation. I could not find the official elevation of the Full Supply Level. Google Maps provides an elevation of 145 meters for the dam, so let&#39;s use this.</p>
+<p>
+The measured values closely matched a cubic regression, so we can calculate the volume of the reservoir using the level with:</p>
+<p>
+$$V(\ell) =-3.463 \times 10^{9} + 8.883 \times 10^{7}\,\ell - 7.640 \times 10^{5}\,\ell^{2} + 2.203 \times 10^{3}\,\ell^{3}$$</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Capacity Curve</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># levels to evaluate</span>
+</span></span><span style="display:flex;"><span>  levels <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq</span>(fsl <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">15</span> <span style="color:#333">-</span> <span style="color:#06b;font-weight:bold">round</span>(<span style="color:#06b;font-weight:bold">max</span>(prettyboy<span style="color:#333">$</span>depth_m) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">10</span>, fsl, by <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  grid_capacity <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(level <span style="color:#333">=</span> levels) <span style="color:#333">|&gt;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(volume_m3 <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">map_dbl</span>(level, <span style="color:#06b;font-weight:bold">\</span>(L) {
+</span></span><span style="display:flex;"><span>      bed <span style="color:#333">&lt;-</span> fsl <span style="color:#333">-</span> prettyboy_grid<span style="color:#333">$</span>depth_m
+</span></span><span style="display:flex;"><span>      depth_L <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">pmax</span>(<span style="color:#60e;font-weight:bold">0</span>, L <span style="color:#333">-</span> bed)
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">sum</span>(depth_L <span style="color:#333">*</span> dx <span style="color:#333">*</span> dy, na.rm <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>)}))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Cubic regression</span>
+</span></span><span style="display:flex;"><span>  cubic <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">lm</span>(volume_m3 <span style="color:#333">~</span> <span style="color:#06b;font-weight:bold">poly</span>(level, <span style="color:#60e;font-weight:bold">3</span>, raw <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>), data <span style="color:#333">=</span> grid_capacity)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  grid_capacity<span style="color:#333">$</span>cubic <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">predict</span>(cubic)
+</span></span><span style="display:flex;"><span>    
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>(grid_capacity) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">aes</span>(level, volume_m3 <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">1E3</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>(col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;grey&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_line</span>(<span style="color:#06b;font-weight:bold">aes</span>(level, cubic <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">1E3</span>)) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_hline</span>(yintercept <span style="color:#333">=</span> grid_volume_m3 <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">1E3</span>, linetype <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">6</span>, col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;red&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_y_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span><span style="color:#06b;font-weight:bold">label_comma</span>()) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_minimal</span>() <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Prettyboy Reservoir Capacity Curve&#34;</span>,
+</span></span><span style="display:flex;"><span>         x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Water level&#34;</span>, y <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">expression</span>(Volume<span style="color:#333">~</span>km^3))</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/prettyboy-capacity-curve.png" alt="Prettyboy Reservoir capacity curve" title="Prettyboy capacity curve" width="800"/>
+<figcaption>
+Prettyboy Capacity Curve.
+</figcaption>
+</figure>
+</div>
+</div>
+
+      

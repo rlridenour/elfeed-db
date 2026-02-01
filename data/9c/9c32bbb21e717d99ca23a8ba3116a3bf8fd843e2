@@ -1,0 +1,117 @@
+<h2 id="motivation">Motivation</h2>
+<p>For this one I got inspired by someone else. A little while ago I saw a YouTube stream by System Crafters called <a href="https://www.youtube.com/watch?v=zWIByv8JOrg">Do we really need use-package in Emacs?</a>.</p>
+<p>Since starting out with Emacs roughly 2 years ago, I have been using <code>use-package</code>. Probably because most of the resources that helped me to learn used it. I never questioned it. To be quite frank, I never had a reason to do. For me it does what it promises.</p>
+<blockquote>
+<p>The use-package macro allows you to isolate package configuration in your .emacs file in a way that is both performance-oriented and, well, tidy.</p>
+</blockquote>
+<p>The only reason to even think of an Emacs configuration without <code>use-package</code> is just the age old question: How hard can it be? In other words, I see an idea and I want to try it out.</p>
+<p>Ok, there is an added benefit for me in that I get to learn more about the innards of Emacs. And it is fun.</p>
+<p>Let&rsquo;s get to it then&hellip;</p>
+<h2 id="the-process">The process</h2>
+<p>The main tool is the function <code>emacs-lisp-macroexpand</code>. This expands any block with <code>use-package</code> in my configuration into <code>emacs-lisp</code> code with Emacs built-in functions, command &amp; co. This is not 100% but with some doc-digging even I managed to do some cleanup.</p>
+<p>The effective changes can be found in these commits:</p>
+<ul>
+<li><a href="https://gitlab.com/aimebertrand/dotfiles/-/commit/e477258ce83cd0daed4ac4628d222a663b21a0ee">e477258c - Add custom package installation settings</a></li>
+<li><a href="https://gitlab.com/aimebertrand/dotfiles/-/commit/94aeb4eb9182d753603f49ae5a66133ac8dc84cd">94aeb4eb - Remove ensure keyword from use-package blocks</a></li>
+<li><a href="https://gitlab.com/aimebertrand/dotfiles/-/commit/5d130ee254df283204eeebe4d68f8b1780a92d22">5d130ee2 - Remove use-package blocks</a></li>
+</ul>
+<h3 id="installing-packages">Installing packages</h3>
+<p>First things first thought. I use the keyword <code>:ensure</code> quite a lot to make sure, that needed packages are installed. I needed to find a solution for that.</p>
+<p>I decided that I wanted to install all the packages at once if these are not already installed. With some search-fu and a little lift-fu I now use the following snippets.</p>
+<ul>
+<li>early-init.el:</li>
+</ul>
+<!--listend-->
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defvar</span> <span class="nv">timu-package-list</span>
+</span></span><span class="line"><span class="cl">  <span class="o">&#39;</span><span class="p">(</span><span class="nv">package-1</span>
+</span></span><span class="line"><span class="cl">    <span class="nv">package-2</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;List of packages to be installed for the Emacs config to work as configured&#34;</span><span class="p">)</span>
+</span></span></code></pre></div><ul>
+<li>init.el:</li>
+</ul>
+<!--listend-->
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;;; setup package installation</span>
+</span></span><span class="line"><span class="cl"><span class="c1">;; credit: https://github.com/bbatsov/prelude</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/packages-installed-p</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Check if all packages in </span><span class="ss">`timu-package-list&#39;</span><span class="s"> are installed.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">cl-every</span> <span class="nf">#&#39;</span><span class="nv">package-installed-p</span> <span class="nv">timu-package-list</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/require-package</span> <span class="p">(</span><span class="nv">package</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Install PACKAGE unless already installed.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nf">memq</span> <span class="nv">package</span> <span class="nv">timu-package-list</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">&#39;timu-package-list</span> <span class="nv">package</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">package-installed-p</span> <span class="nv">package</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">package-install</span> <span class="nv">package</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/require-packages</span> <span class="p">(</span><span class="nv">packages</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Ensure PACKAGES are installed.
+</span></span></span><span class="line"><span class="cl"><span class="s">Missing packages are installed automatically.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nf">mapc</span> <span class="nf">#&#39;</span><span class="nv">timu/require-package</span> <span class="nv">packages</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu/install-packages</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Install all packages listed in </span><span class="ss">`timu-package-list&#39;</span><span class="s">.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">timu/packages-installed-p</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; check for new packages (package versions)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;%s&#34;</span> <span class="s">&#34;Reloading packages DB...&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">package-refresh-contents</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">message</span> <span class="s">&#34;%s&#34;</span> <span class="s">&#34; done.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">;; install the missing packages</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">timu/require-packages</span> <span class="nv">timu-package-list</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">;; run package installation</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">timu/install-packages</span><span class="p">)</span>
+</span></span></code></pre></div><h3 id="swapping-use-package-for-require">swapping use-package for require</h3>
+<p>Let us use my Dired config for illustration here. The following block &hellip;</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">use-package</span> <span class="nv">dired</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">:custom</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-recursive-copies</span> <span class="ss">&#39;always</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-isearch-filenames</span> <span class="ss">&#39;dwim</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-listing-switches</span> <span class="s">&#34;-Ahlp&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-dwim-target</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">:hook</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-mode</span> <span class="o">.</span> <span class="nv">hl-line-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-mode</span> <span class="o">.</span> <span class="nv">dired-hide-details-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">dired-mode</span> <span class="o">.</span> <span class="nv">diredfl-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">:init</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;dired-x</span><span class="p">))</span>
+</span></span></code></pre></div><p>&hellip; got translated into this.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;dired-x</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">require</span> <span class="ss">&#39;dired</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">dired-recursive-copies</span> <span class="ss">&#39;always</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">dired-isearch-filenames</span> <span class="ss">&#39;dwim</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">dired-listing-switches</span> <span class="s">&#34;-Ahlp&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">dired-dwim-target</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;dired-mode-hook</span> <span class="ss">&#39;hl-line-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;dired-mode-hook</span> <span class="ss">&#39;dired-hide-details-mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">&#39;dired-mode-hook</span> <span class="ss">&#39;diredfl-mode</span><span class="p">)</span>
+</span></span></code></pre></div><p>Using <code>setq</code> instead of the expressions with the <code>:custom</code> keyword might be not entirely correct here. I just approached it like it was a <code>:config</code> keyword. It does seem to work for me. Rewriting hooks was reasonably straight forward though. To handle the <code>:init</code> keyword I just placed a require expression before requiring Dired.</p>
+<p>Missing in the above example is the <code>:after</code> keyword, which I use with <code>diredfl</code>. This diff shows the changes quite well.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"><span class="gd">-(use-package diredfl
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  :after (dired async))
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+(with-eval-after-load &#39;async
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  (with-eval-after-load &#39;dired
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    (require &#39;diredfl)))
+</span></span></span></code></pre></div><p>Next was the rewriting of configs with the <code>:bind</code> keyword. As illustrated in the following diff.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"><span class="gd">-(use-package flyspell-correct
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  :after flyspell
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  :bind
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  (:map flyspell-mode-map (&#34;C-ƒ&#34; . flyspell-correct-wrapper)))
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+(with-eval-after-load &#39;flyspell
+</span></span></span><span class="line"><span class="cl"><span class="gi">+  (require &#39;flyspell-correct))
+</span></span></span><span class="line"><span class="cl"><span class="gi">+
+</span></span></span><span class="line"><span class="cl"><span class="gi">+(define-key flyspell-mode-map (kbd &#34;C-ƒ&#34;) &#39;flyspell-correct-wrapper)
+</span></span></span></code></pre></div><p>The next example deals with the translation of blocks with the a <code>:mode</code> keyword.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"><span class="gd">-(use-package csv-mode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  :mode
+</span></span></span><span class="line"><span class="cl"><span class="gd">-  (&#34;\\.csv\\&#39;&#34; . csv-mode))
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+(require &#39;csv-mode)
+</span></span></span><span class="line"><span class="cl"><span class="gi">+(add-to-list &#39;auto-mode-alist &#39;(&#34;\\.csv\\&#39;&#34; . csv-mode))
+</span></span></span></code></pre></div><p>With these examples, I think I have covered how I went about changing my config to remove all the <code>use-packages</code> blocks. The challenge was really how repetitive it was going through the code. Plus of course making sure that the <code>parens</code> remained balanced.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>To answer my own question from the beginning, not hard at all. Well it was tedious at times, but not really hard. Most of the concepts for replacements were already present in my config. Like the use of the functions <code>add-hook</code> and <code>add-to-list</code> or the macro <code>with-eval-after-load</code>. Plus the documentation – online and inside Emacs itself – is fantastic.</p>
+<p>Little bonus, my <code>emacs-init-time</code> seems to be faster. Take this with a pinch of salt though. My slow init time with <code>use-package</code> is most likely due to my lack of chops.</p>

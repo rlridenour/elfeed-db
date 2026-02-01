@@ -1,0 +1,56 @@
+
+<p>Tools like <a href="https://github.com/AGWA/git-crypt"><strong>git-crypt</strong></a> or <strong>Rails credentials</strong> provide an encryption layer for managing sensitive files within Git repositories. However, when using Emacs <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Old-Revisions.html" data-type="link" data-id="https://www.gnu.org/software/emacs/manual/html_node/emacs/Old-Revisions.html"><strong>vc-diff</strong></a> on repositories protected by these tools, the diff output is incorrect because <code>vc-diff</code> compares the encrypted binary files directly rather than comparing the decrypted files. This occurs even when the repository is unlocked and the decrypted content is available, resulting in a failure to display meaningful diffs.</p>
+
+
+
+<h2 class="wp-block-heading">The root cause</h2>
+
+
+
+<p>Internally, <code>vc-diff</code> uses Git commands to compute diffs. However, it does not invoke them with the <code>--textconv</code> flag by default. Without <code>--textconv</code>, Git does not apply content filters, including decryption filters specified by tools such as <code>git-crypt</code> or Rails credentials. Consequently, Emacs <code>vc-diff</code> displays diffs of the raw binary files rather than the decrypted content.</p>
+
+
+
+<h2 class="wp-block-heading">The solution</h2>
+
+
+
+<p>A workaround for enabling human-readable diffs of encrypted files in Emacs is to modify the <code>vc-git-diff-switches</code> variable to include the <code>--textconv</code> argument:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Emacs vc-diff fails to produce meaningful output on git-crypt enabled</span>
+<span class="hljs-comment">;; repositories because it does not use Git's --textconv flag by default. This</span>
+<span class="hljs-comment">;; flag enables Git to apply text conversion filters (e.g., for encrypted files)</span>
+<span class="hljs-comment">;; when generating diffs. Without it, vc-diff compares raw encrypted blobs, even</span>
+<span class="hljs-comment">;; when the working tree shows decrypted content.</span>
+(<span class="hljs-name">unless</span> (<span class="hljs-name">member</span> <span class="hljs-string">"--textconv"</span> vc-git-diff-switches)
+  (<span class="hljs-name">setq</span> vc-git-diff-switches (<span class="hljs-name">cons</span> <span class="hljs-string">"--textconv"</span> vc-git-diff-switches)))</code></span></pre>
+
+
+<p>Adding the <code>--textconv</code> flag to the <code>vc-git-diff-switches</code> variable enables Emacs <code>vc-diff</code> to apply the text conversion filters specified in <code>.gitattributes</code>. This resolves the issue by displaying the diff of the decrypted files instead of the encrypted binary files.</p>
+
+
+
+<h2 class="wp-block-heading">Further Reading</h2>
+
+
+
+<ul class="wp-block-list">
+<li><a href="https://www.jamescherti.com/optimized-git-configuration-for-performance-and-usability/"><strong>Enhancing Git configuration ~/.gitconfig for performance, efficiency, data integrity, and workflow automation</strong></a></li>
+
+
+
+<li><a href="https://lists.gnu.org/archive/html/bug-gnu-emacs/2025-07/msg01033.html">bug#79050: vc-git incorrectly treats git-crypt encrypted files as binary</a></li>
+
+
+
+<li><a href="https://github.com/AGWA/git-crypt">git-crypt</a></li>
+
+
+
+<li><a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Old-Revisions.html" data-type="link" data-id="https://www.gnu.org/software/emacs/manual/html_node/emacs/Old-Revisions.html">Emacs vc-diff</a></li>
+
+
+
+<li><a href="https://www.jamescherti.com/better-git-diff-emacs-lisp-elisp/">Enhancing Git Diff for Emacs Lisp: Better Git Diff of Elisp function or macro definition</a></li>
+</ul>

@@ -1,0 +1,48 @@
+<p>I seem to be more efficient in getting through rss feeds by individually browsing through related content. That is, I can get through all Emacs entries a lot faster if I look at Emacs content exclusively, instead of mixing with say BBC news. <a href="https://github.com/skeeto/elfeed">Elfeed</a> filters are great for filtering related content.</p>
+<p>I wanted a way to easily switch through my typical categories of related content by quickly changing elfeed filters using a completion framework.</p>
+<p>Emacs's <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Minibuffer-Completion.html">completing-read</a> plays nicely with your favorite completing framework (mine is <a href="https://github.com/abo-abo/swiper">ivy</a>). With a couple of functions, we can get Emacs to ask us for the filtering category using human-readable options and quickly presenting related content. Binding the new functionality to &lt;tab&gt; is working well for me.</p>
+<pre><code class="language-{.commonlisp">(use-package elfeed :ensure t
+  :commands elfeed
+  :bind (:map elfeed-search-mode-map
+              (&quot;&lt;tab&gt;&quot; . ar/elfeed-completing-filter))
+  :config
+  (defun ar/elfeed-filter-results-count (search-filter)
+    &quot;Count results for SEARCH-FILTER.&quot;
+    (let* ((filter (elfeed-search-parse-filter search-filter))
+           (head (list nil))
+           (tail head)
+           (count 0))
+      (let ((lexical-binding t)
+            (func (byte-compile (elfeed-search-compile-filter filter))))
+        (with-elfeed-db-visit (entry feed)
+          (when (funcall func entry feed count)
+            (setf (cdr tail) (list entry)
+                  tail (cdr tail)
+                  count (1+ count)))))
+      count))
+
+  (defun ar/elfeed-completing-filter ()
+    &quot;Completing filter.&quot;
+    (interactive)
+    (let ((categories (-filter
+                       (lambda (item)
+                         (&gt; (ar/elfeed-filter-results-count (cdr item))
+                            0))
+                       '((&quot;All&quot; . &quot;@6-months-ago +unread&quot;)
+                         (&quot;BBC&quot; . &quot;@6-months-ago +unread +bbc&quot;)
+                         (&quot;Dev&quot; . &quot;@6-months-ago +unread +dev&quot;)
+                         (&quot;Emacs&quot; . &quot;@6-months-ago +unread +emacs&quot;)
+                         (&quot;Health&quot; . &quot;@6-months-ago +unread +health&quot;)
+                         (&quot;Hacker News&quot; . &quot;@6-months-ago +unread +hackernews&quot;)
+                         (&quot;iOS&quot; . &quot;@6-months-ago +unread +ios&quot;)
+                         (&quot;Money&quot; . &quot;@6-months-ago +unread +money&quot;)))))
+      (if (&gt; (length categories) 0)
+          (progn
+            (ar/elfeed-view-filtered (cdr (assoc (completing-read &quot;Categories: &quot; categories)
+                                                 categories)))
+            (goto-char (window-start)))
+        (message &quot;All caught up \\o/&quot;)))))
+</code></pre>
+<p><img src="https://xenodium.github.io/images/quickly-swapping-elfeed-filters/completing-elfeed.gif" alt=""></p>
+<p>We don't actually need two functions, but <em>ar/elfeed-filter-results-count</em> enables us to list only those feeds that actually have new content. The list will shrink as we get through our content. When no content is left, we get a little celebratory message.</p>
+<p><img src="https://xenodium.github.io/images/quickly-swapping-elfeed-filters/no-left.png" alt=""></p>

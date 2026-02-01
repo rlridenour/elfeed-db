@@ -1,0 +1,756 @@
+<p>
+The <code>use-package</code>. It is a very popular part of Emacs software, which
+can be met in the various configuration examples, installation
+instructions for other packages, etc.
+</p>
+<div class="outline-2">
+<h2>TOC&#xa0;&#xa0;&#xa0;<span class="tag"></span></h2>
+<div class="outline-text-2">
+<ul class="org-ul">
+<li><a href="#pros">Pros</a></li>
+<li><a href="#cons">Cons</a></li>
+<li><a href="#switch-from-use-package">Switching from use-package to "old-school" configuration</a>
+<ul class="org-ul">
+<li><a href="#loading-packages">Loading packages</a></li>
+<li><a href="#delight">Delighting modes</a></li>
+<li><a href="#hooks">Hooks</a></li>
+<li><a href="#keybindings">Keybindings</a></li>
+<li><a href="#configuration-variables">Configuration variables</a></li>
+<li><a href="#code">Code</a></li>
+<li><a href="#modes">Modes</a></li>
+<li><a href="#custom-faces">Custom faces</a></li>
+</ul></li>
+<li><a href="#readability">Note about readability</a></li>
+<li><a href="#results">Results</a></li>
+<li><a href="#notes">Notes</a></li>
+</ul>
+</div>
+</div>
+<div id="outline-container-pros" class="outline-2">
+<h2 id="pros">Pros</h2>
+<div class="outline-text-2" id="text-pros">
+<p>
+I've used this package even before it was added to the Emacs
+distribution. First, it helps me to install packages on the fresh
+computer — they will be installed automatically after first Emacs
+launch.
+</p>
+
+<p>
+Second, <code>use-package</code> helps to separate different configuration bits
+from each other. E.g., all my configuration for <code>flyspell</code> takes one
+<code>use-package</code> S-expression:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> flyspell
+  <span style="color: #53676d; font-weight: bold;">:ensure</span> nil
+  <span style="color: #53676d; font-weight: bold;">:hook</span>
+  <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>input-method-activate . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span>
+                              <span style="color: #489100;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"ru-yeyo"</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span>
+   <span style="color: #0072d4;">(</span>input-method-deactivate . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span>
+                                <span style="color: #489100;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"english"</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:bind</span>
+  <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span><span style="color: #009c8f;">"&lt;f12&gt;"</span> . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span>
+                <span style="color: #489100;">(</span><span style="color: #489100; font-weight: bold;">interactive</span><span style="color: #489100;">)</span>
+                <span style="color: #489100;">(</span><span style="color: #489100; font-weight: bold;">if</span> flyspell-mode
+                    <span style="color: #ad8900;">(</span>flyspell-mode -1<span style="color: #ad8900;">)</span>
+                  <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">progn</span> <span style="color: #0072d4;">(</span>flyspell-mode 1<span style="color: #0072d4;">)</span>
+                         <span style="color: #0072d4;">(</span>flyspell-buffer<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span>
+   <span style="color: #0072d4;">(</span><span style="color: #009c8f;">"S-&lt;f12&gt;"</span> . flyspell-goto-next-error<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+I can switch between different S-expressions in file with <code>C-M-a</code> and
+<code>C-M-e</code> keybindings, which is very nasty.
+</p>
+
+<p>
+And the third: <code>use-package</code> allows to significantly decrease the Emacs
+startup time with the help of all of the knowledge described in the
+<a href="https://www.gnu.org/software/emacs/manual/html_mono/use-package.html#Deferring-loading">"3.2 Deferring package loading"</a> section in the manual. For example,
+all my big configuration loads in 1.85 seconds.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/use-package-statistics.png" alt="Startup time of some packages, gathered via use-package-report. Max time: tramp 0.47 seconds, min time: smtpmail 0.06 seconds. Not all packages are listed." align="center" witdh="80%" />
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-cons" class="outline-2">
+<h2 id="cons">Cons</h2>
+<div class="outline-text-2" id="text-cons">
+<p>
+But of course there were problems, which I was unable to solve even
+with the help of official documentation.
+</p>
+
+<p>
+My main problem: the <code>pinentry</code><sup><a id="fnr.emacs-pinentry" class="footref" href="#fn.emacs-pinentry" role="doc-backlink">1</a></sup> was not initialized
+properly. I used this configuration:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> pinentry
+  <span style="color: #53676d; font-weight: bold;">:custom</span>
+  <span style="color: #ad8900;">(</span>epg-pinentry-mode 'loopback<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:config</span>
+  <span style="color: #ad8900;">(</span>call-process-shell-command <span style="color: #009c8f;">"/usr/local/bin/gpgconf --launch-agent"</span> nil nil 't<span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>call-process-shell-command <span style="color: #009c8f;">"/usr/local/bin/gpg-connect-agent updatestartuptty /bye"</span> nil nil 't<span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>pinentry-start<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:demand</span> t
+  <span style="color: #53676d; font-weight: bold;">:pin</span> gnu<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+And this configuration for e.g. <a href="https://github.com/NicolasPetton/pass">pass</a>:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> pass
+  <span style="color: #53676d; font-weight: bold;">:commands</span> <span style="color: #ad8900;">(</span>pass<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:pin</span> melpa
+  <span style="color: #53676d; font-weight: bold;">:requires</span> <span style="color: #ad8900;">(</span>password-store password-store-otp<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:after</span> <span style="color: #ad8900;">(</span>password-store password-store-otp<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:custom</span>
+  <span style="color: #ad8900;">(</span>pass-username-fallback-on-filename nil <span style="color: #009c8f;">"Don't take username from filename"</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>pass-suppress-confirmations t <span style="color: #009c8f;">"Don't ask for confirmations"</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+But … sometimes the variable <code>epg-pinentry-mode</code> was not initialized and
+was set to <code>nil</code> after Emacs restart and desktop restore. I tried a lot
+of tricks and none of them helped me.
+</p>
+
+<p>
+Another problem was with <a href="https://elpa.gnu.org/packages/windresize.html">windresize</a> package, which helps to resize
+windows with keyboard. It has a pretty simple configuration in my
+files:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> windresize
+  <span style="color: #53676d; font-weight: bold;">:pin</span> gnu
+  <span style="color: #53676d; font-weight: bold;">:bind</span>
+  <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"C-x C-w"</span> . windresize<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:after</span> emacs<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Ideally, after pressing <code>C-x C-w</code> the windresize package should be
+loaded and the <code>windresize</code> function should be called. But, this wasn't
+happened — the default keybindings was used, which calls <code>(write-file)</code>.
+</p>
+
+<p>
+Some variables simply could not be set inside the <code>:custom</code> section —
+for example the <code>mu4e-contexts</code><sup><a id="fnr.mu4e-contexts" class="footref" href="#fn.mu4e-contexts" role="doc-backlink">2</a></sup>. Instead of it the
+<code>(setopt mu4e-contexts …)</code> should be used inside the <code>:config</code> section.
+</p>
+
+<p>
+Also, I met the problems with <a href="https://paredit.org/">paredit</a> — it is a plugin for Lisp
+programming. I have had this configuration:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> paredit
+  <span style="color: #53676d; font-weight: bold;">:pin</span> melpa-stable
+  <span style="color: #53676d; font-weight: bold;">:delight</span>
+  <span style="color: #53676d; font-weight: bold;">:hook</span> <span style="color: #ad8900;">(</span>emacs-lisp-mode lisp-mode<span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:init</span>
+  <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">setopt</span> paredit-lighter <span style="color: #009c8f;">""</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+And this configuration:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> paredit
+  <span style="color: #53676d; font-weight: bold;">:pin</span> melpa-stable
+  <span style="color: #53676d; font-weight: bold;">:delight</span>
+  <span style="color: #53676d; font-weight: bold;">:hook</span>
+  <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>emacs-lisp-mode . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span> <span style="color: #489100;">(</span>enable-paredit-mode<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span>
+   <span style="color: #0072d4;">(</span>lisp-mode . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span> <span style="color: #489100;">(</span>enable-paredit-mode<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #53676d; font-weight: bold;">:init</span>
+  <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">setopt</span> paredit-lighter <span style="color: #009c8f;">""</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+All of these lines wouldn't work — paredit simply wasn't enabled in
+any (Emacs) Lisp buffers. Also note the <code>:init</code> section — there is a
+<code>:custom</code> section should be used, like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #53676d; font-weight: bold;">:custom</span>
+<span style="color: #009c8f;">(</span>paredit-lighter <span style="color: #009c8f;">""</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+But it also wasn't working, instead of line in <code>:init</code> section.
+</p>
+
+<p>
+The <code>*scratch*</code> buffer, which I use for Emacs Lisp hack, sometimes
+didn't initialize properly — not even the Paredit is disabled, but
+also <code>C-j</code> doesn't execute the S-expression. Same for
+<code>completion-preview-mode</code> in this buffer.
+</p>
+
+<p>
+There were other problems, but these are the most memorable for me.
+</p>
+</div>
+</div>
+<div id="outline-container-switch-from-use-package" class="outline-2">
+<h2 id="switch-from-use-package">Switching from use-package to "old-school" configuration</h2>
+<div class="outline-text-2" id="text-switch-from-use-package">
+<p>
+All these problems and <a href="https://zeniesqis.statichost.eu/code/2025-07-16-use-package-or-not/">this blogpost</a> from <a href="https://piaille.fr/@Zenie/115337522067362666">@Zenie</a> led me to the
+experiments with my Emacs configuration. I already rewrite few little
+parts of my config in the "old style", so I didn't expect big
+problems.
+</p>
+
+<p>
+Rewriting is quite simple, there are just a few rules about how to
+change things. I didn't try to fully recreate the use-package
+behavior, I just want my configuration to be loaded in the sequential,
+understandable order.
+</p>
+</div>
+<div id="outline-container-loading-packages" class="outline-3">
+<h3 id="loading-packages">Loading packages</h3>
+<div class="outline-text-3" id="text-loading-packages">
+<p>
+If before necessary packages could be loaded like:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> org
+  ...<span style="color: #009c8f;">)</span>
+
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> prodigy
+  ...<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Then the "old way" to load packages:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">org</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">prodigy</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-delight" class="outline-3">
+<h3 id="delight">Delighting modes</h3>
+<div class="outline-text-3" id="text-delight">
+<p>
+Use-package has a <code>:delight</code> property, which hides minor mode lighters
+from modeline. Usually it looks like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> dired
+  <span style="color: #53676d; font-weight: bold;">:delight</span> auto-revert-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> nerd-icons-dired
+  <span style="color: #53676d; font-weight: bold;">:delight</span> nerd-icons-dired-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> git-gutter
+  <span style="color: #53676d; font-weight: bold;">:delight</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+But the same functionality could be used without use-package. First,
+load the necessary plugin:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">delight</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Then, the same strings as above could be rewritten like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span>delight 'auto-revert-mode nil <span style="color: #009c8f;">"autorevert"</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>delight 'nerd-icons-dired-mode nil <span style="color: #009c8f;">"nerd-icons-dired"</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>delight 'git-gutter-mode nil <span style="color: #009c8f;">"git-gutter"</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-hooks" class="outline-3">
+<h3 id="hooks">Hooks</h3>
+<div class="outline-text-3" id="text-hooks">
+<p>
+Use-package allows to define hooks in multiple ways:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #909995;">;;; </span><span style="color: #909995;">1</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> dired
+  <span style="color: #53676d; font-weight: bold;">:hook</span>
+  <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>dired-mode . dired-omit-mode<span style="color: #0072d4;">)</span>
+   <span style="color: #0072d4;">(</span>dired-mode . dired-hide-details-mode<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">2</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> org-autolist
+  <span style="color: #53676d; font-weight: bold;">:hook</span> org-mode<span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">3</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> nerd-icons-completion
+  <span style="color: #53676d; font-weight: bold;">:hook</span> <span style="color: #ad8900;">(</span>minibuffer-mode icomplete-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">4</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> flyspell
+  <span style="color: #53676d; font-weight: bold;">:hook</span>
+  <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>input-method-activate . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span>
+                              <span style="color: #489100;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"ru-yeyo"</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span>
+   <span style="color: #0072d4;">(</span>input-method-deactivate . <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #489100;">()</span>
+                                <span style="color: #489100;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"english"</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">Etc. This list is not complete&#8230;</span>
+</pre>
+</div>
+
+<p>
+Same constructions but with <code>add-hook</code>:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #909995;">;;; </span><span style="color: #909995;">1</span>
+<span style="color: #009c8f;">(</span>add-hook 'dired-mode-hook 'dired-omit-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'dired-mode-hook 'dired-hide-details-mode<span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">2</span>
+<span style="color: #009c8f;">(</span>add-hook 'org-mode-hook 'org-autolist-mode<span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">3</span>
+<span style="color: #009c8f;">(</span>add-hook 'icomplete-mode-hook 'nerd-icons-completion-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'minibuffer-mode-hook 'nerd-icons-completion-mode<span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">4</span>
+<span style="color: #009c8f;">(</span>add-hook 'input-method-activate-hook
+          <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #0072d4;">()</span>
+            <span style="color: #0072d4;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"ru-yeyo"</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'input-method-deactivate-hook
+          <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #0072d4;">()</span>
+            <span style="color: #0072d4;">(</span>ispell-change-dictionary <span style="color: #009c8f;">"english"</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-keybindings" class="outline-3">
+<h3 id="keybindings">Keybindings</h3>
+<div class="outline-text-3" id="text-keybindings">
+<p>
+Use-package also allows to define keybindings in multiple ways. Here
+the subset of these ways from my old Emacs configuration:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #909995;">;;; </span><span style="color: #909995;">1</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> dired
+  <span style="color: #53676d; font-weight: bold;">:bind</span>
+  <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"C-x C-d"</span> . dired<span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span><span style="color: #53676d; font-weight: bold;">:map</span> dired-mode-map
+        <span style="color: #0072d4;">(</span><span style="color: #009c8f;">"H"</span> . dired-hide-dotfiles-mode<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">2</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> emacs
+  <span style="color: #53676d; font-weight: bold;">:bind</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Join lines</span>
+  <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"M-j"</span> . <span style="color: #0072d4;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #8762c6;">()</span>
+             <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">interactive</span><span style="color: #8762c6;">)</span>
+             <span style="color: #8762c6;">(</span>join-line -1<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">3</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> flyspell
+  <span style="color: #53676d; font-weight: bold;">:bind</span>
+  <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"&lt;f12&gt;"</span> . <span style="color: #0072d4;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #8762c6;">()</span>
+               <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">interactive</span><span style="color: #8762c6;">)</span>
+               <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">if</span> flyspell-mode
+                   <span style="color: #489100;">(</span>flyspell-mode -1<span style="color: #489100;">)</span>
+                 <span style="color: #489100;">(</span><span style="color: #489100; font-weight: bold;">progn</span> <span style="color: #ad8900;">(</span>flyspell-mode 1<span style="color: #ad8900;">)</span>
+                        <span style="color: #ad8900;">(</span>flyspell-buffer<span style="color: #ad8900;">)</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"S-&lt;f12&gt;"</span> . flyspell-goto-next-error<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">And so on&#8230;</span>
+</pre>
+</div>
+
+<p>
+The same keybindings, but rewritten in the "old way":
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #909995;">;;; </span><span style="color: #909995;">1</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-x C-d"</span> 'dired<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'dired-mode-hook
+      <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #0072d4;">()</span>
+        <span style="color: #0072d4;">(</span>keymap-set dired-mode-map <span style="color: #009c8f;">"H"</span> 'dired-hide-dotfiles-mode<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">2</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Join lines</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"M-j"</span>
+                   <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #0072d4;">()</span>
+                     <span style="color: #0072d4;">(</span><span style="color: #489100; font-weight: bold;">interactive</span><span style="color: #0072d4;">)</span>
+                     <span style="color: #0072d4;">(</span>join-line -1<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #909995;">;;; </span><span style="color: #909995;">3</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"&lt;f12&gt;"</span>
+                   <span style="color: #ad8900;">(</span><span style="color: #489100; font-weight: bold;">lambda</span> <span style="color: #0072d4;">()</span>
+                     <span style="color: #0072d4;">(</span><span style="color: #489100; font-weight: bold;">interactive</span><span style="color: #0072d4;">)</span>
+                     <span style="color: #0072d4;">(</span><span style="color: #489100; font-weight: bold;">if</span> flyspell-mode
+                         <span style="color: #8762c6;">(</span>flyspell-mode -1<span style="color: #8762c6;">)</span>
+                       <span style="color: #8762c6;">(</span><span style="color: #489100; font-weight: bold;">progn</span> <span style="color: #489100;">(</span>flyspell-mode 1<span style="color: #489100;">)</span>
+                              <span style="color: #489100;">(</span>flyspell-buffer<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"S-&lt;f12&gt;"</span> 'flyspell-goto-next-error<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-configuration-variables" class="outline-3">
+<h3 id="configuration-variables">Configuration variables</h3>
+<div class="outline-text-3" id="text-configuration-variables">
+<p>
+This task is quite simple. The <code>setopt</code> Lisp macro appeared in Emacs
+near version 29.1. It allows to initialize multiple variables inside
+one S-expression, so result looks like the <code>:custom</code> section in
+use-package.
+</p>
+
+<p>
+So this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> flycheck
+  <span style="color: #53676d; font-weight: bold;">:custom</span>
+  <span style="color: #ad8900;">(</span>flycheck-indication-mode 'left-margin <span style="color: #009c8f;">"Show flycheck icons on the margin, not in the fringe"</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>flycheck-disabled-checkers '<span style="color: #0072d4;">(</span>c/c++-clang<span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>flycheck-gcc-include-path
+   <span style="color: #0072d4;">(</span>list
+    <span style="color: #8762c6;">(</span>expand-file-name <span style="color: #009c8f;">"~/git_repos/palm-sync-daemon/from-prototype-to-realization/src/"</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>flycheck-cppcheck-include-path
+   <span style="color: #0072d4;">(</span>list
+    <span style="color: #8762c6;">(</span>expand-file-name <span style="color: #009c8f;">"~/git_repos/palm-sync-daemon/from-prototype-to-realization/src/"</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>flycheck-cppcheck-args <span style="color: #009c8f;">"--check-level=exhaustive"</span><span style="color: #ad8900;">)</span>
+  <span style="color: #ad8900;">(</span>flycheck-emacs-lisp-load-path 'inherit <span style="color: #009c8f;">"Inherit Emacs load path"</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Will turn into this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">setopt</span> flycheck-cppcheck-args '<span style="color: #ad8900;">(</span><span style="color: #009c8f;">"--check-level=exhaustive"</span><span style="color: #ad8900;">)</span>
+        flycheck-cppcheck-include-path <span style="color: #ad8900;">(</span>list <span style="color: #0072d4;">(</span>expand-file-name <span style="color: #009c8f;">"~/git_repos/palm-sync-daemon/from-prototype-to-realization/src/"</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Disable clang checker, use</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">only gcc</span>
+        flycheck-disabled-checkers '<span style="color: #ad8900;">(</span>c/c++-clang<span style="color: #ad8900;">)</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Inherit Emacs load path</span>
+        flycheck-emacs-lisp-load-path 'inherit
+        flycheck-gcc-include-path <span style="color: #ad8900;">(</span>list <span style="color: #0072d4;">(</span>expand-file-name <span style="color: #009c8f;">"~/git_repos/palm-sync-daemon/from-prototype-to-realization/src/"</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Show flycheck icons on the</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">margin, not in the fringe</span>
+        flycheck-indication-mode 'left-margin<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-code" class="outline-3">
+<h3 id="code">Code</h3>
+<div class="outline-text-3" id="text-code">
+<p>
+This is even simpler — just insert the code section from <code>:config</code> as
+is.
+</p>
+</div>
+</div>
+<div id="outline-container-modes" class="outline-3">
+<h3 id="modes">Modes</h3>
+<div class="outline-text-3" id="text-modes">
+<p>
+Use-package has a special section, named <code>:mode</code>, to load the package
+and corresponding mode when file with a given type is opened — see the
+<a href="https://www.gnu.org/software/emacs/manual/html_mono/use-package.html#Modes-and-interpreters">"4.4 Modes and interpreters"</a> section in the use-package manual. File
+type could be determined with:
+</p>
+<ol class="org-ol">
+<li>File extension</li>
+<li>Magic bytes in the beginning of the file.</li>
+</ol>
+
+<p>
+For example, the next code will enable <code>pdf-view-mode</code> if opened file
+has PDF magic bytes at the beginning, enable <code>nov-mode</code> for EPUB files
+and <code>fb2-reader-mode</code> if any file with <code>*.fb2</code> or <code>*.fb2.zip</code> extension is
+opened:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> pdf-tools
+  <span style="color: #53676d; font-weight: bold;">:magic</span> <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"%PDF"</span> . pdf-view-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> nov
+  <span style="color: #53676d; font-weight: bold;">:mode</span> <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"\\.epub\\'"</span> . nov-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">use-package</span> fb2-reader
+  <span style="color: #53676d; font-weight: bold;">:mode</span> <span style="color: #ad8900;">(</span><span style="color: #009c8f;">"\\.fb2</span><span style="color: #489100; font-weight: bold;">\\</span><span style="color: #ad8900; font-weight: bold;">(</span><span style="color: #009c8f;">\\.zip</span><span style="color: #489100; font-weight: bold;">\\</span><span style="color: #ad8900; font-weight: bold;">)</span><span style="color: #009c8f;">?\\'"</span> . fb2-reader-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+All these functionality based on the <code>magic-mode-alist</code> and
+<code>auto-mode-alist</code>; see the section <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Choosing-Modes.html">"25.3 Choosing File Modes"</a> in the
+Emacs manual.
+</p>
+
+<p>
+So, the same code, but rewritten in the "old style" will look like
+this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span>add-to-list 'magic-mode-alist '<span style="color: #ad8900;">(</span><span style="color: #009c8f;">"%PDF"</span> . pdf-view-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-to-list 'auto-mode-alist '<span style="color: #ad8900;">(</span><span style="color: #009c8f;">"\\.epub\\'"</span> . nov-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-to-list 'auto-mode-alist '<span style="color: #ad8900;">(</span><span style="color: #009c8f;">"\\.fb2</span><span style="color: #489100; font-weight: bold;">\\</span><span style="color: #ad8900; font-weight: bold;">(</span><span style="color: #009c8f;">\\.zip</span><span style="color: #489100; font-weight: bold;">\\</span><span style="color: #ad8900; font-weight: bold;">)</span><span style="color: #009c8f;">?\\'"</span> . fb2-reader-mode<span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-custom-faces" class="outline-3">
+<h3 id="custom-faces">Custom faces</h3>
+<div class="outline-text-3" id="text-custom-faces">
+<p>
+This is quite simple, just take the section:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #53676d; font-weight: bold;">:custom-face</span>
+<span style="color: #009c8f;">(</span>shr-h1 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h1 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.3<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-h2 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h2 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-h3 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h3 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-h4 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h4 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-h5 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h5 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.1<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-h6 <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h6 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejavuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.1 <span style="color: #53676d; font-weight: bold;">:slant</span> oblique<span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>shr-text <span style="color: #ad8900;">(</span><span style="color: #0072d4;">(</span>t <span style="color: #8762c6;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-text <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif-9"</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span><span style="color: #53676d; background-color: #fbf3db;">)</span>
+</pre>
+</div>
+
+<p>
+And use <code>custom-set-faces</code> function like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span>custom-set-faces
+ `<span style="color: #ad8900;">(</span>shr-h1 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h1 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.3<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-h2 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h2 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-h3 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h3 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-h4 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h4 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.2<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-h5 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h5 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.1<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-h6 <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-h6 <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejavuSerif"</span> <span style="color: #53676d; font-weight: bold;">:height</span> 1.1 <span style="color: #53676d; font-weight: bold;">:slant</span> oblique<span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span>
+ `<span style="color: #ad8900;">(</span>shr-text <span style="color: #0072d4;">(</span><span style="color: #8762c6;">(</span>t <span style="color: #489100;">(</span><span style="color: #53676d; font-weight: bold;">:inherit</span> shr-text <span style="color: #53676d; font-weight: bold;">:font</span> <span style="color: #009c8f;">"DejaVuSerif-9"</span><span style="color: #489100;">)</span><span style="color: #8762c6;">)</span><span style="color: #0072d4;">)</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-readability" class="outline-2">
+<h2 id="readability">Note about readability</h2>
+<div class="outline-text-2" id="text-readability">
+<p>
+Yes, the use-package greatly improves the configuration file
+readability. But the readability of "old style" configuration can be
+enough improved with some simple rules:
+</p>
+<ol class="org-ol">
+<li><p>
+All same things should be alphabetically sorted. Some <code>require</code>
+S-expressions at the start of the file? Sort them:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">calendar</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">delight</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">delsel</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">ibuffer</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">icomplete</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">nerd-icons</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">nerd-icons-completion</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">nerd-icons-ibuffer</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">pinentry</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">proced</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">recentf</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">savehist</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">solarized-theme</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">solarized-selenized-light-theme</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">tramp</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">wgrep</span><span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">require</span> '<span style="color: #0072d4; font-weight: bold;">windresize</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Configuration variables? Sorted:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">                                        <span style="color: #909995;">; </span><span style="color: #909995;">Default LaTeX command</span>
+<span style="color: #009c8f;">(</span><span style="color: #489100; font-weight: bold;">setopt</span> LaTeX-command <span style="color: #009c8f;">"pdflatex"</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Automatically close braces</span>
+        LaTeX-electric-left-right-brace t
+        LaTeX-reftex-cite-format-auto-activate t
+        olivetti-body-width 0.6
+        olivetti-minimum-body-width 90
+        reftex-plug-into-AUCTeX t
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Parse document on save</span>
+        TeX-auto-save t
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Russian-specific quotes</span>
+        TeX-close-quote <span style="color: #009c8f;">"&gt;&gt;"</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Russian-specific quotes</span>
+        TeX-open-quote <span style="color: #009c8f;">"&lt;&lt;"</span><span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+<code>add-hook</code> S-expressions? Sorted:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">                                        <span style="color: #909995;">; </span><span style="color: #909995;">Disallow cursor in the</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">minubuffer propmpt first:</span>
+<span style="color: #009c8f;">(</span>add-hook 'minibuffer-setup-hook #'cursor-intangible-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'occur-mode-hook 'hl-line-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'package-mode-hook 'hl-line-mode<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>add-hook 'prog-mode-hook 'abbrev-mode<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Keybindings:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-g"</span> 'my/keyboard-quit-dwim<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-x 2"</span> 'vsplit-last-buffer<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-x 3"</span> 'hsplit-last-buffer<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-x C-r"</span> 'recentf-open-files<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">(</span>keymap-global-set <span style="color: #009c8f;">"C-x C-w"</span> 'windresize<span style="color: #009c8f;">)</span>
+</pre>
+</div>
+
+<p>
+Etc.
+</p></li>
+<li>Each configuration file should use the same template:
+<ol class="org-ol">
+<li>First going the <code>require</code> S-expressions.</li>
+<li>Then, the <code>delight</code> S-expressions.</li>
+<li>Keymaps, defined with <code>keymap-global-set</code> or <code>keymap-set</code></li>
+<li><code>add-hook</code> S-expressions.</li>
+<li>Then the configuration variables should be written with <code>setopt</code>.</li>
+<li>After <code>setopt</code> the usual configuration code could be written.</li>
+<li>At the end the <code>custom-set-faces</code> S-expression should go.</li>
+</ol></li>
+<li><p>
+Because most of the Emacs packages name its configuration variables
+in the same pattern: <code>&lt;package name&gt; "-" &lt;configuration variable
+   name&gt;</code>, it is possible to mix configuration for different packages
+in one file and doesn't lack readability:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">                                        <span style="color: #909995;">; </span><span style="color: #909995;">Width of inline images</span>
+org-image-actual-width 600
+org-image-align 'center
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Respect indentation when</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">M-RET</span>
+org-insert-heading-respect-content t
+org-modern-block-name nil
+org-modern-checkbox nil
+org-modern-hide-stars t
+org-modern-horizontal-rule <span style="color: #009c8f;">"&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;"</span>
+org-modern-internal-target '<span style="color: #009c8f;">(</span><span style="color: #009c8f;">"&#8618; "</span> t <span style="color: #009c8f;">""</span><span style="color: #009c8f;">)</span>
+org-modern-keyword nil
+org-modern-list '<span style="color: #009c8f;">(</span><span style="color: #ad8900;">(</span>43 . <span style="color: #009c8f;">"&#8211;"</span><span style="color: #ad8900;">)</span> <span style="color: #ad8900;">(</span>45 . <span style="color: #009c8f;">"&#8226;"</span><span style="color: #ad8900;">)</span> <span style="color: #ad8900;">(</span>42 . <span style="color: #009c8f;">"&#8618;"</span><span style="color: #ad8900;">)</span><span style="color: #009c8f;">)</span>
+org-modern-priority nil
+org-modern-progress nil
+org-modern-radio-target '<span style="color: #009c8f;">(</span><span style="color: #009c8f;">"&#10096;"</span> t <span style="color: #009c8f;">"&#10097;"</span><span style="color: #009c8f;">)</span>
+org-modern-star 'fold
+org-modern-statistics nil
+org-modern-table nil
+org-modern-timestamp t
+org-outline-path-complete-in-steps t
+org-plantuml-jar-path <span style="color: #009c8f;">"~/bin/plantuml/plantuml.jar"</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Make LaTeX looks good</span>
+org-pretty-entities t
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Don't prettify</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">sub/superscripts</span>
+org-pretty-entities-include-sub-superscripts nil
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">Incomplete dates refer to</span>
+                                        <span style="color: #909995;">; </span><span style="color: #909995;">future dates &amp; times</span>
+org-read-date-prefer-future 'time
+</pre>
+</div>
+
+<p>
+With one exception — the file with common Emacs configuration still
+lack readability.
+</p></li>
+</ol>
+</div>
+</div>
+<div id="outline-container-results" class="outline-2">
+<h2 id="results">Results</h2>
+<div class="outline-text-2" id="text-results">
+<p>
+Most of my changes from use-package to "old style" configuration could
+be viewed in this commit: <a href="https://codeberg.org/evgandr/dotfiles/commit/dc908e6739df7c84cdc8c5cc35da7cac43ea1ff3">https://codeberg.org/evgandr/dotfiles/commit/dc908e6739df7c84cdc8c5cc35da7cac43ea1ff3</a>
+</p>
+
+<p>
+Pinentry works properly, all configuration options and keybindings are
+initialized properly too, the <code>*scratch*</code> buffer works as intended.
+</p>
+
+<p>
+But the Emacs starts slower. If with use-package it started in
+1.85 seconds. Then with "old style" configuration it loads in:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #009c8f;">(</span>emacs-init-time<span style="color: #009c8f;">)</span>
+<span style="color: #009c8f;">"8.456780 seconds"</span>
+</pre>
+</div>
+
+<p>
+These measurements were performed on the Thinkpad X220 with i7 CPU and
+SSD. So, on the more modern machine, the Emacs with the same "old
+style" configuration should start even faster, I think.
+</p>
+
+<p>
+Since, I am using Emacs Daemon — this is not a problem. After this
+daemon my FreeBSD starts syncthing and xdm, and after that I should
+enter my login and password — so these 8 seconds shall pass and
+<code>emacsclient</code> starts successfully in the my WM.
+</p>
+</div>
+</div>
+<div id="outline-container-notes" class="outline-2">
+<h2 id="notes">Notes</h2>
+<div class="outline-text-2" id="text-notes">
+</div>
+</div>
+<div id="footnotes">
+
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.emacs-pinentry" class="footnum" href="#fnr.emacs-pinentry" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://www.gnu.org/software/emacs/manual/html_node/epa/index.html">EasyPG Assistant User’s Manual</a>
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.mu4e-contexts" class="footnum" href="#fnr.mu4e-contexts" role="doc-backlink">2</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+Mu4e variable to define different sets of settings for
+various contexts. Documentation:
+<a href="https://www.djcbsoftware.nl/code/mu/mu4e/Contexts.html">https://www.djcbsoftware.nl/code/mu/mu4e/Contexts.html</a>.
+</p></div></div>
+
+
+</div>
+</div>

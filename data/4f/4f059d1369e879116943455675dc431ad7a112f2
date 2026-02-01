@@ -1,0 +1,154 @@
+<p>While trying out macOS's Music app to manage offline media, I wondered if I could easily search and control playback from Emacs. Spoiler alert: yes it can be done and fuzzy searching music is rather gratifying.</p>
+<p><img src="https://xenodium.github.io/images/emacs-searchplay-music-macos/music_search.gif" alt=""></p>
+<p>Luckily, the hard work's already handled by <a href="https://github.com/hile/pytunes">pytunes</a>, a command line interface to macOS's iTunes/Music app. We add <a href="https://ffmpeg.org/ffprobe.html">ffprobe</a> and some elisp glue to the mix, and we can generate an Emacs media index.</p>
+<p>Indexing takes roughly a minute per 1000 files. Prolly suboptimal, but I don't intend to re-index frequently. For now, we can use a separate process to prevent Emacs from blocking, so we can get back to playing tetris from our beloved editor:</p>
+<pre><code class="language-{.commonlisp">(defun musica-index ()
+  &quot;Indexes Music's tracks in two stages:
+1. Generates \&quot;Tracks.sqlite\&quot; using pytunes (needs https://github.com/hile/pytunes installed).
+2. Caches an index at ~/.emacs.d/.musica.el.&quot;
+  (interactive)
+  (message &quot;Indexing music... started&quot;)
+  (let* ((now (current-time))
+         (name &quot;Music indexing&quot;)
+         (buffer (get-buffer-create (format &quot;*%s*&quot; name))))
+    (with-current-buffer buffer
+      (delete-region (point-min)
+                     (point-max)))
+    (set-process-sentinel
+     (start-process name
+                    buffer
+                    (file-truename (expand-file-name invocation-name
+                                                     invocation-directory))
+                    &quot;--quick&quot; &quot;--batch&quot; &quot;--eval&quot;
+                    (prin1-to-string
+                     `(progn
+                        (interactive)
+                        (require 'cl-lib)
+                        (require 'seq)
+                        (require 'map)
+
+                        (message &quot;Generating Tracks.sqlite...&quot;)
+                        (process-lines &quot;pytunes&quot; &quot;update-index&quot;) ;; Generates Tracks.sqlite
+                        (message &quot;Generating Tracks.sqlite... done&quot;)
+
+                        (defun parse-tags (path)
+                          (with-temp-buffer
+                            (if (eq 0 (call-process &quot;ffprobe&quot; nil t nil &quot;-v&quot; &quot;quiet&quot;
+                                                    &quot;-print_format&quot; &quot;json&quot; &quot;-show_format&quot; path))
+                                (map-elt (json-parse-string (buffer-string)
+                                                            :object-type 'alist)
+                                         'format)
+                              (message &quot;Warning: Couldn't read track metadata for %s&quot; path)
+                              (message &quot;%s&quot; (buffer-string))
+                              (list (cons 'filename path)))))
+
+                        (let* ((paths (process-lines &quot;sqlite3&quot;
+                                                     (concat (expand-file-name &quot;~/&quot;)
+                                                             &quot;Music/Music/Music Library.musiclibrary/Tracks.sqlite&quot;)
+                                                     &quot;select path from tracks&quot;))
+                               (total (length paths))
+                               (n 0)
+                               (records (seq-map (lambda (path)
+                                                   (let ((tags (parse-tags path)))
+                                                     (message &quot;%d/%d %s&quot; (setq n (1+ n))
+                                                              total (or (map-elt (map-elt tags 'tags) 'title) &quot;No title&quot;))
+                                                     tags))
+                                                 paths)))
+                          (with-temp-buffer
+                            (prin1 records (current-buffer))
+                            (write-file &quot;~/.emacs.d/.musica.el&quot; nil))))))
+     (lambda (process state)
+       (if (= (process-exit-status process) 0)
+           (message &quot;Indexing music... finished (%.3fs)&quot;
+                    (float-time (time-subtract (current-time) now)))
+         (message &quot;Indexing music... failed, see %s&quot; buffer))))))
+</code></pre>
+<p>Once media is indexed, we can feed it to <a href="https://github.com/abo-abo/swiper">ivy</a> for that narrowing-down fuzzy-searching goodness! It's worth mentioning the <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Size-of-Displayed-Text.html">truncate-string-to-width</a> function. Super handy for truncating strings to a fixed width and visually organizing search results in columns.</p>
+<pre><code class="language-{.commonlisp">(defun musica-search ()
+  (interactive)
+  (cl-assert (executable-find &quot;pytunes&quot;) nil &quot;pytunes not installed&quot;)
+  (let* ((c1-width (round (* (- (window-width) 9) 0.4)))
+         (c2-width (round (* (- (window-width) 9) 0.3)))
+         (c3-width (- (window-width) 9 c1-width c2-width)))
+    (ivy-read &quot;Play: &quot; (mapcar
+                        (lambda (track)
+                          (let-alist track
+                            (cons (format &quot;%s   %s   %s&quot;
+                                          (truncate-string-to-width
+                                           (or .tags.title
+                                               (file-name-base .filename)
+                                               &quot;No title&quot;) c1-width nil ?\s &quot;…&quot;)
+                                          (truncate-string-to-width (propertize (or .tags.artist &quot;&quot;)
+                                                                                'face '(:foreground &quot;yellow&quot;)) c2-width nil ?\s &quot;…&quot;)
+                                          (truncate-string-to-width
+                                           (propertize (or .tags.album &quot;&quot;)
+                                                       'face '(:foreground &quot;cyan1&quot;)) c3-width nil ?\s &quot;…&quot;))
+                                  track)))
+                        (musica--index))
+              :action (lambda (selection)
+                        (let-alist (cdr selection)
+                          (process-lines &quot;pytunes&quot; &quot;play&quot; .filename)
+                          (message &quot;Playing: %s [%s] %s&quot;
+                                   (or .tags.title
+                                       (file-name-base .filename)
+                                       &quot;No title&quot;)
+                                   (or .tags.artist
+                                       &quot;No artist&quot;)
+                                   (or .tags.album
+                                       &quot;No album&quot;)))))))
+
+(defun musica--index ()
+  (with-temp-buffer
+    (insert-file-contents &quot;~/.emacs.d/.musica.el&quot;)
+    (read (current-buffer))))
+</code></pre>
+<p>The remaining bits are straigtforward. We add a few interactive functions to control playback:</p>
+<pre><code class="language-{.commonlisp">(defun musica-info ()
+  (interactive)
+  (let ((raw (process-lines &quot;pytunes&quot; &quot;info&quot;)))
+    (message &quot;%s [%s] %s&quot;
+             (string-trim (string-remove-prefix &quot;Title&quot; (nth 3 raw)))
+             (string-trim (string-remove-prefix &quot;Artist&quot; (nth 1 raw)))
+             (string-trim (string-remove-prefix &quot;Album&quot; (nth 2 raw))))))
+
+(defun musica-play-pause ()
+  (interactive)
+  (cl-assert (executable-find &quot;pytunes&quot;) nil &quot;pytunes not installed&quot;)
+  (process-lines &quot;pytunes&quot; &quot;play&quot;)
+  (musica-info))
+
+(defun musica-play-next ()
+  (interactive)
+  (cl-assert (executable-find &quot;pytunes&quot;) nil &quot;pytunes not installed&quot;)
+  (process-lines &quot;pytunes&quot; &quot;next&quot;))
+
+(defun musica-play-next-random ()
+  (interactive)
+  (cl-assert (executable-find &quot;pytunes&quot;) nil &quot;pytunes not installed&quot;)
+  (process-lines &quot;pytunes&quot; &quot;shuffle&quot; &quot;enable&quot;)
+  (let-alist (seq-random-elt (musica--index))
+    (process-lines &quot;pytunes&quot; &quot;play&quot; .filename))
+  (musica-info))
+
+(defun musica-play-previous ()
+  (interactive)
+  (cl-assert (executable-find &quot;pytunes&quot;) nil &quot;pytunes not installed&quot;)
+  (process-lines &quot;pytunes&quot; &quot;previous&quot;))
+</code></pre>
+<p>Finally, if we want some convenient keybindings, we can add something like:</p>
+<pre><code class="language-{.commonlisp">(global-set-key (kbd &quot;C-c m SPC&quot;) #'musica-play-pause)
+(global-set-key (kbd &quot;C-c m i&quot;) #'musica-info)
+(global-set-key (kbd &quot;C-c m n&quot;) #'musica-play-next)
+(global-set-key (kbd &quot;C-c m p&quot;) #'musica-play-previous)
+(global-set-key (kbd &quot;C-c m r&quot;) #'musica-play-next-random)
+(global-set-key (kbd &quot;C-c m s&quot;) #'musica-search)
+</code></pre>
+<p>Hooray! Controlling music is now an Emacs keybinding away: ø/</p>
+<p>comments on <a href="https://twitter.com/xenodium/status/1307294369326731264">twitter</a>.</p>
+<p>UPDATE1: Installing pytunes with <em>pip3 install pytunes</em> didn't just work for me. Instead, I cloned and installed as:</p>
+<pre><code class="language-{.bash">git clone https://github.com/hile/pytunes
+pip3 install file:///path/to/pytunes
+pip3 install pytz
+brew install libmagic
+</code></pre>
+<p>UPDATE2: Checked in to <a href="https://github.com/xenodium/dotsies/blob/master/emacs/ar/musica.el">dot files</a>.</p>

@@ -1,0 +1,64 @@
+<h2>Update</h2>
+<p>I now use <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>, which reduces the logic to:</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-image-to-jpg ()
+  &quot;Convert all marked images to jpg(s).&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Convert to jpg&quot;
+   &quot;convert -verbose '&lt;&lt;f&gt;&gt;' '&lt;&lt;fne&gt;&gt;.jpg'&quot;
+   :utils &quot;convert&quot;))
+</code></pre>
+<h2>Original post</h2>
+<p>Shell one-liners are super handy for batch-processing files. Say you'd like to convert a bunch of images from HEIC to jpg, you could use something like:</p>
+<pre><code class="language-{.bash">for f in *.HEIC ; do convert &quot;$f&quot; &quot;${f%.*}.jpg&quot;; done
+</code></pre>
+<p>Save the one-liner (or memorize it) and pull it from your toolbox next time you need it. This is handy as it is, but <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">Emacs dired</a> is just a file-management powerhouse. Its <em>dired-map-over-marks</em> function is just a few elisp lines away from enabling all sorts of batch processing within your dired buffers.</p>
+<p>Dired already enables selecting and deselecting files using all sorts of built-in mechanisms (<a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Marks-vs-Flags.html">dired-mark-files-regexp</a>, <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired-and-Find.html">find-name-dired</a>, etc) or wonderful third-party packages like Matus Goljer's <a href="https://github.com/Fuco1/dired-hacks">dired-filters</a>.</p>
+<p>Regardless of how you selected your files, here's a snippet to run ImageMagick's <a href="https://imagemagick.org/script/convert.php">convert</a> on a bunch of selected files:</p>
+<pre><code class="language-{.commonlisp">;;; -*- lexical-binding: t; -*-
+
+(defun ar/dired-convert-image (&amp;optional arg)
+  &quot;Convert image files to other formats.&quot;
+  (interactive &quot;P&quot;)
+  (assert (or (executable-find &quot;convert&quot;) (executable-find &quot;magick.exe&quot;)) nil &quot;Install imagemagick&quot;)
+  (let* ((dst-fpath)
+         (src-fpath)
+         (src-ext)
+         (last-ext)
+         (dst-ext))
+    (mapc
+     (lambda (fpath)
+       (setq src-fpath fpath)
+       (setq src-ext (downcase (file-name-extension src-fpath)))
+       (when (or (null dst-ext)
+                 (not (string-equal dst-ext last-ext)))
+         (setq dst-ext (completing-read &quot;to format: &quot;
+                                        (seq-remove (lambda (format)
+                                                      (string-equal format src-ext))
+                                                    '(&quot;jpg&quot; &quot;png&quot;)))))
+       (setq last-ext dst-ext)
+       (setq dst-fpath (format &quot;%s.%s&quot; (file-name-sans-extension src-fpath) dst-ext))
+       (message &quot;convert %s to %s ...&quot; (file-name-nondirectory dst-fpath) dst-ext)
+       (set-process-sentinel
+        (if (string-equal system-type &quot;windows-nt&quot;)
+            (start-process &quot;convert&quot;
+                           (generate-new-buffer (format &quot;*convert %s*&quot; (file-name-nondirectory src-fpath)))
+                           &quot;magick.exe&quot; &quot;convert&quot; src-fpath dst-fpath)
+          (start-process &quot;convert&quot;
+                         (generate-new-buffer (format &quot;*convert %s*&quot; (file-name-nondirectory src-fpath)))
+                         &quot;convert&quot; src-fpath dst-fpath))
+        (lambda (process state)
+          (if (= (process-exit-status process) 0)
+              (message &quot;convert %s ✔&quot; (file-name-nondirectory dst-fpath))
+            (message &quot;convert %s ❌&quot; (file-name-nondirectory dst-fpath))
+            (message (with-current-buffer (process-buffer process)
+                       (buffer-string))))
+          (kill-buffer (process-buffer process)))))
+     (dired-map-over-marks (dired-get-filename) arg))))
+</code></pre>
+<p>The snippet can be shorter, but wouldn't be as friendly. We ask users to provide desired image format, spawn separate processes (avoids blocking Emacs), and generate a basic report. Also adds support for Windows.</p>
+<p><img src="https://xenodium.github.io/images/enrich-your-dired-batching-toolbox/batch-dired.gif" alt=""></p>
+<h2>BEWARE</h2>
+<p>The snippet isn't currently capping the number of processes, but hey we can revise in the future…</p>
+<h2>Update</h2>
+<p>Thanks to <a href="https://github.com/pbeliveau">Philippe Beliveau</a> for pointing out a bug in snippet (now updated) and changes to make it Windows compatible.</p>

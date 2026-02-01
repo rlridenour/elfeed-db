@@ -1,0 +1,62 @@
+<p>Every so often, I need to kill the odd unresponsive process. While I really like <code>proced</code> (check out Mickey Petersen's <a href="https://www.masteringemacs.org/article/displaying-interacting-processes-proced">article</a>), I somehow find myself using macOS's <a href="https://support.apple.com/en-bw/guide/activity-monitor/actmaea30277/mac">Activity Monitor</a> to this purpose. Kinda odd, considering I prefer to do these kinds of things from Emacs.</p>
+<p>What I'd really like is a way to quickly fuzzy search a list of active processes and choose the unresponsive culprid, using my preferred completion frontend (in my case <a href="https://github.com/abo-abo/swiper">ivy</a>).</p>
+<p><img src="https://xenodium.github.io/images/emacs-quick-kill-process/kill_x1.8.webp" alt=""></p>
+<p>The function below gives us a fuzzy-searchable process utility. While we could use <code>ivy-read</code> directly in our implementation, we're better of using <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Completion.html">completing-read</a> to remain compatible with other completion frameworks. I'm a big fan of the humble <code>completing-read</code>. You feed it a list of candidates and it prompts users to pick one.</p>
+<p>To build our process list, we can lean on <code>proced</code>'s own source: <code>proced-process-attributes</code>. We transform its output to an <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Association-Lists.html">alist</a>, formatting the visible keys to contain the process id, owner, command name, and the command line which invoked the process. Once a process is chosen, we can send a kill signal using <s>signal-process</s> <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a> and our <em>job is done</em>.</p>
+<pre><code class="language-{.commonlisp">(require 'dwim-shell-command)
+(require 'map)
+(require 'proced)
+(require 'seq)
+
+(defun dwim-shell-commands-kill-process ()
+  &quot;Select and kill process.&quot;
+  (interactive)
+  (let* ((pid-width 5)
+         (comm-width 25)
+         (user-width 10)
+         (processes (proced-process-attributes))
+         (candidates
+          (mapcar (lambda (attributes)
+                    (let* ((process (cdr attributes))
+                           (pid (format (format &quot;%%%ds&quot; pid-width) (map-elt process 'pid)))
+                           (user (format (format &quot;%%-%ds&quot; user-width)
+                                         (truncate-string-to-width
+                                          (map-elt process 'user) user-width nil nil t)))
+                           (comm (format (format &quot;%%-%ds&quot; comm-width)
+                                         (truncate-string-to-width
+                                          (map-elt process 'comm) comm-width nil nil t)))
+                           (args-width (- (window-width) (+ pid-width user-width comm-width 3)))
+                           (args (map-elt process 'args)))
+                      (cons (if args
+                                (format &quot;%s %s %s %s&quot; pid user comm (truncate-string-to-width args args-width nil nil t))
+                              (format &quot;%s %s %s&quot; pid user comm))
+                            process)))
+                  processes))
+         (selection (map-elt candidates
+                             (completing-read &quot;kill process: &quot;
+                                              (seq-sort
+                                               (lambda (p1 p2)
+                                                 (string-lessp (nth 2 (split-string (string-trim (car p1))))
+                                                               (nth 2 (split-string (string-trim (car p2))))))
+                                               candidates) nil t)))
+         (prompt-title (format &quot;%s %s %s&quot;
+                               (map-elt selection 'pid)
+                               (map-elt selection 'user)
+                               (map-elt selection 'comm))))
+    (when (y-or-n-p (format &quot;Kill? %s&quot; prompt-title))
+      (dwim-shell-command-on-marked-files
+       (format &quot;Kill %s&quot; prompt-title)
+       (format &quot;kill -9 %d&quot; (map-elt selection 'pid))
+       :utils &quot;kill&quot;
+       :error-autofocus t
+       :silent-success t))))
+</code></pre>
+<p>I've pushed <code>dwim-shell-commands-kill-process</code> to my <s><a href="https://github.com/xenodium/dotsies/">config</a></s> <a href="https://github.com/xenodium/dwim-shell-command/commit/b98f45c7901446cf1ab60be2ab648c623e774427">dwim-shell-commands.el</a>. Got suggestions? Alternatives? Lemme know.</p>
+<h2>Update</h2>
+<p>I've moved <code>dwim-shell-commands-kill-process</code> from my Emacs <a href="https://github.com/xenodium/dotsies">config</a> to <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-commands.el">dwim-shell-commands.el</a>. A few advantages:</p>
+<ul>
+<li>Killing processes is now async.</li>
+<li>Should anything go wrong, an error message is now accessible.</li>
+<li>You can easily install via <a href="https://melpa.org/#/dwim-shell-command">MELPA</a>.</li>
+</ul>
+<p>If you prefer the previous version (without a dependency on <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>), have a look at the <a href="https://github.com/xenodium/dotsies/commit/eac4f892eab7a80740ee8ce0c727381886442fb6">initial commit</a>.</p>

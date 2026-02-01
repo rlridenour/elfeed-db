@@ -1,0 +1,139 @@
+<p>
+I'm helping other volunteers get on board with doing the <a href="https://bikebrigade.ca">Bike Brigade</a> newsletter. Since not everyone has access to (or the patience for) <a href="https://mailchimp.com">MailChimp</a>, we've been using Google Docs to draft the newsletter and share it with other people behind the scenes. I've previously written about <a href="https://sachachua.com/blog/2025/09/getting-a-google-docs-draft-ready-for-mailchimp-via-emacs/">getting a Google Docs draft ready for Mailchimp via Emacs and Org Mode</a>, which built on my code for <a href="https://sachachua.com/blog/2025/06/transforming-html-clipboard-contents-with-emacs-to-smooth-out-mailchimp-annoyances-dates-images-comments-colours/">transforming HTML clipboard contents to smooth out Mailchimp annoyances: dates, images, comments, colours</a>. Now I've figured out how to update, test, and schedule the MailChimp campaign directly from Emacs so that I don't even have to go into the MailChimp web interface at all. I added those functions to <a href="https://github.com/sachac/mailchimp-el">sachac/mailchimp-el</a>.
+</p>
+
+<p>
+I used to manually download a ZIP of the Google Docs newsletter draft. I didn't feel like figuring out authentication and Google APIs from Emacs, so I did that in a NodeJS script instead. <a href="https://sachachua.com/blog/2026/01/emacs-updating-a-mailchimp-campaign-using-a-template-sending-test-e-mails-and-scheduling-a-campaign/convert-newsletter.js">convert-newsletter.js</a> can either create or download the latest newsletter doc from our Google Shared Drive. (<a href="https://github.com/WarrenWilkinson/google-api">google-api</a> might be helpful if I want to do this in Emacs, not sure.) If I call convert-newsletter.js with the <code>download</code> argument, it unpacks the zip into <code>~/proj/bike-brigade/temp_newsletter</code>, where my Emacs Lisp function for processing the latest newsletter draft with images can turn it into the HTML to insert into the HTML template I've previously created. I've been thinking about whether I want to move my HTML transformation code to NodeJS as well so that I could run the whole thing from the command-line and possibly have other people run this in the future, or if I should just leave it in Emacs for my convenience.
+</p>
+
+<p>
+Updating the campaign through the Mailchimp API means that I don't have to log in, replicate the campaign, click on the code block, and paste in the code. Very nice, no clicks needed. I also use TRAMP to write the HTML to a file on my server (<code>my-bike-brigade-output-file</code> is of the form <code>/ssh:hostname:/path/to/file</code>) so that other volunteers can get a web preview without waiting for the test email.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-next-campaign</span> (<span class="org-type">&amp;optional</span> date)
+  (<span class="org-keyword">setq</span> date (<span class="org-keyword">or</span> date (org-read-date nil nil <span class="org-string">"+Sun"</span>)))
+  (seq-find
+   (<span class="org-keyword">lambda</span> (o)
+     (string-match (concat <span class="org-string">"^"</span> date)
+                   (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">settings</span> o))))
+   (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">campaigns</span> (mailchimp-campaigns 5))))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-bike-brigade-output-file</span> nil)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-download-newsletter-from-google-docs</span> ()
+  <span class="org-doc">"Download the newsletter from Google Docs and puts it in ~/proj/bike-brigade/temp_newsletter/."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let</span> ((default-directory <span class="org-string">"~/proj/bike-brigade"</span>))
+    (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*Newsletter*"</span>)
+      (erase-buffer)
+      (display-buffer (current-buffer))
+      (call-process <span class="org-string">"node"</span> nil t t <span class="org-string">"convert-newsletter.js"</span> <span class="org-string">"download"</span>))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-create-or-update-campaign</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((date (org-read-date nil nil <span class="org-string">"+Sun"</span>))
+         (template-name <span class="org-string">"Bike Brigade weekly update"</span>)
+         (list-name <span class="org-string">"Bike Brigade"</span>)
+         (template-id
+          (alist-get
+           <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">id</span>
+           (seq-find
+            (<span class="org-keyword">lambda</span> (o)
+              (string= template-name (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">name</span> o)))
+            (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">templates</span> (mailchimp&#45;&#45;request-json <span class="org-string">"templates"</span>)))))
+         (list-id (seq-find
+                   (<span class="org-keyword">lambda</span> (o)
+                     (string= list-name
+                              (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">name</span> o)))
+                   (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">lists</span> (mailchimp&#45;&#45;request-json <span class="org-string">"lists"</span>))))
+         (campaign (my-brigade-next-campaign date))
+         (body <span class="org-highlight-quoted-quote">`</span>((type . <span class="org-string">"regular"</span>)
+                 (recipients (list_id . ,(alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">id</span> list-id)))
+                 (settings
+                  (title . ,date)
+                  (subject_line . <span class="org-string">"Bike Brigade: Weekly update"</span>)
+                  (from_name . <span class="org-string">"Bike Brigade"</span>)
+                  (reply_to . <span class="org-string">"info@bikebrigade.ca"</span>)
+                  (tracking
+                   (opens . t)
+                   (html_clicks . t))))))
+    (<span class="org-keyword">unless</span> campaign
+      (<span class="org-keyword">setq</span> campaign (mailchimp&#45;&#45;request-json
+                      <span class="org-string">"/campaigns"</span>
+                      <span class="org-builtin">:method</span> <span class="org-string">"POST"</span>
+                      <span class="org-builtin">:body</span>
+                      body)))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">Download the HTML</span>
+    (my-brigade-download-newsletter-from-google-docs)
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">Upload to Mailchimp</span>
+    (mailchimp-campaign-update-from-template
+     (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">id</span> campaign)
+     template-id
+     (list
+      (cons <span class="org-string">"main_content_area"</span>
+            (my-brigade-process-latest-newsletter-draft-with-images
+             date))))
+    (<span class="org-keyword">when</span> my-bike-brigade-output-file
+      (<span class="org-keyword">with-temp-file</span> my-bike-brigade-output-file
+        (insert (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">html</span> (mailchimp&#45;&#45;request-json (format <span class="org-string">"/campaigns/%s/content"</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">id</span> campaign)))))))
+    (browse-url (concat <span class="org-string">"https://sachachua.com/bike-brigade/"</span> (file-name-nondirectory my-bike-brigade-output-file)))
+    (message <span class="org-string">"%s"</span> <span class="org-string">"Done!"</span>)))
+</code></pre>
+</div>
+
+
+<p>
+Now to send the test e-mails&hellip;
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-brigade-test-emails</span> nil <span class="org-doc">"Set to a list of e-mail addresses."</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-send-test-to-me</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (mailchimp-campaign-send-test-email (my-brigade-next-campaign) user-mail-address))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-send-test</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">if</span> my-brigade-test-emails
+      (mailchimp-campaign-send-test-email (my-brigade-next-campaign) my-brigade-test-emails)
+    (<span class="org-warning">error</span> <span class="org-string">"Set `</span><span class="org-string"><span class="org-constant">my-brigade-test-emails</span></span><span class="org-string">'."</span>)))
+</code></pre>
+</div>
+
+
+<p>
+And schedule it:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-schedule</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((campaign (my-brigade-next-campaign))
+         (sched (format-time-string <span class="org-string">"%FT%T%z"</span> (org-read-date t t <span class="org-string">"+Sun 11:00"</span>) t)))
+    (mailchimp-campaign-schedule campaign sched)
+    (message <span class="org-string">"Scheduled %s"</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">settings</span> campaign)))))
+</code></pre>
+</div>
+
+
+<p>
+Progress, bit by bit! Here's a screenshot showing the Google Docs draft on one side and my web preview in the other:
+</p>
+
+
+<figure id="orgb5bf36c">
+<img src="https://sachachua.com/blog/2026/01/emacs-updating-a-mailchimp-campaign-using-a-template-sending-test-e-mails-and-scheduling-a-campaign/2026-01-17_13-00-27.png" alt="2026-01-17_13-00-27.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>Google Docs and Mailchimp campaign preview</figcaption>
+</figure>
+
+<p>
+It'll be even cooler if I can get some of this working via systemd persistent tasks so that they happen automatically, or have some kind of way for the other newsletter volunteers to trigger a rebuild. Anyway, here's <a href="https://github.com/sachac/mailchimp-el">https://github.com/sachac/mailchimp-el</a> in case the code is useful for anyone else.
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#collaboration-bike-brigade-updating-mailchimp-directly">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/emacs-updating-a-mailchimp-campaign-using-a-template-sending-test-e-mails-and-scheduling-a-campaign/index.org">View org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Femacs-updating-a-mailchimp-campaign-using-a-template-sending-test-e-mails-and-scheduling-a-campaign%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

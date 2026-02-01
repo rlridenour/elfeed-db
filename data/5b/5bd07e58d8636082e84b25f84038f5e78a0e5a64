@@ -1,0 +1,73 @@
+<p>While on Mastodon, I spotted <a href="https://indieweb.social/@summeremacs@fashionsocial.host">@summeremacs</a> looking into <a href="https://indieweb.social/@summeremacs@fashionsocial.host/111058226788825431">sending Emacs text selections to a Kindle via email</a>. This sparked my interest as I previously looked into <a href="https://xenodium.com/emailing-pdfs-to-kindle-from-mu4e/">sending pdfs to my Kindle</a> via <a href="https://github.com/djcb/mu">mu4e</a>.</p>
+<p>Kindle offers a neat service where you can email a file to your <code>@kindle.com</code> address and it automatically shows up in your Kindle library.</p>
+<p>I already do email from my beloved editor, and like most Emacs things, it's powered by <a href="https://en.wikipedia.org/wiki/Emacs_Lisp">elisp</a>. In other words, it's basically up for grabs if you'd like to glue it to anything else, so I did…</p>
+<p>I can now select a region and invoke <code>M-x send-to-kindle-as-txt</code> to send it over to my Kindle.</p>
+<p><img src="https://xenodium.github.io/images/emacs-send-to-kindle/send-to-my-kindle.gif" alt=""></p>
+<p>Soon enough, the note shows up on my Kindle.</p>
+<p><img src="https://xenodium.github.io/images/emacs-send-to-kindle/listed.png" alt=""></p>
+<p>Opening the note reveals the same content we had previously selected and sent from our malleable editor.</p>
+<p><img src="https://xenodium.github.io/images/emacs-send-to-kindle/repeated.png" alt=""></p>
+<p>While it looks kinda magical, it's fairly simple under the hood. It takes the region content, writes it to a txt file, creates an email message buffer attaching the file, and finally sends via <code>message-send-and-exit</code>.</p>
+<p>If <code>M-x send-to-kindle-as-txt</code> is invoked with a <code>C-u</code> prefix, you get to inspect the message buffer right before sending via <code>C-c C-c</code>.</p>
+<p><img src="https://xenodium.github.io/images/emacs-send-to-kindle/email.png" alt=""></p>
+<p>Here's the full snippet.</p>
+<pre><code class="language-{.commonlisp">(defcustom send-to-kindle-from-email
+  nil
+  &quot;Your own email address to send from via mu4e.&quot;
+  :type 'string
+  :group 'send-to-kindle)
+
+(defcustom send-to-kindle-to-email
+  nil
+  &quot;Your Kindle email address to send pdf to.&quot;
+  :type 'string
+  :group 'send-to-kindle)
+
+(defun send-to-kindle-as-txt (review)
+  (interactive &quot;P&quot;)
+  (unless send-to-kindle-from-email
+    (setq send-to-kindle-from-email
+          (read-string &quot;From email address: &quot;)))
+  (unless send-to-kindle-to-email
+    (setq send-to-kindle-to-email
+          (read-string &quot;To email address: &quot;)))
+  (let* ((content (string-trim (if (region-active-p)
+                                   (buffer-substring (region-beginning) (region-end))
+                                 (buffer-string))))
+         (note-name (let ((name (string-trim (read-string &quot;Note name: &quot;))))
+                      (if (string-empty-p name)
+                          (nth
+                           0 (string-split
+                              (substring content 0 (min 40 (length content))) &quot;\n&quot;))
+                        name)))
+         (path (concat (temporary-file-directory) note-name))
+         (txt (concat path &quot;.txt&quot;))
+         (buffer (get-buffer-create (generate-new-buffer-name &quot;*Email txt*&quot;))))
+    (with-temp-buffer
+      (insert content)
+      (write-file txt))
+    (with-current-buffer buffer
+      (erase-buffer)
+      ;; Disable hooks
+      (let ((message-mode-hook nil))
+        (message-mode))
+      (insert
+       (format
+        &quot;From: %s
+To: %s
+Subject: %s
+--text follows this line--
+&lt;#multipart type=mixed&gt;
+&lt;#part type=\&quot;text/plain\&quot; filename=\&quot;%s\&quot; disposition=attachment&gt;
+&lt;#/part&gt;
+&lt;#/multipart&gt;&quot;
+        send-to-kindle-from-email
+        send-to-kindle-to-email
+        note-name txt))
+      (unless review
+        (message-send-and-exit)))
+    (when review
+      (switch-to-buffer buffer))))
+</code></pre>
+<p>By the way, and I only just learned this today… To take a screenshot on a Kindle Paperwhite, tap on these opposite corners.</p>
+<p><img src="https://xenodium.github.io/images/emacs-send-to-kindle/tap-screenshot.png" alt=""></p>

@@ -1,0 +1,414 @@
+<p>To follow up on the <a href="https://leancrew.com/all-this/2025/03/sql-help-from-chatgpt/">two</a> <a href="https://leancrew.com/all-this/2025/03/sql-placeholders-and-python/">posts</a> I wrote a couple of weeks ago, I thought I’d explain how I use the <a href="https://catalog.loc.gov/vwebv/searchAdvanced">Library of Congress catalog</a> to add entries to the SQLite database of my technical books.</p>
+<p>As a reminder, the database consists of three tables, <code>book</code>, <code>author</code>, and <code>book_author</code>. The fields for each table are listed below:</p>
+<table>
+<thead>
+<tr>
+<th align="left">book</th>
+<th align="left">author</th>
+<th align="left">book_author</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left">id</td>
+<td align="left">id</td>
+<td align="left">id</td>
+</tr>
+<tr>
+<td align="left">title</td>
+<td align="left">name</td>
+<td align="left">book_id</td>
+</tr>
+<tr>
+<td align="left">subtitle</td>
+<td align="left"></td>
+<td align="left">author_id</td>
+</tr>
+<tr>
+<td align="left">volume</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">edition</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">publisher</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">published</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">lccn</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">loc</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+<tr>
+<td align="left">added</td>
+<td align="left"></td>
+<td align="left"></td>
+</tr>
+</tbody>
+</table>
+<p>In each table, the <code>id</code> field is a sequential integer that’s automatically generated when a new record is added. The <code>book_id</code> and <code>author_id</code> fields in the <code>book_author</code> table are references to the <code>id</code> values in the other two tables. They tie <code>book</code> and <code>author</code> together and handle the many-to-many relationship between the two.</p>
+<p>The <code>author</code> table is about as simple as it can be. I don’t care about breaking names into given and surname, nor do I care about their birth/death dates. The names are saved in <code>last, first [middle]</code> format, i.e.,</p>
+<pre><code>Ang, Alfredo Hua-Sing
+Gere, James M.
+King, Wilton W.
+McGill, David J.
+Tang, Wilson H.
+Timoshenko, Stephen
+</code></pre>
+<p>Most of the <code>book</code> fields are self-explanatory. The <code>published</code> field is the publication date (just a year), and <code>added</code> is the date I added the book to the database, which helps when I want to print out information about recently added books. SQLite doesn’t have a date datatype, so <code>added</code> is a string in <code>yyyy-mm-dd</code> format.  The <code>loc</code> is the <a href="https://en.wikipedia.org/wiki/Library_of_Congress_Classification">Library of Congress Classification</a>, an alphanumeric identifier similar to the <a href="https://en.wikipedia.org/wiki/Dewey_Decimal_Classification">Dewey Decimal system</a>. The <code>lccn</code> is the <a href="https://en.wikipedia.org/wiki/Library_of_Congress_Control_Number">Library of Congress Control Number</a>, which is basically a serial number that’s prefixed by the year. It has nothing to do with classification by topic or shelving, but it’s the key to quickly collecting all the other data on books in the Library of Congress catalog.</p>
+<p>I shelve my books according to the Library of Congress Classification. All other things being equal, I’d prefer to use the Dewey Decimal system because that’s the system used by most of the libraries I’ve patronized.<sup id="fnref:patron"><a href="#fn:patron" rel="footnote">1</a></sup> But all other things are not equal.</p>
+<ol>
+<li>Virtually all of my technical books are in the Library of Congress.</li>
+<li>The LoC catalog is freely available online.</li>
+<li>The LoC’s records can be downloaded in a convenient format.</li>
+<li>Unfortunately, many of the LoC records do <em>not</em> include a Dewey Decimal number. </li>
+</ol>
+<p>The advantages of using the LoC Classification far outweigh my short-lived comfort. I’m getting used to my structural engineering books being in the <strong>TA600</strong> series instead of the <strong>624.1</strong> series.</p>
+<p>The Library of Congress keeps its catalog records in a few different formats. There’s the venerable <a href="https://www.loc.gov/marc/bibliographic/">MARC format</a>, which uses numbers to identify fields and letters to identify subfields. There’s MARCXML, which is a more or less direct translation of MARC into XML. Neither of these were appealing to me. But there’s also the <a href="https://www.loc.gov/standards/mods/">MODS format</a>, which uses reasonable names for the various elements. For example, here’s the MODS record for <a href="https://catalog.loc.gov/vwebv/holdingsInfo?searchId=4960&amp;recCount=25&amp;recPointer=4&amp;bibId=4242715"><em>An Introduction to Dynamics</em></a> by McGill &amp; King:</p>
+<pre><code>xml:
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;&lt;mods xmlns="http://www.loc.gov/mods/v3" xmlns:zs="http://docs.oasis-open.org/ns/search-ws/sruResponse" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="3.8" xsi:schemaLocation="http://www.loc.gov/mods/v3 http://www.loc.gov/standards/mods/v3/mods-3-8.xsd"&gt;
+  &lt;titleInfo&gt;
+    &lt;nonSort xml:space="preserve"&gt;An &lt;/nonSort&gt;
+    &lt;title&gt;introduction to dynamics&lt;/title&gt;
+  &lt;/titleInfo&gt;
+  &lt;titleInfo type="alternative"&gt;
+    &lt;title&gt;Engineering mechanics&lt;/title&gt;
+  &lt;/titleInfo&gt;
+  &lt;name type="personal" usage="primary"&gt;
+    &lt;namePart&gt;McGill, David J.,&lt;/namePart&gt;
+    &lt;namePart type="date"&gt;1939-&lt;/namePart&gt;
+  &lt;/name&gt;
+  &lt;name type="personal"&gt;
+    &lt;namePart&gt;King, Wilton W.,&lt;/namePart&gt;
+    &lt;namePart type="date"&gt;1937-&lt;/namePart&gt;
+  &lt;/name&gt;
+  &lt;typeOfResource&gt;text&lt;/typeOfResource&gt;
+  &lt;originInfo&gt;
+    &lt;place&gt;
+      &lt;placeTerm authority="marccountry" type="code"&gt;cau&lt;/placeTerm&gt;
+    &lt;/place&gt;
+    &lt;dateIssued encoding="marc"&gt;1984&lt;/dateIssued&gt;
+    &lt;issuance&gt;monographic&lt;/issuance&gt;
+    &lt;place&gt;
+      &lt;placeTerm type="text"&gt;Monterey, Calif&lt;/placeTerm&gt;
+    &lt;/place&gt;
+    &lt;agent&gt;
+      &lt;namePart&gt;Brooks/Cole Engineering Division&lt;/namePart&gt;
+    &lt;/agent&gt;
+    &lt;dateIssued&gt;c1984&lt;/dateIssued&gt;
+  &lt;/originInfo&gt;
+  &lt;language&gt;
+    &lt;languageTerm authority="iso639-2b" type="code"&gt;eng&lt;/languageTerm&gt;
+  &lt;/language&gt;
+  &lt;physicalDescription&gt;
+    &lt;form authority="marcform"&gt;print&lt;/form&gt;
+    &lt;extent&gt;xv, 608 p. : ill. (some col.) ; 25 cm.&lt;/extent&gt;
+  &lt;/physicalDescription&gt;
+  &lt;note type="statement of responsibility"&gt;David J. McGill and Wilton W. King.&lt;/note&gt;
+  &lt;note&gt;Cover title: Engineering mechanics.&lt;/note&gt;
+  &lt;note&gt;Includes index.&lt;/note&gt;
+  &lt;subject authority="lcsh"&gt;
+    &lt;topic&gt;Dynamics&lt;/topic&gt;
+  &lt;/subject&gt;
+  &lt;classification authority="lcc"&gt;TA352 .M385 1984&lt;/classification&gt;
+  &lt;classification authority="ddc" edition="19"&gt;620.1/04&lt;/classification&gt;
+  &lt;identifier type="isbn"&gt;0534029337&lt;/identifier&gt;
+  &lt;identifier type="lccn"&gt;83025283&lt;/identifier&gt;
+  &lt;recordInfo&gt;
+    &lt;descriptionStandard&gt;aacr&lt;/descriptionStandard&gt;
+    &lt;recordContentSource authority="marcorg"&gt;DLC&lt;/recordContentSource&gt;
+    &lt;recordCreationDate encoding="marc"&gt;831128&lt;/recordCreationDate&gt;
+    &lt;recordChangeDate encoding="iso8601"&gt;19840409000000.0&lt;/recordChangeDate&gt;
+    &lt;recordIdentifier&gt;4242715&lt;/recordIdentifier&gt;
+    &lt;recordOrigin&gt;Converted from MARCXML to MODS version 3.8 using MARC21slim2MODS3-8_XSLT1-0.xsl
+                (Revision 1.172 20230208)&lt;/recordOrigin&gt;
+  &lt;/recordInfo&gt;
+&lt;/mods&gt;
+</code></pre>
+<p>OK, XML isn’t as nice as JSON, but there are <a href="https://docs.python.org/3.13/library/xml.html">Python modules</a> for parsing it, and it’s relatively easy to pick out the elements I want to put in my database.</p>
+<p>And if you know a book’s LCCN, you can get its MODS record using a simple URL. The LCCN of McGill &amp; King’s book is 83025283, and the URL to download it is</p>
+<pre><code>https://lccn.loc.gov/83025283/mods
+</code></pre>
+<p>That’s <em>very</em> convenient.</p>
+<p>It does raise the question, though, of how you get the LCCN of a book. In many of my books, especially the older ones, the LCCN is printed on the copyright page. Here’s a photo of the copyright page of Timoshenko &amp; Gere’s <em>Theory of Elastic Stability</em>:</p>
+<p><img alt="Theory of Elastic Stability copyright page" class="ss" src="https://leancrew.com/all-this/images2025/20250409-Theory%20of%20Elastic%20Stability%20copyright%20page.jpg" title="Theory of Elastic Stability copyright page" width="80%"/></p>
+<p>The name of the LCCN has changed over the years, and you’ll sometimes see it like this with a dash between the year and the serial number, but it’s easy to convert it to the current canonical form.</p>
+<p>If the LCCN isn’t in the book, I use the <a href="https://catalog.loc.gov/vwebv/searchAdvanced">LoC’s Advanced Search</a> form to find it. This allows searches by title, author, ISBN (my older books don’t have ISBNs, but all the newer books do), or combinations. The record that comes up will always have the LCCN.</p>
+<p>However I manage to get the LCCN, I then run the <code>lccn2library</code> command with the LCCN as its argument. That adds the necessary entries to the <code>book</code>, <code>author</code>, and <code>book_author</code> tables and returns the <code>loc</code> catalog value. For McGill &amp; King’s book, it would work like this:</p>
+<pre><code>lccn2library 83025283
+</code></pre>
+<p>which returns</p>
+<pre><code>TA352 .M385 1984
+</code></pre>
+<p>This typically gets printed on a label that I stick on the spine of the book before shelving it.</p>
+<p>Here’s the code for <code>lccn2library</code>. It’s longer than the scripts I usually post here, but that’s because there are a lot of details that have to be handled.</p>
+<pre><code>python:
+  1:  #!/usr/bin/env python3
+  2:  
+  3:  import sys
+  4:  import re
+  5:  import sqlite3
+  6:  import requests
+  7:  from unicodedata import normalize
+  8:  import xml.etree.ElementTree as et
+  9:  from datetime import date
+ 10:  import time
+ 11:  
+ 12:  ########## Functions ##########
+ 13:  
+ 14:  def canonicalLCCN(lccn):
+ 15:    """Return an LCCN with no hyphens and the correct number of digits.
+ 16:  
+ 17:    20th century LCCNs have a 2-digit year. 21st century LCCNs have a
+ 18:    4-digit year. The serial number needs to be 6 digits. Pad with
+ 19:    zeros if necessary."""
+ 20:  
+ 21:    # All digits
+ 22:    if re.search(r'^\d+$', lccn):
+ 23:      if len(lccn) == 8 or len(lccn) == 10:
+ 24:        return lccn
+ 25:      else:
+ 26:        return lccn[:2] + f'{int(lccn[2:]):06d}'
+ 27:    # 1-3 lowercase letters followed by digits
+ 28:    elif m := re.search(r'^([a-z]{1,3})(\d+)$', lccn):
+ 29:      if len(m.group(2)) == 8 or len(m.group(2)) == 10:
+ 30:        return lccn
+ 31:      else:
+ 32:        return m.group(1) + m.group(2)[:2] + f'{int(m.group(2)[2:]):06d}'
+ 33:    # 20th century books are sometimes given with a hyphen after the year
+ 34:    elif m := re.search(r'^(\d\d)-(\d+)$', lccn):
+ 35:      return m.group(1) + f'{int(m.group(2)):06d}'
+ 36:    else:
+ 37:      raise ValueError(f'{lccn} is in an unknown form')
+ 38:  
+ 39:  def correctName(name):
+ 40:    """Return the author name without spurious trailing commas,
+ 41:    space, or periods."""
+ 42:  
+ 43:    # Regex for finding trailing periods that are not from initials
+ 44:    trailingPeriod = re.compile(r'([^A-Z])\.$')
+ 45:  
+ 46:    name = name.rstrip(', ')
+ 47:    name = trailingPeriod.sub(r'\1', name)
+ 48:    return(name)
+ 49:  
+ 50:  def dbAuthors(cur):
+ 51:    """Return a dictionary of all the authors in the database.
+ 52:    Keys are names and values are IDs."""
+ 53:  
+ 54:    res = cur.execute('select name, id from author')
+ 55:    authorList = res.fetchall()
+ 56:    return dict(authorList)
+ 57:  
+ 58:  def addAuthor(cur, name):
+ 59:    """Add a new author to the database and return the ID."""
+ 60:  
+ 61:    params = [name]
+ 62:    insertCmd = 'insert into author(name) values(?)'
+ 63:    res = cur.execute(insertCmd, params)
+ 64:    params = [name]
+ 65:    idCmd = 'select id from author where name = ?'
+ 66:    res = cur.execute(idCmd, params)
+ 67:    return res.fetchone()[0]
+ 68:  
+ 69:  def bookData(root):
+ 70:    """Return a dictionary of information about the book.
+ 71:  
+ 72:    Keys are field names and values are from the book.
+ 73:    If a field name is missing, it's given the value None."""
+ 74:  
+ 75:    # Initialize the dictionary
+ 76:    book = dict()
+ 77:  
+ 78:    # Collect the book information from the MODS XML record
+ 79:    # Use the order in the database: title, subtitle, volume,
+ 80:    # edition, publisher, published, lccn, loc
+ 81:  
+ 82:    # The default namespace for mods in XPath searches
+ 83:    ns = {'m': 'http://www.loc.gov/mods/v3'}
+ 84:  
+ 85:    # Get the title, subtitle, and part/volume
+ 86:    for t in root.findall('m:titleInfo', ns):
+ 87:      if len(t.attrib.keys()) == 0:
+ 88:        # Title
+ 89:        try:
+ 90:          starter = t.find('m:nonSort', ns).text
+ 91:        except AttributeError:
+ 92:          starter = ''
+ 93:        book['title'] = starter + t.find('m:title', ns).text.rstrip(', ')
+ 94:  
+ 95:        # Subtitle
+ 96:        try:
+ 97:          book['subtitle'] = t.find('m:subTitle', ns).text.rstrip(', ')
+ 98:        except AttributeError:
+ 99:          book['subtitle'] = None
+100:  
+101:        # Part/volume
+102:        try:
+103:          book['volume'] = t.find('m:partName', ns).find.rstrip(', ')
+104:        except AttributeError:
+105:          book['volume'] = None
+106:  
+107:    # Get the origin/publishing information
+108:    # Edition
+109:    try:
+110:      book['edition'] = root.find('m:originInfo/m:edition', ns).text
+111:    except AttributeError:
+112:      book['edition'] = None
+113:  
+114:    # Publisher
+115:    try:
+116:      book['publisher'] = root.find('m:originInfo/m:agent/m:namePart', ns).text
+117:    except AttributeError:
+118:      book['publisher'] = None
+119:  
+120:    # Date published
+121:    try:
+122:      book['published'] = root.find('m:originInfo/m:dateIssued', ns).text
+123:    except AttributeError:
+124:      book['published'] = None
+125:  
+126:    # ID numbers
+127:    # LCCN (must be present)
+128:    book['lccn'] = root.find('m:identifier[@type="lccn"]', ns).text
+129:  
+130:    # LOC classification number (must be present)
+131:    book['loc'] = root.find('m:classification[@authority="lcc"]', ns).text
+132:  
+133:    # Date added to database is today
+134:    book['added'] = date.today().strftime('%Y-%m-%d')
+135:  
+136:    return book
+137:  
+138:  def authorData(cur, root):
+139:    """Return a dictionary of authors of the book, primary first.
+140:  
+141:    The keys are the author names and values are their IDs.
+142:    Authors not already in the database are added to it."""
+143:  
+144:    # The default namespace for mods in XPath searches
+145:    ns = {'m': 'http://www.loc.gov/mods/v3'}
+146:  
+147:    # Get all the authors (primary and secondary) of the book
+148:    # The primary author goes first in the authors list
+149:    authors = []
+150:    names = root.findall('m:name', ns)
+151:    pnames = root.findall('m:name[@usage="primary"]', ns)
+152:    snames = list(set(names) - set(pnames))
+153:    pnames = [ correctName(n.find('m:namePart', ns).text) for n in pnames ]
+154:    snames = [ correctName(n.find('m:namePart', ns).text) for n in snames ]
+155:  
+156:    # Get the authors already in the database
+157:    existingAuthors = dbAuthors(cur)
+158:  
+159:    # Determine which authors are new to the database and add them.
+160:    # The primary author comes first.
+161:    authors = dict()
+162:    for n in pnames:
+163:      if n in existingAuthors.keys():
+164:        authors[n] = existingAuthors[n]
+165:      else:
+166:        newID = addAuthor(cur, n)
+167:        authors[n] = newID
+168:    for n in snames:
+169:      if n in existingAuthors.keys():
+170:        authors[n] = existingAuthors[n]
+171:      else:
+172:        newID = addAuthor(cur, n)
+173:        authors[n] = newID
+174:  
+175:    return authors
+176:  
+177:  
+178:  ########## Main program ##########
+179:  
+180:  # Connect to the database
+181:  con = sqlite3.connect('library.db')
+182:  cur = con.cursor()
+183:  
+184:  # Get the LCCN from the argument
+185:  lccn = canonicalLCCN(sys.argv[1])
+186:  
+187:  # Get and parse the MODS data for the LCCN
+188:  r = requests.get(f'https://lccn.loc.gov/{lccn}/mods')
+189:  mods = normalize('NFC', r.content.decode())
+190:  root = et.fromstring(mods)
+191:  
+192:  # Collect the book data and add it to the book table
+193:  book = bookData(root)
+194:  params = list(book.values())
+195:  insertCmd = 'insert into book(title, subtitle, volume, edition, publisher, published, lccn, loc, added) values(?, ?, ?, ?, ?, ?, ?, ?, ?);'
+196:  res = cur.execute(insertCmd, params)
+197:  params = [book["lccn"]]
+198:  idCmd = f'select id from book where lccn = ?'
+199:  res = cur.execute(idCmd, params)
+200:  bookID = res.fetchone()[0]
+201:  
+202:  # Collect the authors, adding the new ones to the author table
+203:  authors = authorData(cur, root)
+204:  
+205:  # Add entries to the book_author table
+206:  for authorID in authors.values():
+207:    params = [bookID, authorID]
+208:    insertCmd = f'insert into book_author(book_id, author_id) values(?, ?)'
+209:    res = cur.execute(insertCmd, params)
+210:  
+211:  # Commit and close the database
+212:  con.commit()
+213:  con.close()
+214:  
+215:  # Print the LOC classification number
+216:  print(book['loc'])
+</code></pre>
+<p>The script starts with a couple of utility functions, <code>canonicalLCCN</code> and <code>correctName</code>. The former (Lines 12–37) takes an LCCN as its argument and returns it in the form needed in the URL we talked about above. For 20th century books, that form is a two-digit year followed by a six-digit serial number. For 21st century books, it’s a four-digit year followed by a six-digit serial number. In both cases, the serial number part is padded with zeros to make it six digits long. Hyphens are removed. Oh, and there can sometimes be 1–3 lowercase letters in front of the digits.</p>
+<p><code>correctName</code> (Lines 39–48) is necessary because I noticed that sometimes the authors’ names are followed by spurious commas or periods. You can see trailing commas in both authors’ names in the MODS file shown above. I think these extra bits of punctuation made some sense in the MARC format, but I don’t want them in my database.</p>
+<p>Often, the book I’m adding to the database has one or more authors that are already entered in the <code>author</code> table. I don’t want them entered again, so I use the <code>dbAuthors</code> function (Lines 50–56) to query the database for all the authors and put them in a dictionary. The dictionary may seem backwards—its keys are the names and the values are the IDs—but that makes it easy to look up an author’s ID by their name.</p>
+<p>The <code>addAuthor</code> function (Lines 58–67) does what you’d expect: it executes an SQL command to add a new author to the <code>author</code> table. The return value is the author’s ID.</p>
+<p>The <code>bookData</code> function (Lines 69–136) is by far the longest function. It starts at the root of the XML element tree and pulls out all of the elements needed for the <code>book</code> table entry. It returns a dictionary in which the keys are the <code>book</code> field names (other than <code>id</code>, which will be automatically generated), and the values are the corresponding entries in the MODS file. If there is no entry for, say, a subtitle or volume number, the dictionary is given a <code>None</code> value for that key.</p>
+<p>I’m using the <a href="https://docs.python.org/3.13/library/xml.etree.elementtree.html"><code>ElementTree</code> module</a> for parsing and searching the MODS, and its <code>find</code> and <code>findall</code> functions want the namespace of the elements they’re looking for when the XML data has more than one namespace. As you can see in the first line of the example above, there are three namespaces in MODS, the first of which is</p>
+<pre><code>http://www.loc.gov/mods/v3
+</code></pre>
+<p>That’s the reason for the <code>ns</code> dictionary defined on Line 83 and the <code>m:</code> prefix in all the element names.</p>
+<p>Searching for the <code>book</code> fields takes up many lines of code, partly because MODS has nested data and partly because some of the fields may not be present. That’s why there are several <code>try/except</code> blocks.</p>
+<p>One last thing: the <code>added</code> field (Line 128) comes from the date on which <code>lccn2library</code> is run. It has nothing to do with the MODS data.</p>
+<p>The last function is <code>authorData</code> (Lines 138–175). It pulls the names of the authors from the MODS data, distinguishing between the primary author and the others. It then uses <code>dbAuthors</code> (Line 151) to figure out which of this book’s authors are already in the database. Those that <em>aren’t</em> in the database are added to it using the <code>addAuthor</code> function described above. A dictionary of all the book’s authors is returned. As with <code>dbAuthors</code>, the keys are the author names and the values are the author IDs. The primary author comes first in the dictionary.<sup id="fnref:order"><a href="#fn:order" rel="footnote">2</a></sup></p>
+<p>The main program starts on Line 181 by connecting to the database and setting up a “cursor” for executing commands. The LCCN argument is put in canonical form (Line 185), which is then used with the <a href="https://docs.python-requests.org/en/latest/index.html"><code>requests</code> library</a> to download the MODS data.</p>
+<p>Before parsing the XML, I <a href="https://docs.python.org/3/library/unicodedata.html"><code>normalize</code></a> the Unicode data into the <code>NFC</code> format on Line 189. This means that something like <code>é</code> is made into a single character, rather than an <code>e</code> followed by a combining acute accent character. I did this because some utilities I use to format the results of database queries don’t like combining characters.</p>
+<p>With the root of the MODS element tree defined in Line 190, the script then calls <code>bookData</code> to get the dictionary of book info. That is then <code>insert</code>ed into the <code>book</code> table on Lines 194–196 using SQL command execution with parameters. The ID of the newly added book—which was automatically generated by the <code>insert</code> command—is then gathered from the database and put in the <code>bookID</code> variable in Lines 197–200.</p>
+<p>The authors are added to the <code>author</code> table by calling <code>authorData</code> on Line 203. The dictionary of author names and IDs is saved in the <code>authors</code> variable.</p>
+<p>The entries in the <code>book_author</code> table are <code>insert</code>ed in Lines 206–209 using the <code>bookID</code> and <code>authors</code> values.</p>
+<p>With all the table insertions done, the changes are committed and the database connection closed in Lines 212-213. The <code>loc</code> field for the book is printed out by Line 216.</p>
+<p>Phew!</p>
+<p>As you might imagine, I didn’t run <code>lccn2library</code> by hand hundreds of times when I was initially populating the database. No, I made files with lists of LCCNs, one per line, and ran commands like</p>
+<pre><code>xargs -n 1 lccn2library &lt; lccn-list.txt
+</code></pre>
+<p>Giving the <code>-n 1</code> option to <a href="https://leancrew.com/all-this/man/man1/xargs.html"><code>xargs</code></a> insures that <code>lccn2library</code> will consume only one argument each time it’s run.</p>
+<p>I typically did this in chunks of 20-50 LCCNs, mainly because every time I thought I finally had <code>lccn2library</code> debugged, some new MODS input would reveal an error. I feel certain there are still bugs in it, but none have turned up in a while.</p>
+<p>There are currently about 500 books in the database, and I think I’ve cleaned out every nook and cranny in the house where books might be hiding. Of course, books still somehow show up when I visit used book stores or (this is the most dangerous) <a href="https://www.abebooks.com/">AbeBooks</a>.</p>
+<p><img alt="Foppl books at AbeBooks" class="ss" src="https://leancrew.com/all-this/images2025/20250411-Foppl%20books%20at%20AbeBooks.png" title="Foppl books at AbeBooks" width="100%"/></p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:patron">
+<p>Shout out to librarians for keeping the word “patron” alive and kicking. <a href="#fnref:patron" rev="footnote">↩</a></p>
+</li>
+<li id="fn:order">
+<p>For the last several point releases of Python, dictionaries maintain the order in which they were built. Before that, you had to use the <a href="https://docs.python.org/3/library/collections.html#collections.OrderedDict"><code>OrderedDict</code> class</a>. The value of putting the primary author first is it insures that scripts like <code>bytitle</code> and <code>byauthor</code>–discussed in my <a href="https://leancrew.com/all-this/2025/03/sql-help-from-chatgpt/">earlier</a> <a href="https://leancrew.com/all-this/2025/03/sql-placeholders-and-python/">posts</a>—will return the list of authors with the primary author first. That’s how I think of the books. It’s McGill &amp; King, not King &amp; McGill. <a href="#fnref:order" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

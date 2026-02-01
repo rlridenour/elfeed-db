@@ -1,0 +1,61 @@
+<p>Emacs’s automatic window management is a bit arcane, but <a href="https://www.masteringemacs.org/article/demystifying-emacs-window-manager">Mickey Petersen’s excellent article “Demystifying Emacs’s Window Manager”</a> is full of inspiring snippets.</p>
+
+<p>A couple of months ago, I made some tweaks. One is to dedicate a tab to “Org Agenda”. (That’s a <code>tab-bar-mode</code> tab, not a <code>tab-line-mode</code> tab.)</p>
+
+<p>The code for the Org Agenda is this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'display-buffer-alist</span>
+             <span class="o">'</span><span class="p">(</span><span class="s">"\\*Org Agenda\\*"</span>
+               <span class="p">(</span><span class="nv">display-buffer-in-tab</span> <span class="nv">display-buffer-reuse-mode-window</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">ignore-current-tab</span> <span class="o">.</span> <span class="no">t</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">tab-name</span> <span class="o">.</span> <span class="s">"Org Files"</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">window-height</span> <span class="o">.</span> <span class="mf">.8</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">dedicated</span> <span class="o">.</span> <span class="no">t</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">inhibit-same-window</span> <span class="o">.</span> <span class="no">nil</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>This makes it so that the <code>*Org Agenda*</code> buffer is being displayed in a tab called “Org Files”. If I’m in another tab, this tab is being selected first, and the agenda is displayed inside, so it’s not spawning tons of tabs.</p>
+
+<p>The <code>(dedicated . t)</code> attribute ensures that the agenda itself tries to stay visible. When I follow links to TODOs, for example, this makes it even more likely that the agenda will stay on screen. And I can’t accidentally visit another buffer in its window. I need to split the window first, or, more likely in my case, create a new tab or re-use an existing one.</p>
+
+<p>That’s all fine and dandy.</p>
+
+<p>But I also added something else – which I like quite a bit less!</p>
+
+<p>The following rule is displaying my <code>.org</code> files in the same tab, but always splitting the window to the right. That was intended to make sure where my org-agenda-managed files would be displayed: to the right, so the agenda itself in turn stays visible to the left in its dedicated window split.</p>
+
+<p>But this also applies to manual buffer switching. That’s where I’m most dissatisfied.</p>
+
+<p>If I <kbd>C-x b</kbd> switch to an org buffer that is visiting a file from my agenda, the “Org Files” tab will be activated, a new split (to the right) will be created, and there, the buffer is displayed.</p>
+
+<p>If I switch to another such buffer, a new split is created – so I have the agenda at 50% width, a buffer to the right at 25%, and then another to its right at 25%. That’s very useless because 25% width doesn’t make for a good reading experience.</p>
+
+<p>I end up switching to a buffer and then remove all other windows to focus on it. That’s not terrible, but I now believe this new default isn’t that great at all.</p>
+
+<p>Nevertheless, here’s the implementation:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/display-buffer-org-agenda-managed-p</span> <span class="p">(</span><span class="nv">buffer-name</span> <span class="nv">action</span><span class="p">)</span>
+  <span class="s">"Determine whether BUFFER-NAME is an org-agenda managed buffer."</span>
+  <span class="p">(</span><span class="nv">with-current-buffer</span> <span class="nv">buffer-name</span>
+    <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nv">derived-mode-p</span> <span class="ss">'org-mode</span><span class="p">)</span>
+         <span class="p">(</span><span class="nb">member</span> <span class="p">(</span><span class="nv">buffer-file-name</span><span class="p">)</span> <span class="p">(</span><span class="nv">org-agenda-files</span><span class="p">)))))</span>
+
+<span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'display-buffer-alist</span>
+             <span class="o">'</span><span class="p">(</span><span class="nv">ct/display-buffer-org-agenda-managed-p</span>
+               <span class="p">(</span><span class="nv">display-buffer-in-tab</span> <span class="nv">display-buffer-in-direction</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">ignore-current-tab</span> <span class="o">.</span> <span class="no">t</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">tab-name</span> <span class="o">.</span> <span class="s">"Org Files"</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">direction</span> <span class="o">.</span> <span class="nv">right</span><span class="p">)</span>
+               <span class="p">(</span><span class="nv">window-height</span> <span class="o">.</span> <span class="mf">.6</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>Just now I notice the <code>(window-height . .6)</code> setting, so I must’ve experimented with vertical splits in the past as well :) Since <code>(direction . right)</code> is there, the vertical split apparently wasn’t great, either. (I don’t even remember.)</p>
+
+<p>I felt clever for coming up with <code>ct/display-buffer-org-agenda-managed-p</code> to determine if a buffer’s file was part of the agenda.</p>
+
+<p>But we should kill our darlings, right?</p>
+
+<p>I’ll come back after some more experimentation.</p>
+
+<p>In the meantime: do you have a setting like this you’d like to share?</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

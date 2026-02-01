@@ -1,0 +1,214 @@
+<div class="update" id="orgf3812e9">
+<ul class="org-ul">
+<li><span class="timestamp-wrapper"><span class="timestamp">[2025-07-14 Mon]</span></span>: Naturally, <a href="https://emacsninja.com/posts/cve-2025-1244-from-emacs-url-handler-to-rce.html">do this only with text you trust</a>. =)</li>
+<li><span class="timestamp-wrapper"><span class="timestamp">[2025-07-12 Sat]</span></span>: Use cl-pushnew instead of add-to-list, correct <code>browse-url-browser-browser-function</code> to <code>browse-url-browser-function</code>, and add an example for eww.</li>
+</ul>
+
+</div>
+
+<p>
+On IRC, someone asked for help configuring Emacs
+to have a keyboard shortcut that would either open
+the URL at point or search the web for the region
+or the word at point. I thought this was a great
+idea that I would find pretty handy too.
+</p>
+
+<p>
+Let's write the interactive function that
+I'll call from my keyboard shortcut.
+</p>
+
+<ul class="org-ul">
+<li>First, let's check if there's an active region.
+If there isn't, let's assume we're looking at
+the thing at point (could be a URL, an e-mail
+address, a filename, or a word).</li>
+<li>If there are links, open them.</li>
+<li>Otherwise, if there are e-mail addresses,
+compose a message with all those email addresses
+in the "To" header.</li>
+<li>Are we at a filename? Let's open that.</li>
+<li>Otherwise, do a web search. Let's make that
+configurable. Most people will want to use a web
+browser to search their favorite search engine,
+such as DuckDuckGo or Google, so we'll make that
+the default.</li>
+</ul>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defcustom</span> <span class="org-variable-name">my-search-web-handler</span> <span class="org-string">"https://duckduckgo.com/html/?q="</span>
+  <span class="org-doc">"How to search. Could be a string that accepts the search query at the end (URL-encoded)</span>
+<span class="org-doc">or a function that accepts the text (unencoded)."</span>
+  <span class="org-builtin">:type</span> <span class="org-highlight-quoted-quote">'</span>(choice (string <span class="org-builtin">:tag</span> <span class="org-string">"Prefix URL to search engine."</span>)
+                 (<span class="org-keyword">function</span> <span class="org-builtin">:tag</span> <span class="org-string">"Handler function."</span>)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-open-url-or-search-web</span> (<span class="org-type">&amp;optional</span> text-or-url)
+  (<span class="org-keyword">interactive</span> (list (<span class="org-keyword">if</span> (region-active-p)
+                         (buffer-substring (region-beginning) (region-end))
+                       (<span class="org-keyword">or</span>
+                        (<span class="org-keyword">and</span> (derived-mode-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-mode</span>)
+                             (<span class="org-keyword">let</span> ((elem (org-element-context)))
+                               (<span class="org-keyword">and</span> (eq (org-element-type elem) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">link</span>)
+                                    (buffer-substring-no-properties
+                                     (org-element-begin elem)
+                                     (org-element-end elem)))))
+                        (thing-at-point <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">url</span>)
+                        (thing-at-point <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">email</span>)
+                        (thing-at-point <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">filename</span>)
+                        (thing-at-point <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">word</span>)))))
+    (<span class="org-keyword">catch</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">done</span>
+      (<span class="org-keyword">let</span> (links)
+        (<span class="org-keyword">with-temp-buffer</span>
+          (insert text-or-url)
+          (org-mode)
+          (goto-char (point-min))
+          <span class="org-comment-delimiter">;; </span><span class="org-comment">We add all the links to a list first because following them may change the point</span>
+          (<span class="org-keyword">while</span> (re-search-forward org-any-link-re nil t)
+            (<span class="org-keyword">cl-pushnew</span> (match-string-no-properties 0) links))
+          (<span class="org-keyword">when</span> links
+            (<span class="org-keyword">dolist</span> (link links)
+              (org-link-open-from-string link))
+            (<span class="org-keyword">throw</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">done</span> links))
+          <span class="org-comment-delimiter">;; </span><span class="org-comment">Try emails</span>
+          (<span class="org-keyword">while</span> (re-search-forward thing-at-point-email-regexp nil t)
+            (<span class="org-keyword">cl-pushnew</span> (match-string-no-properties 0) links))
+          (<span class="org-keyword">when</span> links
+            (compose-mail (string-join links <span class="org-string">", "</span>))
+            (<span class="org-keyword">throw</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">done</span> links)))
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Open filename if specified, or do a web search</span>
+        (<span class="org-keyword">cond</span>
+         ((ffap-guesser) (find-file-at-point))
+         ((functionp my-search-web-handler)
+          (funcall my-search-web-handler text-or-url))
+         ((stringp my-search-web-handler)
+          (browse-url (concat my-search-web-handler (url-hexify-string text-or-url))))))))
+</code></pre>
+</div>
+
+
+<p>
+I've been really liking how <a href="https://sachachua.com/blog/2024/10/yay-emacs-inserting-links-with-consult-omni/">consult-omni lets me do quick searches as I type from within Emacs</a>,
+which is actually really cool. I've even extended
+it to search my bookmarks as well, so that I can
+find things using my words for them and not trust
+the internet's words for them. So if I wanted to
+search using consult-omni, this is how I would do
+it instead.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setopt</span> my-search-web-handler <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult-omni</span>)
+</code></pre>
+</div>
+
+
+<p>
+Now I can bind that to <code>C-c o</code> in my config
+with this bit of Emacs Lisp.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(keymap-global-set <span class="org-string">"C-c o"</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-open-url-or-search-web</span>)
+</code></pre>
+</div>
+
+
+<p>
+Here's a quick demo:
+</p>
+
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/07/emacs-open-urls-or-search-the-web-plus-browse-url-handlers/2025-07-11_17.07.10.webm" type="video/webm"><a href="https://sachachua.com/blog/2025/07/emacs-open-urls-or-search-the-web-plus-browse-url-handlers/2025-07-11_17.07.10.webm">Download the video</a></video><figcaption><div>Screencast showing it in use</div></figcaption></figure>
+<p></p>
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;">
+                  <summary><strong>Play by play</strong></summary>
+<ol class="org-ol">
+<li>Opening a URL: <a href="https://example.com">https://example.com</a></li>
+<li>Opening several URLs in a region:
+<ul class="org-ul">
+<li><a href="https://example.com">https://example.com</a></li>
+<li>Other stuff can go here</li>
+<li><a href="https://emacsconf.org">https://emacsconf.org</a></li>
+</ul></li>
+<li>Opening several e-mail addresses:
+<ul class="org-ul">
+<li>test@example.com</li>
+<li>another.test@example.com</li>
+<li>maybe also yet.another.test@example.com</li>
+</ul></li>
+<li>A filename
+<ul class="org-ul">
+<li>~/.config/emacs/init.el</li>
+</ul></li>
+<li><span title="(setopt my-search-web-handler &quot;https://duckduckgo.com/html?q=&quot;)">With DuckDuckGo handling searches</span>: <code>(setopt my-search-web-handler "https://duckduckgo.com/html?q=")</code>
+<ul class="org-ul">
+<li>antidisestablishmentarianism</li>
+</ul></li>
+<li><span title="(setopt my-search-web-handler #'consult-omni)">With consult-omni handling searches</span>: <code>(setopt my-search-web-handler #'consult-omni)</code>
+<ul class="org-ul">
+<li>antidisestablishmentarianism</li>
+</ul></li>
+</ol>
+
+
+</details>
+
+<p>
+Depending on the kind of URL, I might want to look
+at it in different browsers. For example, some
+websites like <a href="https://emacswiki.org">https://emacswiki.org</a> work perfectly
+fine without JavaScript, so opening them in <a href="https://www.gnu.org/software/emacs/manual/html_mono/eww.html">EWW</a>
+(the Emacs Web Wowser) is great. Then it's right
+there within Emacs for easy copying, searching,
+etc. Some websites are a little buggy when run in
+anything other than Chromium. For example,
+<a href="https://mailchimp.com/">MailChimp</a> and <a href="https://demo.bigbluebutton.org/">BigBlueButton</a> (which is the
+<a href="https://bbb.emacsverse.org">webconference server we use for EmacsConf</a>) both
+behave a bit better under <a href="https://www.google.com/chrome/">Google Chrome</a>. There are
+some URLs I want to ignore because they don't work
+for me or they tend to be too paywalled, like
+permalink.gmane.org and medium.com. I want to open
+Mastodon URLs in <a href="https://codeberg.org/martianh/mastodon.el">mastodon.el</a>. I want to open the
+rest of the URLs in Firefox, which is my current
+default browser.
+</p>
+
+<p>
+To change the way Emacs opens URLs, you can
+customize <code>browse-url-browser-function</code> and
+<code>browse-url-handlers</code>. For example, to set up the
+behaviour I described, I can use:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setopt</span> browse-url-handlers
+        <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"https?://?medium\\.com"</span> . ignore)
+          (<span class="org-string">"https?://[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">/]+/@[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">/]+/.*"</span> . mastodon-url-lookup)
+          (<span class="org-string">"https?://mailchimp\\.com"</span> . browse-url-chrome)
+          (<span class="org-string">"https?://bbb\\.emacsverse\\.org"</span> . browse-url-chrome)
+          (<span class="org-string">"https?://emacswiki.org"</span> . eww)))
+(<span class="org-keyword">setopt</span> browse-url-browser-function <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">browse-url-firefox</span>)
+</code></pre>
+</div>
+
+
+<p>
+If you wanted to use EWW as your default web
+browser, you could use <code>(setopt browse-url-browser-function 'eww)</code> instead.
+</p>
+
+<p>
+Could be a fun tweak. I wonder if something like
+this might be handy for other people too!
+</p>
+<div><a href="https://sachachua.com/blog/2025/07/emacs-open-urls-or-search-the-web-plus-browse-url-handlers/index.org">View org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F07%2Femacs-open-urls-or-search-the-web-plus-browse-url-handlers%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

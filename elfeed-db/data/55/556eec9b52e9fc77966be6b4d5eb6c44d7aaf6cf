@@ -1,0 +1,115 @@
+<p><strong>Summary: </strong>
+Seeking inspiration from what I&rsquo;ve already gathered, I wrote an #Emacs function to randomly render quotes I&rsquo;ve collected.
+</p>
+<p>I’ve been collecting quotes for awhile. You can see all of them on <a href="https://takeonrules.com/site-map/epigraphs">my Epigraphs
+page</a>. And <time datetime="2025-01-29" title="2025-01-29">earlier today</time>, I found myself wanting to find inspiration from those
+epigraphs.</p>
+<p>So I wrote a function to randomly pick an epigraph and render it in an Emacs
+buffer.</p>
+<p>I chose to add two keys bindings to that buffer:</p>
+<ul>
+<li><kbd>g</kbd>: Refresh and get a new epigraph.</li>
+<li><kbd>q</kbd>: Bury the buffer.</li>
+</ul>
+<p>The refresh is naive, re-querying the corpus. In a later implementation, I
+might cache the values and re-use them on a refresh. But, for now, what I have
+works well enough.</p>
+<p>Below is the <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-EMACS">&#128214;</a></small>
+code, and <a href="https://github.com/jeremyf/dotemacs/blob/fb0c5a519f2fcc62f91b8bec3660791925e1fba1/emacs.d/personal.el#L108-L228">here’s a link to the Github section of code</a>:</p>
+<pre><code class="language-emacs-lisp">(defun jf/epigraph/random ()
+&quot;Open a random epigraph for reading and review.&quot;
+(interactive)
+(let* ((use-hard-newlines
+t)
+(epigraph
+(car (jf/epigraphs/all-randomized)))
+(text
+(plist-get epigraph :text))
+(author
+(plist-get epigraph :author))
+(work
+(plist-get epigraph :work))
+(content
+;; TODO: Put this in a buffer
+(format &quot;%s%s&quot;
+text
+(cond
+((and (s-present? author) (s-present? work))
+(format &quot;\n―%s, «%s»&quot; author work))
+((s-present? author)
+(format &quot;\n―%s&quot; author))
+((s-present? work)
+(format &quot;\n―«%s»&quot; work))
+(t &quot;&quot;))))
+(buffer
+(get-buffer-create &quot;*epigraph*&quot;)))
+(with-current-buffer buffer
+(erase-buffer)
+(insert content)
+(text-mode)
+(jf/epigraph-mode t)
+(pop-to-buffer buffer
+`((display-buffer-in-side-window)
+(side . bottom)
+(window-width 72)
+(window-parameters
+(tab-line-format . none)
+(no-delete-other-windows . t)))))))
+(defvar jf/epigraph-mode-map
+(let ((map
+(make-sparse-keymap)))
+(define-key map (kbd &quot;q&quot;) #'bury-buffer)
+(define-key map (kbd &quot;g&quot;) #'jf/epigraph/random)
+map)
+&quot;Map for `jf/epigraph-mode'.&quot;)
+(define-minor-mode jf/epigraph-mode
+&quot;Defined for rendering random epigraph.&quot;
+:init-value nil
+:global nil
+:keymap jf/epigraph-mode-map)
+(defun jf/epigraphs/all-randomized ()
+(save-excursion
+(with-current-buffer
+(find-file-noselect jf/filename/bibliography)
+(elfeed--shuffle
+(org-element-map
+(org-element-parse-buffer)
+'(quote-block verse-block)
+(lambda (el)
+;; Skip un-named blocks as we can’t link to them.
+(when-let* ((id
+(org-element-property :name el)))
+(let* ((lineage
+(org-element-lineage el))
+(h-node
+(car
+(seq-filter
+(lambda (el)
+(and
+(eq (org-element-type el) 'headline)
+(= (org-element-property :level el) 2)))
+lineage)))
+(people?
+(member &quot;people&quot;
+(org-element-property :tags h-node))))
+(list
+:id id
+:type (org-element-type el)
+:work (if people?
+&quot;&quot;
+(car
+(org-element-property
+:title h-node)))
+:author
+(if people?
+(car
+(org-element-property :title h-node))
+(org-entry-get h-node &quot;AUTHOR&quot;))
+:text
+(buffer-substring-no-properties
+(org-element-property
+:contents-begin el)
+(org-element-property
+:contents-end el)))))))))))
+</code></pre>
+<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Seeking%20Inspiration%20from%20the%20Notes%20I%27ve%20Taken">Reply by Email</a></p>

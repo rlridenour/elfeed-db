@@ -1,0 +1,38 @@
+<p>I have been using <strong><code>C-RET</code></strong> or <strong><code>W</code></strong> in <code>dired</code> for a while now to open a file externally via <code>browse-url-of-dired-file</code>.</p>
+<figure class="emacs-img"><img src="https://emacs.dyerdwelling.family/ox-hugo/20230529112814-emacs--Opening-Files-Externally-Natively.jpg">
+</figure>
+
+<p>I was never quite sure how that worked but it just worked, however now it doesn&rsquo;t work so I need to do something about it.</p>
+<p>I suspect that the reason it doesn&rsquo;t work now is that I have been hopping around different window managers / compositors.  My tried and tested workhorse environment is generally kde plasma on arch where the <code>browse-url-of-dired-file</code> was working just fine, but now I have switched to <strong>sway / wayland</strong> or <strong>i3 / x11</strong> this functionality seems to be broken.</p>
+<p>I have an idea it&rsquo;s probably related to the window manager and the way each one handles default applications through the XDG portal.  I think I need to find a more agnostic opening method.</p>
+<p>My first thought was the <strong><code>openwith</code></strong> package but this had the side effect of opening every single file externally (especially when coming back from a <code>desktop-save</code>) which is not something I find desirable.  I prefer the default dired mechanism for opening a file in emacs itself and I want an explicit mechanism to push a file to a native external application.</p>
+<p>My next thought was <code>dired-do-shell-command</code> which can be activated by <code>!</code> or <code>X</code> in <code>dired</code>.  This brings up a default opening application called <code>xloadimage</code> which I&rsquo;m assuming runs through possibly an XDG default application opening mechanism linked to the running window manager.  Well I don&rsquo;t really want to set a default application for each window manager / environment so I&rsquo;m not sure that this is right approach either.</p>
+<p>My next thought was how does <code>dired</code> determine which opening mechanism to use, I mean where does <code>xloadimage</code> come from?</p>
+<p>Well the answer is twofold, firstly <code>dired-guess-shell-alist-default</code> and secondly <code>dired-guess-shell-alist-user</code></p>
+<p>The first list includes many lines in an alist format, for example:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(<span style="color:#e6db74">&#34;\\.jpe?g\\&#39;&#34;</span> <span style="color:#e6db74">&#34;xloadimage&#34;</span>)
+</span></span></code></pre></div><p>I don&rsquo;t really want to touch the default settings so lets have a look at the user variant which is described as follows:</p>
+<blockquote>
+<p>User-defined alist of rules for suggested commands.
+These rules take precedence over the predefined rules in the variable
+‘dired-guess-shell-alist-default’ (to which they are prepended).</p>
+</blockquote>
+<p>I therefore appended the prepended list! (even though it was empty anyway)</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(setq dired-guess-shell-alist-user
+</span></span><span style="display:flex;"><span>  (<span style="color:#a6e22e">append</span> <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;\\.\\(jpg\\|jpeg\\|png\\|gif\\|bmp\\)$&#34;</span> <span style="color:#e6db74">&#34;gwenview&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;\\.\\(mp4\\|mkv\\|avi\\|mov\\|wmv\\|flv\\|mpg\\)$&#34;</span> <span style="color:#e6db74">&#34;mpv&#34;</span>))
+</span></span><span style="display:flex;"><span>    dired-guess-shell-alist-user))
+</span></span></code></pre></div><p>Now to the testing stage&hellip;</p>
+<hr>
+<p>I seem to have an intermittent problem when running <code>! (dired-do-shell-command)</code> in that the file isn&rsquo;t always opened in gwenview, however mpv opens every single time!.  I literally have no idea what is going on here but <code>&amp; (dired-do-async-shell-command)</code> opens every time! so lets use that then, it might be better to run the file opening asynchronously anyway.</p>
+<p>However, another issue presents itself.  By default the async shell window always opens a new buffer / window and is polluting my emacs window layout!!!!.  Well certainly I can&rsquo;t have that so I decide to use the <code>display-buffer-alist</code> as follows:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defvar go-away-repl-regexp
+</span></span><span style="display:flex;"><span>  (rx bos <span style="color:#e6db74">&#34;*&#34;</span> (or <span style="color:#e6db74">&#34;Async&#34;</span>)
+</span></span><span style="display:flex;"><span>    (zero-or-more nonl))
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Regexp for matching windows to disappear&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(add-to-list <span style="color:#e6db74">&#39;display-buffer-alist</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">`</span>(<span style="color:#f92672">,</span>go-away-repl-regexp
+</span></span><span style="display:flex;"><span>     display-buffer-no-window
+</span></span><span style="display:flex;"><span>     (inhibit-same-window <span style="color:#f92672">.</span> <span style="color:#66d9ef">t</span>)))
+</span></span></code></pre></div><p>Done.</p>

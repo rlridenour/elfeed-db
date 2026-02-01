@@ -1,0 +1,221 @@
+<p>
+One of the things I like about blogging from Org
+Mode in Emacs is that it's easy to add properties
+to the section that I'm working on and then use
+those property values elsewhere. For example, I've
+modified Emacs to simplify <a href="https://sachachua.com/blog/2025/03/mastodon-el-copy-toot-url-after-posting-also-copying-just-this-post-with-11ty/#:~:text=If%20it%20has%20and%20I%20don't%20have%20a%20Mastodon%20toot%20field%20yet%2C%20maybe%20I%20can%20automatically%20set%20that%20property%2C%20assuming%20I%20end%20up%20back%20in%20the%20Org%20Mode%20file%20I%20started%20it%20from.">tooting a link to my
+blog post</a> and <a href="https://sachachua.com/blog/2025/03/mastodon-el-copy-toot-url-after-posting-also-copying-just-this-post-with-11ty/#:~:text=If%20it%20has%20and%20I%20don't%20have%20a%20Mastodon%20toot%20field%20yet%2C%20maybe%20I%20can%20automatically%20set%20that%20property%2C%20assuming%20I%20end%20up%20back%20in%20the%20Org%20Mode%20file%20I%20started%20it%20from.">saving the Mastodon status URL</a> in
+the <code>EXPORT_MASTODON</code> property. Then I can use
+that in my <a href="https://www.11ty.dev/">11ty</a> static site generation process to
+include a link to the Mastodon thread as a comment
+option.
+</p>
+
+<p>
+First, I need to export the property and include
+it in the front matter. I use <a href="https://www.11ty.dev/docs/data-template-dir/">.11tydata.json</a> files
+to store the details for each blog post. I
+modified <a href="https://github.com/sachac/ox-11ty/blob/master/ox-11ty.el">ox-11ty.el</a> so that I could specify
+functions to change the front matter
+(<code>org-11ty-front-matter-functions</code>,
+<code>org-11ty&#45;&#45;front-matter</code>):
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">org-11ty-front-matter-functions</span> nil
+  <span class="org-doc">"Functions to call with the current front matter plist and info."</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">org-11ty&#45;&#45;front-matter</span> (info)
+  <span class="org-doc">"Return front matter for INFO."</span>
+  (<span class="org-keyword">let*</span> ((date (plist-get info <span class="org-builtin">:date</span>))
+         (title (plist-get info <span class="org-builtin">:title</span>))
+         (modified (plist-get info <span class="org-builtin">:modified</span>))
+         (permalink (plist-get info <span class="org-builtin">:permalink</span>))
+         (categories (plist-get info <span class="org-builtin">:categories</span>))
+         (collections (plist-get info <span class="org-builtin">:collections</span>))
+         (extra (<span class="org-keyword">if</span> (plist-get info <span class="org-builtin">:extra</span>) (json-parse-string
+                                             (plist-get info <span class="org-builtin">:extra</span>)
+                                             <span class="org-builtin">:object-type</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">plist</span>))))
+    (seq-reduce
+     (<span class="org-keyword">lambda</span> (prev val)
+       (funcall val prev info))
+     org-11ty-front-matter-functions
+     (append
+      extra
+      (list <span class="org-builtin">:permalink</span> permalink
+            <span class="org-builtin">:date</span> (<span class="org-keyword">if</span> (listp date) (car date) date)
+            <span class="org-builtin">:modified</span> (<span class="org-keyword">if</span> (listp modified) (car modified) modified)
+            <span class="org-builtin">:title</span> (<span class="org-keyword">if</span> (listp title) (car title) title)
+            <span class="org-builtin">:categories</span> (<span class="org-keyword">if</span> (stringp categories) (split-string categories) categories)
+            <span class="org-builtin">:tags</span> (<span class="org-keyword">if</span> (stringp collections) (split-string collections) collections))))))
+</pre>
+</div>
+
+
+<p>
+Then I added <a href="https://sachachua.com/dotemacs#org-mode-publishing-11ty-static-site-generation-include-mastodon-field-in-front-matter">the <code>EXPORT_MASTODON</code> Org property</a> as
+part of the front matter. This took a little
+figuring out because I needed to pass it as one of
+<code>org-export-backend-options</code>, where the parameter
+is defined as <code>MASTODON</code> but the actual property
+needs to be called <code>EXPORT_MASTODON</code>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-11ty-add-mastodon-to-front-matter</span> (front-matter info)
+  (plist-put front-matter <span class="org-builtin">:mastodon</span> (plist-get info <span class="org-builtin">:mastodon</span>)))
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">ox-11ty</span>
+  (<span class="org-keyword">cl-pushnew</span>
+   <span class="org-highlight-quoted-quote">'</span>(<span class="org-builtin">:mastodon</span> <span class="org-string">"MASTODON"</span> nil nil)
+   (org-export-backend-options (org-export-get-backend <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">11ty</span>)))
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-11ty-front-matter-functions</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-org-11ty-add-mastodon-to-front-matter</span>))
+</pre>
+</div>
+
+
+<p>
+Then I added the Mastodon field as an option to my
+<a href="https://github.com/sachac/eleventy-blog-setup/blob/master/_includes/shortcodes/comments.cjs">comments.cjs</a> shortcode. This was a little tricky
+because I'm not sure I'm passing the data
+correctly to the shortcode (sometimes it ends up
+as item.data, sometimes it's item.data.data,
+&#x2026;?), but with <code>?.</code>, I can just throw all the
+possibilities in there and it'll eventually find
+the right one.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><span class="org-keyword">const</span> <span class="org-variable-name">pluginRss</span> = require(<span class="org-string">'@11ty/eleventy-plugin-rss'</span>);
+module.exports = <span class="org-keyword">function</span>(<span class="org-variable-name">eleventyConfig</span>) {
+  <span class="org-keyword">function</span> <span class="org-function-name">getCommentChoices</span>(<span class="org-variable-name">data</span>, <span class="org-variable-name">ref</span>) {
+    <span class="org-keyword">const</span> <span class="org-variable-name">mastodonUrl</span> = data.mastodon || data.page?.mastodon || data.data?.mastodon;
+    <span class="org-keyword">const</span> <span class="org-variable-name">mastodon</span> = mastodonUrl &amp;&amp; <span class="org-string">`&lt;a href="${mastodonUrl}" target="_blank" rel="noopener noreferrer"&gt;comment on Mastodon&lt;/a&gt;`</span>;
+    <span class="org-keyword">const</span> <span class="org-variable-name">url</span> = ref.absoluteUrl(data.url || data.permalink || data.data?.url || data.data?.permalink, data.metadata?.url || data.data?.metadata?.url);
+    <span class="org-keyword">const</span> <span class="org-variable-name">subject</span> = encodeURIComponent(<span class="org-string">'Comment on '</span> + url);
+    <span class="org-keyword">const</span> <span class="org-variable-name">body</span> = encodeURIComponent(<span class="org-string">"Name you want to be credited by (if any): \nMessage: \nCan I share your comment so other people can learn from it? Yes/No\n"</span>);
+    <span class="org-keyword">const</span> <span class="org-variable-name">email</span> = <span class="org-string">`&lt;a href="mailto:sacha@sachachua.com?subject=${subject}&amp;body=${body}"&gt;e-mail me at sacha@sachachua.com&lt;/a&gt;`</span>;
+    <span class="org-keyword">const</span> <span class="org-variable-name">disqusLink</span> = url + <span class="org-string">'#comment'</span>;
+    <span class="org-keyword">const</span> <span class="org-variable-name">disqusForm</span> = data.metadata?.disqusShortname &amp;&amp; <span class="org-string">`&lt;div id="disqus_thread"&gt;&lt;/div&gt;</span>
+<span class="org-string">&lt;script&gt;</span>
+<span class="org-string"> var disqus_config = function () {</span>
+<span class="org-string">   this.page.url = "${url}";</span>
+<span class="org-string">   this.page.identifier = "${data.id || ''} ${data.metadata?.url || ''}?p=${ data.id || data.permalink || this.page?.url}";</span>
+<span class="org-string">   this.page.disqusTitle = "${ data.title }"</span>
+<span class="org-string">   this.page.postId = "${ data.id || data.permalink || this.page?.url }"</span>
+<span class="org-string"> };</span>
+<span class="org-string"> (function() { // DON'T EDIT BELOW THIS LINE</span>
+<span class="org-string">   var d = document, s = d.createElement('script');</span>
+<span class="org-string">   s.src = 'https://${ data.metadata?.disqusShortname }.disqus.com/embed.js';</span>
+<span class="org-string">   s.setAttribute('data-timestamp', +new Date());</span>
+<span class="org-string">   (d.head || d.body).appendChild(s);</span>
+<span class="org-string"> })();</span>
+<span class="org-string">&lt;/script&gt;</span>
+<span class="org-string">&lt;noscript&gt;Disqus requires Javascript, but you can still e-mail me if you want!&lt;/noscript&gt;`</span>;
+    <span class="org-keyword">return</span> { mastodon, disqusLink, disqusForm, email };
+  }
+  eleventyConfig.addShortcode(<span class="org-string">'comments'</span>, <span class="org-keyword">function</span>(<span class="org-variable-name">data</span>, <span class="org-variable-name">linksOnly</span>=<span class="org-constant">false</span>) {
+    <span class="org-keyword">const</span> { mastodon, disqusForm, disqusLink, email } = getCommentChoices(data, <span class="org-constant">this</span>);
+    <span class="org-keyword">if</span> (linksOnly) {
+      <span class="org-keyword">return</span> <span class="org-string">`You can ${mastodon ? mastodon + ', ' : ''}&lt;a href="${disqusLink}"&gt;comment with Disqus (JS required)&lt;/a&gt;${mastodon ? ',' : ''} or ${email}.`</span>;
+    } <span class="org-keyword">else</span> {
+      <span class="org-keyword">return</span> <span class="org-string">`&lt;div id="comment"&gt;&lt;/div&gt;</span>
+<span class="org-string">You can ${mastodon ? mastodon + ', ' : ''}comment with Disqus (JS required)${mastodon ? ', ' : ''} or you can ${email}.</span>
+<span class="org-string">${disqusForm || ''}`</span>;}
+  });
+}
+</pre>
+</div>
+
+
+<p>
+I included it in my <a href="https://github.com/sachac/eleventy-blog-setup/blob/master/_includes/shortcodes/post.cjs">post.cjs</a> shortcode:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js">module.exports = eleventyConfig =&gt;
+eleventyConfig.addShortcode(<span class="org-string">'post'</span>, <span class="org-keyword">async</span> <span class="org-keyword">function</span>(<span class="org-variable-name">item</span>, <span class="org-variable-name">index</span>, <span class="org-variable-name">includeComments</span>) {
+  <span class="org-keyword">let</span> <span class="org-variable-name">comments</span> = <span class="org-string">'&lt;div class="comments"&gt;'</span> + (includeComments ? <span class="org-constant">this</span>.comments(item) : <span class="org-constant">this</span>.comments(item, <span class="org-constant">true</span>)) + <span class="org-string">'&lt;/div&gt;'</span>;
+  <span class="org-keyword">let</span> <span class="org-variable-name">categoryList</span> = item.categories || item.data &amp;&amp; item.data.categories;
+  <span class="org-keyword">let</span> <span class="org-variable-name">categoriesFooter</span> = <span class="org-string">''</span>, <span class="org-variable-name">categories</span> = <span class="org-string">''</span>;
+  <span class="org-keyword">if</span> (categoryList &amp;&amp; categoryList.length &gt; 0) {
+    categoriesFooter = <span class="org-string">`&lt;div class="footer-categories"&gt;More posts about ${this.categoryList(categoryList)}&lt;/div&gt;`</span>;
+    categories = <span class="org-string">`| &lt;span class="categories"&gt;${this.categoryList(categoryList)}&lt;/span&gt;`</span>;
+  }
+
+  <span class="org-keyword">return</span>  <span class="org-string">`&lt;article class="post" id="index${index}" data-url="${item.url || item.permalink || ''}"&gt;</span>
+<span class="org-string">&lt;header&gt;&lt;h2 data-pagefind-meta="title"&gt;&lt;a href="${item.url || item.permalink || ''}"&gt;${item.title || item.data &amp;&amp; item.data.title}&lt;/a&gt;&lt;/h2&gt;</span>
+<span class="org-string">${this.timeInfo(item)}${categories}</span>
+<span class="org-string">&lt;/header&gt;</span>
+<span class="org-string">&lt;div class="entry"&gt;</span>
+<span class="org-string">${await (item.templateContent || item.layoutContent || item.data?.content || item.content || item.inputContent)}</span>
+<span class="org-string">&lt;/div&gt;</span>
+<span class="org-string">${comments}</span>
+<span class="org-string">${categoriesFooter}</span>
+<span class="org-string">&lt;/article&gt;`</span>;
+});
+</pre>
+</div>
+
+
+<p>
+I also included it in my <a href="https://github.com/sachac/eleventy-blog-setup/blob/master/_includes/shortcodes/rssItem.cjs">RSS item</a> template to make
+it easier for people to send me comments without
+having to dig through my website for contact info.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><span class="org-keyword">const</span> <span class="org-variable-name">posthtml</span> = require(<span class="org-string">"posthtml"</span>);
+<span class="org-keyword">const</span> <span class="org-variable-name">urls</span> = require(<span class="org-string">"posthtml-urls"</span>);
+
+module.exports = (eleventyConfig) =&gt; {
+  eleventyConfig.addAsyncShortcode(<span class="org-string">'rssItem'</span>, <span class="org-keyword">async</span> <span class="org-keyword">function</span>(<span class="org-variable-name">item</span>) {
+    <span class="org-keyword">let</span> <span class="org-variable-name">content</span> = item.templateContent.replace(<span class="org-string">/&#45;&#45;/</span>g, <span class="org-string">'&amp;#45;&amp;#45;'</span>);
+    <span class="org-keyword">if</span> (<span class="org-constant">this</span>.transformWithHtmlBase) {
+      content = <span class="org-keyword">await</span> <span class="org-constant">this</span>.transformWithHtmlBase(content);
+    }
+    <span class="org-keyword">return</span> <span class="org-string">`&lt;item&gt;</span>
+<span class="org-string">    &lt;title&gt;${item.data.title}&lt;/title&gt;</span>
+<span class="org-string">    &lt;link&gt;${this.absoluteUrl(item.url, item.data.metadata.url)}&lt;/link&gt;</span>
+<span class="org-string">    &lt;dc:creator&gt;&lt;![CDATA[${item.data.metadata.author.name}]]&gt;&lt;/dc:creator&gt;</span>
+<span class="org-string">    &lt;pubDate&gt;${item.date.toUTCString()}&lt;/pubDate&gt;</span>
+<span class="org-string">    ${item.data.categories?.map((cat) =&gt; `</span>&lt;category&gt;${cat}&lt;/category&gt;<span class="org-string">`).join("\n") || ''}</span>
+<span class="org-string">    &lt;guid isPermaLink="false"&gt;${this.guid(item)}&lt;/guid&gt;</span>
+<span class="org-string">    &lt;description&gt;&lt;![CDATA[${content}</span>
+<span class="org-string">&lt;p&gt;${this.comments(item, true)}&lt;/p&gt;]]&gt;&lt;/description&gt;</span>
+<span class="org-string">    &lt;/item&gt;`</span>;
+  });
+};
+</pre>
+</div>
+
+
+<p>
+The new workflow I'm trying out seems to be working:
+</p>
+
+<ol class="org-ol">
+<li>Keep <code>npx eleventy &#45;&#45;serve</code> running in the
+background, using <code>.eleventyignore</code> to make
+rebuilds reasonably fast.</li>
+<li>Export the subtree with <code>C-c e s 1 1</code>, which uses <code>org-export-dispatch</code> to call <code>my-org-11ty-export</code> with the subtree.</li>
+<li>After about 10 seconds, use <code>my-org-11ty-copy-just-this-post</code> and verify.</li>
+<li>Use <code>my-mastodon-11ty-toot-post</code> to compose a toot. Edit the toot and post it.</li>
+<li>Check that the <code>EXPORT_MASTODON</code> property has been set.</li>
+<li>Export the subtree again, this time with the front matter.</li>
+<li>Publish my whole blog.</li>
+</ol>
+
+<p>
+Next, I'm thinking of modifying
+<code>my-mastodon-11ty-toot-post</code> so that it includes a
+list of links to blog posts I might be building on
+or responding to, and possibly the handles of
+people related to those blog posts or topics.
+Hmm&#x2026;
+</p>
+<div><a href="https://sachachua.com/blog/2025/03/tweaking-my-11ty-blog-to-link-to-the-mastodon-post-defined-in-an-org-mode-property/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JQCB0QP0S3XPJ81EP4CK8XD9" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Ftweaking-my-11ty-blog-to-link-to-the-mastodon-post-defined-in-an-org-mode-property%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

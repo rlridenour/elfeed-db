@@ -1,0 +1,91 @@
+<p>
+I sometimes want to thank a bunch of people for
+contributing to a Mastodon conversation. The
+following code lets me collect handles in a single
+kill ring entry by calling it with my point over a
+handle or a toot, or with an active region.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-mastodon-handle</span> <span class="org-string">"@sacha@social.sachachua.com"</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-mastodon-copy-handle</span> (<span class="org-type">&amp;optional</span> start-new beg end)
+  <span class="org-doc">"Append Mastodon handles to the kill ring.</span>
+
+<span class="org-doc">Use the handle at point or the author of the toot.  If called with a</span>
+<span class="org-doc">region, collect all handles in the region.</span>
+
+<span class="org-doc">Append to the current kill if it starts with @. If not, start a new</span>
+<span class="org-doc">kill. Call with \\[</span><span class="org-doc"><span class="org-constant">universal-argument</span></span><span class="org-doc">] to always start a new list.</span>
+
+<span class="org-doc">Omit my own handle, as specified in `</span><span class="org-doc"><span class="org-constant">my-mastodon-handle</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">interactive</span> (list current-prefix-arg
+                     (<span class="org-keyword">when</span> (region-active-p) (region-beginning))
+                     (<span class="org-keyword">when</span> (region-active-p) (region-end))))
+  (<span class="org-keyword">let</span> ((handle
+         (<span class="org-keyword">if</span> (<span class="org-keyword">and</span> beg end)
+             <span class="org-comment-delimiter">;; </span><span class="org-comment">collect handles in region</span>
+             (<span class="org-keyword">save-excursion</span>
+               (goto-char beg)
+               (<span class="org-keyword">let</span> (list)
+                 <span class="org-comment-delimiter">;; </span><span class="org-comment">Collect all handles from the specified region</span>
+                 (<span class="org-keyword">while</span> (&lt; (point) end)
+                   (<span class="org-keyword">let</span> ((mastodon-handle (get-text-property (point) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-handle</span>))
+                         (button (get-text-property (point) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">button</span>)))
+                     (<span class="org-keyword">cond</span>
+                      (mastodon-handle
+                       (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (string-match <span class="org-string">"@"</span> mastodon-handle)
+                                  (<span class="org-keyword">or</span> (null my-mastodon-handle)
+                                      (not (string= my-mastodon-handle mastodon-handle))))
+                         (<span class="org-keyword">cl-pushnew</span>
+                          (concat (<span class="org-keyword">if</span> (string-match <span class="org-string">"^@"</span> mastodon-handle) <span class="org-string">""</span>
+                                    <span class="org-string">"@"</span>)
+                                  mastodon-handle)
+                          list
+                          <span class="org-builtin">:test</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string=</span>))
+                       (goto-char (next-single-property-change (point) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-handle</span> nil end)))
+                      ((<span class="org-keyword">and</span> button (looking-at <span class="org-string">"@"</span>))
+                       (<span class="org-keyword">let</span> ((text-start (point))
+                             (text-end (<span class="org-keyword">or</span> (next-single-property-change (point) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">button</span> nil end) end)))
+                         (<span class="org-keyword">dolist</span> (h (split-string (buffer-substring-no-properties text-start text-end) <span class="org-string">", \n\t"</span>))
+                           (<span class="org-keyword">unless</span> (<span class="org-keyword">and</span> my-mastodon-handle (string= my-mastodon-handle h))
+                             (<span class="org-keyword">cl-pushnew</span> h list <span class="org-builtin">:test</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string=</span>)))
+                         (goto-char text-end)))
+                      (t
+                       <span class="org-comment-delimiter">;; </span><span class="org-comment">collect authors of toots too</span>
+                       (<span class="org-keyword">when-let*</span>
+                           ((toot (mastodon-toot&#45;&#45;base-toot-or-item-json))
+                            (author (<span class="org-keyword">and</span> toot
+                                         (concat <span class="org-string">"@"</span>
+                                                 (alist-get
+                                                  <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">acct</span>
+                                                  (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">account</span> (mastodon-toot&#45;&#45;base-toot-or-item-json)))))))
+                         (<span class="org-keyword">unless</span> (<span class="org-keyword">and</span> my-mastodon-handle (string= my-mastodon-handle author))
+                           (<span class="org-keyword">cl-pushnew</span>
+                            author
+                            list
+                            <span class="org-builtin">:test</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string=</span>)))
+                       (goto-char (next-property-change (point) nil end))))))
+                 (<span class="org-keyword">setq</span> handle (string-join (seq-uniq list <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string=</span>) <span class="org-string">" "</span>))))
+           (concat <span class="org-string">"@"</span>
+                   (<span class="org-keyword">or</span>
+                    (get-text-property (point) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-handle</span>)
+                    (alist-get
+                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">acct</span>
+                     (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">account</span> (mastodon-toot&#45;&#45;base-toot-or-item-json))))))))
+    (<span class="org-keyword">if</span> (<span class="org-keyword">or</span> start-new (null kill-ring) (not (string-match <span class="org-string">"^@"</span> (car kill-ring))))
+        (kill-new handle)
+      (<span class="org-keyword">dolist</span> (h (split-string handle <span class="org-string">" "</span>))
+        (<span class="org-keyword">unless</span> (member h (split-string <span class="org-string">" "</span> (car kill-ring)))
+          (<span class="org-keyword">setf</span> (car kill-ring) (concat (car kill-ring) <span class="org-string">" "</span> h)))))
+    (message <span class="org-string">"%s"</span> (car kill-ring))))
+</pre>
+</div>
+
+
+<p>
+Another perk of tooting from Emacs using <a href="https://codeberg.org/martianh/mastodon.el">mastodon.el</a>. =)
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#mastodon-mastodon-el-collect-handles-in-kill-ring">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2025/03/mastodon-el-collect-handles-in-kill-ring/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JQ9ECZFN6KE1JNWHF680X345" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Fmastodon-el-collect-handles-in-kill-ring%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

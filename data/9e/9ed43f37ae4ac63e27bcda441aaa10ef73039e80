@@ -1,0 +1,213 @@
+<h1 id="introduction">Introduction</h1>
+
+<p>I’ve signed up to ride RAGBRAI LIII in July 2026. This is my first
+time riding RAGBRAI, and being a geek, I was curious about possible
+routes. So, using the first 52 routes, some Python, and the Monte
+Carlo method, I wrote a little program to figure out the possible
+routes and the likelihood of each route.</p>
+
+<p>There’s a lot to unpack in that first paragraph. So, here goes:</p>
+
+<ul>
+  <li>RAGBRAI: This originally meant Register’s Annual Great Bike Ride
+Across Iowa. I don’t think this acronym is used these days. But the
+name stuck.</li>
+  <li>Monte Carlo method: a numerical method that relies on repeated
+random sampling to obtain results. So this does simulations with
+random number generation to figure out routes.</li>
+</ul>
+
+<h1 id="what-do-we-know">What Do We Know?</h1>
+
+<p>The first 52 RAGBRAI routes are published in various places. I grabbed
+the routes from this <a href="https://en.wikipedia.org/wiki/List_of_RAGBRAI_overnight_stops#By_year">Wikipedia</a> page, and converted them to a CSV file
+using Emacs Org mode and a little hand editing.</p>
+
+<h1 id="now-what">Now what?</h1>
+
+<p>From the CSV file, I can create adjacency lists, which I represent in
+Python as a dictionary of unordered lists that describe the neighbors
+for each node. In this case, this is representing the overnight towns
+and the next or previous town on the route.</p>
+
+<p>I also save a list of starting and ending towns, so I know where
+routes have started or ended in the past.</p>
+
+<p>51 of the 52 routes have 8 nodes, as RAGBRAI runs from Sunday to
+Saturday. But the first RAGBRAI route only has 7 nodes, so I needed to
+take that into account. This was just a little extra code.</p>
+
+<p>Once I’ve got the adjacency lists, I can run the Monte Carlo
+simulations. I initially implemented this beginning with a random
+starting town. For each town, I picked a random link to the next town.
+If there’s a town that next visits the same town multiple times, then
+that next visited town will be in the adjacency list multiple times.</p>
+
+<p>But I noticed there were many routes created that didn’t end in one of
+the ending towns. Eliminating those, the method was heavily biased
+towards only starting a couple of towns. Hmmm.</p>
+
+<p>So I tried started with the end towns and moving backwards. This gave
+a much better spread of starting and ending towns in the simulation.
+So I stuck with building routes from the end town backwards to the
+start.</p>
+
+<h1 id="code">Code</h1>
+
+<p>First there are some <code class="language-plaintext highlighter-rouge">imports</code>:</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
+<span class="kn">import</span> <span class="nn">csv</span>
+<span class="kn">import</span> <span class="nn">graphviz</span>
+<span class="kn">from</span> <span class="nn">operator</span> <span class="kn">import</span> <span class="n">itemgetter</span>
+<span class="kn">import</span> <span class="nn">random</span></code></pre></figure>
+
+<p>Next I set up a tuple of days I can use with the CSV reader to grab
+fields from each line of the CSV file.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">days</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s">"Starting City"</span><span class="p">,</span>
+    <span class="s">"Sunday"</span><span class="p">,</span>
+    <span class="s">"Monday"</span><span class="p">,</span>
+    <span class="s">"Tuesday"</span><span class="p">,</span>
+    <span class="s">"Wednesday"</span><span class="p">,</span>
+    <span class="s">"Thursday"</span><span class="p">,</span>
+    <span class="s">"Friday"</span><span class="p">,</span>
+    <span class="s">"Saturday"</span><span class="p">,</span>
+<span class="p">)</span></code></pre></figure>
+
+<p>I also create empty lists for the starting towns and ending towns, and
+create the adjacencies dictionary using <code class="language-plaintext highlighter-rouge">defaultdict</code> so
+each dictionary value will be set up as a list when it is first
+accessed.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">starts</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">ends</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="n">adjacencies</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">list</span><span class="p">)</span></code></pre></figure>
+
+<h2 id="parsing-the-csv-file-into-adjacency-lists">Parsing the CSV file into adjacency lists</h2>
+
+<p>This function parses the CSV file a couple of times using the Python
+“csv” package to read the CSV file as a dictionary. The first time
+through is to find the starting and ending towns.</p>
+
+<p>The second time reading the CSV file is to create the adjacency lists.
+I start with the days, reversed, to go from the end of a route to the
+beginning.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">parse</span><span class="p">():</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span>
+        <span class="s">"/home/davemarq/shell-scripts/ragbrai-by-year.csv"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s">""</span>
+    <span class="p">)</span> <span class="k">as</span> <span class="n">csvfile</span><span class="p">:</span>
+        <span class="n">reader</span> <span class="o">=</span> <span class="n">csv</span><span class="p">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">csvfile</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span><span class="s">","</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">reader</span><span class="p">:</span>
+            <span class="n">starts</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s">"Starting City"</span><span class="p">])</span>
+            <span class="k">if</span> <span class="n">row</span><span class="p">[</span><span class="s">"Saturday"</span><span class="p">]</span> <span class="o">!=</span> <span class="s">"N/A"</span><span class="p">:</span>
+                <span class="n">ends</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s">"Saturday"</span><span class="p">])</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">ends</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="s">"Friday"</span><span class="p">])</span>
+
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span>
+        <span class="s">"/home/davemarq/shell-scripts/ragbrai-by-year.csv"</span><span class="p">,</span> <span class="n">newline</span><span class="o">=</span><span class="s">""</span>
+    <span class="p">)</span> <span class="k">as</span> <span class="n">csvfile</span><span class="p">:</span>
+        <span class="n">reader</span> <span class="o">=</span> <span class="n">csv</span><span class="p">.</span><span class="n">DictReader</span><span class="p">(</span><span class="n">csvfile</span><span class="p">,</span> <span class="n">delimiter</span><span class="o">=</span><span class="s">","</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">reader</span><span class="p">:</span>
+            <span class="n">prev</span> <span class="o">=</span> <span class="bp">None</span>
+            <span class="k">for</span> <span class="n">d</span> <span class="ow">in</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">days</span><span class="p">):</span>
+                <span class="k">if</span> <span class="n">prev</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+                    <span class="n">prev</span> <span class="o">=</span> <span class="n">d</span>
+                <span class="k">elif</span> <span class="n">row</span><span class="p">[</span><span class="n">prev</span><span class="p">]</span> <span class="o">!=</span> <span class="s">"N/A"</span><span class="p">:</span>
+                    <span class="n">adjacencies</span><span class="p">[</span><span class="n">row</span><span class="p">[</span><span class="n">prev</span><span class="p">]].</span><span class="n">append</span><span class="p">(</span><span class="n">row</span><span class="p">[</span><span class="n">d</span><span class="p">])</span>
+                <span class="n">prev</span> <span class="o">=</span> <span class="n">d</span></code></pre></figure>
+
+<h2 id="making-routes">Making routes</h2>
+
+<p>Once I have the adjacency lists, I want to create random routes. A
+route starts with a random end town. For each town, I pick one of its
+neighbors based on its adjacency list, using a random number
+generator. I append the random choice to the route list. Once I have a
+full route, that goes from end to start, I return its reverse.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">makeroute</span><span class="p">():</span>
+    <span class="n">route</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">cur</span> <span class="o">=</span> <span class="n">random</span><span class="p">.</span><span class="n">choice</span><span class="p">(</span><span class="n">ends</span><span class="p">)</span>
+    <span class="n">route</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="n">cur</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">7</span><span class="p">):</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="nb">next</span> <span class="o">=</span> <span class="n">random</span><span class="p">.</span><span class="n">choice</span><span class="p">(</span><span class="n">adjacencies</span><span class="p">[</span><span class="n">cur</span><span class="p">])</span>
+        <span class="k">except</span> <span class="nb">IndexError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">None</span>
+        <span class="n">route</span><span class="p">.</span><span class="n">append</span><span class="p">(</span><span class="nb">next</span><span class="p">)</span>
+        <span class="n">cur</span> <span class="o">=</span> <span class="nb">next</span>
+    <span class="k">if</span> <span class="n">cur</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">starts</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">None</span>
+
+    <span class="k">return</span> <span class="nb">reversed</span><span class="p">(</span><span class="n">route</span><span class="p">)</span></code></pre></figure>
+
+<h2 id="making-a-graph">Making a graph</h2>
+
+<p>I also thought it would be nice to get a graph of all the towns linked
+to each other from existing routes. This gives a nice visual
+representation showing how often the routes go from town to town. For
+example, routes from Sioux City visited Storm Lake next 6 times, so
+there will be 6 arrows from Sioux City to Storm Lake.</p>
+
+<p>I inially created this code manually to create a Graphviz directed
+graph, or digraph. But I thought, there’s gotta be a Python package
+for this. Sure enough, there is.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">make_graph</span><span class="p">():</span>
+    <span class="n">dot</span> <span class="o">=</span> <span class="n">graphviz</span><span class="p">.</span><span class="n">Digraph</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s">'ragbrai'</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s">'png'</span><span class="p">,</span> <span class="n">engine</span><span class="o">=</span><span class="s">'dot'</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">a</span> <span class="ow">in</span> <span class="n">adjacencies</span><span class="p">:</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">adjacencies</span><span class="p">[</span><span class="n">a</span><span class="p">]:</span>
+            <span class="n">dot</span><span class="p">.</span><span class="n">edge</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">a</span><span class="p">)</span>
+    <span class="n">dot</span> <span class="o">=</span> <span class="n">dot</span><span class="p">.</span><span class="n">unflatten</span><span class="p">()</span>
+    <span class="n">dot</span><span class="p">.</span><span class="n">render</span><span class="p">(</span><span class="n">view</span><span class="o">=</span><span class="bp">True</span><span class="p">)</span></code></pre></figure>
+
+<p>Here’s the graph based on the 52 existing routes.</p>
+
+<p><img src="/images/ragbrai.gv.png" alt="img" /></p>
+
+<h2 id="do-the-work">Do the work!</h2>
+
+<p>Okay, now the main code starts. It parses, then creates the graph.
+Finally, it does the Monte Carlo method.</p>
+
+<p>The Monte Carlo method here creates routes 1,000,000 times. It tracks
+how many times each route is created through a dictionary. Once
+created, We get told how many unique routes were created and then the
+routes are sorted by count and printed, along with the count for each.
+Typically the method creates a little over 7000 unique routes. The
+results are pretty consistent, with a route from Sioux City to Clinton
+getting a bit over 10000 hits, i.e. about 1% of the possibilities.
+It’s also fun to look at the bottom of the list for those “1 in a
+million” routes.</p>
+
+<p>Here’s the first fiew lines of typical output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Opening in existing browser session.
+Created 7230 unique routes
+('Sioux City', 'Storm Lake', 'Fort Dodge', 'Iowa Falls', 'Vinton', 'Mount Vernon', 'Maquoketa', 'Clinton') 10433
+('Glenwood', 'Shenandoah', 'Creston', 'Adel', 'Pella', 'Ottumwa', 'Mount Pleasant', 'Burlington') 6969
+('Rock Rapids', 'Spencer', 'Algona', 'Clear Lake', 'New Hampton', 'Decorah', 'Manchester', 'Dubuque') 6153
+('Glenwood', 'Shenandoah', 'Creston', 'Adel', 'Pella', 'Ottumwa', 'Washington', 'Muscatine') 5483
+('Glenwood', 'Shenandoah', 'Creston', 'Adel', 'Pella', 'Ottumwa', 'Mount Pleasant', 'Fort Madison') 5261
+</code></pre></div></div>
+
+<p>And here’s the final bits of code.</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">parse</span><span class="p">()</span>
+<span class="n">make_graph</span><span class="p">()</span>
+
+<span class="n">routes</span> <span class="o">=</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1000000</span><span class="p">):</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="bp">None</span>
+    <span class="k">while</span> <span class="n">r</span> <span class="ow">is</span> <span class="bp">None</span><span class="p">:</span>
+        <span class="n">r</span> <span class="o">=</span> <span class="n">makeroute</span><span class="p">()</span>
+    <span class="n">routes</span><span class="p">[</span><span class="nb">tuple</span><span class="p">(</span><span class="n">r</span><span class="p">)]</span> <span class="o">+=</span> <span class="mi">1</span>
+<span class="k">print</span><span class="p">(</span><span class="sa">f</span><span class="s">"Created </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">routes</span><span class="p">)</span><span class="si">}</span><span class="s"> unique routes"</span><span class="p">)</span>
+
+<span class="n">sortedroutes</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="nb">sorted</span><span class="p">(</span><span class="n">routes</span><span class="p">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="n">itemgetter</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span> <span class="n">reverse</span><span class="o">=</span><span class="bp">True</span><span class="p">))</span>
+<span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">sortedroutes</span><span class="p">:</span>
+    <span class="k">print</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">sortedroutes</span><span class="p">[</span><span class="n">r</span><span class="p">])</span></code></pre></figure>

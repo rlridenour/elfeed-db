@@ -1,0 +1,155 @@
+ 
+<p><img src="https://cdn.blot.im/blog_c4a729f3205a44e5a9669523ddfb8b2e/_image_cache/9e504949-34a4-4d13-a541-0032c2c31bfc.png" alt="Emacs" width="512" height="512" data-action="zoom"><span class="caption">Emacs</span></p>
+
+<p>These are some of the things which got my attention last week.</p>
+<h2 id="constraining-the-movement-of-the-cursor-in-the-mini-buffer">Constraining the movement of the cursor in the mini-buffer</h2>
+<p>The cursor in the mini-buffer needs to be constrained from moving around. Errant arrow-keys make life difficult. This is the solution, from the documentation of Daniel Mendler’s Vertico package:</p>
+<pre><code>#+begin_src emacs-lisp
+  (setq minibuffer-prompt-properties
+        '(read-only t cursor-intangible t face minibuffer-prompt))
+  (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
+#+end_src</code></pre>
+<h2 id="get-rid-of-m">Get rid of ^M</h2>
+<p>I have the need to copy some file names in the Finder and paste into an org-mode buffer.</p>
+<p>This is what happens:</p>
+<p><img src="https://cdn.blot.im/blog_c4a729f3205a44e5a9669523ddfb8b2e/_image_cache/fced2b24-f3aa-416b-aa66-0b134927278b.png" alt="Evil fuckers" width="1102" height="139" data-action="zoom"><span class="caption">Evil fuckers</span></p>
+<p>What are these <code>^M</code> characters? Did some research and they seemed to be DOS line-ending markers. What? DOS? Confused the hell out of me. I don’t have that in BBEdit. What is going on? More research led to this solution.</p>
+<pre><code>#+begin_src emacs-lisp
+(defun dos2unix ()
+  "Replace DOS eolns CR LF with Unix eolns CR"
+  (interactive)
+    (goto-char (point-min))
+      (while (search-forward (string ?\C-m) nil t) (replace-match "\n")))
+#+end_src</code></pre>
+<p>I run the dos2unix function to get rid of these evil things.</p>
+<h2 id="outliner-minor-mode-for-everything">Outliner minor mode for everything</h2>
+<p>I love org-mode because it lets me have outliner behavior in my text editor. Like folding, hoisting, and so on. I got exposed to outline-minor-mode and decided to bring that to Markdown. The keybindings need work but this is what I am starting with:</p>
+<pre><code>#+begin_src emacs-lisp
+(add-hook 'markdown-mode-hook 'outline-minor-mode)
+;; Define outline-minor-mode key map
+  (define-prefix-command 'cm-map nil "Outline-")
+  (define-key outline-minor-mode-map (kbd "C-c @") 'cm-map)
+
+  ;; Define key bindings for outline minor mode
+  (define-key cm-map (kbd "t") 'outline-hide-body)     ; Hide all but headings
+  (define-key cm-map (kbd "a") 'outline-show-all)      ; Show everything
+  (define-key cm-map (kbd "c") 'outline-hide-entry)    ; Hide this entry's body
+  (define-key cm-map (kbd "e") 'outline-show-entry)    ; Show this entry's body
+  (define-key cm-map (kbd "l") 'outline-hide-leaves)   ; Hide all body lines
+  (define-key cm-map (kbd "k") 'outline-show-branches) ; Show all entries
+  (define-key cm-map (kbd "q") 'outline-hide-sublevels); Hide everything but top-level
+  (define-key cm-map (kbd "o") 'outline-hide-other)    ; Hide other branches
+#+end_src</code></pre>
+<h2 id="reveal-in-osx-finder">reveal-in-osx-finder</h2>
+<p>Looking at some transients Howard Melman sent me, I came across a reference to reveal-in-osx-finder. Shows you the file you are working on in the Finder. Useful.</p>
+<pre><code>#+begin_src emacs-lisp
+(use-package reveal-in-osx-finder)
+(require 'reveal-in-osx-finder)
+(global-set-key (kbd "C-c z") 'reveal-in-osx-finder)
+#+end_src</code></pre>
+<h2 id="cycle-spacing">cycle-spacing</h2>
+<p>Ran across this in <a href="http://yummymelon.com/devnull/precise-word-spacing-in-macos-emacs.html" target="_blank">Precise Word Spacing in macOS Emacs</a>. It is a problem I face quite often and now I have a solution:</p>
+<pre><code>#+begin_src emacs-lisp
+(keymap-global-set "M-SPC" #'cycle-spacing)
+#+end_src</code></pre>
+<h2 id="transients-and-general">Transients and General</h2>
+<p>I use General for assigning my own keybindings to org-mode and markdown-mode. The default keybindings are too elaborate. General is not helpful if you don’t know what the options are that are available to you. Transients are handy in the process of discovery. The act of creating the transients helps you get familiar with the options that you can access. Howard Melman clued me in to the efficiency of this addition. Two examples of what he pointed me to.</p>
+<h3 id="transient-for-c-x-r">Transient for C-x r</h3>
+<pre><code>#+begin_src emacs-lisp
+;;;; Transient for C-x r - rectangles, registers, bookmarks
+(defun hrm-list-bookmarks ()
+  (interactive)
+  (call-interactively 'bookmark-bmenu-list))
+(transient-define-prefix hrm-ctl-x-r-transient ()
+  "Transient for C-x r commands"
+  ["C-x r …"
+   ["Rectangles"
+    ("M-w" "Copy" copy-rectangle-as-kill)
+    ("k" "Kill" kill-rectangle)
+    ("y" "Yank" yank-rectangle)
+    ("d" "Delete" delete-rectangle)
+    ("o" "Open" open-rectangle)
+    ("c" "Clear" clear-rectangle)
+    ("t" "String" string-rectangle)
+    ("N" "Number" rectangle-number-lines)
+    (":" "Sum Down" calc-grab-sum-down) ; Unnecessary since I add it to rectangle-mark-mode-map
+    ]
+   ["To Register"
+    ("SPC" "Point" point-to-register)
+    ;; ("C-SPC" "Point" point-to-register)
+    ;; ("C-@" "Point" point-to-register)
+    ("s" "Region" copy-to-register)
+    ("a" "Region Append" append-to-register) ; unbound
+    ("p" "Region Prepend" prepend-to-register) ; unbound
+    ("r" "Rectangle" copy-rectangle-to-register)
+    ("w" "Window Config" window-configuration-to-register)
+    ("f" "Frameset" frameset-to-register)
+    ("n" "Number" number-to-register)
+    ("+" "Increment" increment-register)
+    ("K" "KMacro" kmacro-to-register)     ; C-x C-k K, can be here too
+    ]
+   ["From Register"
+    ("j" "Jump" jump-to-register)
+    ("i" "Insert" insert-register)
+    ("x" "Consult" consult-register :if (lambda () (fboundp 'consult-register)))
+    ]
+   ["Bookmarks"
+    ("m" "Set" bookmark-set)
+    ;;("b" "Jump" bookmark-jump)        ; I bind C-x r b to consult-bookmark
+    ("b" "Jump Consult" consult-bookmark)
+    ("l" "List" hrm-list-bookmarks) ; list-bookmarks fails, probably because of call-interactively
+    ("M" "Set if Unset" bookmark-set-no-overwrite)
+    ("S" "Save" bookmark-save)
+    ]
+   ]
+  )
+
+(global-set-key (kbd "C-x R") #'hrm-ctl-x-r-transient)
+
+#+end_src</code></pre>
+<h3 id="transient-for-m-g">Transient for M-g</h3>
+<pre><code>#+begin_src emacs-lisp
+      (transient-define-prefix hrm-goto-transient ()
+        "Transient for navigation commands on M-g."
+        ["Goto"
+         ["Position #"
+          ("g" "Line"             consult-goto-line)
+          ("c" "Char"             avy-goto-char-timer)
+          ("TAB" "Column"         move-to-column)
+          ("t"  "Window Top/Bot"  move-to-window-line-top-bottom)
+          ]
+       ["Index Here"
+        ("i" "Imenu"          consult-imenu)
+        ("o" "Outline"        consult-outline) ; goto outline-regexp matches
+        ("h" "Org Heading"    consult-org-heading :if-mode org-mode)
+        ("m" "Mark"           consult-mark)     ; goto marker in mark-ring
+       ]
+     ["Index All"
+      ("I" "Project Imenu"  consult-imenu-multi)
+      ("M" "Global Mark"    consult-global-mark)
+      ("T" "All Todo"       consult-todo-all)
+      ]
+    ["Here in"
+    ("D" "Dired"   dired-jump)
+    ("B" "IBuffer" ibuffer-jump)
+    ("S" "Shell"   shell)       ; eshell?
+    ("R" "Finder"  reveal-in-osx-finder :if (lambda () (fboundp 'reveal-in-osx-finder)))
+    ]
+   ["Avy"
+    ("l" "Line" avy-goto-line)
+    ("w" "Word" avy-goto-word-0)
+    ("W" "Prompted Word" avy-goto-word-1)
+    ]
+  ])
+      (global-set-key (kbd "M-G") 'hrm-goto-transient)
+#+end_src</code></pre>
+<h2 id="lists-of-some-other-changes">Lists of Some Other Changes</h2>
+<ul>
+<li>I installed the Spacemacs theme. I like the light version of the theme.</li>
+<li>Also installed the Standard themes from Protesilaos. Love the light theme there.</li>
+<li>Installed the Nano theme from Rougier. It is an impressively minimal look.</li>
+<li>Installed the Embark package. Have little idea of what it does. I am reading up on it. Will discuss when I have a better idea of what that package is good for.</li>
+</ul>
+<p>As you can tell, I am having fun and learning some new stuff.</p>
+<p>Till next time.</p>
+<p>macosxguru at the gmail thingie.</p> 

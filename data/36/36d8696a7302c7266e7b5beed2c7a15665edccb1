@@ -1,0 +1,127 @@
+<p>I’ll be pretty brief today. <code class="language-plaintext highlighter-rouge">keyboard-quit</code> (<code class="language-plaintext highlighter-rouge">C-g</code>) is one of the most
+used commands, but unfortunately it’s not very smart. Most annoyingly,
+it doesn’t work as expected when the minibuffer is active.</p>
+
+<p>Fortunately, fixing such problems (and then some) is trivial in Emacs:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">er-keyboard-quit</span> <span class="p">()</span>
+  <span class="s">"Smater version of the built-in `keyboard-quit'.
+
+The generic `keyboard-quit' does not do the expected thing when
+the minibuffer is open.  Whereas we want it to close the
+minibuffer, even without explicitly focusing it."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nv">active-minibuffer-window</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nv">minibufferp</span><span class="p">)</span>
+          <span class="p">(</span><span class="nv">minibuffer-keyboard-quit</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">abort-recursive-edit</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">keyboard-quit</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>I’d suggest to just remap <code class="language-plaintext highlighter-rouge">keyboard-quit</code> to our improved version:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">global-set-key</span> <span class="nv">[remap</span> <span class="nv">keyboard-quit]</span> <span class="nf">#'</span><span class="nv">er-keyboard-quit</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>There are other ways to tackle this particular issue, of course,
+and different people might prefer an even more complicated
+version of the smarter <code class="language-plaintext highlighter-rouge">keyboard-quit</code> or one that does fewer
+things. One of my readers suggested in the comments a similar
+solution using an advice:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-advice</span> <span class="nv">keyboard-quit</span>
+    <span class="p">(</span><span class="ss">:around</span> <span class="p">(</span><span class="nv">quit</span><span class="p">)</span> <span class="nv">quit-current-context</span><span class="p">)</span>
+  <span class="s">"Quit the current context.
+
+When there is an active minibuffer and we are not inside it close
+it.  When we are inside the minibuffer use the regular
+`minibuffer-keyboard-quit' which quits any active region before
+exiting.  When there is no minibuffer `keyboard-quit' unless we
+are defining or executing a macro."</span>
+  <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nv">active-minibuffer-window</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nv">minibufferp</span><span class="p">)</span>
+          <span class="p">(</span><span class="nv">minibuffer-keyboard-quit</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">abort-recursive-edit</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nb">or</span> <span class="nv">defining-kbd-macro</span>
+                <span class="nv">executing-kbd-macro</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">funcall-interactively</span> <span class="nv">quit</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>This has the benefit of directly modifying the original command, so you don’t
+really need to rebind anything. On the other hand - advices are arguably
+a bit more complicated to understand and debug. Personally, I like
+to replace functions in my own setup with versions that I prefer,
+as I think this makes the modifications more obvious.</p>
+
+<p>Another option is a similar function from Prot:<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">prot/keyboard-quit-dwim</span> <span class="p">()</span>
+  <span class="s">"Do-What-I-Mean behaviour for a general `keyboard-quit'.
+
+The generic `keyboard-quit' does not do the expected thing when
+the minibuffer is open.  Whereas we want it to close the
+minibuffer, even without explicitly focusing it.
+
+The DWIM behaviour of this command is as follows:
+
+- When the region is active, disable it.
+- When a minibuffer is open, but not focused, close the minibuffer.
+- When the Completions buffer is selected, close it.
+- In every other case use the regular `keyboard-quit'."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">cond</span>
+   <span class="p">((</span><span class="nv">region-active-p</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">keyboard-quit</span><span class="p">))</span>
+   <span class="p">((</span><span class="nv">derived-mode-p</span> <span class="ss">'completion-list-mode</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">delete-completion-window</span><span class="p">))</span>
+   <span class="p">((</span><span class="nb">&gt;</span> <span class="p">(</span><span class="nv">minibuffer-depth</span><span class="p">)</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">abort-recursive-edit</span><span class="p">))</span>
+   <span class="p">(</span><span class="no">t</span>
+    <span class="p">(</span><span class="nv">keyboard-quit</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>I know this version of the command is quite popular in the wild, as many
+people follow Prot’s work, but looking at the code of the actual <code class="language-plaintext highlighter-rouge">keyboard-quit</code>
+it seems to me that Prot’s version is more complicated than it needs to be:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; This executes C-g typed while Emacs is waiting for a command.</span>
+<span class="c1">;; Quitting out of a program does not go through here;</span>
+<span class="c1">;; that happens in the maybe_quit function at the C code level.</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">keyboard-quit</span> <span class="p">()</span>
+  <span class="s">"Signal a `quit' condition.
+During execution of Lisp code, this character causes a quit directly.
+At top-level, as an editor command, this simply beeps."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="c1">;; Avoid adding the region to the window selection.</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">saved-region-selection</span> <span class="no">nil</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">(</span><span class="nv">select-active-regions</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">deactivate-mark</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">fboundp</span> <span class="ss">'kmacro-keyboard-quit</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">kmacro-keyboard-quit</span><span class="p">))</span>
+  <span class="p">(</span><span class="nb">when</span> <span class="nv">completion-in-region-mode</span>
+    <span class="p">(</span><span class="nv">completion-in-region-mode</span> <span class="mi">-1</span><span class="p">))</span>
+  <span class="c1">;; Force the next redisplay cycle to remove the "Def" indicator from</span>
+  <span class="c1">;; all the mode lines.</span>
+  <span class="p">(</span><span class="k">if</span> <span class="nv">defining-kbd-macro</span>
+      <span class="p">(</span><span class="nv">force-mode-line-update</span> <span class="no">t</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">defining-kbd-macro</span> <span class="no">nil</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">debug-on-quit</span> <span class="no">nil</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">signal</span> <span class="ss">'quit</span> <span class="no">nil</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>As you can see it already handles things like the selected region
+and completion in region. But perhaps I’m missing what Prot was
+trying to achieve with his version.</p>
+
+<p>Which of the three approaches do you prefer?
+How would you improve <code class="language-plaintext highlighter-rouge">er-keyboard-quit-dwim</code> further?</p>
+
+<p>That’s all I have for you today! Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p><a href="https://protesilaos.com/codelog/2024-11-28-basic-emacs-configuration/#h:1e468b2a-9bee-4571-8454-e3f5462d9321">https://protesilaos.com/codelog/2024-11-28-basic-emacs-configuration/#h:1e468b2a-9bee-4571-8454-e3f5462d9321</a> <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

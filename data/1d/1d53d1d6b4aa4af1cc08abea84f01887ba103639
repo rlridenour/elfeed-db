@@ -1,0 +1,78 @@
+
+<p>I&rsquo;ve been using my <a href="https://brettterpstra.com/projects/na/">na</a> and <a href="https://brettterpstra.com/projects/doing/">doing</a> command-line tools daily for years, but lately they&rsquo;d started feeling sluggish. When <code class="language-plaintext highlighter-rouge">na next</code> was taking over a second to show me my next actions from a tiny 5KB file, I knew it was time to dig in and fix things.</p>
+
+<p>In case you&rsquo;re unfamiliar, <code class="language-plaintext highlighter-rouge">na</code> is a command line tool for adding and listing per-project todos, and <code class="language-plaintext highlighter-rouge">doing</code> is a CLI for tracking what you were doing, with export features, time tracking, tagging, and other usefuly features.</p>
+
+<ul>
+  <li><a href="https://brettterpstra.com/projects/na/">na project page</a></li>
+  <li><a href="https://brettterpstra.com/projects/doing/">doing projct page</a></li>
+</ul>
+
+<h2 id="the-problem">The Problem</h2>
+
+<p>Both tools had developed performance issues that made them occasionally frustrating to use. The <code class="language-plaintext highlighter-rouge">na next</code> command was consistently running at 1.3+ seconds with wildly variable performance—sometimes 200ms, sometimes 500ms for identical inputs. Meanwhile, <code class="language-plaintext highlighter-rouge">doing recent</code> was sometimes taking over 3 seconds to display a simple list of recent entries.</p>
+
+<p>This wasn&rsquo;t acceptable for tools meant for quick, frequent use.</p>
+
+<h2 id="the-investigation">The Investigation</h2>
+
+<p>I built custom benchmarking systems for both gems (<code class="language-plaintext highlighter-rouge">NA_BENCHMARK=1</code> and <code class="language-plaintext highlighter-rouge">DOING_BENCHMARK=1</code>) to see where the time was going. The results were eye-opening.</p>
+
+<p>For <code class="language-plaintext highlighter-rouge">na</code>, the culprits were:</p>
+
+<ul>
+  <li>Theme loading happening repeatedly for every action</li>
+  <li>Regex compilation on every color template use</li>
+  <li>Pager overhead adding 300-479ms to small outputs</li>
+  <li>Git integration running system calls by default</li>
+  <li>Heavy gems loading at startup</li>
+</ul>
+
+<p>For <code class="language-plaintext highlighter-rouge">doing</code>, the pager was the main bottleneck, consuming about 600ms of the 3+ second runtime.</p>
+
+<h2 id="the-fixes">The Fixes</h2>
+
+<dl>
+  <dt>Caching everything</dt>
+  <dd>I pre-compiled regex patterns, cached theme data, and implemented template caching to eliminate repeated processing.</dd>
+  <dt>Smart pagination</dt>
+  <dd>Both tools now skip the pager entirely for small outputs. For <code class="language-plaintext highlighter-rouge">na</code>, that&rsquo;s anything under 2000 characters or 50 lines. For <code class="language-plaintext highlighter-rouge">doing</code>, it&rsquo;s anything under 150% of terminal height (letting you scroll up half a page for reasonable outputs).</dd>
+  <dt>Lazy loading</dt>
+  <dd>Made git integration opt-in with a <code class="language-plaintext highlighter-rouge">--repo-top</code> flag in <code class="language-plaintext highlighter-rouge">na</code>, and deferred heavy gem loading until actually needed.</dd>
+  <dt>Batch processing</dt>
+  <dd>Generate all strings first, then apply regex highlighting once instead of repeatedly.</dd>
+</dl>
+
+<h2 id="the-results">The Results</h2>
+
+<p>The improvements were dramatic:</p>
+
+<ul>
+  <li><strong>na</strong>: From 1300ms+ down to ~6ms (99.5% faster)</li>
+  <li><strong>doing</strong>: From 3+ seconds down to 0.73 seconds (78% faster)</li>
+</ul>
+
+<p>Both tools now feel genuinely responsive again. The <code class="language-plaintext highlighter-rouge">na next</code> command is nearly instantaneous, and <code class="language-plaintext highlighter-rouge">doing recent</code> displays results in under a second.</p>
+
+<h2 id="bonus-fixes">Bonus Fixes</h2>
+
+<p>While I was at it, I fixed several test failures that had been nagging me:</p>
+
+<ul>
+  <li>Color module method definitions causing <code class="language-plaintext highlighter-rouge">NoMethodError</code></li>
+  <li>ANSI escape sequence handling in exports</li>
+  <li>String extension methods for color attributes</li>
+  <li>Cleaned up export output (no more unwanted <code class="language-plaintext highlighter-rouge">\e[0m</code> characters)</li>
+</ul>
+
+<p>Both tools are back to being the responsive, daily-use utilities they were meant to be. You can find more details in the <a href="https://github.com/ttscoff/doing/wiki">doing wiki</a> and there&rsquo;s full documentation for <code class="language-plaintext highlighter-rouge">na</code> on the <a href="https://brettterpstra.com/projects/na/">na project page</a>, if you&rsquo;re curious.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115423878701415957">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Optimizing+na+and+doing%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F23%2Foptimizing-na-and-doing%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F23%2Foptimizing-na-and-doing%2F&text=Optimizing+na+and+doing&url=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F23%2Foptimizing-na-and-doing%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17192014.gif" height="1" width="1"/>

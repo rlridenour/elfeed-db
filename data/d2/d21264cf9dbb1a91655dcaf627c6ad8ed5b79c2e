@@ -1,0 +1,81 @@
+<p>In the <a href="https://fosstodon.org/@drdrang/114279791808568796">Mastodon announcement</a> of <a href="https://leancrew.com/all-this/2025/04/play-connections/">my last post</a>, I included some text that was struck through:</p>
+<blockquote>
+<p>☃️ A shortcut I use to c̸h̸e̸a̸t̸ a̸t̸ play the NY Times Connections game.
+  <a href="https://leancrew.com/all-this/2025/04/play-connections/">https://leancrew.com/all-this/2025/04/play-connections/</a></p>
+</blockquote>
+<p>This was not done with <code>&lt;s&gt;</code> tags. Those use a horizontal line to <s>strike through</s>, not diagonals, and besides, Mastodon doesn’t support HTML tags.</p>
+<p>Instead, each struck-through character was followed by the <a href="https://www.fileformat.info/info/unicode/char/0338/index.htm">Long Solidus Overlay</a> combining character. Combining characters overstrike the previous character, which is just what I wanted.</p>
+<p>I used to have <a href="http://www.leancrew.com/all-this/2014/10/circle-service/">a Service</a> that created struck-through text like this, but that was long ago and was written in Python 2, which I don’t use anymore. For the particular seven characters shown above, I just copied the combining solidus character from its <a href="https://www.fileformat.info/info/unicode/char/0338/index.htm">FileFormat page</a> and pasted it after each character I wanted struck through. That was the quickest way to get it done for a one-off.</p>
+<p>But I do like making jokey strikethroughs like that, so a new Quick Action<sup id="fnref:qa"><a href="#fn:qa" rel="footnote">1</a></sup> for doing it seemed in order. Because the world has changed since <a href="http://www.leancrew.com/all-this/2014/10/circle-service/">that post in 2014</a>, it seemed best to use Shortcuts to invoke a Python 3 script and save it as a Quick Action.</p>
+<p>Here’s Shortcuts with the Quick Action:</p>
+<p><img alt="Slash Text Shortcut" class="ss" src="https://leancrew.com/all-this/images2025/20250405-Slash%20Text%20Shortcut.png" title="Slash Text Shortcut" width="100%"/></p>
+<p>The Python code in the <span class="menu">Run Shell Script</span> step is this:</p>
+<pre><code>python:
+from sys import stdin
+from string import whitespace
+
+orig = stdin.read().rstrip('\n')
+print(''.join(c if c in whitespace else c + '\u0338' for c in orig), end='')
+</code></pre>
+<p>I found that Shortcuts was adding a linefeed to the end of the selected text, so that’s why the <code>rstrip('\n')</code> method was added to <code>read</code>. The <a href="https://peps.python.org/pep-0289/">generator expression</a> inside the <code>join</code> function uses Python’s somewhat tricky <a href="https://peps.python.org/pep-0308/">conditional expression</a>, which puts an <code>if-then-else</code> on a single line but in <code>then-if-else</code> order. The generator expression adds the solidus combining character (<code>\u0338</code>) after each character that’s <em>not</em> whitespace.</p>
+<p>Using this Quick Action is simple: select the text you want to strike through, control-click and choose <span class="menu">Slash Text</span> from the <span class="menu">Services</span> submenu. Like this:</p>
+<p><img alt="Choosing Slash Text from the Services submenu" class="ss" src="https://leancrew.com/all-this/images2025/20250405-Choosing%20Slash%20Text%20from%20the%20Services%20submenu.png" title="Choosing Slash Text from the Services submenu" width="80%"/></p>
+<p>When I tested the Quick Action in some common text editing applications, like BBEdit, Mail, Pages, TextEdit, and even Stickies, it worked just fine. But you know I wouldn’t write a sentence like that if there weren’t another shoe waiting to drop. And you’re right. It didn’t work in <a href="https://apps.apple.com/us/app/mona-for-mastodon/id1659154653">Mona</a> or Messages, the two apps in which I’d use it most frequently.</p>
+<p><img alt="Error alert from Messages" class="ss" src="https://leancrew.com/all-this/images2025/20250405-Error%20alert%20from%20Messages.png" title="Error alert from Messages" width="50%"/></p>
+<p>Why did it fail in those apps? I have no idea, but whatever the reason, it was no good to me in its current state. What to do?</p>
+<p>My first thought was to revert to using Automator to make the Quick Action. It’s supposed to be getting phased out in favor of Shortcuts, but it still works. Here’s my Slash Text Automator workflow:</p>
+<p><img alt="Slash Text Automator workflow" class="ss" src="https://leancrew.com/all-this/images2025/20250405-Slash%20Text%20Automator%20workflow.png" title="Slash Text Automator workflow" width="100%"/></p>
+<p>The shell script is now run via bash:</p>
+<pre><code>source $HOME/.bashrc
+
+slashtext
+</code></pre>
+<p>I couldn’t just use the Python code in Automator because it doesn’t allow me to use either <code>/usr/bin/python3</code> or my Homebrew-installed Python as the shell. The shells it allows are</p>
+<ul>
+<li><code>/bin/bash</code></li>
+<li><code>/bin/csh</code></li>
+<li><code>/bin/ksh</code></li>
+<li><code>/bin/sh</code></li>
+<li><code>/bin/tcsh</code></li>
+<li><code>/bin/zsh</code></li>
+<li><code>/usr/bin/perl</code></li>
+<li><code>/usr/bin/ruby</code></li>
+<li><code>/usr/local/bin/python</code></li>
+<li><code>/usr/local/bin/python3</code></li>
+</ul>
+<p>These are apparently unchangeable because they’re in a plist file on a read-only partition. Since I don’t have a Python executable in <code>/usr/local/bin</code>,<sup id="fnref:link"><a href="#fn:link" rel="footnote">2</a></sup> my workaround was to save my Python script as a file, <code>slashtext</code>, in my <code>$PATH</code> and call it via bash. The source code of <code>slashfile</code> is the same Python code as before but with a shebang line:</p>
+<pre><code>python:
+#!/usr/bin/env python3
+
+from sys import stdin
+from string import whitespace
+
+orig = stdin.read().rstrip('\n')
+print(''.join(c if c in whitespace else c + '\u0338' for c in orig), end='')
+</code></pre>
+<p>Going back to the shell script, my <code>.bashrc</code> file sets my <code>$PATH</code> when I work in the Terminal, so <code>source</code>ing it gives the Quick Action my usual environment. That’s why I can call <code>slashtext</code> directly in the following line.</p>
+<p>This Quick Action worked in every application I tried, an indication that Shortcuts still has a ways to go before it’s as reliable as Automator.</p>
+<p>Speaking of reliability, my final thought was that I should give up on Quick Actions entirely and just make a <a href="https://www.keyboardmaestro.com/main/">Keyboard Maestro</a> macro (<a href="https://leancrew.com/all-this/downloads/Slash%20Text.kmmacros">download</a>). Peter Lewis’s app is more trustworthy than most of what Apple’s put out recently. With the Python script already written, the only real work was adding some actions on either side of the script to deal with the clipboard. Here’s a screenshot of the macro:</p>
+<p><img alt="KM Slash Text" class="ss" src="https://leancrew.com/all-this/images2025/20250406-KM%20Slash%20Text.png" title="KM Slash Text" width="90%"/></p>
+<p>Both the <code>rstrip('\n')</code> and the <code>end=' '</code> are unnecessary here because no linefeed is added to the input and Keyboard Maestro strips trailing linefeeds from the output by default. But leaving those bits of code in doesn’t hurt anything.</p>
+<p>Typing ⌥⇧⌘/ is certainly faster than control-clicking and navigating the <span class="menu">Services</span> submenu. Will I remember this keystroke combination? Probably not, but since I have <a href="https://ergonis.com/keycue">KeyCue</a> installed, I don’t need to. All I have to do is press the Control key, wait a couple of seconds for the KeyCue window to appear and choose Slash Text.</p>
+<p><img alt="KeyCue window" class="ss" src="https://leancrew.com/all-this/images2025/20250406-KeyCue%20window.png" title="KeyCue window" width="100%"/></p>
+<p>That’s still easier than using the <span class="menu">Services</span> submenu.</p>
+<p>By the way, Keyboard Maestro allows you to export macros as Text Services. For this one you’d first have to change the input of the shell script to the <code>%TriggerValue%</code> token and delete a couple of the clipboard actions, but otherwise the macro would be the same. I didn’t do it that way because I’d already convinced myself to avoid Quick Actions/Services.</p>
+<p>If you really want to stick with Apple-supplied software while still having a fast way to slash text, you can build the Automator workflow, save it as a Quick Action, and then set a keyboard shortcut to it via the System Settings app. I’d use that solution if Peter Lewis or the Ergonis people decided to retire and no one took up their apps.</p>
+<div class="update">
+<p><strong>Update 6 Apr 2025 6:25 PM</strong><br/>
+John Gruber <a href="https://mastodon.social/@gruber/114293060121316187">shared a Keyboard Maestro macro</a> he uses to skip over the complicated mousework needed to access the <span class="menu">Services</span> menu. The macro, run via a keystroke combination, opens the submenu but doesn’t select any command. He then starts typing, which selects the Quick Action he wants, and hits Return to execute it. This takes longer to describe than it takes to do.</p>
+<p>I like the hybrid nature of this approach. By tucking Quick Actions away in the <span class="menu">Services</span> menu, Apple has made them hard to get at. This macro brings them out into the light and requires the memorization of only one keystroke combination. It parallels how I use KeyCue to remind me of Keyboard Maestro macros whose keyboard shortcuts I’ve forgotten.</p>
+</div>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:qa">
+<p>Why did Apple decide to change their name from Services to Quick Actions even though they’re still invoked from the <span class="menu">Services</span> menu? Maybe it was to distinguish the action from the menu, but if that were the case, why do we now build shortcuts in the Shortcuts app? <a href="#fnref:qa" rev="footnote">↩</a></p>
+</li>
+<li id="fn:link">
+<p>Yes, I could make a <a href="https://en.wikipedia.org/wiki/Symbolic_link">symbolic link</a>, but I didn’t want to. <a href="#fnref:link" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

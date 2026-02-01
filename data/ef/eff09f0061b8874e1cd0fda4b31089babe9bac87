@@ -1,0 +1,28 @@
+<p>UPDATE: Check out <a href="https://xenodium.com/emacs-password-protect-current-pdf-revisited">Password-protect current pdf (revisted)</a> for a simpler version.</p>
+<p>Every so often, I need to password-protect a pdf. On macOS, <a href="https://support.apple.com/en-gb/guide/preview/prvw587dd90f/mac">Preview has a simple solution</a>, but I figured there must be a command line utility to make this happen. There are options, but <a href="https://github.com/qpdf/qpdf">qdf</a> did the job just fine.</p>
+<pre><code class="language-{.bash">qpdf --verbose --encrypt USER-PASSWORD OWNER-PASSWORD KEY-LENGTH -- input.pdf output.pdf
+</code></pre>
+<p>So what does <code>qpdf</code> have to do with Emacs? Command-line utilities are easy to invoke from Emacs via <code>shell-command</code> (M-!), but I don't want to remember the command nor the parameters. I may as well add a function that <a href="https://xenodium.com/emacs-dwim-do-what-i-mean/">does what I mean</a> and password-protect either buffers or <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> files.</p>
+<pre><code class="language-{.commonlisp">(defun pdf-password-protect ()
+    &quot;Password protect current pdf in buffer or `dired' file.&quot;
+    (interactive)
+    (unless (executable-find &quot;qpdf&quot;)
+      (user-error &quot;qpdf not installed&quot;))
+    (unless (equal &quot;pdf&quot;
+                   (or (when (buffer-file-name)
+                         (downcase (file-name-extension (buffer-file-name))))
+                       (when (dired-get-filename nil t)
+                         (downcase (file-name-extension (dired-get-filename nil t))))))
+      (user-error &quot;no pdf to act on&quot;))
+    (let* ((user-password (read-passwd &quot;user-password: &quot;))
+           (owner-password (read-passwd &quot;owner-password: &quot;))
+           (input (or (buffer-file-name)
+                      (dired-get-filename nil t)))
+           (output (concat (file-name-sans-extension input)
+                           &quot;_enc.pdf&quot;)))
+      (message
+       (string-trim
+        (shell-command-to-string
+         (format &quot;qpdf --verbose --encrypt '%s' '%s' 256 -- '%s' '%s'&quot;
+                 user-password owner-password input output))))))
+</code></pre>

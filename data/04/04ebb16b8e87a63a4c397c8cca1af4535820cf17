@@ -1,0 +1,139 @@
+<p>Python is one of my programming languages I&rsquo;m using for both work and
+home life &ndash; no doubt, I&rsquo;d want to use Emacs as an IDE for Python
+programming. There is a certain set of features we&rsquo;d expect to have
+in any IDE: 1) code completion, 2) code navigation, 3) error checking.</p>
+<p>Thanks to the fact that both <code>eglot</code>, the Emacs client for the
+Language Server Protocol (LSP), and <code>tree-sitter</code>, a powerful parsing
+library, are now &ndash; since version 29 &ndash; the parts of Emacs, It should
+not be too hard to construct a lightweight and fast Python IDE.</p>
+<h2 id="choosing-a-language-server">Choosing a Language Server</h2>
+<p>There are a number of the language servers for Python available these days &ndash;
+<a href="https://github.com/python-lsp/python-lsp-server">pylsp</a>,
+<a href="https://github.com/palantir/python-language-server">pyls</a>,
+<a href="https://github.com/microsoft/pyright">pyright</a>,
+<a href="https://github.com/pappasam/jedi-language-server">jedi-language-server</a>.
+After a series of tests, I&rsquo;ve settled on <a href="https://github.com/microsoft/pyright">pyright</a>,
+an open syntax and type checker from Microsoft <em>(sic!)</em> used in Visual Studio Code,
+the fast and reliable one, as for me.</p>
+<p>The Pyright <a href="https://microsoft.github.io/pyright/#/">documentation</a> &ndash;
+a bit weird &ndash; claims that Pyright is just static type checker for Python.
+However, as we&rsquo;ll see later, Pyright can do much more than just type checks.</p>
+<h2 id="a-note-on-the-tree-sitter-package">A note on the Tree-Sitter package</h2>
+<p>The <code>tree-sitter</code> package is optional &ndash; I&rsquo;m using it for
+pretty-looking source code fontification mainly. However, if you want
+to use it you have to pay attention to the following quote from the
+Mickey Petersen&rsquo;s <a href="https://www.masteringemacs.org/article/how-to-get-started-tree-sitter">&lsquo;Mastering Emacs&rsquo;</a>
+book:</p>
+<blockquote>
+<p>And in Emacs 29, support for tree-sitter is built in. Sort of. It&rsquo;s an
+optional extra, so you must compile Emacs from source, or hope that
+someone else will do it for you.</p>
+<p>Neither tree-sitter nor Emacs come installed with language grammars.
+Just like kids&rsquo; toys and batteries, they&rsquo;re sold separately. So you&rsquo;re
+required to download and compile the sources for each language grammar
+you want to use.</p>
+<p><em>&ndash; Mastering Emacs by Mickey Petersen.</em></p>
+</blockquote>
+<p>If you are &ndash; like me &ndash; on Linux, the best way to setup language
+grammars is to compile them from the source code; you can find all grammars
+available on the <a href="https://github.com/orgs/tree-sitter/repositories?type=all">tree-sitter repository</a>.
+More details at <a href="https://www.masteringemacs.org/article/how-to-get-started-tree-sitter">How to Get Started with Tree-Sitter</a>.</p>
+<h2 id="python-prerequisites">Python prerequisites</h2>
+<p>First of all, we need to install the following Python packages &ndash;
+<code>pyright</code> (the language server) and <code>jsonrpc</code> (the transport layer for
+the LSP).</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span><span style="color:#f92672">[</span>p3<span style="color:#f92672">]</span> $ pip install pyright
+</span></span><span style="display:flex;"><span><span style="color:#f92672">[</span>p3<span style="color:#f92672">]</span> $ pip install jsonrpc
+</span></span></code></pre></div><p>I&rsquo;m running Python in the virtual environment, &ldquo;p3&rdquo; in my case.</p>
+<h2 id="error-checking-with-pyright">Error checking with Pyright</h2>
+<p>Eglot automatically finds a suitable LSP &ndash; Pyright in our case &ndash;
+when you are opening a Python file. I&rsquo;m using the default Pyright
+settings, no extra tuning required.</p>
+<h3 id="pyright-lsp-with-flymake">Pyright LSP with Flymake</h3>
+<p>Flymake is a minor Emacs mode performing on-the-fly syntax checks. I&rsquo;m
+using the <code>flymake</code> built-in Emacs package as an Eglot front-end for
+syntax checks.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;flymake</span>)
+</span></span></code></pre></div><p>My custom <code>my/flymake-toggle-diagnostics-buffer</code> function toggles the
+<em>Flymake diagnostics</em> buffer window.</p>
+<p>If there is the Flymake diagnostics buffer associated with a file in
+the current buffer, it shows the diagnostics buffer in the new window
+and switches to it. If the current buffer <em>is</em> the Flymake diagnostics
+buffer, it closes it. Otherwise it just shows the error message.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/flymake-toggle-diagnostics-buffer ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; Check if we are in the diagnostics buffer.</span>
+</span></span><span style="display:flex;"><span>  (if (string-search <span style="color:#e6db74">&#34;*Flymake diagnostics&#34;</span> (<span style="color:#a6e22e">buffer-name</span>))
+</span></span><span style="display:flex;"><span>      (delete-window)
+</span></span><span style="display:flex;"><span>    (progn
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; Activate the Flymake diagnostics buffer.</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; and switch to it</span>
+</span></span><span style="display:flex;"><span>      (flymake-show-buffer-diagnostics)
+</span></span><span style="display:flex;"><span>      (let ((name (flymake--diagnostics-buffer-name)))
+</span></span><span style="display:flex;"><span>        (if (<span style="color:#a6e22e">get-buffer</span> name)
+</span></span><span style="display:flex;"><span>            (switch-to-buffer-other-window name)
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">error</span> <span style="color:#e6db74">&#34;No Flymake diagnostics buffer found&#34;</span>)
+</span></span><span style="display:flex;"><span>          )))))
+</span></span></code></pre></div><p>I&rsquo;ve bound this function to the <code>F7</code> key globally since I&rsquo;m using <code>F7</code>
+in other programming modes as well.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(global-set-key [(f7)] <span style="color:#a6e22e">#&#39;</span>my/flymake-toggle-diagnostics-buffer)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Additional bindings.</span>
+</span></span><span style="display:flex;"><span>(global-set-key (kbd <span style="color:#e6db74">&#34;C-c f b&#34;</span>) <span style="color:#a6e22e">#&#39;</span>flymake-show-buffer-diagnostics)
+</span></span><span style="display:flex;"><span>(global-set-key (kbd <span style="color:#e6db74">&#34;C-c f p&#34;</span>) <span style="color:#a6e22e">#&#39;</span>flymake-show-project-diagnostics)
+</span></span></code></pre></div><p>The screenshot below shows what happens if you press <code>F7</code> while
+editing a Python file managed by Eglot + Flymake.</p>
+<figure><a href="https://olddeuteronomy.github.io/img/python-pyright.png"><img src="https://olddeuteronomy.github.io/img/python-pyright.png"/></a><figcaption>
+            <h4>Click or tap to view the full-size picture.</h4>
+        </figcaption>
+</figure>
+
+<p>As you can see, Pyright can do much more than just type checks.</p>
+<h2 id="code-completion">Code completion</h2>
+<p>I&rsquo;m using the <a href="https://company-mode.github.io/"><code>company</code></a> package, a
+modular in-buffer completion framework for Emacs, as an Eglot
+front-end for code completion; it integrates with Eglot seamlessly.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#75715e">;;;; `COMPANY&#39;</span>
+</span></span><span style="display:flex;"><span>(use-package company
+</span></span><span style="display:flex;"><span>  :ensure <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>  :config
+</span></span><span style="display:flex;"><span>  (setq company-idle-delay <span style="color:#ae81ff">0</span>)
+</span></span><span style="display:flex;"><span>  (setq company-minimum-prefix-length <span style="color:#ae81ff">2</span>)
+</span></span><span style="display:flex;"><span>  (setq company-show-numbers <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; To prevent default down-casing.</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; https://emacs.stackexchange.com/questions/10837/how-to-make-company-mode-be-case-sensitive-on-plain-text</span>
+</span></span><span style="display:flex;"><span>  (setq company-dabbrev-downcase <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; 2023-01-13 From a Reddit post on mixed case issue.</span>
+</span></span><span style="display:flex;"><span>  (setq company-dabbrev-ignore-case <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>  (setq company-dabbrev-code-ignore-case <span style="color:#66d9ef">nil</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Use `company&#39; everywhere.</span>
+</span></span><span style="display:flex;"><span>(add-hook <span style="color:#e6db74">&#39;after-init-hook</span> <span style="color:#e6db74">&#39;global-company-mode</span>)
+</span></span></code></pre></div><figure><a href="https://olddeuteronomy.github.io/img/python-eglot.png"><img src="https://olddeuteronomy.github.io/img/python-eglot.png"/></a><figcaption>
+            <h4>Click or tap to view the full-size picture.</h4>
+        </figcaption>
+</figure>
+
+<h2 id="code-navigation">Code navigation</h2>
+<p>I&rsquo;m using the default key bindings for</p>
+<dl>
+<dt><code>xref-find-definitions</code></dt>
+<dd><code>M-.</code> to find the definition of the identifier at point.</dd>
+<dt><code>xref-go-back</code></dt>
+<dd><code>M-,</code> to return back to where you invoked the <code>xref-find-definitions</code> command.</dd>
+<dt><code>xref-find-references</code></dt>
+<dd><code>M-?</code> to find references to the identifier at point.</dd>
+</dl>
+<p>These functions are now powered by Eglot.</p>
+<h2 id="final-notes">Final notes</h2>
+<p>I can recommend to force using Eglot for Python explicitly &ndash;</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;eglot</span>)
+</span></span><span style="display:flex;"><span>(add-hook <span style="color:#e6db74">&#39;python-mode-hook</span> <span style="color:#e6db74">&#39;eglot-ensure</span>)
+</span></span></code></pre></div><h3 id="a-note-for-tree-sitter-users">A note for Tree-Sitter users</h3>
+<p>If you are using Tree-Sitter for Python, it&rsquo;s recommended to <em>remap</em>
+the <code>python-mode</code> to the Tree-Sitter specific <code>python-ts-mode</code>.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(add-to-list <span style="color:#e6db74">&#39;major-mode-remap-alist</span> <span style="color:#f92672">&#39;</span>(python-mode <span style="color:#f92672">.</span> python-ts-mode))
+</span></span></code></pre></div><p>If this is the case, do not forget to force using Eglot for this mode
+as well.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(add-hook <span style="color:#e6db74">&#39;python-ts-mode-hook</span> <span style="color:#e6db74">&#39;eglot-ensure</span>)
+</span></span></code></pre></div><p>Happy emacsing!</p>

@@ -1,0 +1,71 @@
+
+        <p>Related Links :: <span class="label">Tags:</span> <span role="list" aria-label="Tags for “Adding More Link Description Defaults”">
+<span role="listitem" aria-label="&ldquo;emacs&rdquo; tag navigation"><a href="https://takeonrules.com/2025/09/20/generating-descriptions-of-org-insert-link/" aria-label="Previous post tagged with &ldquo;emacs&rdquo; is &ldquo;Generating Descriptions of org-insert-link&rdquo;" title="Older post tagged with &ldquo;emacs&rdquo; is &ldquo;Generating Descriptions of org-insert-link&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/emacs/" class="p-category" aria-label="All posts tagged with &ldquo;emacs&rdquo;" title="All posts tagged with &ldquo;emacs&rdquo;">emacs</a> <a href="https://takeonrules.com/2025/12/05/managing-lightdark-scheme-in-macos-and-linux/" aria-label="Next post tagged with &ldquo;emacs&rdquo; is &ldquo;Managing Light/Dark Scheme in MacOS and Linux&rdquo;" title="Newer post tagged with &ldquo;emacs&rdquo; is &ldquo;Managing Light/Dark Scheme in MacOS and Linux&rdquo;"><small>&gt;</small></a>
+</span></span>
+
+</p/><p><strong>Summary: </strong>
+Building on yesterday&rsquo;s post, this post further describes additional #Emacs and #OrgMode link insertion functionality.
+</p>
+        <p>Yesterday I wrote <a href="https://takeonrules.com/2025/09/20/generating-descriptions-of-org-insert-link/">Generating Descriptions of org-insert-link</a>; in which I wrote
+about pulling the default description for links to works.  <time datetime="2025-09-21" title="2025-09-21">Today</time> I added one
+more function that resolves three use cases: <code>abbr</code>, <code>abbr-plural</code>, and <code>denote</code>
+links to subheadings.</p>
+<p>For each of the above, I set the <code>:insert-description #'jf/org-link-description/work</code> configuration.  That function deconstructs the
+link and then looks up the information in the corresponding <span><a href="https://protesilaos.com/emacs/denote">Denote</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Denote”" title="Other site-wide references of “Denote”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-DENOTE">&#128214;</a></small>
+ file.  In the
+case of <code>abbr</code>, I use the <code>ABBR</code> property for the description.</p>
+<p>What does that look like?  The link is to a glossary entry “Rich Site Summary”
+and that entry has an <code>ABBR</code> property of “RSS”.  The description would then be
+“RSS”.</p>
+<p>See the <a href="https://github.com/jeremyf/dotemacs/blob/f61746d35efa5b662ba648d01430681bc950c3ca/emacs.d/init.el#L752-L782">jf/org-link-description/glossary (link to Github)</a> below:</p>
+<pre><code class="language-emacs-lisp">(defun jf/org-link-description/glossary (link desc)
+  &quot;Provide default DESC for a glossary LINK.
+
+Types can be: abbr, abbr-plural, and denote&quot;
+  (if desc
+      desc
+    (let* ((_match
+            (string-match &quot;^\\([^:]+\\):\\([^:]+\\)\\(::#\\(.*\\)\\)?&quot;
+                          link))
+           (type
+            (match-string 1 link))
+           (denote-identifier
+            (match-string 2 link))
+           (custom_id
+            (match-string 4 link))
+           (entry
+            (car (org-map-entries
+                  #'org-element-at-point
+                  (format &quot;CUSTOM_ID=\&quot;%s\&quot;&quot; custom_id)
+                  (list (denote-get-path-by-id denote-identifier))))))
+      (if entry
+          (pcase type
+            (&quot;abbr&quot;
+             (or (org-entry-get entry &quot;ABBR&quot;)
+                 (org-element-property :title entry)))
+            (&quot;abbr-plural&quot;
+             (or (org-entry-get entry &quot;PLURAL_ABBR&quot;)
+                 (org-element-property :title entry)))
+            (&quot;denote&quot;
+             (org-element-property :title entry)))
+        nil))))
+</code></pre>
+<p>This next part is <a href="https://github.com/jeremyf/dotemacs/blob/f61746d35efa5b662ba648d01430681bc950c3ca/emacs.d/init.el#L1343-L1348">me appending to the “denote” <code>org-link-parameters</code> configuration
+(see code on Github)</a>:</p>
+<pre><code class="language-emacs-lisp">(with-eval-after-load 'denote-org
+  (let ((config
+          (alist-get &quot;denote&quot; org-link-parameters nil nil #'string=)))
+    (plist-put config :insert-description
+      #'jf/org-link-description/glossary)
+    (org-link-set-parameters &quot;denote&quot; config)))
+</code></pre>
+<p>Getting this to work was made easy by leveraging <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-EMACS">&#128214;</a></small>
+’s <span><a href="https://en.wikipedia.org/wiki/Read%E2%80%93eval%E2%80%93print_loop">Read-eval-print loop</a></span> (<abbr title="Read-eval-print loop">REPL</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Read-eval-print loop”" title="Other site-wide references of “Read-eval-print loop”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-REPL">&#128214;</a></small>)
+, something I
+greatly miss when I’m writing <span><a href="https://takeonrules.com/tags/golang/">Go Lang</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Go Lang”" title="Other site-wide references of “Go Lang”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-GO">&#128214;</a></small>
+ code for my day job.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Adding%20More%20Link%20Description%20Defaults">Reply by Email</a></p>
+
+      

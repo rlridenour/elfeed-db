@@ -1,0 +1,226 @@
+<p>
+Times and time zones trip me up. Even with
+calendar notifications, I still fumble scheduled
+events. Automation helps me avoid embarrassing
+hiccups.
+</p>
+
+<p>
+We run <a href="https://demo.bigbluebutton.org/">BigBlueButton</a> as a self-hosted web
+conferencing server for <a href="https://emacsconf.org">EmacsConf</a>. It needs at
+least 8 GB of RAM when active. When it's dormant,
+it fits on a 1 GB RAM virtual private server. <a href="https://sachachua.com/blog/2025/01/scaling-a-bigbluebutton-server-down-to-a-1-gb-node-between-uses/">It's
+easy enough to scale the server up and down as
+needed</a>. Using the server for Emacs meetups in
+between EmacsConfs gives people a way to get
+together, and it also means I can regularly test
+the infrastructure. That makes scaling it up for
+EmacsConf less nerve-wracking.
+</p>
+
+<p>
+I have some code that processes various Emacs
+meetup iCalendar files (often with repeating
+entries) and combines them into one <a href="https://emacslife.com/calendar/emacs-calendar.ics">iCal file</a> that
+people can subscribe to calendar, as well as <a href="https://emacslife.com/calendar/#:~:text=Or%20you%20can%20periodically%20download%20and%20include%20one%20of%20these%20files%20in%20your%20Org%20agenda%20files:">Org
+files in different timezones</a> that they can include
+in their <code>org-agenda-files</code>. The <a href="https://emacslife.com/calendar">code I use to
+parse the iCal</a> seems to handle time zones and
+daylight savings time just fine. I set it up so
+that the Org files have simple non-repeating
+entries, which makes them easy to parse. I can use
+the Org file to determine the scheduled jobs to
+run with <a href="https://en.wikipedia.org/wiki/Cron">cron</a> on a home server (named xu4) that's
+up all the time.
+</p>
+
+<p>
+This code parses the Org file for schedule
+information, then generates pairs of crontab
+entries. The first entry scales the BigBlueButton
+server up 1 hour before the event using my
+bbb-testing script, and the second entry scales
+the server down 6 hours after the event using my
+bbb-dormant script (<a href="https://sachachua.com/blog/2025/01/scaling-a-bigbluebutton-server-down-to-a-1-gb-node-between-uses/">more info</a>). That gives organizers time to
+test it before the event starts, and it gives
+people plenty of time to chat. A shared CPU 8 GB
+RAM Linode costs USD 0.072 per hour, so that's USD
+0.50 per meetup hosted.
+</p>
+
+<p>
+Using <code>#+begin_src emacs-lisp :file "/ssh:xu4:~/bbb.crontab" :results file</code> as the header for my code block and <a href="http://www.macs.hw.ac.uk/~hwloidl/docs/ssh.htm">using an
+SSH agent for authentication</a> lets me use <a href="https://www.gnu.org/s/tramp/">TRAMP</a> to
+write the file directly to the server. (See
+<a href="https://orgmode.org/manual/Results-of-Evaluation.html">Results of Evaluation (The Org Manual)</a>)
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">let*</span> ((file <span class="org-string">"/home/sacha/sync/emacs-calendar/emacs-calendar-toronto.org"</span>)
+       (time-format <span class="org-string">"%M %H %d %m"</span>)
+       (bbb-meetups <span class="org-string">"OrgMeetup</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">Emacs Berlin</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">Emacs APAC"</span>)
+       (scale-up <span class="org-string">"/home/sacha/bin/bbb-testing"</span>)
+       (scale-down <span class="org-string">"/home/sacha/bin/bbb-dormant"</span>))
+  (mapconcat
+   (<span class="org-keyword">lambda</span> (o)
+     (<span class="org-keyword">let</span> ((start-time (format-time-string time-format (- (car o) 3600 )))
+           (end-time (format-time-string time-format (+ (car o) (* 6 3600)))))
+       (format <span class="org-string">"# %s\n%s * %s\n%s * %s\n"</span>
+               (cdr o)
+               start-time
+               scale-up
+               end-time
+               scale-down)))
+   (delq nil
+         (<span class="org-keyword">with-temp-buffer</span>
+           (insert-file-contents file)
+           (org-mode)
+           (goto-char (point-min))
+           (org-map-entries
+            (<span class="org-keyword">lambda</span> ()
+              (<span class="org-keyword">when</span> (<span class="org-keyword">and</span>
+                     (string-match bbb-meetups (org-entry-get (point) <span class="org-string">"ITEM"</span>))
+                     (re-search-forward org-tr-regexp (<span class="org-keyword">save-excursion</span> (org-end-of-subtree)) t))
+                (<span class="org-keyword">let</span> ((time (match-string 0)))
+                  (cons (org-time-string-to-seconds time)
+                        (format <span class="org-string">"%s - %s"</span> (org-entry-get (point) <span class="org-string">"ITEM"</span>) time)))))
+            <span class="org-string">"LEVEL=1"</span>)))
+   <span class="org-string">"\n"</span>))
+</code></pre>
+</div>
+
+
+<p>
+The code makes entries that look like this:
+</p>
+
+<pre class="example" id="org861ddc9">
+# OrgMeetup (virtual) - &lt;2025-06-11 Wed 12:00&gt;&#45;&#45;&lt;2025-06-11 Wed 14:00&gt;
+00 11 11 06 * /home/sacha/bin/bbb-testing
+00 18 11 06 * /home/sacha/bin/bbb-dormant
+
+# Emacs Berlin (hybrid, in English) - &lt;2025-06-25 Wed 12:30&gt;&#45;&#45;&lt;2025-06-25 Wed 14:30&gt;
+30 11 25 06 * /home/sacha/bin/bbb-testing
+30 18 25 06 * /home/sacha/bin/bbb-dormant
+
+# Emacs APAC: Emacs APAC meetup (virtual) - &lt;2025-06-28 Sat 04:30&gt;&#45;&#45;&lt;2025-06-28 Sat 06:00&gt;
+30 03 28 06 * /home/sacha/bin/bbb-testing
+30 10 28 06 * /home/sacha/bin/bbb-dormant
+</pre>
+
+<p>
+This works because meetups don't currently
+overlap. If there were, I'll need to tweak the
+code so that the server isn't downscaled in the
+middle of a meetup. It'll be a good problem to
+have.
+</p>
+
+<p>
+I need to load the crontab entries by using
+<code>crontab bbb.crontab</code>. Again, I can tell Org Mode
+to run this on the xu4 home server. This time I
+use the <a href="https://orgmode.org/manual/Environment-of-a-Code-Block.html#Choosing-a-working-directory-1">:dir</a> argument to specify the default
+directory, like this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-org"><code><span class="org-org-block-begin-line">#+begin_src sh :dir "/ssh:xu4:~" :results silent</span>
+<span class="org-org-block">crontab bbb.crontab</span>
+<span class="org-org-block-end-line">#+end_src</span>
+</code></pre>
+</div>
+
+
+<p>
+Then cron can take care of things automatically,
+and I'll just get the e-mail notifications from
+Linode telling me that the server has been
+resized. This has already come in handy, like when
+I thought of Emacs APAC as being on Saturday, but
+it was actually on Friday my time.
+</p>
+
+<p>
+I have another Emacs Lisp block that I use to
+retrieve all the info and update the list of
+meetups. I can add <code>(goto-char (org-find-property
+"CUSTOM_ID" "crontab"))</code> to find this section and
+use <code>org-babel-execute-subtree</code> to execute all the
+code blocks. That makes it an automatic part of my
+process for updating the <a href="https://emacslife.com/calendar/">Emacs Calendar</a> and <a href="https://sachachua.com/blog/category/emacs-news">Emacs
+News</a>. Here's the code that does the calendar part
+(<a href="https://emacslife.com/calendar/README.org">Org source</a>):
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-elisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-prepare-calendar-for-export</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">with-current-buffer</span> (find-file-noselect <span class="org-string">"~/sync/emacs-calendar/README.org"</span>)
+    (<span class="org-keyword">save-restriction</span>
+      (widen)
+      (goto-char (point-min))
+      (re-search-forward <span class="org-string">"#\\+NAME: event-summary"</span>)
+      (org-ctrl-c-ctrl-c)
+      (org-export-to-file <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">html</span> <span class="org-string">"README.html"</span>)
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">(unless my-laptop-p (my-schedule-announcements-for-upcoming-emacs-meetups))</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">update the crontab</span>
+      (goto-char (org-find-property <span class="org-string">"CUSTOM_ID"</span> <span class="org-string">"crontab"</span>))
+      (org-babel-execute-subtree)
+      (<span class="org-keyword">when</span> my-laptop-p
+        (org-babel-goto-named-result <span class="org-string">"event-summary"</span>)
+        (re-search-forward <span class="org-string">"^- "</span>)
+        (goto-char (match-beginning 0))
+        (<span class="org-keyword">let</span> ((events (org-babel-read-result)))
+          (oddmuse-edit <span class="org-string">"EmacsWiki"</span> <span class="org-string">"Usergroups"</span>)
+          (goto-char (point-min))
+          (delete-region (<span class="org-keyword">progn</span> (re-search-forward <span class="org-string">"== Upcoming events ==\n\n"</span>) (match-end 0))
+                         (<span class="org-keyword">progn</span> (re-search-forward <span class="org-string">"^$"</span>) (match-beginning 0)))
+          (<span class="org-keyword">save-excursion</span> (insert (mapconcat (<span class="org-keyword">lambda</span> (s) (concat <span class="org-string">"* "</span> s <span class="org-string">"\n"</span>)) events <span class="org-string">""</span>))))))))
+(my-prepare-calendar-for-export)
+</code></pre>
+</div>
+
+
+<p>
+I used a similar technique to <a href="https://sachachua.com/blog/2023/10/emacsconf-backstage-autopilot-with-crontab/">generate the
+EmacsConf crontabs for automatically switching to
+the next talk</a>. For that one, I used Emacs Lisp to
+write the files directly instead of using the
+<code>:file</code> header argument for Org Mode source
+blocks. That made it easier to loop over multiple
+files.
+</p>
+
+<p>
+Hmm. Come to think of it, the technique of "go to
+a specific subtree and then execute it" is pretty
+powerful. In the past, I've found it handy to
+<a href="https://sachachua.com/dotemacs#execute-named-babel-block">execute source blocks by name</a>. Executing a subtree
+by custom ID is even more useful because I can
+easily mix source blocks in different languages or
+include other information. I think that's worth
+adding a <a href="https://sachachua.com/dotemacs#execute-subtree-by-custom-id">my-org-execute-subtree-by-custom-id</a>
+function to my Emacs configuration. Combined with
+an <a href="https://www.gnu.org/software/emacs/manual/html_node/org/External-Links.html"><code>elisp:</code> link</a>, I can make links that execute
+functional blocks that might even be in different
+files. That could be a good starting point for a
+dashboard.
+</p>
+
+<p>
+I love the way Emacs can easily work with files
+and scripts in different languages on different
+computers, and how it can help me with times and
+time zones too. This code should help me avoid
+brain hiccups and calendar mixups so that people
+can just enjoy getting together. Now I don't have
+to worry about whether I remembered to set up cron
+entries and if I did the math right for the times.
+We'll see how it holds up!
+</p>
+<div><a href="https://sachachua.com/blog/2025/06/using-org-mode-emacs-lisp-and-tramp-to-parse-meetup-calendar-entries-and-generate-a-crontab/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JY2D1TWZCJY0Z6D0606275WD" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F06%2Fusing-org-mode-emacs-lisp-and-tramp-to-parse-meetup-calendar-entries-and-generate-a-crontab%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

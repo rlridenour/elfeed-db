@@ -1,0 +1,136 @@
+<p>Upgrading to Emacs 29.1 worked like a charm.</p>
+
+<p>There’ve been a couple of small neat additions next to all the big changes like native <code>tree-sitter</code> support – and there’s one in particular that you could say I almost <em>hate</em>.</p>
+
+<h2 id="kill-anyway-yes-no-save-and-kill">Kill Anyway? Yes, No, Save and kill?!</h2>
+
+<p>When I compose email and decide to discard everything, I’m politely being asked whether I want to kill (aka ‘close’) the buffer and discard all changes. This applies to all other buffers that haven’t been saved, too, but I mostly run into this with email.</p>
+
+<p>The confirmation step before killing a buffer is a sensible thing to do to prevent accidental data loss. Great idea.</p>
+
+<p>It used to be a yes-or-no question, where “yes” continued the process (of killing the modified buffer) and “no” canceled it.</p>
+
+<p>I’m not a fan of yes-or-no questions in Emacs, to be honest.</p>
+
+<p>It’s a standard mechanism in Emacs, but it’s also used in many different ways. Sometimes, “yes” will discard changes, sometimes “yes” will save things, depending on context. The options are not meaningful, they require knowledge of the context, and so they are only a slight improvement over “OK” and “Cancel” – which is looked down upon for good reason in confirmation dialogs since Windows 95.</p>
+
+<p>Emacs 29 adds a third option, a convenience option, to kill the buffer <em>and</em> save the contents. It’s being added to the yes-or-no convention, though, in an odd way.</p>
+
+<p>Emacs 29.1 presents it like so (via <code>kill-buffer--possibly-save</code>, <a href="https://github.com/emacs-mirror/emacs/blob/3907c884f03cf5f2a09696bda015b1060c7111ba/lisp/simple.el#L10980">see source code</a>):</p>
+
+<blockquote>
+  <p>Buffer MyAwesomeEmail.txt modified; kill anyway?</p>
+
+  <ul>
+    <li>yes</li>
+    <li>no</li>
+    <li>save and then kill</li>
+  </ul>
+</blockquote>
+
+<p>It used to be just yes-or-no, and it became muscle memory over the past years. With the addition of the third option, I involuntarily pause for a heartbeat. Sometimes only <em>after</em> performing the muscle-memory-action, wondering if I did the right thing, because some meaning trickles into my consciousness only at a delay here.</p>
+
+<p>It’s like this: The option to “save and then kill”, which I scan/read at a glance, changes the semantics of all the rest.</p>
+
+<p>It’s basically: “save”, “yes”, “no”, that I’m noticing I am trying to parse automatically, where it used to be “kill? yes, no”.</p>
+
+<p>But these three options don’t make sense!</p>
+
+<p>Not that one action is “save”, what is “yes”? It’s <em>discarding</em> the contents. Even though it’s phrased affirmatively, it’s affirming “kill anyway?”, not the verb among the options, which is “save”. The verbs don’t gel well.</p>
+
+<p>Also, how is “save” an appropriate answer to a yes-no question like “kill anyway?”?</p>
+
+<p>This confuses the hell out of me. So I got rid of this.</p>
+
+<p><strong>Update 2025-02-27:</strong> Emacs 30.1 changes the long labels of options to show “kill buffer without saving” (yes), “exit without doing anything” (no), “save the buffer and then kill it”. Thanks <a href="https://sfba.social/@kickingvegas/114066293034631389">Charles Choi (@kickingvegas@sfba.social)</a> for pointing out that there was a change. The descriptive labels are much better than the old yes/no! With a vanilla Emacs installation, I wouldn’t mind seeing these. But the descriptive labels aren’t shown in any minibuffer prompt, so my <code>kill-with-intelligence.el</code> still offers more clarity.</p>
+
+<h2 id="rationale-for-my-replacement">Rationale for my replacement</h2>
+
+<figure><a href="https://christiantietze.de/posts/2023/09/kill-unsaved-buffer-ux-action-labels/screenshot.png"><img alt="" src="https://christiantietze.de/posts/2023/09/kill-unsaved-buffer-ux-action-labels/screenshot.png" /></a><figcaption>This is how I render the question in my setup</figcaption></figure>
+
+<p>Below, I’m sharing with you my drop-in replacement which I use to overwrite the confirmation function. It does a couple of things differently.</p>
+
+<ul>
+  <li>Since “kill anyway?”, the question that’s been used since forever in this confirmation, doesn’t <em>work</em> with anything except “yes” and “no”, I’m dropping that altogether. Let the options carry the weight.</li>
+  <li>I’m replacing “yes” and “no” with strong options. This is my main UX contribution: to offer options that tell what the effect is.</li>
+</ul>
+
+<p>The confirmation will be presented like so:</p>
+
+<blockquote>
+  <p>Buffer MyAwesomeEmail.txt modified.</p>
+
+  <ul>
+    <li>Save and kill buffer</li>
+    <li>Discard and kill buffer without saving</li>
+    <li>Cancel</li>
+  </ul>
+</blockquote>
+
+<p>“Cancel” replaces “no”, which would abort the process of “kill anyway?”, not the “save” part.</p>
+
+<p>“Save and kill buffer” replaces “save and then kill”. I couldn’t find anything wrong with this new 3rd option on its own, except that it didn’t make sense in a yes-no question.</p>
+
+<p>“Discard and kill buffer without saving” puts “discard” in the front. I settled on this because “kill buffer without saving” on its own, or in the front of a longer phrase, didn’t work as well for me when I was scanning the options. I basically read these as “Save”, “Discard”, “Cancel”, and that suffices to pick the correct one.</p>
+
+<p>My choice of actions will probably be too long for the purists. With <code>ido</code>, for example, I’d rather see a much shorter “save”/”discard”/”cancel”. But I’m using <code>vertico</code> and select the options from a list.</p>
+
+<h2 id="alternatives">Alternatives</h2>
+
+<p><a href="http://xahlee.info/emacs/emacs/elisp_close_buffer_open_last_closed.html">Xah Lee improved this years ago</a> with a custom <code>xah-close-current-buffer</code> function that asks the user: “Buffer %s modified; Do you want to save?”, where the affimation with “yes” is the safe one, not the dangerous one, and to abort the process, you just use <kbd>C-g</kbd>.</p>
+
+<p>That approach is already able to handle all three cases: save and kill (“yes”), discard and kill (“no”), and cancel (hit <kbd>C-g</kbd>).</p>
+
+<p>It may not sound like much, but this is actually a much better use of the yes-or-no prompt. It composes much better with the existing Emacs approach: <kbd>C-g</kbd> to abort the current command is always available, and that’s exactly what the “no” answer in the old yes-or-no question “kill anyway?” was doing.</p>
+
+<p>Consequently, we can say that the “kill anyway?” question only effectively added the “yes” response to discard changes and duplicated <kbd>C-g</kbd>, while Xah Lee improved the phrase and added more powerful and useful options.</p>
+
+<h2 id="kill-buffer--possibly-save-replacement"><code>kill-buffer--possibly-save</code> Replacement</h2>
+
+<p>I didn’t want to deviate from the Emacs 29 triple of answers even though “save an kill” and “discard and kill” are enough, and “cancel” is superfluous. Xah Lee’s approach is superior, though.</p>
+
+<p>So here’s my replacement of <code>kill-buffer--possibly-save</code> in <code>simple.el</code>:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; kill-with-intelligence.el --- Making buffer killing suck less. -*- lexical-binding: t -*-</span>
+<span class="c1">;;</span>
+<span class="c1">;;; Commentary:</span>
+<span class="c1">;; Original function at the time of this writing is at:</span>
+<span class="c1">;; https://github.com/emacs-mirror/emacs/blob/3907c884f03cf5f2a09696bda015b1060c7111ba/lisp/simple.el#L10980</span>
+<span class="c1">;;</span>
+<span class="c1">;;; Code:</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/kill-buffer--possibly-save--advice</span> <span class="p">(</span><span class="nv">original-function</span> <span class="nv">buffer</span> <span class="k">&amp;rest</span> <span class="nv">args</span><span class="p">)</span>
+  <span class="s">"Ask user in the minibuffer whether to save before killing.
+
+Replaces `kill-buffer--possibly-save' as advice, so
+ORIGINAL-FUNCTION is unused and never delegated to. Its first
+parameter is the buffer, which is the `car' or ARGS."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">response</span>
+         <span class="p">(</span><span class="nb">car</span>
+          <span class="p">(</span><span class="nv">read-multiple-choice</span>
+           <span class="p">(</span><span class="nb">format</span> <span class="s">"Buffer %s modified."</span>
+                   <span class="p">(</span><span class="nv">buffer-name</span><span class="p">))</span>
+           <span class="o">'</span><span class="p">((</span><span class="nv">?s</span> <span class="s">"Save and kill buffer"</span> <span class="s">"save the buffer and then kill it"</span><span class="p">)</span>
+             <span class="p">(</span><span class="nv">?d</span> <span class="s">"Discard and kill buffer without saving"</span> <span class="s">"kill buffer without saving"</span><span class="p">)</span>
+             <span class="p">(</span><span class="nv">?c</span> <span class="s">"Cancel"</span> <span class="s">"Exit without doing anything"</span><span class="p">))</span>
+           <span class="no">nil</span> <span class="no">nil</span> <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nb">not</span> <span class="nv">use-short-answers</span><span class="p">)</span>
+                        <span class="p">(</span><span class="nb">not</span> <span class="p">(</span><span class="nv">use-dialog-box-p</span><span class="p">)))))))</span>
+    <span class="p">(</span><span class="nb">cond</span> <span class="p">((</span><span class="nb">=</span> <span class="nv">response</span> <span class="nv">?s</span><span class="p">)</span>
+           <span class="p">(</span><span class="nv">with-current-buffer</span> <span class="nv">buffer</span> <span class="p">(</span><span class="nv">save-buffer</span><span class="p">))</span>
+           <span class="no">t</span><span class="p">)</span>
+          <span class="p">((</span><span class="nb">=</span> <span class="nv">response</span> <span class="nv">?d</span><span class="p">)</span>
+           <span class="no">t</span><span class="p">)</span>
+          <span class="p">((</span><span class="nb">=</span> <span class="nv">response</span> <span class="nv">?c</span><span class="p">)</span>
+           <span class="no">nil</span><span class="p">)</span>
+          <span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">advice-add</span> <span class="ss">'kill-buffer--possibly-save</span> <span class="ss">:around</span> <span class="nf">#'</span><span class="nv">ct/kill-buffer--possibly-save--advice</span><span class="p">)</span>
+
+<span class="c1">;;;</span>
+
+<span class="p">(</span><span class="nb">provide</span> <span class="ss">'kill-with-intelligence</span><span class="p">)</span>
+<span class="c1">;; kill-with-intelligence.el ends here</span>
+</code></pre></div></div>
+
+<p><strong>Update 2023-10-09:</strong> Updated code to address <a href="https://christiantietze.de/posts/2023/09/kill-unsaved-buffer-ux-action-labels/#fast-comments-jt=WHaeFn897Mz">feedback by PhilHudson</a>.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

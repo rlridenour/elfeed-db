@@ -1,0 +1,120 @@
+ 
+<p><img src="https://cdn.blot.im/blog_c4a729f3205a44e5a9669523ddfb8b2e/_image_cache/9e504949-34a4-4d13-a541-0032c2c31bfc.png" alt="Emacs" width="512" height="512" data-action="zoom"><span class="caption">Emacs</span></p>
+
+<p>When I started building my Emacs configuration, I copied bits and pieces of code from a whole host of other people’s configurations. It made it possible for me to get started and be productive. I am grateful for the help I got from them. However, I ran out into some problems. One particular area of friction is keybindings. All of the individuals whose configuration I copied had their own logic behind the assignment of their keybindings. When you mix them together, the logic disappears and it all becomes a plethora of decisions which do not make sense. When it doesn’t make sense, it becomes more difficult to remember them. I needed to change that.</p>
+<h2 id="my-own-keymap">My Own Keymap</h2>
+<p>I came across, <a href="https://github.com/captainflasmr/Emacs-core" target="_blank">captainflasmr/Emacs-core: A stripped-down version of my primary Emacs configuration, it is designed to leverage only the default built-in features of Emacs</a>. It is an attempt to replicate the features of packages in vanilla emacs through some clever code snippets. I learned a lot from it. It also taught me the benefit of designing my own keymap and making sense of what you assign to them. This is my first attempt at just that:</p>
+<pre><code>#+begin_src emacs-lisp
+(defvar my-misc-keymap (make-sparse-keymap))
+(global-set-key (kbd "M-o") my-misc-keymap)
+    (define-key my-misc-keymap (kbd "+") #'tab-bar-new-tab)
+    (define-key my-misc-keymap (kbd "-") #'tab-close)
+    (define-key my-misc-keymap (kbd "b j") #'bookmark-jump)
+    (define-key my-misc-keymap (kbd "b o") #'consult-bookmark)
+    (define-key my-misc-keymap (kbd "b u") #'consult-buffer)
+    (define-key my-misc-keymap (kbd "d") #'consult-dir)
+    (define-key my-misc-keymap (kbd "g") #'consult-grep)
+    (define-key my-misc-keymap (kbd "o h") #'consult-org-heading)
+    (define-key my-misc-keymap (kbd "o a") #'consult-org-agenda)
+    (define-key my-misc-keymap (kbd "o o") #'consult-outline)
+    (define-key my-misc-keymap (kbd "r e") #'er/expand-region)
+    (define-key my-misc-keymap (kbd "r c") #'er/contract-region)
+    (define-key my-misc-keymap (kbd "r f") #'recentf-open-files)
+    (define-key my-misc-keymap (kbd "r r") #'consult-register)
+    (define-key my-misc-keymap (kbd "r s") #'consult-register-store)
+    (define-key my-misc-keymap (kbd "/") #'my/comment-or-uncomment)
+    (define-key my-misc-keymap (kbd "m l") #'my/mark-line)
+    (define-key my-misc-keymap (kbd "m b") #'my/mark-block)
+    (define-key my-misc-keymap (kbd "s") (lambda () (interactive) (switch-to-buffer "*scratch*")))
+    (define-key my-misc-keymap (kbd "w") #'my/quick-window-jump)
+#+end_src</code></pre>
+<p>Some functions which need to be explained.</p>
+<h2 id="comment-or-uncomment">Comment or Uncomment</h2>
+<p>This is from <a href="https://github.com/captainflasmr" target="_blank">captainflasmr (CaptainFlasmr)</a> and his Emacs-core repository.</p>
+<pre><code>#+begin_src emacs-lisp
+(defun my/comment-or-uncomment ()
+  "Comments or uncomments the current line or region."
+  (interactive)
+  (if (region-active-p)
+      (comment-or-uncomment-region
+       (region-beginning)(region-end))
+    (comment-or-uncomment-region
+     (line-beginning-position)(line-end-position))))
+#+end_src</code></pre>
+<h2 id="mark-line">Mark Line</h2>
+<p>Again from <a href="https://github.com/captainflasmr" target="_blank">captainflasmr (CaptainFlasmr)</a> and his Emacs-core repository.</p>
+<pre><code>#+begin_src emacs-lisp
+(defun my/mark-line ()
+  "Mark whole line."
+  (interactive)
+  (beginning-of-line)
+  (push-mark (point) nil t)
+  (end-of-line))
+#+end_src</code></pre>
+<h2 id="mark-block">Mark Block</h2>
+<p>Again from <a href="https://github.com/captainflasmr" target="_blank">captainflasmr (CaptainFlasmr)</a> and his Emacs-core repository.</p>
+<pre><code>#+begin_src emacs-lisp
+(defun my/mark-block ()
+  "Marking a block of text surrounded by a newline."
+  (interactive)
+  (when (not (region-active-p))
+    (backward-char))
+  (skip-chars-forward " \n\t")
+  (re-search-backward "^[ \t]*\n" nil 1)
+  (skip-chars-forward " \n\t")
+  (when (not (region-active-p))
+    (push-mark))
+  (re-search-forward "^[ \t]*\n" nil 1)
+  (skip-chars-backward " \n\t")
+  (setq mark-active t))
+#+end_src</code></pre>
+<h2 id="ace-windows-replacement">ace-windows Replacement</h2>
+<p>I was using ace-windows to move between windows. This, again from <a href="https://github.com/captainflasmr" target="_blank">captainflasmr (CaptainFlasmr)</a> and his Emacs-core repository, is a replacement which works well.</p>
+<pre><code>#+begin_src emacs-lisp
+(defun my/quick-window-jump ()
+  "Jump to a window by typing its assigned character label.
+Windows are labeled starting from the top-left window and proceed top to bottom left to right."
+  (interactive)
+  (let* ((window-list (my/get-windows))
+         (window-keys (seq-take '("j" "k" "l" ";" "a" "s" "d" "f")
+                                (length window-list)))
+         (window-map (cl-pairlis window-keys window-list))
+         (key (read-key (format "Select window [%s]: " (string-join window-keys ", ")))))
+    (if-let ((selected-window (cdr (assoc (char-to-string key) window-map))))
+        (select-window selected-window)
+      (message "No window assigned to key: %c" key))))
+
+(defun my/get-windows ()
+  "Return a list of windows in the current frame, ordered from top to bottom, left to right."
+  (sort (window-list nil 'no-mini)
+        (lambda (w1 w2)
+          (let ((edges1 (window-edges w1))
+                (edges2 (window-edges w2)))
+            (or (&lt; (car edges1) (car edges2)) ; Compare top edges
+                (and (= (car edges1) (car edges2)) ; If equal, compare left edges
+                     (&lt; (cadr edges1) (cadr edges2))))))))
+#+end_src</code></pre>
+<h2 id="other-changes">Other Changes</h2>
+<ul>
+<li>I got rid of ace-windows.</li>
+<li>Got rid of hydra and all the hydras I had designed. The two major ones were for dired and Markdown. Need to learn the keyboard commands and not rely on the hydras. Might create a general keymap for dired. Not sure about it yet.</li>
+<li>Got rid of discover and makey from Mickey Petersen. Wasn’t supported by other packages and hence not useful.</li>
+<li>Tried to install <a href="https://github.com/kickingvegas/casual-suite" target="_blank">kickingvegascasual-suite Casual Suite - An umbrella package to support a single install point for all Casual user interfaces.</a>. For some reason, it didn’t work at all and I did not bother to troubleshoot it. Might come back to it at some point, but it is not an urgent need.</li>
+<li>Was curious about <a href="http://xahlee.info/emacs/misc/xah-fly-keys.html" target="_blank">Emacs: Xah Fly Keys</a>. Couldn’t get it to work and then read the documentation and decided not to go there. It will require a major change to the way I interact with Emacs and I am not sure I want to climb that mountain yet.</li>
+</ul>
+<h2 id="pain-point">Pain-point</h2>
+<p>I have an org-file called Emacs.org which tangles to an init.el. I notice that if I take an installed package and set the elisp code to <code>tangle: no</code>, it disappears from the init.el. However the package still exists in my elpa directory and it is accessible to me through <code>M-x</code>. Doesn’t work, but it shows up in the command-list. Annoying. I have to delete the package from the elpa directory myself. Is this normal behavior or is my configuration missing something? Any help would be appreciated.</p>
+<p>This is the code I am using for auto-tangling the org file on save. It is from the Emacs from Scratch series at <a href="https://systemcrafters.net/" target="_blank">System Crafters</a>.</p>
+<pre><code>#+begin_src emacs-lisp
+  ;; Automatically tangle our Emacs.org config file when we save it
+  (defun efs/org-babel-tangle-config ()
+    (when (string-equal (file-name-directory (buffer-file-name))
+                        (expand-file-name user-emacs-directory))
+      ;; Dynamic scoping to the rescue
+      (let ((org-confirm-babel-evaluate nil))
+        (org-babel-tangle))))
+
+  (add-hook 'org-mode-hook (lambda () (add-hook 'after-save-hook #'efs/org-babel-tangle-config)))
+#+end_src</code></pre>
+<p>That is all I have for today.</p>
+<p>macosxguru at the gmail thingie.</p> 

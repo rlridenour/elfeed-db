@@ -1,0 +1,45 @@
+<p>I seem to be grepping a lot recently and I think the way I use <code>deadgrep</code> can be improved a little.</p>
+<figure class="emacs-img"><img src="https://emacs.dyerdwelling.family/ox-hugo/20230120181918-emacs--Better-Grepping-with-Deadgrep.jpg">
+</figure>
+
+<p>Currently <code>deadgrep</code> defaults to a recursive <code>ripgrep</code> from the <code>default-directory</code> which is generally the current directory of the buffer, but I find that by default I tend to mostly want to grep from a top level directory (yes I know, almost like a project!).</p>
+<p>I would like to have a typical <strong>Find All References</strong> type of functionality from my grepping and not to rely on <code>xref</code> as I will not necessarily ever know if any <code>xref</code> functionality is supported for any file that I am working on and for the moment I am not using any connection to an LSP server.  I would like a simple generic process that can be used across all files and I think <code>deadgdrep</code> can help me out with this.</p>
+<p>I would like to bind to <code>S-f12</code> to grep from the &ldquo;project&rdquo; top level with the search set to whatever string is under my cursor; this should enable a quick workflow involving jumping around files within the top level directory structure bouncing back and forth between the <code>deadgrep</code> buffer.</p>
+<p>I have chosen the binding of <code>S-f12</code> for consistency across IDEs as I am often required to use VSCode and Visual Studio for work.</p>
+<p>In addition I would like to replace my usual local directory grepping where I use <code>grep</code> with <code>deadgrep</code> for a more unified approach.</p>
+<p>So I created the following two functions:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/deadgrep ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">equal</span> major-mode <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span>))
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span> (thing-at-point <span style="color:#e6db74">&#39;symbol</span>)))
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  (deadgrep search-term home-dir)
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/grep ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">equal</span> major-mode <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span>))
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span> (thing-at-point <span style="color:#e6db74">&#39;symbol</span>)))
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  (deadgrep search-term)
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><p>home-dir as you might guess is where my top level directory resides.</p>
+<p>I came to realise that when I am in a <code>dired</code> buffer I don&rsquo;t actually ever want to grep with the string under the cursor (which of course would most likely be a file or directory) but only when I am in a file.</p>
+<p>I toyed around with the idea of having a single (interactive &ldquo;p&rdquo;) function so it would accept a prefix command and then perform the following kind of logic:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>((<span style="color:#a6e22e">equal</span> current-prefix-arg <span style="color:#66d9ef">nil</span>)   <span style="color:#75715e">; no C-u</span>
+</span></span><span style="display:flex;"><span>  (do top level grep))
+</span></span><span style="display:flex;"><span>((<span style="color:#a6e22e">equal</span> current-prefix-arg <span style="color:#f92672">&#39;</span>(<span style="color:#ae81ff">4</span>))  <span style="color:#75715e">; C-u</span>
+</span></span><span style="display:flex;"><span>  (do local grep))
+</span></span><span style="display:flex;"><span>((<span style="color:#a6e22e">equal</span> current-prefix-arg <span style="color:#ae81ff">1</span>)     <span style="color:#75715e">; C-u 1</span>
+</span></span><span style="display:flex;"><span>  (do some other grepping))
+</span></span></code></pre></div><p>however this had the unintended consequence of pushing through the prefix command to <code>deadgrep</code> and therefore it would not start immediately but wait for user interaction.  I couldn&rsquo;t see a way round this so had to split my grepping into both a <code>S-f12</code> and <code>M-f12</code> for each function call; not much of a big deal.</p>
+<p>As I am just running a single deadgrep instance using:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(setq deadgrep-max-buffers <span style="color:#ae81ff">1</span>)
+</span></span></code></pre></div><p>I also needed to add the following as I will always want to kill the current process if I am starting a new one.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(setq kill-buffer-query-functions <span style="color:#66d9ef">nil</span>)
+</span></span></code></pre></div>

@@ -1,0 +1,373 @@
+<div class="update" id="orge8f325d">
+<ul class="org-ul">
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-01-13">[2026-01-13 Tue]</time></span>: Change main function to <code>my-whisper-run</code>, use seq-reduce to go through the functions.</li>
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-01-09">[2026-01-09 Fri]</time></span>: Added code for automatically capturing screenshots, saving text, working with a list of functions.</li>
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-01-08">[2026-01-08 Thu]</time></span>: Added demo, fixed some bugs.</li>
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-01-04">[2026-01-04 Sun]</time></span>: Added note about difference from MELPA package, fixed :vc</li>
+</ul>
+
+</div>
+
+<p>
+I want to get my thoughts into the computer quickly, and talking might be a good way to do some of that. <a href="https://github.com/openai/whisper">OpenAI Whisper</a> is reasonably good at recognizing my speech now and <a href="https://github.com/natrys/whisper.el">whisper.el</a> gives me a convenient way to call <a href="https://github.com/ggml-org/whisper.cpp">whisper.cpp</a> from Emacs with a single keybinding. (Note: This is not the same <a href="https://melpa.org/#/whisper">whisper</a> package as the one on MELPA.) Here is how I have it set up for reasonable performance on my Lenovo P52 with just the CPU, no GPU.
+</p>
+
+<p>
+I've bound <code>&lt;f9&gt;</code> to the command <code>whisper-run</code>. I press <code>&lt;f9&gt;</code> to start recording, talk, and then press <code>&lt;f9&gt;</code> to stop recording. By default, it inserts the text into the buffer at the current point. I've set <code>whisper-return-cursor-to-start</code> to <code>nil</code> so that I can keep going.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">use-package</span> whisper
+  <span class="org-builtin">:vc</span> (<span class="org-builtin">:url</span> <span class="org-string">"https://github.com/natrys/whisper.el"</span>)
+  <span class="org-builtin">:load-path</span> <span class="org-string">"~/vendor/whisper.el"</span>
+  <span class="org-builtin">:config</span>
+  (<span class="org-keyword">setq</span> whisper-quantize <span class="org-string">"q4_0"</span>)
+  (<span class="org-keyword">setq</span> whisper-install-directory <span class="org-string">"~/vendor"</span>)
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;install-path (concat
+     (expand-file-name (file-name-as-directory whisper-install-directory))
+     <span class="org-string">"whisper.cpp/"</span>))
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">Get it running with whisper-server-mode set to nil first before you switch to 'local.</span>
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">If you change models,</span>
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">(whisper-install-whispercpp (whisper&#45;&#45;check-install-and-run nil "whisper-start"))</span>
+  (<span class="org-keyword">setq</span> whisper-server-mode <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">local</span>)
+  (<span class="org-keyword">setq</span> whisper-model <span class="org-string">"base"</span>)
+  (<span class="org-keyword">setq</span> whisper-return-cursor-to-start nil)
+  <span class="org-comment-delimiter">;</span><span class="org-comment">(setq whisper&#45;&#45;ffmpeg-input-device "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.analog-stereo")</span>
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;ffmpeg-input-device <span class="org-string">"VirtualMicSink.monitor"</span>)
+  (<span class="org-keyword">setq</span> whisper-language <span class="org-string">"en"</span>)
+  (<span class="org-keyword">setq</span> whisper-recording-timeout 3000)
+  (<span class="org-keyword">setq</span> whisper-before-transcription-hook nil)
+  (<span class="org-keyword">setq</span> whisper-use-threads (1- (num-processors)))
+  (<span class="org-keyword">setq</span> whisper-transcription-buffer-name-function <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper&#45;&#45;simple-transcription-buffer-name</span>)
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-after-transcription-hook</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-subed-fix-common-errors-from-start</span> -100)
+  <span class="org-builtin">:bind</span>
+  ((<span class="org-string">"&lt;f9&gt;"</span> . whisper-run)
+   (<span class="org-string">"C-&lt;f9&gt;"</span> . my-whisper-run)
+   (<span class="org-string">"S-&lt;f9&gt;"</span> . my-whisper-replay)
+   (<span class="org-string">"M-&lt;f9&gt;"</span> . my-whisper-toggle-language)))
+</code></pre>
+</div>
+
+
+<p>
+Disk space is inexpensive and backups are great, so let's save each file using the timestamp.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-dir</span> <span class="org-string">"~/recordings/whisper/"</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-set-temp-filename</span> ()
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;temp-file (expand-file-name
+                            (format-time-string <span class="org-string">"%Y-%m-%d-%H-%M-%S.wav"</span>)
+                            my-whisper-dir)))
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper</span>
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-before-transcription-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-set-temp-filename</span>))
+</code></pre>
+</div>
+
+
+<p>
+The technology isn't quite there yet to do real-time audio transcription so that I can see what it understands while I'm saying things, but that might be distracting anyway. If I do it in short segments, it might still be okay. I can replay the most recently recorded snippet in case it's missed something and I've forgotten what I just said.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-replay</span> ()
+  <span class="org-doc">"Replay the last temporary recording."</span>
+  (<span class="org-keyword">interactive</span>)
+  (mpv-play whisper&#45;&#45;temp-file))
+</code></pre>
+</div>
+
+
+<p>
+Il peut aussi comprendre le français.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-toggle-language</span> ()
+  <span class="org-doc">"Set the language explicitly, since sometimes auto doesn't figure out the right one."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> whisper-language (<span class="org-keyword">if</span> (string= whisper-language <span class="org-string">"en"</span>) <span class="org-string">"fr"</span> <span class="org-string">"en"</span>))
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">If using a server, we need to restart for the language</span>
+  (<span class="org-keyword">when</span> (process-live-p whisper&#45;&#45;server-process) (kill-process whisper&#45;&#45;server-process))
+  (message <span class="org-string">"%s"</span> whisper-language))
+</code></pre>
+</div>
+
+
+<p>
+I could use this with <code>org-capture</code>, but that's a lot of keystrokes. My shortcut for org-capture is <code>C-c r</code>. I need to press at least one key to set the template, <code>&lt;f9&gt;</code> to start recording, <code>&lt;f9&gt;</code> to stop recording, and <code>C-c C-c</code> to save it. I want to be able to capture notes to my currently clocked in task without having an Org capture buffer interrupt my display.
+</p>
+
+<p>
+To clock in, I can use <code>C-c C-x i</code> or my <code>!</code> <a href="https://sachachua.com/dotemacs#org-mode-keyboard-shortcuts-other-speed-commands">speed command</a>. Bonus: the modeline displays the current task to keep me on track, and I can use <code>org-clock-goto</code> (which I've bound to <code>C-c j</code>) to jump to it.
+</p>
+
+<p>
+Then, when I'm looking at something else and I want to record a note, I can press <code>&lt;f9&gt;</code> to start the recording, and then <code>C-&lt;f9&gt;</code> to save it to my currently clocked task along with a link to whatever I'm looking at. (Update: Ooh, now I can save a screenshot too.)
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-targets</span>
+  <span class="org-highlight-quoted-quote">'</span>(my-whisper-save-text
+    my-whisper-org-save-to-clocked-task
+    my-whisper-save-to-file)
+  <span class="org-doc">"*Where to save the target.</span>
+
+<span class="org-doc">Nil means jump to the current clocked-in entry and insert it along with</span>
+<span class="org-doc">a link, or prompt for a capture template if nothing is clocked in.</span>
+
+<span class="org-doc">If this is set to a string, it should specify a key from</span>
+<span class="org-doc">`</span><span class="org-doc"><span class="org-constant">org-capture-templates</span></span><span class="org-doc">'. The text will be in %i, and you can use %a for the link.</span>
+<span class="org-doc">For example, you could have a template entry like this:</span>
+<span class="org-doc">\(\"c\" \"Contents to current clocked task\" plain (clock) \"%i%?\n%a\" :empty-lines 1)</span>
+
+<span class="org-doc">If this is set to a function, the function will be called from the</span>
+<span class="org-doc">original marker with the text as the argument. Note that the window</span>
+<span class="org-doc">configuration and message will not be preserved after this function is</span>
+<span class="org-doc">run, so if you want to change the window configuration or display a</span>
+<span class="org-doc">message, add a timer.</span>
+
+<span class="org-doc">If this is set to a list of functions, the functions are called in</span>
+<span class="org-doc">sequence.  The first function is called with the text. The second</span>
+<span class="org-doc">function is called with the result from the first function, and so on."</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-process</span> ()
+  <span class="org-doc">"Process the transcription."</span>
+  (remove-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-after-transcription-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-process</span>)
+  (<span class="org-keyword">let</span> ((text (string-trim (buffer-string))))
+    (erase-buffer)      <span class="org-comment-delimiter">; </span><span class="org-comment">stops further processing</span>
+    (my-whisper-process-text text)
+    (<span class="org-keyword">setq</span> my-whisper-skip-annotation nil)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-process-text</span> (text)
+  (<span class="org-keyword">save-window-excursion</span>
+    (<span class="org-keyword">with-current-buffer</span> (<span class="org-keyword">if</span> (markerp whisper&#45;&#45;marker) (marker-buffer whisper&#45;&#45;marker) (current-buffer))
+      (<span class="org-keyword">when</span> (markerp whisper&#45;&#45;marker) (goto-char whisper&#45;&#45;marker))
+      (<span class="org-keyword">cond</span>
+       ((<span class="org-keyword">and</span> my-whisper-targets (listp my-whisper-targets))
+        (seq-reduce
+         (<span class="org-keyword">lambda</span> (prev cur)
+           (funcall cur prev))
+         my-whisper-targets
+         text))
+       ((functionp my-whisper-targets)
+        (funcall my-whisper-targets text))
+       (my-whisper-targets
+        (<span class="org-keyword">setq</span> org-capture-initial text)
+        (org-capture nil my-whisper-targets)
+        (org-capture-finalize)
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Delay the display of the message because whisper&#45;&#45;cleanup-transcription clears it</span>
+        (run-at-time 0.5 nil (<span class="org-keyword">lambda</span> (text) (message <span class="org-string">"Captured: %s"</span> text)) text))
+       (t (my-whisper-org-save-to-clocked-task text))))))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-last-annotation</span> nil <span class="org-doc">"Last annotation so we can skip duplicates."</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-skip-annotation</span> nil)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-run</span> (<span class="org-type">&amp;optional</span> skip-annotation)
+  (<span class="org-keyword">interactive</span> (list current-prefix-arg))
+  (<span class="org-keyword">require</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">whisper</span>)
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-after-transcription-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-process</span> -50)
+  (whisper-run)
+  (<span class="org-keyword">when</span> skip-annotation
+    (<span class="org-keyword">setq</span> my-whisper-skip-annotation t)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-save-text</span> (text)
+  <span class="org-doc">"Save TEXT beside `</span><span class="org-doc"><span class="org-constant">whisper&#45;&#45;temp-file</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">when</span> text
+    (<span class="org-keyword">let</span> ((link (org-store-link nil)))
+      (<span class="org-keyword">with-temp-file</span> (concat (file-name-sans-extension whisper&#45;&#45;temp-file) <span class="org-string">".txt"</span>)
+        (<span class="org-keyword">when</span> link
+          (insert link <span class="org-string">"\n"</span>))
+        (insert text)))
+    text))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-org-save-to-clocked-task</span> (text)
+  (<span class="org-keyword">when</span> text
+    (<span class="org-keyword">save-window-excursion</span>
+      (<span class="org-keyword">with-current-buffer</span> (<span class="org-keyword">if</span> (markerp whisper&#45;&#45;marker) (marker-buffer whisper&#45;&#45;marker) (current-buffer))
+        (<span class="org-keyword">when</span> (markerp whisper&#45;&#45;marker) (goto-char whisper&#45;&#45;marker))
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Take a screenshot maybe</span>
+        (<span class="org-keyword">let*</span> ((link (<span class="org-keyword">and</span> (not my-whisper-skip-annotation)
+                          (org-store-link nil)))
+               (region (<span class="org-keyword">and</span> (region-active-p) (buffer-substring (region-beginning) (region-end))))
+               (screenshot-filename
+                (<span class="org-keyword">when</span> (<span class="org-keyword">or</span>
+                       (null link)
+                       (not (string= my-whisper-last-annotation link)))
+                  (my-screenshot-svg (concat (file-name-sans-extension whisper&#45;&#45;temp-file) <span class="org-string">".svg"</span>)))))
+          (<span class="org-keyword">if</span> (org-clocking-p)
+              (<span class="org-keyword">progn</span>
+                (<span class="org-keyword">let</span> ()
+                  (org-clock-goto)
+                  (org-end-of-subtree)
+                  (<span class="org-keyword">unless</span> (bolp)
+                    (insert <span class="org-string">"\n"</span>))
+                  (insert <span class="org-string">"\n"</span>)
+                  (<span class="org-keyword">when</span> screenshot-filename
+                    (insert (org-link-make-string
+                             (concat <span class="org-string">"file:"</span> screenshot-filename))
+                            <span class="org-string">"\n"</span>))
+                  (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> link (not (string= my-whisper-last-annotation link)))
+                    (insert link <span class="org-string">"\n"</span>))
+                  (<span class="org-keyword">when</span> region
+                    (insert <span class="org-string">"#+begin_example\n"</span> region <span class="org-string">"\n#+end_example\n"</span>))
+                  (insert text <span class="org-string">"\n"</span>)
+                  (<span class="org-keyword">setq</span> my-whisper-last-annotation link))
+                (run-at-time 0.5 nil (<span class="org-keyword">lambda</span> (text) (message <span class="org-string">"Added clock note: %s"</span> text)) text))
+            <span class="org-comment-delimiter">;; </span><span class="org-comment">No clocked task, prompt for a place to capture it</span>
+            (kill-new text)
+            (<span class="org-keyword">setq</span> org-capture-initial text)
+            (call-interactively <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-capture</span>)
+            <span class="org-comment-delimiter">;; </span><span class="org-comment">Delay the window configuration</span>
+            (<span class="org-keyword">let</span> ((config (current-window-configuration)))
+              (run-at-time 0.5 nil
+                           (<span class="org-keyword">lambda</span> (text config)
+                             (set-window-configuration config)
+                             (message <span class="org-string">"Copied: %s"</span> text))
+                           text config))))))
+    text))
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org</span>
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-clock-in-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-org-clear-saved-annotation</span>))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-org-clear-saved-annotation</span> ()
+  (<span class="org-keyword">setq</span> my-whisper-org-last-annotation nil))
+</code></pre>
+</div>
+
+
+<p>
+Here's an idea for a <code>my-whisper-targets</code> function that saves the recognized text with a timestamp.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-notes</span> <span class="org-string">"~/sync/stream/narration.org"</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-save-to-file</span> (text)
+  (<span class="org-keyword">when</span> text
+    (<span class="org-keyword">let</span> ((link (org-store-link nil)))
+      (<span class="org-keyword">with-current-buffer</span> (find-file-noselect my-whisper-notes)
+        (goto-char (point-max))
+        (insert <span class="org-string">"\n\n"</span> (format-time-string <span class="org-string">"%H:%M "</span>) text <span class="org-string">"\n"</span> link <span class="org-string">"\n"</span>)
+        (save-buffer)
+        (run-at-time 0.5 nil (<span class="org-keyword">lambda</span> (text) (message <span class="org-string">"Saved to file: %s"</span> text)) text)))
+    text))
+<span class="org-comment-delimiter">; </span><span class="org-comment">(setq my-whisper-targets #'my-whisper-save-to-file)</span>
+<span class="org-comment-delimiter">; </span><span class="org-comment">(setq my-whisper-targets '(my-whisper-save-to-file my-whisper-org-save-to-clocked-task))</span>
+</code></pre>
+</div>
+
+
+
+
+<p>
+And now I can redo things if needed:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-redo</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;marker (point-marker))
+  (whisper&#45;&#45;transcribe-audio))
+</code></pre>
+</div>
+
+
+<p>
+I think I've just figured out my Pipewire setup so
+that I can record audio in OBS while also being
+able to do speech to text, without the audio
+stuttering. <a href="https://github.com/rncbc/qpwgraph">qpwgraph</a> was super helpful
+for visualizing the Pipewire connections and fixing them.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-sh"><code>systemctl &#45;&#45;user restart pipewire
+sleep 2
+pactl load-module module-null-sink <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink_name</span>=<span class="org-string">"VirtualMicSink"</span> <span class="org-variable-name">sink_properties</span>=device.description=VirtualMicSink
+pactl load-module module-null-sink <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink_name</span>=<span class="org-string">"CombinedSink"</span> <span class="org-variable-name">sink_properties</span>=device.description=CombinedSink
+<span class="org-keyword">if</span> pactl list short sources | grep -i pci-0000; <span class="org-keyword">then</span>
+  pactl load-module module-loopback <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source</span>=<span class="org-string">"alsa_input.pci-0000_00_1f.3.analog-stereo"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink</span>=<span class="org-string">"VirtualMicSink"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">latency_msec</span>=100 <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">adjust_time</span>=1 <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.name='SysToVMic'"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.name='SysToVMic' media.role='filter'"</span>
+    <span class="org-variable-name">sink_input_properties</span>=media.role=filter
+  pactl load-module module-loopback <span class="org-string">\ </span>   <span class="org-variable-name">source</span>=<span class="org-string">"alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink</span>=<span class="org-string">"CombinedSink"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">node_name</span>=<span class="org-string">"SystemOutToCombined"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.name='SysOutToCombined' node.description='SysOutToCombined'"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.name='SysOutToCombined' node.description='SysOutToCombined' media.role='filter'"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">latency_msec</span>=100 <span class="org-variable-name">adjust_time</span>=1
+<span class="org-keyword">fi</span>
+<span class="org-keyword">if</span> pactl list short sources | grep -i yeti; <span class="org-keyword">then</span>
+  pactl load-module module-loopback <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source</span>=<span class="org-string">"alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.analog-stereo"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink</span>=<span class="org-string">"VirtualMicSink"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">latency_msec</span>=100 <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">adjust_time</span>=1 <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.description='YetiToVMic' node.name='YetiToVMic' media.name='YetiToVMic'"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.description='YetiToVMic' node.name='YetiToVMic' media.role='filter'"</span>
+  pactl load-module module-loopback <span class="org-string">\ </span>   <span class="org-variable-name">source</span>=<span class="org-string">"alsa_output.usb-Blue_Microphones_Yeti_Stereo_Microphone_REV8-00.analog-stereo.monitor"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink</span>=<span class="org-string">"CombinedSink"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.description='YetiOutToCombined' node.name='YetiOutToCombined' media.name='YetiOutToCombined' "</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.description='YetiOutToCombined' node.name='YetiOutToCombined' media.role='filter'"</span> <span class="org-sh-escaped-newline">\</span>
+    <span class="org-variable-name">latency_msec</span>=100 <span class="org-variable-name">adjust_time</span>=1
+<span class="org-keyword">fi</span>
+pactl load-module module-loopback <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">source</span>=<span class="org-string">"VirtualMicSink.monitor"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink</span>=<span class="org-string">"CombinedSink"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.description='VMicToCombined' node.name='VMicToCombined' media.name='VMicToCombined'"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.description='VMicToCombined' node.name='VMicToCombined' media.role='filter'"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">latency_msec</span>=100 <span class="org-variable-name">adjust_time</span>=1
+
+pactl load-module module-null-sink <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink_name</span>=<span class="org-string">"ExtraSink1"</span> <span class="org-variable-name">sink_properties</span>=device.description=ExtraSink1
+
+pactl load-module module-loopback <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">source</span>=<span class="org-string">"ExtraSink1.monitor"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink</span>=<span class="org-string">"CombinedSink"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">source_output_properties</span>=<span class="org-string">"node.description='ExtraSink1ToCombined' node.name='ExtraSink1ToCombined' media.name='ExtraSink1ToCombined'"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">sink_input_properties</span>=<span class="org-string">"node.description='ExtraSink1ToCombined' node.name='ExtraSink1ToCombined' media.role='filter'"</span> <span class="org-sh-escaped-newline">\</span>
+  <span class="org-variable-name">latency_msec</span>=100 <span class="org-variable-name">adjust_time</span>=1
+</code></pre>
+</div>
+
+
+<p>
+Here's a demo:
+</p>
+
+<div class="media-post" id="orgc568c07">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2026/01/using-whisper-el-to-capture-text-to-speech-in-emacs/2026-01-08_11.17.22.webm" type="video/webm"><track kind="subtitles" label="Captions" src="https://sachachua.com/blog/2026/01/using-whisper-el-to-capture-text-to-speech-in-emacs/2026-01-08_11.17.22.vtt" srclang="en" default=""><a href="https://sachachua.com/blog/2026/01/using-whisper-el-to-capture-text-to-speech-in-emacs/2026-01-08_11.17.22.webm">Download the video</a></video><figcaption><div>Screencast of using whisper.el to do speech-to-text into the current buffer, clocked-in task, or other function</div></figcaption></figure>
+<p></p>
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;" open="">
+                  <summary><strong>Transcript</strong></summary>
+<p>
+</p><div class="transcript-heading"><span class="audio-time" data-start="0.000000">00:00:00</span> <strong>Inserting into the current buffer</strong></div><span class="audio-time caption" data-start="0.000000" data-stop="5.239000">Here's a quick demonstration</span> <span class="audio-time caption" data-start="5.240000" data-stop="13.799000">of using whisper.el to log notes.</span> <div class="transcript-heading"><span class="audio-time" data-start="13.000000">00:00:13</span> <strong>Inserting text and moving on</strong></div><span class="audio-time caption" data-start="13.800000" data-stop="16.279000">I can insert text into the current buffer</span> <span class="audio-time caption" data-start="16.280000" data-stop="31.559000">one after the other.</span> <div class="transcript-heading"><span class="audio-time" data-start="31.000000">00:00:31</span> <strong>Clocking in</strong></div><span class="audio-time caption" data-start="31.560000" data-stop="33.159000">If I clock into a task,</span> <span class="audio-time caption" data-start="33.160000" data-stop="35.319000">I can add to the end of that clocked in task</span> <span class="audio-time caption" data-start="35.320000" data-stop="36.879000">using my custom code</span> <span class="audio-time caption" data-start="36.880000" data-stop="38.399000">by pressing C-&lt;f9&gt;</span> <span class="audio-time caption" data-start="38.400000" data-stop="52.999000">or whatever my shortcut was.</span> <span class="audio-time caption" data-start="53.000000" data-stop="65.839000">I can do that multiple times.</span> <div class="transcript-heading"><span class="audio-time" data-start="65.000000">00:01:05</span> <strong>Logging a note from a different file</strong></div><span class="audio-time caption" data-start="65.840000" data-stop="75.319000">I can do that while looking at a different file.</span> <div class="transcript-heading"><span class="audio-time" data-start="75.000000">00:01:15</span> <strong>I can look at an info page</strong></div><span class="audio-time caption" data-start="75.320000" data-stop="76.799000">I can do it looking at an info page, for example,</span> <span class="audio-time caption" data-start="76.800000" data-stop="78.599000">and annotations will include a link</span> <span class="audio-time caption" data-start="78.600000" data-stop="93.959000">back to whatever I was looking at.</span> <div class="transcript-heading"><span class="audio-time" data-start="93.000000">00:01:33</span> <strong>Adding without an annotation (C-u)</strong></div><span class="audio-time caption" data-start="93.960000" data-stop="96.479000">I just added an optional argument</span> <span class="audio-time caption" data-start="96.480000" data-stop="99.999000">so that I can also capture a note</span> <span class="audio-time caption" data-start="100.000000" data-stop="114.359000">without saving an annotation.</span> <span class="audio-time caption" data-start="114.360000" data-stop="117.319000">That way, if I'm going to say a lot of things</span> <span class="audio-time caption" data-start="117.320000" data-stop="118.839000">about the same buffer,</span> <span class="audio-time caption" data-start="118.840000" data-stop="120.519000">I don't have to have a lot of links</span> <span class="audio-time caption" data-start="120.520000" data-stop="162.719000">that I need to edit out.</span> <div class="transcript-heading"><span class="audio-time" data-start="162.000000">00:02:42</span> <strong>Saving to a different function</strong></div><span class="audio-time caption" data-start="162.720000" data-stop="177.680000">I can also have it save to a different function.</span>
+<p></p>
+
+
+</details>
+
+</div>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#multimedia-whisper">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/using-whisper-el-to-capture-text-to-speech-in-emacs/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KE3D9XENS7FKCEJHF7SKR3TX" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Fusing-whisper-el-to-capture-text-to-speech-in-emacs%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

@@ -1,0 +1,104 @@
+<p>These days, I use three different operating systems at work and home:
+Ubuntu Linux (Dell Latitude 7490 13&quot; laptop), Microsoft Windows (Dell
+Latitude 7400 13&quot; laptop), and macOS (27&quot; iMac). My primary tool
+across these platforms is Emacs, which I use for nearly
+everything—coding (<a href="https://olddeuteronomy.github.io/post/cpp-programming-in-emacs/">C++</a>,
+<a href="https://olddeuteronomy.github.io/post/python-programming-in-emacs/">Python</a>),
+blogging (<a href="https://olddeuteronomy.github.io/post/elfeed-optimized-blogging/">Hugo</a>),
+reading (Elfeed),
+note-taking (<a href="https://olddeuteronomy.github.io/post/orgmode-for-reproducibility-testing/">Org Mode</a>,
+org-roam), diary, and agenda management (beorg on iPhone,
+synchronized via Dropbox across all computers), among other tasks.</p>
+<p>Naturally, I want a <em>single</em> Emacs configuration file—<code>.emacs</code> or, if you
+prefer, <code>init.el</code>—to work seamlessly across all these platforms.</p>
+<p>Emacs is arguably the most platform-agnostic software available.
+However, some OS-specific differences must be addressed. These can be
+grouped into several categories:</p>
+<ol>
+<li>Paths for external executables, particularly on Windows.</li>
+<li>OS-specific key bindings, especially on macOS.</li>
+<li>Various OS-specific tweaks, particularly for Windows.</li>
+<li>Font sizes, which depend on screen size and resolution.</li>
+</ol>
+<p>Below, I explore these issues in greater detail.</p>
+<h2 id="introduction">Introduction</h2>
+<p>First, we need to determine the operating system type.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#75715e">;;;; OS Detection</span>
+</span></span><span style="display:flex;"><span>(defvar os-windows (<span style="color:#a6e22e">string-equal</span> system-type <span style="color:#e6db74">&#34;windows-nt&#34;</span>) <span style="color:#e6db74">&#34;Running on Windows.&#34;</span>)
+</span></span><span style="display:flex;"><span>(defvar os-linux (<span style="color:#a6e22e">string-equal</span> system-type <span style="color:#e6db74">&#34;gnu/linux&#34;</span>) <span style="color:#e6db74">&#34;Running on Linux.&#34;</span>)
+</span></span><span style="display:flex;"><span>(defvar os-macos (<span style="color:#a6e22e">string-equal</span> system-type <span style="color:#e6db74">&#34;darwin&#34;</span>) <span style="color:#e6db74">&#34;Running on macOS.&#34;</span>)
+</span></span></code></pre></div><h2 id="paths">Paths</h2>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#75715e">;;; Environment Variables.</span>
+</span></span><span style="display:flex;"><span>(defvar my/home (getenv <span style="color:#e6db74">&#34;HOME&#34;</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(when os-linux
+</span></span><span style="display:flex;"><span>  (setenv <span style="color:#e6db74">&#34;PATH&#34;</span>
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">concat</span>
+</span></span><span style="display:flex;"><span>           my/home <span style="color:#e6db74">&#34;/lib/grpc/bin&#34;</span> path-separator <span style="color:#75715e">; gRPC binaries</span>
+</span></span><span style="display:flex;"><span>           (getenv <span style="color:#e6db74">&#34;PATH&#34;</span>)))
+</span></span><span style="display:flex;"><span>  (setenv <span style="color:#e6db74">&#34;PKG_CONFIG_PATH&#34;</span>
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">concat</span>
+</span></span><span style="display:flex;"><span>           my/home <span style="color:#e6db74">&#34;/lib/grpc/lib/pkgconfig&#34;</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Add Cygwin path on Windows.</span>
+</span></span><span style="display:flex;"><span>(when os-windows
+</span></span><span style="display:flex;"><span>  (setq exec-path (<span style="color:#a6e22e">cons</span> <span style="color:#e6db74">&#34;C:/cygwin64/bin&#34;</span> exec-path)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Clang/clangd compiler on Windows.</span>
+</span></span><span style="display:flex;"><span>(when os-windows
+</span></span><span style="display:flex;"><span>  (setq exec-path (<span style="color:#a6e22e">append</span> exec-path <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;C:/bin/LLVM/9.0.0/bin&#34;</span>))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Clang/clangd compiler on macOS.</span>
+</span></span><span style="display:flex;"><span>(when os-macos
+</span></span><span style="display:flex;"><span>  (setq exec-path (<span style="color:#a6e22e">append</span> exec-path <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;/usr/local/Cellar/llvm/11.0.0_1/bin&#34;</span>))))
+</span></span></code></pre></div><p>The <code>exec-path</code> built-in variable contains a list of directories Emacs
+searches to run programs in subprocesses. Each element is either a
+string (directory name) or nil (indicating the default directory).</p>
+<h2 id="os-specific-key-bindings">OS-Specific Key Bindings</h2>
+<h3 id="macos">macOS</h3>
+<p>Disable the Command key as Meta and enable Option as Meta (Alt).</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#75715e">;;;; `macOS&#39; keyboard</span>
+</span></span><span style="display:flex;"><span>(when os-macos
+</span></span><span style="display:flex;"><span>    (setq mac-command-key-is-meta <span style="color:#66d9ef">nil</span>
+</span></span><span style="display:flex;"><span>          mac-command-modifier <span style="color:#e6db74">&#39;super</span>
+</span></span><span style="display:flex;"><span>          mac-option-key-is-meta <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>          mac-option-modifier <span style="color:#e6db74">&#39;meta</span>))
+</span></span></code></pre></div><p>Prevent accidentally closing the frame or Emacs app by disabling ⌘-w and ⌘-q.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(when os-macos
+</span></span><span style="display:flex;"><span>  (global-unset-key (kbd <span style="color:#e6db74">&#34;s-w&#34;</span>))
+</span></span><span style="display:flex;"><span>  (global-unset-key (kbd <span style="color:#e6db74">&#34;s-q&#34;</span>)))
+</span></span></code></pre></div><h2 id="os-specific-tweaks">OS-Specific Tweaks</h2>
+<h3 id="microsoft-windows">Microsoft Windows</h3>
+<p>Increase the default Windows pipe buffer size. (<strong>Note</strong>: This may no
+longer be necessary, but I include it for compatibility.)</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(when os-windows
+</span></span><span style="display:flex;"><span>  (setq w32-pipe-read-delay <span style="color:#ae81ff">0</span>)
+</span></span><span style="display:flex;"><span>  (setq irony-server-w32-pipe-buffer-size (<span style="color:#a6e22e">*</span> <span style="color:#ae81ff">64</span> <span style="color:#ae81ff">1024</span>)))
+</span></span></code></pre></div><p>Configure <code>Dired</code> to resemble its appearance on Linux/macOS.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(if os-windows
+</span></span><span style="display:flex;"><span>    (setq dired-listing-switches <span style="color:#e6db74">&#34;/A:H /O:NG&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; Linux/macOS</span>
+</span></span><span style="display:flex;"><span>  (setq dired-listing-switches <span style="color:#e6db74">&#34;-laGgh1v --group-directories-first --time-style=long-iso&#34;</span>))
+</span></span></code></pre></div><h3 id="linux">Linux</h3>
+<p>Set the default browser on Linux.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(when os-linux
+</span></span><span style="display:flex;"><span>  (setq browse-url-browser-function <span style="color:#e6db74">&#39;browse-url-firefox</span>))
+</span></span></code></pre></div><h2 id="font-size">Font Size</h2>
+<p>I use the same <code>.emacs</code> configuration on both a 13&quot; laptop and a 27&quot;
+desktop, which have significantly different screen sizes and
+resolutions. This requires font size adjustments.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(cond
+</span></span><span style="display:flex;"><span> (os-linux (defvar my/font-height <span style="color:#ae81ff">140</span> <span style="color:#e6db74">&#34;The default font height for Emacs on Linux (in 1/10th points).&#34;</span>))
+</span></span><span style="display:flex;"><span> (os-macos (defvar my/font-height <span style="color:#ae81ff">180</span> <span style="color:#e6db74">&#34;The default font height for Emacs on macOS (in 1/10th points).&#34;</span>))
+</span></span><span style="display:flex;"><span> (<span style="color:#66d9ef">t</span> (defvar my/font-height <span style="color:#ae81ff">140</span> <span style="color:#e6db74">&#34;The default font height for Emacs on Windows and other systems (in 1/10th points).&#34;</span>)))
+</span></span></code></pre></div><p>Set the default font size based on the OS type.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(custom-set-faces
+</span></span><span style="display:flex;"><span> <span style="color:#f92672">`</span>(default ((<span style="color:#66d9ef">t</span> (:height <span style="color:#f92672">,</span>my/font-height :width normal :family <span style="color:#e6db74">&#34;Aporetic Sans Mono&#34;</span>))))
+</span></span><span style="display:flex;"><span>)
+</span></span></code></pre></div><p>Note the use of the backquote macro for dynamic font height.</p>
+<h2 id="summary">Summary</h2>
+<p>With these configurations, I can use a single <code>.emacs</code> file across all
+my machines, ensuring a consistent Emacs experience regardless of the
+operating system.</p>
+<p>Happy emacsing!</p>
+<p>&mdash; The Emacs Cat.</p>

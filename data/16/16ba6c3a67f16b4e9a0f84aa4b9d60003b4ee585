@@ -1,0 +1,62 @@
+<p>Astral announced <a href="https://astral.sh/blog/ty">Ty Beta</a> today, the new Rust-based Python type checker. I&#39;ve been using Ruff and uv for a while now, and they&#39;ve consistently delivered on the &quot;rewrite Python tooling in Rust to make it absurdly fast&quot; promise. So when they claimed Ty is 10-80x faster than Pyright for incremental checking, I had to try it.</p>
+<p>  I&#39;ve been using basedpyright with Eglot and it works, but I&#39;d be lying if I said the lag didn&#39;t bother me. When you&#39;re editing and the type checker is half a second behind, you stop trusting the feedback. The squiggly lines show up after you&#39;ve already moved on to the next thought.</p>
+<h2>The Dual Setup</h2>
+<p>  Since Ty just hit Beta, I wasn&#39;t ready to completely abandon basedpyright. Instead, I set up a toggle so I can switch between them. Here&#39;s my configuration:</p>
+<pre><code class="language-elisp">  ;; Python LSP Server Selection
+  (defvar my/python-lsp-server &#39;ty
+    &quot;Which Python language server to use: &#39;basedpyright or &#39;ty&quot;)
+
+  (defun my/python-lsp-command ()
+    &quot;Return the LSP command based on selected server.&quot;
+    (pcase my/python-lsp-server
+      (&#39;ty &#39;(&quot;ty&quot; &quot;server&quot;))
+      (&#39;basedpyright &#39;(&quot;basedpyright-langserver&quot; &quot;--stdio&quot;
+                       :initializationOptions (:basedpyright (:plugins (
+                         :ruff (:enabled t
+                               :lineLength 88
+                               :exclude [&quot;E501&quot;]
+                               :select [&quot;E&quot; &quot;F&quot; &quot;I&quot; &quot;UP&quot;])
+                         :pycodestyle (:enabled nil)
+                         :pyflakes (:enabled nil)
+                         :pylint (:enabled nil)
+                         :rope_completion (:enabled t)
+                         :autopep8 (:enabled nil))))))))
+
+  (defun my/switch-python-lsp ()
+    &quot;Toggle between Ty and basedpyright, restart Eglot.&quot;
+    (interactive)
+    (setq my/python-lsp-server
+          (if (eq my/python-lsp-server &#39;ty) &#39;basedpyright &#39;ty))
+    (when (eglot-managed-p)
+      (ignore-errors (eglot-shutdown (eglot-current-server)))
+      (sleep-for 0.5)
+      (eglot-ensure))
+    (message &quot;Switched to %s&quot; my/python-lsp-server))
+
+  The Eglot configuration uses a lambda to dynamically evaluate which server to start:
+
+  (use-package eglot
+    :ensure t
+    :defer t
+    :commands (eglot eglot-ensure)
+    :config
+    (setq eglot-server-programs
+          &#39;((python-ts-mode . (lambda (&amp;rest _) (my/python-lsp-command)))
+            ((js-ts-mode typescript-ts-mode tsx-ts-mode) .
+             (&quot;typescript-language-server&quot; &quot;--stdio&quot;))))
+    :hook ((python-ts-mode . eglot-ensure)))
+</code></pre>
+<p>  That lambda matters. Without it, Eglot evaluates my/python-lsp-command once when your config loads and hardcodes the result. The lambda forces fresh evaluation each time Eglot starts a server, which is what makes toggling work.</p>
+<p>  The speed difference is very noticeable. Fix a type error and the diagnostic disappears immediately instead of lingering for that half-second that makes you wonder if it registered. It&#39;s the kind of improvement that changes whether you pay attention to type feedback or ignore it. Completions and jumping to definitions are instant now.</p>
+<p>  I hit one issue. Ty doesn&#39;t handle the LSP shutdown request cleanly, throwing a JSON parsing error. Wrapping the shutdown in ignore-errors fixed it, but it&#39;s the kind of rough edge you expect from a December 2024 Beta release.</p>
+<h1>Installation</h1>
+<h2>Install Ty globally</h2>
+<pre><code>uv tool install ty@latest
+</code></pre>
+<h2>Keep basedpyright around</h2>
+<pre><code>pip install basedpyright ruff
+</code></pre>
+<p>  Then M-x my/switch-python-lsp toggles between them.</p>
+<h2>Is It Worth It?</h2>
+<p>  If you&#39;re already using Ruff and uv, yes. The speed improvement is real. The dual setup gives you a fallback when if I hit issues, which I expect to happen occasionally given the Beta status.</p>
+<p>  My emacs config is on <a href="https://github.com/gregnewman/gmacs">Github</a> for reference.</p>

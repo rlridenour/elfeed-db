@@ -1,0 +1,41 @@
+<p>UPDATE: <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a> is now available on <a href="https://melpa.org/#/dwim-shell-command">melpa</a>.</p>
+<p><img src="https://xenodium.github.io/images/emacs-password-protect-current-pdf-revisited/passprotect.gif" alt=""></p>
+<p>With a recent look at writing <a href="https://xenodium.com/emacs-dwim-shell-command/">DWIM shell commands</a>, I've been revisiting my custom Emacs functions invoking command line utilities.</p>
+<p>Take this <a href="https://xenodium.com/emacs-password-protect-current-pdf/">post</a>, for example, where I invoke <a href="https://github.com/qpdf/qpdf">qpdf</a> via a elisp. Using the new <code>dwim-shell-command--on-marked-files</code> in <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-command.el">dwim-shell-command.el</a>, the code is stripped down to a bare minimum:</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-pdf-password-protect ()
+  &quot;Password protect pdf.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Password protect pdf&quot;
+   (format &quot;qpdf --verbose --encrypt '%s' '%s' 256 -- '&lt;&lt;f&gt;&gt;' '&lt;&lt;fne&gt;&gt;_enc.&lt;&lt;e&gt;&gt;'&quot;
+           (read-passwd &quot;user-password: &quot;)
+           (read-passwd &quot;owner-password: &quot;))
+   :utils &quot;qpdf&quot;
+   :extensions &quot;pdf&quot;))
+</code></pre>
+<p>Compare the above <code>dwim-shell-command--on-marked-files</code> usage to my <a href="https://xenodium.com/emacs-password-protect-current-pdf/">previous implementation</a>:</p>
+<pre><code class="language-{.commonlisp">(defun pdf-password-protect ()
+  &quot;Password protect current pdf in buffer or `dired' file.&quot;
+  (interactive)
+  (unless (executable-find &quot;qpdf&quot;)
+    (user-error &quot;qpdf not installed&quot;))
+  (unless (equal &quot;pdf&quot;
+                 (or (when (buffer-file-name)
+                       (downcase (file-name-extension (buffer-file-name))))
+                     (when (dired-get-filename nil t)
+                       (downcase (file-name-extension (dired-get-filename nil t))))))
+    (user-error &quot;no pdf to act on&quot;))
+  (let* ((user-password (read-passwd &quot;user-password: &quot;))
+         (owner-password (read-passwd &quot;owner-password: &quot;))
+         (input (or (buffer-file-name)
+                    (dired-get-filename nil t)))
+         (output (concat (file-name-sans-extension input)
+                         &quot;_enc.pdf&quot;)))
+    (message
+     (string-trim
+      (shell-command-to-string
+       (format &quot;qpdf --verbose --encrypt '%s' '%s' 256 -- '%s' '%s'&quot;
+               user-password owner-password input output))))))
+</code></pre>
+<p>This really changes things for me. I'll be more inclined to add more of these tiny integrations to lots of great command line utilities. Take this recent <a href="https://news.ycombinator.com/item?id=32028752">Hacker News post</a> on <a href="https://github.com/ocrmypdf/OCRmyPDF">ocrmypdf</a> as an example. Their <a href="https://ocrmypdf.readthedocs.io/en/latest/cookbook.html">cookbook</a> has lots of examples that can be easily used via <code>dwim-shell-command--on-marked-files</code>.</p>
+<p>What command line utils would you use?</p>

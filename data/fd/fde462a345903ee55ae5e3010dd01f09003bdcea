@@ -1,0 +1,42 @@
+<p>Normally, you’d associate file path extensions with major modes in Emacs via <code>auto-mode-alist</code>. The associative list contains entries like <code>("\\.html" . web-mode)</code> so that when you open (aka “visit”) an HTML file, Emacs automatically switches to <code>web-mode</code>, which in turns supplies shortcuts and syntax highlighting and so on.</p>
+
+<p>That doesn’t work with <code>.sqlite</code> files and <code>sqlite-mode</code>, though. The built-in <code>sqlite-mode</code> (since Emacs 29) is peculiar: it expects you to manually run <code>sqlite-mode-open-file</code> and pick a file to open. There are probably very good technical reasons (like not having SQLite support bundled into your Emacs binary), but that’s so weird. Especially since you can open PDFs, images, and SVGs in a graphical preview just like that without special incantations.</p>
+
+<figure><a href="https://christiantietze.de/posts/2024/01/emacs-sqlite-mode-open-sqlite-files-automatically/./2024-01-09_sqlite-table.png"><img alt="" src="https://christiantietze.de/posts/2024/01/emacs-sqlite-mode-open-sqlite-files-automatically/./2024-01-09_sqlite-table.png" /></a><figcaption>Why, yes, I do consider this to be a graphical representation of a SQLite file!</figcaption></figure>
+
+<p><a href="https://mastodon.online/@zardoz03/111720653550362827">On Mastodon, @zardoz.el@mastodon.online suggested <code>magic-mode-alist</code></a> and using a lambda or function. Never heard of that list, but it turns out that this is checked <em>before</em> <code>auto-mode-alist</code>, and instead of operating on the file path, it operates on the file contents (or rather: buffer contents of the file that is just being opened). That means I can copy and paste whatever Emacs displays as text in its buffer for the <em>binary file format</em> <code>.sqlite</code> and go from there. The start of the file is:</p>
+
+<pre><code>SQLite format 3������
+</code></pre>
+
+<p>Oh, no, that doesn’t render properly as plain text. Of course. Let me try again with a picture:</p>
+
+<figure><a href="https://christiantietze.de/posts/2024/01/emacs-sqlite-mode-open-sqlite-files-automatically/./2024-01-09_binary-file.png"><img alt="" src="https://christiantietze.de/posts/2024/01/emacs-sqlite-mode-open-sqlite-files-automatically/./2024-01-09_binary-file.png" /></a><figcaption>The <code>^@</code> is code point 0 (null), <code>^P</code> is code point 16 (#x10, data link escape), and <code>^A</code> is code point 1 (start of heading)</figcaption></figure>
+
+<p>And then there’s many more of these character sequences, but that should do to disambiguate a binary <code>.sqlite</code> file from a text file that starts with the text “SQLite format 3”.</p>
+
+<p>Now the function to auto-magic-ally use <code>sqlite-mode-open-file</code> (which creates a new buffer!) and close the binary file buffer can work with the buffer-local variable <code>buffer-file-name</code>.  The procedure is</p>
+
+<ol>
+  <li>save <code>buffer-file-name</code>,</li>
+  <li>kill the current binary file buffer,</li>
+  <li>invoke <code>sqlite-mode-open-file</code> with the file name from step (1).</li>
+</ol>
+
+<p>The piece form my <code>init.el</code> thus is:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">sqlite-mode</span> 
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/sqlite-view-file-magically</span> <span class="p">()</span>
+    <span class="s">"Runs `sqlite-mode-open-file' on the file name visited by the
+current buffer, killing it."</span>
+    <span class="p">(</span><span class="nb">require</span> <span class="ss">'sqlite-mode</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">file-name</span> <span class="nv">buffer-file-name</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">kill-current-buffer</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">sqlite-mode-open-file</span> <span class="nv">file-name</span><span class="p">)))</span>
+
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'magic-mode-alist</span> <span class="o">'</span><span class="p">(</span><span class="s">"SQLite format 3\x00"</span> <span class="o">.</span> <span class="nv">ct/sqlite-view-file-magically</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p><strong>Update 2024-01-09:</strong> In the comments, <a href="https://christiantietze.de/posts/2024/01/emacs-sqlite-mode-open-sqlite-files-automatically/#fast-comments-jt=p8a3RIdX7X8h">matteo</a> suggested the string <code>"SQLite format 3\x00"</code> instead of my hastily pasted one. I adapted the code accordingly.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

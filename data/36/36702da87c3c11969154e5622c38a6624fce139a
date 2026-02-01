@@ -1,0 +1,122 @@
+<p>
+I can <a href="https://sachachua.com/blog/2026/01/queue-multiple-transcriptions-with-whisper-el-speech-recognition/">queue multiple transcriptions with whisper.el</a> so that they get processed sequentially with backup audio. It catches up when I pause to think. Now I want to use <a href="https://pytorch.org/hub/snakers4_silero-vad_vad/">Silero voice activity detection</a> to do that kind of segmentation for me automatically.
+</p>
+
+<p>
+First, I need a Python server that can print out events when it notices the start or stop of a speech segment. If I print out the timestamps, I might be able to cross-reference it someday with interestingthings. For now, even just paying attention to the end of a segment is enough for what I want to do.
+</p>
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;">
+                  <summary><strong>Python script for printing out events</strong></summary>
+
+<div class="org-src-container">
+<pre class="src src-python"><code><span class="org-keyword">import</span> sounddevice <span class="org-keyword">as</span> sd
+<span class="org-keyword">import</span> numpy <span class="org-keyword">as</span> np
+<span class="org-keyword">import</span> torch
+<span class="org-keyword">import</span> sys
+<span class="org-keyword">from</span> datetime <span class="org-keyword">import</span> datetime, timedelta
+
+<span class="org-variable-name">SILENCE_DURATION</span> <span class="org-operator">=</span> 500
+<span class="org-variable-name">SAMPLING_RATE</span> <span class="org-operator">=</span> 16000
+<span class="org-variable-name">CHUNK_SIZE</span> <span class="org-operator">=</span> 512
+<span class="org-variable-name">model</span>, <span class="org-variable-name">utils</span> <span class="org-operator">=</span> torch.hub.load(repo_or_dir<span class="org-operator">=</span><span class="org-string">'snakers4/silero-vad'</span>,
+                              model<span class="org-operator">=</span><span class="org-string">'silero_vad'</span>,
+                              force_reload<span class="org-operator">=</span><span class="org-constant">False</span>)
+
+(<span class="org-variable-name">get_speech_timestamps</span>, <span class="org-variable-name">save_audio</span>, <span class="org-variable-name">read_audio</span>, <span class="org-variable-name">VADIterator</span>, <span class="org-variable-name">collect_chunks</span>) <span class="org-operator">=</span> utils
+<span class="org-variable-name">vad_iterator</span> <span class="org-operator">=</span> VADIterator(model, threshold<span class="org-operator">=</span>0.5, min_silence_duration_ms<span class="org-operator">=</span>SILENCE_DURATION)
+
+<span class="org-variable-name">stream_start_time</span> <span class="org-operator">=</span> <span class="org-constant">None</span>
+
+<span class="org-keyword">def</span> <span class="org-function-name">format_iso_with_offset</span>(offset_seconds):
+    <span class="org-keyword">if</span> stream_start_time <span class="org-keyword">is</span> <span class="org-constant">None</span>:
+        <span class="org-keyword">return</span> <span class="org-string">"PENDING"</span>
+    <span class="org-variable-name">event_time</span> <span class="org-operator">=</span> stream_start_time <span class="org-operator">+</span> timedelta(seconds<span class="org-operator">=</span>offset_seconds)
+    <span class="org-keyword">return</span> event_time.astimezone().isoformat(timespec<span class="org-operator">=</span><span class="org-string">'milliseconds'</span>)
+
+<span class="org-keyword">def</span> <span class="org-function-name">audio_callback</span>(indata, frames, time, status):
+    <span class="org-keyword">global</span> stream_start_time
+    <span class="org-keyword">if</span> status:
+        <span class="org-builtin">print</span>(status, file<span class="org-operator">=</span>sys.stderr)
+    <span class="org-keyword">if</span> stream_start_time <span class="org-keyword">is</span> <span class="org-constant">None</span>:
+        <span class="org-variable-name">stream_start_time</span> <span class="org-operator">=</span> datetime.now()
+    <span class="org-variable-name">tensor_input</span> <span class="org-operator">=</span> torch.from_numpy(indata.copy()).flatten()
+    <span class="org-variable-name">speech_dict</span> <span class="org-operator">=</span> vad_iterator(tensor_input, return_seconds<span class="org-operator">=</span><span class="org-constant">True</span>)
+    <span class="org-keyword">if</span> speech_dict:
+        <span class="org-keyword">if</span> <span class="org-string">"start"</span> <span class="org-keyword">in</span> speech_dict:
+            <span class="org-builtin">print</span>(f<span class="org-string">"START </span>{format_iso_with_offset(speech_dict['start'])}<span class="org-string">"</span>, flush<span class="org-operator">=</span><span class="org-constant">True</span>)
+        <span class="org-keyword">if</span> <span class="org-string">"end"</span> <span class="org-keyword">in</span> speech_dict:
+            <span class="org-builtin">print</span>(f<span class="org-string">"END </span>{format_iso_with_offset(speech_dict['end'])}<span class="org-string">"</span>, flush<span class="org-operator">=</span><span class="org-constant">True</span>)
+<span class="org-keyword">try</span>:
+    <span class="org-keyword">with</span> sd.InputStream(samplerate<span class="org-operator">=</span>SAMPLING_RATE,
+                        channels<span class="org-operator">=</span>1,
+                        callback<span class="org-operator">=</span>audio_callback,
+                        blocksize<span class="org-operator">=</span>CHUNK_SIZE):
+        <span class="org-keyword">while</span> <span class="org-constant">True</span>:
+            <span class="org-keyword">pass</span>
+<span class="org-keyword">except</span> <span class="org-type">KeyboardInterrupt</span>:
+    <span class="org-builtin">print</span>(<span class="org-string">"</span><span class="org-constant">\n</span><span class="org-string">Stopping..."</span>)
+</code></pre>
+</div>
+
+
+
+</details>
+
+<p>
+Then I can start this process from Emacs:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-vad-events-process</span> nil)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-vad-events-dir</span> <span class="org-string">"~/proj/speech/"</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-vad-events-command</span> <span class="org-highlight-quoted-quote">`</span>(,(expand-file-name <span class="org-string">".venv/bin/python"</span> my-vad-events-dir)
+                                <span class="org-string">"vad-events.py"</span>))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-vad-events-filter</span> (proc string)
+  (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (string-match <span class="org-string">"^END"</span> string)
+             (process-live-p whisper&#45;&#45;recording-process))
+    (message <span class="org-string">"Noticed speech turn: %s"</span> string)
+    (my-whisper-continue)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-vad-events-ensure</span> ()
+  <span class="org-doc">"Start the process if it's not already running."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">unless</span> (process-live-p my-vad-events-process)
+    (<span class="org-keyword">let</span> ((default-directory my-vad-events-dir)
+          (process-environment
+           (cons
+            (format
+             <span class="org-string">"PULSE_PROP=node.description='</span><span class="org-string"><span class="org-constant">%s</span></span><span class="org-string">' media.name='</span><span class="org-string"><span class="org-constant">%s</span></span><span class="org-string">' node.name='</span><span class="org-string"><span class="org-constant">%s</span></span><span class="org-string">'"</span>
+             <span class="org-string">"vad"</span> <span class="org-string">"vad"</span> <span class="org-string">"vad"</span>)
+            process-environment)))
+      (<span class="org-keyword">setq</span> my-vad-events-process
+            (make-process
+             <span class="org-builtin">:name</span> <span class="org-string">"vad-events"</span>
+             <span class="org-builtin">:command</span> my-vad-events-command
+             <span class="org-builtin">:buffer</span> (get-buffer-create <span class="org-string">"*vad-events*"</span>)
+             <span class="org-builtin">:stderr</span> (get-buffer-create <span class="org-string">"*vad-events-err*"</span>)
+             <span class="org-builtin">:filter</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-vad-events-filter</span>)))))
+
+</code></pre>
+</div>
+
+
+<p>
+Because I added Pulse properties to the process environment, I can easily use <a href="https://sachachua.com/blog/2026/01/visualizing-and-managing-pipewire-audio-graphs-from-emacs/">epwgraph</a> to rewire the input so that it gets the input from my VirtualMicSink instead of the default system audio device. (Someday I'll figure out how to specify that as the input automatically.)
+</p>
+
+<p>
+Now I can press my shortcut for <code>my-whisper-continue</code> to start the process. As I keep talking, it will continue to record. When I pause for more than a second between sentences, then it will send that chunk to the server for transcription without me having to press another button, while still listening for more speech.
+</p>
+
+<p>
+How is this different from the streaming approach that many real-time speech recognition services offer? I think this gives me a bit more visibility into and control of the process. For my personal use, I don't need to have everything processed as quickly as possible, and I'm not trying to replicate live captions. I just want to be able to look back over the last five minutes to try to remember what I was talking about. I usually have a lot of quiet time as I think through my next steps, and it's fine to have it catch up then. I also like that I can save time-stamped audio files for later processing, divided according to the speech segments. Those might be a little bit easier to work with when I get around to compositing them into a video.
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-using-silero-voice-activity-detection-to-automatically-queue-multiple-transcriptions-with-natrys-whisper-el">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/using-silero-voice-activity-detection-to-automatically-queue-multiple-transcriptions-with-natrys-whisper-el/index.org">View org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Fusing-silero-voice-activity-detection-to-automatically-queue-multiple-transcriptions-with-natrys-whisper-el%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

@@ -1,0 +1,46 @@
+<p>As some of you may be aware, I prefer to keep certain things private, which means I don&rsquo;t use cloud services for those. So, I wanted to have a dedicated folder for private notes on my Linux desktop, which doesn&rsquo;t sync to my Mac. This sounds simple enough, but my setup makes it a bit more complicated.</p>
+<p>For my technical documentations and blog posts, I use <a href="https://protesilaos.com/emacs/denote">Denote</a>, an excellent org-mode note-taking package from Protesilaos Stavrou (AKA Prot). By design, Denote is set up to have one root folder to work from with an option for subfolders under that folder for organization, which is what I have: <code>~/Sync/Notes/</code> is the main folder, and under it I have  <code>~/Sync/Notes/Info</code> and <code>~/Sync/Notes/Blog/</code>, which should make sense if you&rsquo;re follwing along.</p>
+<p><code>~/Sync/Notes/</code> is under my <code>Sync</code> folder which is synced between my devices with Syncthing. Usually this is a good idea, since I want to have my technical notes and blog posts available to me both on Linux and on the Mac - and for that matter also on the iPhone and Android, but that&rsquo;s a different story.</p>
+<p>You&rsquo;re probably starting to see the problem here. Denote is using a synced folder for its root folder, so I can&rsquo;t have a &ldquo;just for Linux&rdquo; folder under normal circumstances. I wanted that private Linux-only folder to be at <code>~/Documents/private</code> on my Linux desktop, and here we have yet another problem: the Mac has a <code>~/Documents/</code> folder as well, which I&rsquo;m syncing to iCloud. Again, usually this is good: some of my work files are there, and I have a few settings saved. But if this folder was synced between my Linux and the Mac, these files will quickly be uploaded to Apple&rsquo;s servers. Not good.</p>
+<p>While Denote&rsquo;s documentation notes that the upcoming release will have the option to define several folders as a list for <code>denote-directory</code>, this is not in production yet. So my first attempt took me through Syncthing documentation.</p>
+<p>I knew I could ask Syncthing to ignore files using <a href="https://docs.syncthing.net/users/ignoring.html">ignore patterns</a>, and these are robust enough to work on folders as well.  After a few attempts, I managed to have a  <code>~/Sync/Notes/private</code> folder on my Linux desktop that did not sync to my other devices.</p>
+<p>While this works, it&rsquo;s a weird workaround to have an isolated folder inside a folder meant for syncing; it&rsquo;s kind of counterintuitive. Another concern: if the <code>.stignore</code> file with the ignore pattern was to be deleted by mistake, Sycnthing would sync that folder and its contents everywhere.</p>
+<p>Digging deeper into my old Denote configurations, I found the solution in a Denote function that could solve it:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-lisp" data-lang="lisp">    (defun jr-private-denote ()
+         (interactive)
+         (<span style="color:#66d9ef">let</span> ((denote-directory (expand-file-name <span style="color:#e6db74">&#34;~/Documents/private/&#34;</span>))
+               (denote-excluded-directories-regexp <span style="color:#e6db74">&#34;data&#34;</span>)
+               (denote-prompts <span style="color:#f92672">&#39;</span>(title keywords))
+               (denote-org-front-matter <span style="color:#e6db74">&#34;
+</span><span style="color:#e6db74">    #+title:      %s
+</span><span style="color:#e6db74">    #+creator: JTR  
+</span><span style="color:#e6db74">    #+date:       %s
+</span><span style="color:#e6db74">    #+filetags:   %s
+</span><span style="color:#e6db74">    #+identifier: %s
+</span><span style="color:#e6db74">    #+STARTUP: inlineimages
+</span><span style="color:#e6db74">    #+OPTIONS: num:nil
+</span><span style="color:#e6db74">    \n&#34;</span>))
+           (call-interactively <span style="color:#e6db74">&#39;denote</span>)))
+</code></pre></div><p>This function bypasses the regular denoate creation process (<code>M-x denote</code>) and changes the denote root folder to <code>~/Documents/private</code> just for the purpose of this function. As well, I&rsquo;ve included a few more options in the Denote front-matter, like the creator and the option to load images when the file loads. This function also excludes the <code>/data</code> subfolder under <code>~/Documents/private</code>, which contains attachments, so I don&rsquo;t create a note there by mistake.</p>
+<p>This worked well, but it still leaves me with the problem I mentioned earlier. My configurations are stored in an org file synced inside my sync folder (so Emacs on my Linux desktop will run the same way as Emacs on my Mac, as much as possible), which means I could still run this function on the Mac, creating a private note in my Documentation folder there, and I don&rsquo;t want a chance of that to happen. Besides, tweaking stuff is fun.</p>
+<p>To fix that, I included a condition to help out:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-lisp" data-lang="lisp">    (defun jr-private-denote ()
+      (interactive)
+      (cond
+       ((<span style="color:#a6e22e">eq</span> system-type <span style="color:#e6db74">&#39;gnu/linux</span>)
+        (<span style="color:#66d9ef">let</span> ((denote-directory (expand-file-name <span style="color:#e6db74">&#34;~/Documents/private/&#34;</span>))
+              (denote-excluded-directories-regexp <span style="color:#e6db74">&#34;data&#34;</span>)
+              (denote-prompts <span style="color:#f92672">&#39;</span>(title keywords))
+              (denote-org-front-matter <span style="color:#e6db74">&#34;
+</span><span style="color:#e6db74">    #+title:      %s
+</span><span style="color:#e6db74">    #+creator: JTR  
+</span><span style="color:#e6db74">    #+date:       %s
+</span><span style="color:#e6db74">    #+filetags:   %s
+</span><span style="color:#e6db74">    #+identifier: %s
+</span><span style="color:#e6db74">    #+STARTUP: inlineimages
+</span><span style="color:#e6db74">    #+OPTIONS: num:nil
+</span><span style="color:#e6db74">    \n&#34;</span>))
+          (call-interactively <span style="color:#e6db74">&#39;denote</span>)))
+       ((<span style="color:#a6e22e">eq</span> system-type <span style="color:#e6db74">&#39;darwin</span>)
+        (message <span style="color:#e6db74">&#34;You&#39;re using your Mac&#34;</span>))))
+</code></pre></div><p>Now I have the Denote org file creation process dependent on a condition that I am running on Linux: <code>(eq system-type 'gnu/linux)</code>. In case I&rsquo;m running on Mac, <code>(eq system-type 'darwin)</code>, I will only get a reminder that I&rsquo;m using my Mac, and that&rsquo;s it, nothing further will happen.</p>

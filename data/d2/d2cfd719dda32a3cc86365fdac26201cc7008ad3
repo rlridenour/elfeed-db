@@ -1,0 +1,68 @@
+<p><a href="https://github.com/bbatsov/projectile">Projectile</a> and <a href="https://company-mode.github.io">company</a> are just amazing Emacs packages. Projectile gives random access to files, while company completes well… anything. For shells, Emacs has a handful of options.</p>
+<p>Standing on the shoulders of package giants (<a href="https://github.com/magnars/dash.el">dash</a> and <a href="https://github.com/rejeep/f.el">f</a> included) and some elisp, we can bring random access to project directories from the shell.</p>
+<p><img src="https://xenodium.github.io/images/projectile-shell-dir-company-completion/company-projectile-cd.png" alt=""></p>
+<pre><code class="language-{.commonlisp">(require 'cl-lib)
+(require 'company)
+(require 'dash)
+(require 'f)
+(require 'projectile)
+
+(defvar-local company-projectile-cd-prefix &quot;cd &quot;)
+
+(defun company-projectile-cd (command &amp;optional arg &amp;rest ignored)
+  &quot;Company shell completion for any projectile path.&quot;
+  (interactive (list 'interactive))
+  (case command
+    (interactive (company-begin-backend 'company-projectile-cd))
+    (prefix
+     (company-grab-symbol-cons company-projectile-cd-prefix
+                               (length company-projectile-cd-prefix)))
+    (candidates
+     (company-projectile-cd--candidates
+      (company-grab-symbol-cons company-projectile-cd-prefix
+                                (length company-projectile-cd-prefix))))
+    (post-completion
+     (company-projectile-cd--expand-inserted-path arg))))
+
+(defun company-projectile-cd--candidates (input)
+  &quot;Return candidates for given INPUT.&quot;
+  (company-projectile-cd--reset-root)
+  (when (consp input)
+    (let ((search-term (substring-no-properties
+                        (car input) 0 (length (car input))))
+          (prefix-found (cdr input)))
+      (when prefix-found
+        (if (projectile-project-p)
+            (company-projectile-cd--projectile search-term)
+          (company-projectile-cd--find-fallback search-term))))))
+
+(defun company-projectile-cd--projectile (search-term)
+  (-filter (lambda (path)
+             (string-match-p (regexp-quote
+                              search-term)
+                             path))
+           (-snoc
+            (projectile-current-project-dirs)
+            ;; Throw project root in there also.
+            (projectile-project-root))))
+
+(defun company-projectile-cd--find-fallback (search-term)
+  (ignore-errors
+    (-map (lambda (path)
+            (string-remove-prefix &quot;./&quot; path))
+          (apply #'process-lines
+                 (list &quot;find&quot; &quot;.&quot; &quot;-type&quot; &quot;d&quot;  &quot;-maxdepth&quot; &quot;2&quot; &quot;-iname&quot;
+                       (format &quot;\*%s\*&quot; search-term))))))
+
+(defun company-projectile-cd--expand-inserted-path (path)
+  &quot;Replace relative PATH insertion with its absolute equivalent if needed.&quot;
+  (unless (f-exists-p path)
+    (delete-region (point) (- (point) (length path)))
+    (insert (concat (projectile-project-root) path))))
+
+(defun company-projectile-cd--reset-root ()
+  &quot;Reset project root. Useful when cd'ing in and out of projects.&quot;
+  (projectile-reset-cached-project-root)
+  (when (projectile-project-p)
+    (projectile-project-root)))
+</code></pre>

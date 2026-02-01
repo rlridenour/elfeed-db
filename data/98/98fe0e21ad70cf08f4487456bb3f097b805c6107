@@ -1,0 +1,75 @@
+<p>The email fun in Emacs continues. After a few weeks since I <a href="#trying-out-mu4e-and-offlineimap">started using mu4e and offlineimap</a>, I'm sold. Both are awesome. <a href="http://isync.sourceforge.net/mbsync.html">Mbsync</a> is an <a href="http://www.offlineimap.org/">offlineimap</a> alternative. Despite resyncing all my mail, the transition was fairly smooth. Here's how…</p>
+<h2>Install isync (for mbsync)</h2>
+<pre><code class="language-{.bash">brew install isync
+</code></pre>
+<h2>Configure mbsync</h2>
+<p>Mbsync uses <code>~/.mbsyncrc</code> for configuration. Migrating <a href="#trying-out-mu4e-and-offlineimap">~/.offlineimaprc</a> to <code>~/.mbsyncrc</code> looks like:</p>
+<pre><code class="language-conf">IMAPAccount Personal
+Host some.imap.host.com
+User your_user_name
+PassCmd &quot;gpg --quiet --batch -d ~/.offlineimap_accountname.gpg&quot;
+Port 993
+SSLType IMAPS
+AuthMechs Login
+CertificateFile  ~/.offlineimapcerts.pem
+# My IMAP provider doesn't handle concurrent IMAP commands.
+PipelineDepth 1
+
+IMAPStore Personal-remote
+Account Personal
+
+MaildirStore Personal-local
+Path ~/IMAP/Personal/
+Inbox ~/IMAP/Personal/INBOX
+
+Channel Personal
+Master :Personal-remote:
+Slave :Personal-local:
+Patterns *
+Create Slave
+Sync All
+Expunge Both
+SyncState *
+</code></pre>
+<h2>No concurrent IMAP commands supported</h2>
+<p>My IMAP provider doesn't handle concurrent IMAP commands. <a href="https://kdecherf.com/blog/2017/05/01/mbsync-and-office-365/">mbsync and Office 365</a> had the answer:</p>
+<pre><code class="language-conf">PipelineDepth 1
+</code></pre>
+<h2>Initial sync</h2>
+<p>Run initial from the command line sync:</p>
+<pre><code class="language-{.bash">mbsync -Va
+</code></pre>
+<p>While syncing my largest inbox, it sometimes received an unexpected EOF error:</p>
+<pre><code>IMAP error: unexpected EOF from some.imap.host.com (1.2.3.4:993)
+</code></pre>
+<p>First few times, I restarted the syncing manually, but then used a loop to automatically restart it.</p>
+<p>Bash loops:</p>
+<pre><code class="language-{.bash">while true; do mbsync -V Personal; sleep 5; done
+</code></pre>
+<pre><code class="language-{.bash">for i in {1..5}; do mbsync -V Personal; sleep 5; done
+</code></pre>
+<p>Eshell loop:</p>
+<pre><code class="language-{.bash">for i in (number-sequence 1 10) {mbsync -V Personal; sleep 5}
+</code></pre>
+<h2>Create mu index</h2>
+<p>Reindex using mu, but first remove existing index for offlineimap messages:</p>
+<pre><code class="language-{.bash">rm -rf ~/.mu
+</code></pre>
+<p>Ok, do index now:</p>
+<pre><code class="language-{.bash">mu index --maildir=~/IMAP
+</code></pre>
+<h2>Mu4e tweaks</h2>
+<p>The <em>get mail</em> command should now point to mbsync.</p>
+<pre><code class="language-{.commonlisp">(csetq mu4e-get-mail-command &quot;mbsync -Va&quot;)
+</code></pre>
+<p>I had issues with duplicate IDs after moving and deleting messages from mu4e. <a href="http://pragmaticemacs.com/emacs/migrating-from-offlineimap-to-mbsync-for-mu4e/">Migrating from offlineimap to mbsync for mu4e</a> had the answer:</p>
+<pre><code class="language-{.commonlisp">(csetq mu4e-change-filenames-when-moving t)
+</code></pre>
+<h2>Helpful references</h2>
+<ul>
+<li><a href="https://webgefrickel.de/blog/a-modern-mutt-setup">A modern mutt setup with neomutt, mbsync, msmtp and mu — part one | webgefrickel</a>.</li>
+<li><a href="http://pragmaticemacs.com/emacs/migrating-from-offlineimap-to-mbsync-for-mu4e/">Migrating from offlineimap to mbsync for mu4e | Pragmatic Emacs</a>.</li>
+<li><a href="https://copyninja.info/blog/email_setup.html">My personal Email setup - Notmuch, mbsync, postfix and dovecot</a>.</li>
+<li><a href="https://github.com/jeremy-compostella/org-msg/blob/master/README.org">org-msg: Compose and reply to emails in a Outlook HTML friendly style</a>.</li>
+<li><a href="http://www.ict4g.net/adolfo/notes/2014/12/27/EmacsIMAP.html">Reading IMAP Mail in Emacs on OSX</a>.</li>
+</ul>

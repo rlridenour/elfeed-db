@@ -1,0 +1,317 @@
+
+<h2 class="wp-block-heading" id="org457e63c">Mission Brief</h2>
+
+
+
+<p>Plain text communication is loud. It&#8217;s bleeding data.<br>Prying eyes can see every bit in the wire.</p>
+
+
+
+<p>You have to isolate the backend &#8211; the Semaphore UI and MySQL containers stay locked down. Unreachable for the external work.<br>Open a tiny hole on the stronghold to the world &#8211; the frontend is an NginX SSL proxy.</p>
+
+
+
+<p>You use:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Podman pod for network and container isolation</li>
+
+
+
+<li>The Semaphore and MySQL containers without exposing them to the world</li>
+
+
+
+<li>An NginX proxy container with SSL</li>
+</ul>
+
+
+
+<span id="more-7774"></span>
+
+
+
+<h2 class="wp-block-heading" id="orgeaa48a7">Requirements</h2>
+
+
+
+<ul class="wp-block-list">
+<li>Debian 12 (with hardened kernel preferred)</li>
+
+
+
+<li>Podman installed and functional (v4 or later)</li>
+
+
+
+<li>Working MySQL container</li>
+
+
+
+<li>Functioning Semaphore UI container</li>
+
+
+
+<li>X509 certificates for HTTPS</li>
+
+
+
+<li>NginX configuration for the reverse proxy</li>
+
+
+
+<li>Terminal access</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgfa2e753">Step 1: Create The Pod For The Configuration</h2>
+
+
+
+<p>The pod exposes only an HTTPS port for the NginX proxy:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman pod create -p 4430:443 p_semaphore
+</pre></div>
+
+
+<p>Non-root containers use ports above 1000.</p>
+
+
+
+<h2 class="wp-block-heading" id="org0e90cb0">Step 2: Activate The MySQL Container</h2>
+
+
+
+<p>Run the database container assigned to the pod:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman run --rm -d \
+       --pod p_semaphore \
+       -v semaphore_mysql:/var/lib/mysql \
+       --name semaphore_mysql \
+       -e MYSQL_RANDOM_ROOT_PASSWORD='yes' \
+       -e MYSQL_DATABASE=semaphore \
+       -e MYSQL_USER=semaphore \
+       -e MYSQL_PASSWORD=semaphore # DO NOT USE IN PROD \
+       docker.io/mysql:lts
+</pre></div>
+
+
+<ul class="wp-block-list">
+<li>No open ports.</li>
+
+
+
+<li>No exposure.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgb91af67">Step 3: Initiate The Semaphore Container</h2>
+
+
+
+<p>Assign and run Semaphore in the pod:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman run --rm -d \
+       --pod p_semaphore \
+       --name semaphore \
+       -e SEMAPHORE_DB_USER=semaphore \
+       -e SEMAPHORE_DB_PASS=semaphore # DO NOT USE IN PROD \
+       -e SEMAPHORE_DB_HOST=127.0.0.1 \
+       -e SEMAPHORE_DB_PORT=3306 \
+       -e SEMAPHORE_DB_DIALECT=mysql \
+       -e SEMAPHORE_DB=semaphore \
+       -e SEMAPHORE_PLAYBOOK_PATH=/tmp/semaphore/ \
+       -e SEMAPHORE_ADMIN_PASSWORD=changeme # DO NOT USE IN PROD \
+       -e SEMAPHORE_ADMIN_NAME=admin \
+       -e SEMAPHORE_ADMIN_EMAIL=admin@localhost \
+       -e SEMAPHORE_ADMIN=admin \
+       -e SEMAPHORE_ACCESS_KEY_ENCRYPTION=gs72mPntFATGJs9qK0pQ0rKtfidlexiMjYCH9gWKhTU= \
+       -e SEMAPHORE_LDAP_ACTIVATED='no' \
+       -e TZ=UTC \
+       docker.io/semaphoreui/semaphore:latest
+</pre></div>
+
+
+<ul class="wp-block-list">
+<li>No exposed ports.</li>
+
+
+
+<li>The DB host is <code>127.0.0.1</code> in the pod.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="org43733f1">Step 4: The Mask To The World &#8211; NginX Reverse Proxy</h2>
+
+
+
+<h3 class="wp-block-heading" id="org2425c3e">NginX Configuration</h3>
+
+
+
+<p>You set up the only exposure here. No mistakes.</p>
+
+
+
+<p>The&nbsp;<code>nginx-conf/nginx.conf</code>&nbsp;file must be brief. No fluff.</p>
+
+
+
+<p>Clients connect over SSL on port 4430 &#8211; they are forwarded to the NginX port 443 in Podman.<br>NginX from 443 forwards the connection to Semaphore&#8217;s port 3000 (Default UI port). It&#8217;s sealed. Never exposed.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+server {
+    listen 443 ssl;
+    server_name semaphore.local;
+ 
+    ssl_certificate /etc/nginx/cert.pem;
+    ssl_certificate_key /etc/nginx/key.pem;
+ 
+    location / {
+        proxy_pass http://127.0.0.1:3000/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+	    proxy_set_header X-Forwarded-Proto $scheme;
+	    proxy_set_header X-Forwarded-Port $port;
+	    proxy_set_header X-Forwarded-Host $host:$port;
+        proxy_set_header X-Forwarded-Server $host;
+    }
+}
+</pre></div>
+
+
+<p>In a Podman pod the nework is separated. Containers &#8220;see&#8221; each other.</p>
+
+
+
+<h3 class="wp-block-heading" id="org1795aa9">X509 Certificates</h3>
+
+
+
+<p>Always use valid certificates in production systems. They are your chain of trust.</p>
+
+
+
+<p>For testing you can create your own files.<br>Never use self-signed certificates in prod. A warning in the browser is the killer of trust.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+mkdir certs && cd certs
+openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+cd ..
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="orgda93b14">Proxy Container</h3>
+
+
+
+<p>Assign and run the reverse proxy in the pod:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman run --rm -d \
+       --pod p_semaphore \
+       --name semaphore_proxy \
+       -v ./nginx-conf/nginx.conf:/etc/nginx/conf.d/default.conf:ro \
+       -v ./certs/cert.pem:/etc/nginx/cert.pem \
+       -v ./certs/key.pem:/etc/nginx/key.pem \
+       docker.io/library/nginx
+</pre></div>
+
+
+<h2 class="wp-block-heading" id="orgb0173f1">Step 5: Verify The Setup</h2>
+
+
+
+<p>Log in.<br>Check the logs.<br>Verify your setup.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman pod logs p_semaphore
+</pre></div>
+
+
+<p>Does it work? Seal it.</p>
+
+
+
+<h2 class="wp-block-heading" id="orgbfa3c16">Step 6: Generating The Pod Configuration File</h2>
+
+
+
+<p>You built a system. Don&#8217;t rebuild it by hand.<br>Create a Kubernetes-compatible pod configuration.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman kube generate -f semaphore-pod.yaml p_semaphore
+</pre></div>
+
+
+<p>You may have to edit the file a bit. Remove the noise. Keep the data.</p>
+
+
+
+<h2 class="wp-block-heading" id="org944f417">Step 7: Security Considerations &#8211; Hardening</h2>
+
+
+
+<ol class="wp-block-list">
+<li>Offload secrets to <code>.env</code> files or a secrets manager &#8211; never bake them into scripts.</li>
+
+
+
+<li>Don&#8217;t use self-signed certificates. Use valid Let&#8217;s Encrypt or other ones.</li>
+
+
+
+<li>Never trust. Verify. Monitor. Check.</li>
+</ol>
+
+
+
+<h2 class="wp-block-heading" id="orgb0e373c">Ghost Thoughts</h2>
+
+
+
+<p>Networks and systems are full of evil ghosts with prying eyes.<br>Unencrypted flows scream louder than logs. Silence them.</p>
+
+
+
+<p>Secure the wire &#8211; use SSL, encrypt your connections.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p>&#8220;They left Semaphore open on port 3000. We tunneled in through that silence.&#8221;</p>
+</blockquote>
+
+
+
+<p>—</p>
+
+
+
+<p>Whisper to DeadSwitch on Matrix:&nbsp;<code>@deadswitch:matrix.org</code><br>Maybe he answers back…</p>
+
+
+
+<p><strong>DeadSwitch | The Cyber Ghost</strong><br><em>&#8220;In silence, we rise. Behind the wire, we vanish.&#8221;</em></p>
+
+
+
+<p></p>

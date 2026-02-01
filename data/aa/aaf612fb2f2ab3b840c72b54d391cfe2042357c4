@@ -1,0 +1,49 @@
+<p>Today was a day of convergence.</p>
+
+<p>Our home server/NAS had a lot of SATA-related kernel errors and drive failures in the past weeks that I couldn’t track down. I replaced the drive <em>and</em> the cables and things have quieted down. This means I was SSH’ing into the server quite a bit this month. Mild data loss ans corrupted file systems included.</p>
+
+<p>So when I was asked to send a potentially corrupted backup record file that prevents <a href="https://www.arqbackup.com/">Arq for Mac</a> from backing up anything, I did the straight-forward and sensible thing.</p>
+
+<p>The UUIDs in the path of Arq backups are quite cryptic. The file’s absolute path actually is this: <code>/mnt/user/ct_mirror/mbp2020/EC5C50F5-96D9-4965-8849-C2E8296E12FD/backupfolders/F6BA5DBC-31E4-4DE3-9AE9-7A41873881EC/backuprecords/00170/4209506.backuprecord</code>.</p>
+
+<p>Now this is the recipe to get the file from the NAS to the nice support people:</p>
+
+<ol>
+  <li>Hit “Reply” on the email. You do your email in Emacs, of course, so a mail composition buffer opens.</li>
+  <li>In another window, SSH onto the server. That’s quite simple using TRAMP: start with this fake path-protocol-thingie notation, like <code>/ssh:USER@SERVER:/</code>, and from that absolute “path”, interactively drill down into the directory tree to get to the final directory of the path,  “<code>00170</code>”.</li>
+  <li>In that directoy listing (via <code>dired</code>, you’re still in Emacs, after all!), locate the file they want. You can use full text search on the buffer like I did, it’s all text after all!</li>
+  <li>Use <kbd>C-,</kbd> to launch Embark on the file. For files, which I have an “attach the selected file to mail composition buffer” action.</li>
+  <li>Compose the rest of the reply, hit send.</li>
+</ol>
+
+<p>It’s a bit slower to attach a file that’s being transferred from the server than a local file, but since email is just weird plain text with binary blobs anyway, it’s no big deal, either.</p>
+
+<p>That workflow was quite magical. How would normal people send stuff from servers via email? <code>rsync</code> or <code>scp</code> to their local machine first, I guess? It’s sort of fun that the actual location of a file was completely irrelevant for this process. That sparked a lot of joy, I must say.</p>
+
+<p>Oh, I mentioned the <a href="https://github.com/oantolin/embark">Embark</a> action to attach files <a href="https://christiantietze.de/posts/2022/04/transient-menu-galore/">before</a> but never shared the code, so here it is:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/attach-file</span> <span class="p">(</span><span class="nv">file</span><span class="p">)</span>
+  <span class="s">"Attach FILE to an email message.
+The message to which FILE is attached is chosen as for `gnus-dired-attach`."</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"fAttach: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">require</span> <span class="ss">'gnus-dired</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">ct/with-notmuch-as-compose-mail</span>
+   <span class="p">(</span><span class="nv">gnus-dired-attach</span> <span class="p">(</span><span class="nb">list</span> <span class="nv">file</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defmacro</span> <span class="nv">ct/with-notmuch-as-compose-mail</span> <span class="p">(</span><span class="k">&amp;rest</span> <span class="nv">body</span><span class="p">)</span>
+  <span class="s">"Overrides `compose-mail' with `notmuch-mua-mail' for the duration of BODY."</span>
+  <span class="o">`</span><span class="p">(</span><span class="k">progn</span>
+     <span class="p">(</span><span class="nb">require</span> <span class="ss">'notmuch-mua</span><span class="p">)</span>
+     <span class="p">(</span><span class="nv">advice-add</span> <span class="ss">'compose-mail</span> <span class="ss">:override</span> <span class="nf">#'</span><span class="nv">notmuch-mua-mail</span><span class="p">)</span>
+     <span class="p">(</span><span class="k">unwind-protect</span> <span class="p">(</span><span class="k">progn</span> <span class="o">,@</span><span class="nv">body</span><span class="p">)</span>
+       <span class="p">(</span><span class="nv">advice-remove</span> <span class="ss">'compose-mail</span> <span class="nf">#'</span><span class="nv">notmuch-mua-mail</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>Then bind this to the <kbd>a</kbd> key (for “<u>a</u>ttach”) in the Embark file action keymap:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">embark-file-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"a"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">ct/attach-file</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Please don’t ask how this came into being. It is a horrible mix of tips on Reddit (the original implementation was by @oantolin, creator of <code>embark.el</code>, if I recall correctly) and other hacks because attaching files from <code>dired</code> apparently is not part of the <code>mml-*</code> or <code>message-*</code> packages, but <code>gnus</code>. It works, so I’m not touching it.</p>
+
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

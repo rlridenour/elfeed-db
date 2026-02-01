@@ -1,0 +1,108 @@
+<p>macOS has a wonderful input mechanism where you press and hold a key on your keyboard to display the accent menu. It's easy to internalize: <em>long press &quot;a&quot; if you want to input &quot;á&quot;</em>.</p>
+<p><img src="https://xenodium.github.io/images/an-accentuated-emacs-experiment/macosaccent.webp" alt=""></p>
+<p>On Emacs, <em>C-x 8 ' a</em> would be the equivalent, but it just didn't stick for me. Fortunately, there's an alternative, using dead keys. Mickey Petersen gives a <a href="https://www.masteringemacs.org/article/diacritics-in-emacs">wonderful introduction</a>. Having said all this, I still longed for macOS's input mechanism.</p>
+<p>Thanks to Christian Tietze's <a href="https://twitter.com/ctietze/status/1552446492559958017">post</a>, I discovered the <a href="https://github.com/elias94/accent">accent</a> package. While it doesn't handle <em>press-and-hold</em>, it does the heavy lifting of offering a menu with character options. If I could just bring that <em>press-and-hold</em>…</p>
+<p>My initial attempt was to use <a href="https://github.com/emacsorphanage/key-chord">key chords</a> (via <a href="https://github.com/jwiegley/use-package">use-package</a>):</p>
+<pre><code class="language-{.commonlisp">(use-package accent
+  :ensure t
+  :chords ((&quot;aa&quot; . ar/spanish-accent-menu)
+           (&quot;ee&quot; . ar/spanish-accent-menu)
+           (&quot;ii&quot; . ar/spanish-accent-menu)
+           (&quot;oo&quot; . ar/spanish-accent-menu)
+           (&quot;uu&quot; . ar/spanish-accent-menu)
+           (&quot;AA&quot; . ar/spanish-accent-menu)
+           (&quot;EE&quot; . ar/spanish-accent-menu)
+           (&quot;II&quot; . ar/spanish-accent-menu)
+           (&quot;OO&quot; . ar/spanish-accent-menu)
+           (&quot;UU&quot; . ar/spanish-accent-menu)
+           (&quot;nn&quot; . ar/spanish-accent-menu)
+           (&quot;NN&quot; . ar/spanish-accent-menu)
+           (&quot;??&quot; . ar/spanish-accent-menu)
+           (&quot;!!&quot; . ar/spanish-accent-menu))
+  :config
+  (defun ar/spanish-accent-menu ()
+    (interactive)
+    (let ((accent-diacritics
+           '((a (á))
+             (e (é))
+             (i (í))
+             (o (ó))
+             (u (ú ü))
+             (A (Á))
+             (E (É))
+             (I (Í))
+             (O (Ó))
+             (U (Ú Ü))
+             (n (ñ))
+             (N (Ñ))
+             (\? (¿))
+             (! (¡)))))
+      (ignore-error quit
+        (accent-menu)))))
+</code></pre>
+<p>While it kinda works, &quot;nn&quot; quickly got in the way of my n/p <a href="https://magit.vc/">magit</a> navigation. Perhaps key chords are still an option for someone who doesn't need the &quot;nn&quot; chord, but being a Spanish speaker, I need that &quot;ñ&quot; from long &quot;n&quot; presses!</p>
+<p>I'm now trying a little experiment using an <code>after-change-functions</code> hook to monitor text input and present the accent menu. I'm sure there's a better way (anyone with ideas?). For now, it gives me something akin to <em>press-and-hold.</em></p>
+<p><img src="https://xenodium.github.io/images/an-accentuated-emacs-experiment/accentuated.webp" alt=""></p>
+<p>I'm wrapping the hook with a minor mode to easily enable/disable whenever needed. I'm also overriding <code>accent-diacritics</code> to only include the characters I typically need.</p>
+<pre><code class="language-{.commonlisp">(use-package accent
+  :ensure t
+  :hook ((text-mode . accent-menu-mode)
+         (org-mode . accent-menu-mode)
+         (message-mode . accent-menu-mode))
+  :config
+  (setq accent-diacritics '((a (á))
+                            (e (é))
+                            (i (í))
+                            (o (ó))
+                            (u (ú ü))
+                            (A (Á))
+                            (E (É))
+                            (I (Í))
+                            (O (Ó))
+                            (U (Ú Ü))
+                            (n (ñ))
+                            (N (Ñ))
+                            (\? (¿))
+                            (! (¡))))
+  (defvar accent-menu-monitor--last-edit-time nil)
+
+  (define-minor-mode accent-menu-mode
+    &quot;Toggle `accent-menu' if repeated keys are detected.&quot;
+    :lighter &quot; accent-menu mode&quot;
+    (if accent-menu-mode
+        (progn
+          (remove-hook 'after-change-functions #'accent-menu-monitor--text-change t)
+          (add-hook 'after-change-functions #'accent-menu-monitor--text-change 0 t))
+      (remove-hook 'after-change-functions #'accent-menu-monitor--text-change t)))
+
+  (defun accent-menu-monitor--text-change (beginning end length)
+    &quot;Monitors text change BEGINNING, END, and LENGTH.&quot;
+    (let ((last-edit-time accent-menu-monitor--last-edit-time)
+          (edit-time (float-time)))
+      (when (and (&gt; end beginning)
+                 (eq length 0)
+                 last-edit-time
+                 (not undo-in-progress)
+                 ;; 0.27 seems to work for my macOS keyboard settings.
+                 ;; Key Repeat: Fast | Delay Until Repeat: Short.
+                 (&lt; (- edit-time last-edit-time) 0.27)
+                 (float-time (time-subtract (current-time) edit-time))
+                 (accent-menu-monitor--buffer-char-string (1- beginning))
+                 (seq-contains-p (mapcar (lambda (item)
+                                           (symbol-name (car item)))
+                                         accent-diacritics)
+                                 (accent-menu-monitor--buffer-char-string beginning))
+                 (string-equal (accent-menu-monitor--buffer-char-string (1- beginning))
+                               (accent-menu-monitor--buffer-char-string beginning)))
+        (delete-backward-char 1)
+        (ignore-error quit
+          (accent-menu)))
+      (setq accent-menu-monitor--last-edit-time edit-time)))
+
+  (defun accent-menu-monitor--buffer-char-string (at)
+    (when (and (&gt;= at (point-min))
+               (&lt; at (point-max)))
+      (buffer-substring-no-properties at (+ at 1)))))
+</code></pre>
+<p>As a bonus, it ocurred to me that I could use the same <em>press-and-hold</em> to handle question marks in Spanish (from my UK keyboard).</p>
+<p><img src="https://xenodium.github.io/images/an-accentuated-emacs-experiment/porque.webp" alt=""></p>

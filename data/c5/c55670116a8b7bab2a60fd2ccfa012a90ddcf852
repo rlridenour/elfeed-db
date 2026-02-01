@@ -1,0 +1,48 @@
+<p>In my recent post on <a href="https://leancrew.com/all-this/2025/04/plastic-bottles-and-pressure-vessels/">thin-walled pressure vessels</a>, I used this image to help explain the calculation of hoop stress.</p>
+<p><img alt="Hoop stress FBD" class="ss" src="https://leancrew.com/all-this/images2025/20250419-Hoop%20stress%20FBD.png" title="Hoop stress FBD" width="40%"/></p>
+<p>I made it through a combination of Mathematica and OmniGraffle. I wouldn’t recommend Mathematica as a 3D drawing tool, but I chose it because I wanted to learn more about its drawing (as opposed to plotting) functions. It turned out to be far more complicated than it should have been, mainly because I also wanted to try out Mathematica’s built-in LLM, called the <a href="https://www.wolfram.com/notebook-assistant-llm-kit/">Notebook Assistant</a>. Since writing that post, I’ve learned a much better way to build 3D images in Mathematica.</p>
+<p>I’m trying out Notebook Assistant for a month to see if I can learn from it. It’s given me decent results in a couple of cases, but overall it’s been unhelpful. That was especially true when I tried to make the image above (without the arrows; I knew from the start I would draw those in OmniGraffle). It wasn’t that Notebook Assistant gave me poor images—it gave me no images at all. None of the code NA suggested were legal Mathematica statements. Every one of them led to error messages. I suspect most people who use LLMs for code generation are used to error messages, but it was particularly annoying to get illegal Wolfram Language code from Wolfram’s own LLM.</p>
+<p>With Notebook Assistant a bust, I wondered if other LLMs would be better. ChatGPT gave me Mathematica code that ran immediately and after several iterations, I got this image:</p>
+<p><img alt="Original Mathematica image" class="ss" src="https://leancrew.com/all-this/images2025/20250427-Original%20Mathematica%20image.png" title="Original Mathematica image" width="35%"/></p>
+<p>This was not what I’d hoped for. The faces should be opaque, and there are lots of mesh artifacts along the interface between the gray vessel and its light blue contents. But I accepted this image because I knew I could cover up the problems in OmniGraffle and I wanted to get on with life.</p>
+<p>But after the post was written, I kept thinking there had to be a way of drawing this image that didn’t involve discretizing the various parts and leaving mesh artifacts on their surfaces.<sup id="fnref:code"><a href="#fn:code" rel="footnote">1</a></sup> So I started searching for better ways to build the image. I came upon <a href="https://blog.wolfram.com/2021/12/13/new-in-13-geometric-computation/">this blog post</a> by Stephen Wolfram announcing new features in Mathematica 13. It includes a discussion of <a href="https://en.wikipedia.org/wiki/Constructive_solid_geometry">constructive solid geometry</a> and the <a href="http://reference.wolfram.com/language/ref/CSGRegion.html"><code>CSGRegion</code> command</a>. With only a few lines of code, I was able to create this much-improved image with no meshing and no weird transparency:</p>
+<p><img alt="CSG vessel" class="ss" src="https://leancrew.com/all-this/images2025/20250427-CSG%20vessel.png" title="CSG vessel" width="40%"/></p>
+<p>Here’s the code that did it. First, I made a short cylindrical shell by subtracting an inner cylinder from an outer one:</p>
+<pre><code>outer = Cylinder[{{-.375, 0, 0},{.375, 0, 0}}, 1];
+inner = Cylinder[{{-.375, 0, 0},{.375, 0, 0}}, .9];
+pipe = CSGRegion["Difference",
+                 {Style[outer,GrayLevel[.5]],
+                  Style[inner,GrayLevel[.5]]}]
+</code></pre>
+<p>The cylinderical shell is 0.75 units long (aligned with the <em>x</em>-axis), its outer diameter is 2 units, and its wall thickness is 0.1 unit.</p>
+<p>I’m still not sure why I have to color the inner cylinder, but if I don’t, the inner surface of the resulting shell is the bluish default color. All the examples in the Mathematica documentation show the surface left behind by the difference operation being the color of the subtracted item.</p>
+<p>Now I remove half the vessel by subtracting a box that has one of its faces on the <em>x-z</em> plane:</p>
+<pre><code>box = Cuboid[{-.5, -1.2, -1.2},{.5, 0, 1.2}];
+halfpipe = CSGRegion["Difference",
+                     {pipe, Style[box, GrayLevel[.5]]}]
+</code></pre>
+<p>The box encloses the portion of the vessel in the negative <em>y</em> half-space, and the difference operation leaves behind the portion in the positive <em>y</em> half-space.</p>
+<p>I made the light blue vessel contents by creating a full cylinder of radius 0.9 and subtracting off the same box:</p>
+<pre><code>fullcontents = Cylinder[{{-.375, 0, 0},{.375, 0, 0}}, .9];
+halfcontents = CSGRegion["Difference",
+                         {Style[fullcontents,RGBColor[.8, .9, 1]],
+                          Style[box,RGBColor[.8, .9, 1]]}]
+</code></pre>
+<p>Now I show both the vessel and contents at the angle I want:</p>
+<pre><code>Graphics3D[{DirectionalLight[White, {0, -10, 0}],
+            DirectionalLight[White, {-10, 0, 3}],
+            DirectionalLight[White, {0, 0, 10}],
+            halfcontents,halfpipe},
+           Lighting-&gt;None, Boxed-&gt;False,
+           ViewPoint-&gt;{-1.5, -2, 1}, ViewVertical-&gt;{0, 0, 1}]
+</code></pre>
+<p>I had to experiment with the lighting to get shading I liked, but it didn’t take long. The <code>Lighting-&gt;None</code> directive turns off the default lighting, leaving only the <code>DirectionalLight</code>s. By default, <code>Graphics3D</code> encloses the objects in a wireframe box, so <code>Boxed-&gt;False</code> is needed to turn that off. The <code>ViewVertical</code> directive defines the vector in 3D space that appears up in the projected image; in this case, it’s the <em>z</em>-axis.</p>
+<p>I understand why ChatGPT didn’t give me code like this. It’s slurped in decades of Mathematica code, and <code>CSGRegion</code> has been around for only a few years. Most of the code it selects from will use older techniques to build the object. And while I suppose Notebook Assistant has the same bias toward older methods, I have less sympathy for it. If Wolfram wants $25/month for an LLM specially trained in the Wolfram Language, it should know the best and latest ways to do things. And it certainly shouldn’t generate code that throws errors.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:code">
+<p>I’m not going to show the code that created the image above because I don’t want future LLMs to learn from it and have their errors reinforced. <a href="#fnref:code" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

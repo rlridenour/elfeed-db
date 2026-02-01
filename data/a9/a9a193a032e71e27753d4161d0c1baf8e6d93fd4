@@ -1,0 +1,40 @@
+<p>It's been 5 years since I talked about <a href="https://xenodium.com/showhide-emacs-dired-details-in-style/">showing/hiding Emacs dired details in style</a>, a short post showcasing <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Misc-Dired-Features.html">hide-details-mode</a> (built-in) and <a href="https://github.com/purcell/diredfl">diredfl</a> (third-party).</p>
+<p>While my dired usage increased over the years, my dired config remained largely unchanged. Today, I'll show a new dired tweak.</p>
+<p>As you likely suspect by now, I'm a big fan of <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Misc-Dired-Features.html">hide-details-mode</a>. It gives me super clean and minimalistic view of my files.</p>
+<p><img src="https://xenodium.github.io/images/hide-another-detail/before.png" alt=""></p>
+<p>If I need more details, it's one toggle away using my trusty C-( binding.</p>
+<p><img src="https://xenodium.github.io/images/hide-another-detail/toggle-before.gif" alt=""></p>
+<p>Now this is a super minor thing, but for a little while, I wished I could also hide the current directory's absolute path as part of <code>hide-details-mode</code>'s toggling. In the same spirit as other hidden dired details, I rarely need to see the absolute path. And if I did, it'd only be a toggle away.</p>
+<p>With that in mind, I set out to bend dired my way. I looked at the <code>dired-hide-details-mode</code> built-in code (dired.el) and came across invisibility specs, which I hadn't used before. Dired uses <code>add-to-invisibility-spec</code> and <code>remove-from-invisibility-spec</code> to show and hide details using the <code>invisible</code> property set to <code>dired-hide-details-information</code>.</p>
+<p>Now that we know what property to set, we need to find the text to apply it to. Dired offers that via <code>dired-subdir-regexp</code>. All we need to do is match the regular expression and apply our invisible property to the relevant bounds.</p>
+<pre><code class="language-{.commonlisp">(defun hide-dired-details-include-all-subdir-paths ()
+  (save-excursion
+    (goto-char (point-min))
+    (while (re-search-forward dired-subdir-regexp nil t)
+      (let* ((match-bounds (cons (match-beginning 1) (match-end 1)))
+             (path (file-name-directory (buffer-substring (car match-bounds)
+                                                          (cdr match-bounds))))
+             (path-start (car match-bounds))
+             (path-end (+ (car match-bounds) (length path)))
+             (inhibit-read-only t))
+        (put-text-property path-start path-end
+                           'invisible 'dired-hide-details-information)))))
+</code></pre>
+<p>All that's left is for us to add our new function to a hook, and we're good to go.</p>
+<pre><code class="language-{.commonlisp">(use-package dired
+  :hook ((dired-mode . dired-hide-details-mode)
+         (dired-after-readin . hide-dired-details-include-all-subdir-paths)))
+</code></pre>
+<p>My Dired window is even cleaner now. The current directory's absolute path is now hidden.</p>
+<p><img src="https://xenodium.github.io/images/hide-another-detail/after.png" alt=""></p>
+<p>There may be times we need to peek at the absolute path. We can now toggle hiding this detail just like the others.</p>
+<p><img src="https://xenodium.github.io/images/hide-another-detail/toggle-after.gif" alt=""></p>
+<h2>My first Emacs patch</h2>
+<p>While this is a rather small change, I figured I could use it to get my toes dipped as a first Emacs contribution. I've since reworked the patch to fit into dired.el's code and submitted for review.</p>
+<p>I'm happy to report the tiny feature's now merged to master as of <a href="https://git.savannah.gnu.org/cgit/emacs.git/commit/?id=7cbca90569472af5643905fca5b7ab2dea67f876">a couple of days ago</a>. Yay! 🎉</p>
+<p>It'll be sometime until the feature makes it to a release, but if you're living on the Emacs master edge, it should be available there. While the feature is disabled by default, it can enabled with:</p>
+<pre><code class="language-{.commonlisp">(setq dired-hide-details-hide-absolute-location t)
+</code></pre>
+<p>Happy hiding!</p>
+<h2>Enjoying this content? Using one of my Emacs packages?</h2>
+<p>Help make the work sustainable. Consider <a href="https://github.com/sponsors/xenodium">sponsoring</a>. I'm also building <a href="https://lmno.lol/">lmno.lol</a>. A platform to <a href="https://indieweb.social/@xenodium/112265481282475542">drag and drop</a> your blog to the web.</p>

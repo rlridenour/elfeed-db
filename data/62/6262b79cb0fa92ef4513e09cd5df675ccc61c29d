@@ -1,0 +1,51 @@
+<p>The original implementation of <code>my/quick-window-jump</code> worked perfectly for multi-window setups. It enabled you to assign character labels to each window, display them as overlays within the windows themselves, and jump to your desired window by typing its corresponding key. However, for setups with just two windows (a very common scenario in Emacs), this process felt unnecessarily complicated. Why go through the entire label-assignment process when a single key press could suffice?</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20241213115239-emacs--Emacs-core-window-jumping-between-two-windows.jpg" width="100%">
+</figure>
+
+<p>This latest tweak to <code>my/quick-window-jump</code> introduces a simple improvement and in fact is currently what <code>ace-window</code> does: <strong>direct switching for two windows</strong>. If there are exactly two windows open, the function now skips the overhead of key prompts and overlay creation. Instead, it switches directly to the other window, this seems more logical to me, why the extra key when it is obvious where the point is going to jump to?</p>
+<p>Here’s the core logic for handling two windows:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>  (let* ((<span style="color:#a6e22e">window-list</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)))
+</span></span><span style="display:flex;"><span>    (if (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>) <span style="color:#ae81ff">2</span>)
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">;; If there are only two windows, switch to the other directly.</span>
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">select-window</span> (<span style="color:#a6e22e">other-window-for-scrolling</span>))
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; Otherwise, show the key selection interface.</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">...</span>))
+</span></span></code></pre></div><p>and here is the updated function:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>  (defun my/quick-window-jump ()
+</span></span><span style="display:flex;"><span>    <span style="color:#e6db74">&#34;Jump to a window by typing its assigned character label.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">  If there are only two windows, jump directly to the other window.&#34;</span>
+</span></span><span style="display:flex;"><span>    (interactive)
+</span></span><span style="display:flex;"><span>    (let* ((<span style="color:#a6e22e">window-list</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)))
+</span></span><span style="display:flex;"><span>      (if (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>) <span style="color:#ae81ff">2</span>)
+</span></span><span style="display:flex;"><span>          <span style="color:#75715e">;; If there are only two windows, switch to the other one directly.</span>
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">select-window</span> (<span style="color:#a6e22e">other-window-for-scrolling</span>))
+</span></span><span style="display:flex;"><span>        <span style="color:#75715e">;; Otherwise, show the key selection interface.</span>
+</span></span><span style="display:flex;"><span>        (let* ((my/quick-window-overlays <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>               (sorted-windows (<span style="color:#a6e22e">sort</span> <span style="color:#a6e22e">window-list</span>
+</span></span><span style="display:flex;"><span>                                     (lambda (w1 w2)
+</span></span><span style="display:flex;"><span>                                       (let ((edges1 (<span style="color:#a6e22e">window-edges</span> w1))
+</span></span><span style="display:flex;"><span>                                             (edges2 (<span style="color:#a6e22e">window-edges</span> w2)))
+</span></span><span style="display:flex;"><span>                                         (or (<span style="color:#a6e22e">&lt;</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                             (and (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                                  (<span style="color:#a6e22e">&lt;</span> (cadr edges1) (cadr edges2))))))))
+</span></span><span style="display:flex;"><span>               (window-keys (seq-take <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;j&#34;</span> <span style="color:#e6db74">&#34;k&#34;</span> <span style="color:#e6db74">&#34;l&#34;</span> <span style="color:#e6db74">&#34;;&#34;</span> <span style="color:#e6db74">&#34;a&#34;</span> <span style="color:#e6db74">&#34;s&#34;</span> <span style="color:#e6db74">&#34;d&#34;</span> <span style="color:#e6db74">&#34;f&#34;</span>)
+</span></span><span style="display:flex;"><span>                                      (<span style="color:#a6e22e">length</span> sorted-windows)))
+</span></span><span style="display:flex;"><span>               (window-map (cl-pairlis window-keys sorted-windows)))
+</span></span><span style="display:flex;"><span>          (setq my/quick-window-overlays
+</span></span><span style="display:flex;"><span>                (<span style="color:#a6e22e">mapcar</span> (lambda (entry)
+</span></span><span style="display:flex;"><span>                          (let* ((key (<span style="color:#a6e22e">car</span> entry))
+</span></span><span style="display:flex;"><span>                                 (window (<span style="color:#a6e22e">cdr</span> entry))
+</span></span><span style="display:flex;"><span>                                 (start (<span style="color:#a6e22e">window-start</span> window))
+</span></span><span style="display:flex;"><span>                                 (overlay (<span style="color:#a6e22e">make-overlay</span> start start (<span style="color:#a6e22e">window-buffer</span> window))))
+</span></span><span style="display:flex;"><span>                            (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;after-string</span>
+</span></span><span style="display:flex;"><span>                                         (<span style="color:#a6e22e">propertize</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;[%s]&#34;</span> key)
+</span></span><span style="display:flex;"><span>                                                     <span style="color:#e6db74">&#39;face</span> <span style="color:#f92672">&#39;</span>(:foreground <span style="color:#e6db74">&#34;white&#34;</span> :background <span style="color:#e6db74">&#34;blue&#34;</span> :weight bold)))
+</span></span><span style="display:flex;"><span>                            (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;window</span> window)
+</span></span><span style="display:flex;"><span>                            overlay))
+</span></span><span style="display:flex;"><span>                        window-map))
+</span></span><span style="display:flex;"><span>          (let ((key (read-key (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Select window [%s]: &#34;</span> (string-join window-keys <span style="color:#e6db74">&#34;, &#34;</span>)))))
+</span></span><span style="display:flex;"><span>            (<span style="color:#a6e22e">mapc</span> <span style="color:#a6e22e">#&#39;delete-overlay</span> my/quick-window-overlays)
+</span></span><span style="display:flex;"><span>            (setq my/quick-window-overlays <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>            (when-let ((<span style="color:#a6e22e">selected-window</span> (<span style="color:#a6e22e">cdr</span> (<span style="color:#a6e22e">assoc</span> (<span style="color:#a6e22e">char-to-string</span> key) window-map))))
+</span></span><span style="display:flex;"><span>              (<span style="color:#a6e22e">select-window</span> <span style="color:#a6e22e">selected-window</span>)))))))
+</span></span></code></pre></div>

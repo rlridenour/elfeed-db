@@ -1,0 +1,249 @@
+
+	
+<p>
+In <a href="https://lucidmanager.org/data-science/simulating-water-consumption/">last week&#39;s article</a>, I discussed how to simulate water consumption data to help develop analytics and reporting. This post describes how to analyse digital water meter data and create a diurnal consumption curve.</p>
+<p>
+The code is available in the GitHub repository in the <code class="verbatim">case-studies</code> folder.</p>
+<p>
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Data Source
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>The simulated data consists  of three fields:</p>
+<ul>
+<li><code class="verbatim">device_id</code>: Unique identifier of the digital water meter.</li>
+<li><code class="verbatim">timestamp</code>: Time stamp in <a href="https://en.wikipedia.org/wiki/Coordinated_Universal_Time">Coordinated Universal Time</a></li>
+<li><code class="verbatim">count</code>: Cumulative <em>count</em> of pulses.</li>
+</ul>
+<p>Note that all data is recorded in UTC. The digital water meters send an hourly pulse at a random time within the hour. Each transmitter (RTU) uses a random offset to avoid network congestion. The digital meter counts each time the impeller makes a full turn, and for this analysis, we assume that this equates to a five-litre volume. The ratio between volume and count depends on the meter brand and type. The image below shows a typical data set for an RTU, including some missing data points.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/simulated-missing.png" alt="Simulated water consumption" title="Simulated water consumption"/>
+<figcaption>
+Simulated water consumption with missing reads (In Australian time).
+</figcaption>
+</figure>
+<p>
+To analyse the data we need two auxiliary functions: one to slice the data we need and one to interpolate data for the times we need it. The <a href="https://www.tidyverse.org/">Tidyverse</a> heavily influences the code in this article. I prefer the Tidyverse way of doing things because it leads to elegant code that is easy to understand.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Analyse digital meter data</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(lubridate)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(magrittr)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Load data</span>
+</span></span><span style="display:flex;"><span>  meter_reads <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read_csv</span>(<span style="background-color:#fff0f0">&#34;data/meter_reads.csv&#34;</span>)
+</span></span><span style="display:flex;"><span>  rtu <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unique</span>(meter_reads<span style="color:#333">$</span>device_id)</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Prepare the Analysis
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>To construct a diurnal curve we need to slice to data to the required window and interpolate the hourly flows.</p>
+<div id="outline-container-headline-3" class="outline-3">
+<h3 id="headline-3">
+Slicing Digital Water Metering Data
+</h3>
+<div id="outline-text-headline-3" class="outline-text-3">
+<p>Analysis is undertaken on slices of the complete data set. This function slices the available data by a vector of RTU ids and a timestamp range in AEST. This function adds a new timestamp variable in AEST. If no date range is provided, all available data for the selected RTUs is provided. The output of this function is a data frame (a Tibble in Tydiverse language).</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Slicing meter reads</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  slice_reads <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rtus, dates <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">range</span>(meter_reads<span style="color:#333">$</span>timestamp)) {
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(meter_reads, device_id <span style="color:#333">%in%</span> rtus) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">filter</span>(timestamp <span style="color:#333">&gt;=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(dates[1], tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>) <span style="color:#333">&amp;</span>
+</span></span><span style="display:flex;"><span>             timestamp <span style="color:#333">&lt;=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(dates[2], tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">arrange</span>(device_id, timestamp)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">slice_reads</span>(rtu[12], <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;2050-02-12&#34;</span>, <span style="background-color:#fff0f0">&#34;2050-02-13&#34;</span>))</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-4" class="outline-3">
+<h3 id="headline-4">
+Interpolation of Meter Reads
+</h3>
+<div id="outline-text-headline-4" class="outline-text-3">
+<p>This function interpolates the cumulative counts for a series of RTUs over a vector of timestamps in AEST. The function creates a list to store the results for each RTU, interpolates the data using the <a href="https://stat.ethz.ch/R-manual/R-devel/library/stats/html/approxfun.html">approx function</a> and then flattens the list back to a data frame. The interpolation function contains a different type of pipe because the approx for interpolation function does not take a data argument. The <code class="verbatim">%$%</code> pipe from the Magrittr <a href="https://cran.r-project.org/web/packages/magrittr/">package</a> solves that problem.</p>
+<p>
+The output is a data frame with DevEUI, the timestamp in AEST and the interpolated cumulative count. The image above shows the counts for two meters over two days an the graph superimposes an interpolated point over the raw data. Although the actual data consists of integer counts, interpolated values are numeric values. The decimals are retained to distinguish them from real reads.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Interpolation</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  interpolate_count <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rtus, timestamps) {
+</span></span><span style="display:flex;"><span>      timestamps <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(timestamps, tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>)
+</span></span><span style="display:flex;"><span>      results <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">vector</span>(<span style="background-color:#fff0f0">&#34;list&#34;</span>, <span style="color:#06b;font-weight:bold">length</span>(rtus))
+</span></span><span style="display:flex;"><span>      <span style="color:#080;font-weight:bold">for</span> (r <span style="color:#080;font-weight:bold">in</span> <span style="color:#06b;font-weight:bold">seq_along</span>(rtus)) {
+</span></span><span style="display:flex;"><span>          interp <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">slice_reads</span>(rtus[r]) <span style="color:#333">%$%</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#06b;font-weight:bold">approx</span>(timestamp, count, timestamps)
+</span></span><span style="display:flex;"><span>          results[[r]] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data_frame</span>(device_id <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(rtus[r], 
+</span></span><span style="display:flex;"><span>                                                     <span style="color:#06b;font-weight:bold">length</span>(timestamps)),
+</span></span><span style="display:flex;"><span>                                     timestamp <span style="color:#333">=</span> timestamps, count <span style="color:#333">=</span> interp<span style="color:#333">$</span>y)
+</span></span><span style="display:flex;"><span>      }
+</span></span><span style="display:flex;"><span>      <span style="color:#080;font-weight:bold">return</span>(<span style="color:#06b;font-weight:bold">do.call</span>(rbind, results))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">interpolate_count</span>(rtu[2<span style="color:#333">:</span><span style="color:#60e;font-weight:bold">3</span>], <span style="color:#06b;font-weight:bold">seq.POSIXt</span>(<span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="background-color:#fff0f0">&#34;2050-02-01&#34;</span>), 
+</span></span><span style="display:flex;"><span>                                         by <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;day&#34;</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  sample <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">4</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">5</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">slice_reads</span>(rtu[sample], <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;2050-02-01 20:00&#34;</span>, <span style="background-color:#fff0f0">&#34;2050-02-02 04:00&#34;</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(timestamp, count, col <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">factor</span>(device_id))) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_line</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_point</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">interpolate_count</span>(rtu[sample], <span style="background-color:#fff0f0">&#34;2050-02-02 00:00&#34;</span>), 
+</span></span><span style="display:flex;"><span>                 col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;blue&#34;</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">facet_wrap</span>(<span style="color:#333">~</span>device_id, scale <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;free_y&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">ggtitle</span>(<span style="color:#06b;font-weight:bold">paste</span>(<span style="background-color:#fff0f0">&#34;Device&#34;</span>, rtu[2<span style="color:#333">:</span><span style="color:#60e;font-weight:bold">3</span>])) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/digital-meters-interpolation.png" alt="Interpolated digital metering data" title="Interpolated digital metering data"/>
+<figcaption>
+Interpolated digital metering data.
+</figcaption>
+</figure>
+<p>
+With these two auxiliary functions, we can start analysing the data.</p>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-5" class="outline-2">
+<h2 id="headline-5">
+Analyse Daily Consumption
+</h2>
+<div id="outline-text-headline-5" class="outline-text-2">
+<p>Daily consumption for each connection is a critical metric in managing water resources and billing customers. The daily consumption of any water connection is defined by the difference between the cumulative counts at midnight. The interpolation function makes it easy to determine daily consumption. This function interpolates the midnight reads for each of the RTUs over the period, starting the previous day. The output of the function is a data frame that can be piped into the plotting function to visualise the data. When you group the data by date, you can also determine the total consumption over a group of services.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Daily consumption</span>
+</span></span><span style="display:flex;"><span>  daily_consumption <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rtus, dates) {
+</span></span><span style="display:flex;"><span>    timestamps <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq.POSIXt</span>(<span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="color:#06b;font-weight:bold">min</span>(dates), tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>) <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">3600</span>,
+</span></span><span style="display:flex;"><span>                             <span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="color:#06b;font-weight:bold">max</span>(dates), tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>), by <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;day&#34;</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">interpolate_count</span>(rtus, timestamps) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">group_by</span>(device_id) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">mutate</span>(consumption <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#06b;font-weight:bold">diff</span>(count)) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">5</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">filter</span>(timestamp <span style="color:#333">!=</span> timestamps[1])
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">daily_consumption</span>(rtu[32<span style="color:#333">:</span><span style="color:#60e;font-weight:bold">33</span>], <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;2050-02-01&#34;</span>, <span style="background-color:#fff0f0">&#34;2050-02-07&#34;</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(timestamp, consumption)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_col</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">facet_wrap</span>(<span style="color:#333">~</span>device_id) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggtitle</span>(<span style="background-color:#fff0f0">&#34;Daily consumption&#34;</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/digital-meters-daily.png" alt="/images/hydroinformatics/digital-meters-daily.png" title="Daily water consumption"/>
+<figcaption>
+Daily water consumption.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-6" class="outline-2">
+<h2 id="headline-6">
+Diurnal Curves
+</h2>
+<div id="outline-text-headline-6" class="outline-text-2">
+<p>The diurnal curve is one of the most important pieces of information used in the design of water supply systems. This curve shows the usage of one or more services for each hour in the day. This curve is a reflection of human behaviour, as we use most water in the morning and the evenings.</p>
+<p>
+This function slices data for a vector of RTUs over a period and then plots the average diurnal curve. The data is obtained by interpolating the cumulative counts for each whole hour in the period. The function then calculates the flow in litres per hour and visualises the minimum, mean and maximum value.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Diurnal curves</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  plot_diurnal_connections <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rtus, dates) {
+</span></span><span style="display:flex;"><span>    timestamps <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq.POSIXt</span>(<span style="color:#06b;font-weight:bold">as.POSIXct</span>(dates[1], tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>),
+</span></span><span style="display:flex;"><span>                             <span style="color:#06b;font-weight:bold">as.POSIXct</span>(dates[2], tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>), by <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;hour&#34;</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">interpolate_count</span>(rtus, timestamps) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">group_by</span>(device_id) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">mutate</span>(rate <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#06b;font-weight:bold">diff</span>(count <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">5</span>)),
+</span></span><span style="display:flex;"><span>             hour <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">as.integer</span>(<span style="color:#06b;font-weight:bold">format</span>(timestamp, <span style="background-color:#fff0f0">&#34;%H&#34;</span>))) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">filter</span>(rate <span style="color:#333">&gt;=</span> <span style="color:#60e;font-weight:bold">0</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">group_by</span>(hour) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">summarise</span>(min <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">min</span>(rate), mean <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">mean</span>(rate), max <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">max</span>(rate)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> hour, ymin <span style="color:#333">=</span> min, ymax <span style="color:#333">=</span> max)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_ribbon</span>(fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;lightblue&#34;</span>, alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.5</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_line</span>(<span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> hour, y <span style="color:#333">=</span> mean), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;orange&#34;</span>, linewidth <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">ggtitle</span>(<span style="background-color:#fff0f0">&#34;Connections Diurnal flow&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">ylab</span>(<span style="background-color:#fff0f0">&#34;Flow rate [L/h]&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">plot_diurnal_connections</span>(rtu[10<span style="color:#333">:</span><span style="color:#60e;font-weight:bold">20</span>], <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;2050-02-01&#34;</span>, <span style="background-color:#fff0f0">&#34;2050-03-01&#34;</span>))</span></span></code></pre></div>
+</div>
+<p>
+Boxplots are also an informative way to visualise this curve. This
+method provides more statistical information on one page, and the ggplot
+function performs the statistical analysis.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/digital-meters-diurnal-curve.png" alt="Diurnal curve in UTC" title="Diurnal curve in UTC"/>
+<figcaption>
+Diurnal curve in UTC.
+</figcaption>
+</figure>
+<p>
+Analysing digital metering data is explained in more detail in <a href="https://lucidmanager.org/data-science/working-with-dates-and-times-in-r/">chapter 11</a> of <em>Data Science for Water Utilities</em>.</p>
+<p>
+
+  <div class="box">
+    <div class="media">
+      <figure class="media-left">
+        <p class="image is-128x128">
+          <img src="https://lucidmanager.org/images/books/2023_ds4wu.jpg" alt = "Data Science for Water Utilities" title = "Data Science for Water Utilities">
+        </p>
+      </figure>
+      <div class="media-content">
+        <div class="content">
+          <p class="is-size-5 has-text-weight-bold">Data Science for Water Utilities</p>
+          <p class="mb-2">Data Science for Water Utilities published by CRC Press is an applied, practical guide that shows water professionals how to use data science to solve urban water management problems using the R language for statistical computing.</p>
+          <div class="buttons">
+            <a class="button is-info" href="https://routledge.com/9781032354545" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Routledge</span>
+            </a>
+            <a class="button is-info" href="https://www.amazon.com/Data-Science-Water-Utilities-Chapman/dp/1032354550" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Amazon</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

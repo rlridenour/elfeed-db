@@ -1,0 +1,29 @@
+<p>As I was getting ready to take an Emacs screenshot in the <a href="https://xenodium.com/emacs-send-to-kindle/">previous post</a>, I figured I may want to redact email addresses before moving forward. I had a quick look for existing options and found <a href="https://github.com/bkaestner/redacted.el">redacted.el</a>, built-in <code>toggle-rot13-mode</code>, and <a href="https://github.com/alphapapa/unpackaged.el#obfuscate-buffer-text-with-lorem-ipsum-words">unpackaged/lorem-ipsum-overlay</a>. All great options. I wanted a solution I could feed a single regular expression to obscure matches. I also wanted toggling capabilities, so I had a quick go at it…</p>
+<p><img src="https://xenodium.github.io/images/redact-that-buffer/redact-regexp.gif" alt=""></p>
+<p>I also wanted the ability to redact the entire buffer content, so feeding a space to the regexp query also translates to <code>[[:graph:]]</code>, effectively redacting all visible characters.</p>
+<p><img src="https://xenodium.github.io/images/redact-that-buffer/redact-all.gif" alt=""></p>
+<p>The solution is overlay-based, ensuring the buffer content remains unchanged. The function may have its own rough edges, yet it certainly scratched the itch for the current need. I'll leave ya with the snippet.</p>
+<pre><code class="language-{.commonlisp">(defun ar/toggle-redact-buffer ()
+  &quot;Redact buffer content matching regexp. A space redacts all.&quot;
+  (interactive)
+  (let* ((redacted)
+         (regexp (string-trim (read-regexp &quot;Redact regexp&quot; 'regexp-history-last)))
+         (matches (let ((results '()))
+                    (when (string-empty-p regexp)
+                      (setq regexp &quot;[[:graph:]]&quot;)
+                      (setq regexp-history-last regexp)
+                      (add-to-history 'regexp-history regexp))
+                    (save-excursion
+                      (goto-char (point-min))
+                      (while (re-search-forward regexp nil t)
+                        (push (cons (match-beginning 0) (match-end 0)) results)))
+                    (nreverse results))))
+    (mapc (lambda (match)
+            (dolist (overlay (overlays-in (car match) (cdr match)))
+              (setq redacted t)
+              (delete-overlay overlay))
+            (unless redacted
+              (overlay-put (make-overlay (car match) (cdr match))
+                           'display (make-string (- (cdr match) (car match)) ?x))))
+          matches)))
+</code></pre>

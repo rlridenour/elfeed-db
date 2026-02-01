@@ -1,0 +1,128 @@
+<p>Back in 2020, I wrote a semi-automatic <a href="https://github.com/joaotavora/yasnippet">yasnippet</a> to <a href="https://xenodium.com/smarter-snippets/">generate Swift initializers</a>. I say semi-automatic because it could have been a little smarter. While it helped generate some of the code, what I really wanted was full context-aware generation. The Swift struct already had a few properties defined, so a smarter yasnippet should have been able to use this info for code generation.</p>
+<p><img src="https://xenodium.github.io/images/smarter-snippets/snippet.gif" alt=""></p>
+<p>With an extra push, we could have written a smarter yasnippet, but it may require a fair bit of parsing logic. Fast forward to today, and bringing context-awareness seems like the right match for <a href="https://tree-sitter.github.io/tree-sitter/">Tree-sitter</a>. While Tree-sitter can enable faster and more reliable syntax-highlighting in our beloved text editor, it can also power smarter tools. It does so by exposing a semantic snapshot of our source code using a syntax tree.</p>
+<p>Let's see how we can use Tree-sitter to realise our original yasnippet vision. We'll start with the same struct snippet we used back in 2020. The goal is to generate an initializer using the existing definitions.</p>
+<pre><code class="language-swift">struct Coordinate {
+  public let x: Int
+  public let y: Int
+  public let z: Int
+}
+</code></pre>
+<p>While Emacs will <a href="https://lists.gnu.org/archive/html/emacs-devel/2022-11/msg01443.html">will soon ship its own Tree-sitter integration</a>, I've opted to try out the <a href="https://github.com/emacs-tree-sitter/elisp-tree-sitter">emacs-tree-sitter</a> package as Swift support is currently included in <a href="https://github.com/emacs-tree-sitter/tree-sitter-langs">tree-sitter-langs</a>.</p>
+<p>I have much to learn much about Tree-sitter syntax trees, but the package ships with a handy tool to dump the tree via <code>tree-sitter-debug-mode</code>.</p>
+<p><img src="https://xenodium.github.io/images/emacs-generate-a-swift-initializer/syntax-tree.png" alt=""></p>
+<p>With a syntax tree in mind, one can craft a query to semantically extract parts of the code. In our case, we want property names and types. I've yet to get acquainted with Tree-sitter's <a href="https://tree-sitter.github.io/tree-sitter/using-parsers#query-syntax">query syntax</a>, but the package also ships with another handy tool that helps view query results via <code>tree-sitter-query-builder</code>.</p>
+<p><img src="https://xenodium.github.io/images/emacs-generate-a-swift-initializer/query-builder.png" alt=""></p>
+<p>The following query extracts all the <code>let properties</code> in file. You can see the builder in action above, highlighting our query results.</p>
+<pre><code>(struct_declaration (constant_declaration (identifier) @name (type) @value))
+</code></pre>
+<p>If we want to be more thorough, we should likely cater for classes, vars, int/string literals, etc. so the query needs to be extended as follows. I'm sure it can be written differently, but for now, it does the job.</p>
+<pre><code>(struct_declaration (variable_declaration (identifier) @name (type) @type))
+(struct_declaration (variable_declaration (identifier) @name (string) @value))
+(struct_declaration (variable_declaration (identifier) @name (number) @value))
+(struct_declaration (constant_declaration (identifier) @name (type) @value))
+(struct_declaration (constant_declaration (identifier) @name (string) @value))
+(struct_declaration (constant_declaration (identifier) @name (number) @value))
+(class_declaration (variable_declaration (identifier) @name (type) @type))
+(class_declaration (variable_declaration (identifier) @name (string) @value))
+(class_declaration (variable_declaration (identifier) @name (number) @value))
+(class_declaration (constant_declaration (identifier) @name (type) @type))
+(class_declaration (constant_declaration (identifier) @name (string) @value))
+(class_declaration (constant_declaration (identifier) @name (number) @value))
+</code></pre>
+<p>Now that we got our Tree-sitter query sorted, let's write a little elisp to extract the info we need from the generated tree. We'll write a <code>swift-class-or-struct-vars-at-point</code> function to extract the struct (or class) at point and subsequently filter its property names/types using our query. To simplify the result, we'll return a list of alists.</p>
+<pre><code class="language-{.commonlisp">(defun swift-class-or-struct-vars-at-point ()
+  &quot;Return a list of class or struct vars in the form '(((name . \&quot;foo\&quot;) (type . \&quot;Foo\&quot;))).&quot;
+  (cl-assert (seq-contains local-minor-modes 'tree-sitter-mode) &quot;tree-sitter-mode not enabled&quot;)
+  (let* ((node (or (tree-sitter-node-at-point 'struct_declaration)
+                   (tree-sitter-node-at-point 'class_declaration)))
+         (vars)
+         (var))
+    (unless node
+      (error &quot;Neither in class nor struct&quot;))
+    (mapc
+     (lambda (item)
+       (cond ((eq 'identifier
+                  (tsc-node-type (cdr item)))
+              (when var
+                (setq vars (append vars (list var))))
+              (setq var (list (cons 'name (tsc-node-text
+                                           (cdr item))))))
+             ((eq 'type
+                  (tsc-node-type (cdr item)))
+              (setq var (map-insert var 'type (tsc-node-text
+                                               (cdr item)))))
+             ((eq 'string
+                  (tsc-node-type (cdr item)))
+              (setq var (map-insert var 'type &quot;String&quot;)))
+             ((eq 'number
+                  (tsc-node-type (cdr item)))
+              (setq var (map-insert var 'type &quot;Int&quot;)))
+             (t (message &quot;%s&quot; (tsc-node-type (cdr item))))))
+     (tsc-query-captures
+      (tsc-make-query tree-sitter-language
+                      &quot;(struct_declaration (variable_declaration (identifier) @name (type) @type))
+                       (struct_declaration (variable_declaration (identifier) @name (string) @value))
+                       (struct_declaration (variable_declaration (identifier) @name (number) @value))
+                       (struct_declaration (constant_declaration (identifier) @name (type) @value))
+                       (struct_declaration (constant_declaration (identifier) @name (string) @value))
+                       (struct_declaration (constant_declaration (identifier) @name (number) @value))
+                       (class_declaration (variable_declaration (identifier) @name (type) @type))
+                       (class_declaration (variable_declaration (identifier) @name (string) @value))
+                       (class_declaration (variable_declaration (identifier) @name (number) @value))
+                       (class_declaration (constant_declaration (identifier) @name (type) @type))
+                       (class_declaration (constant_declaration (identifier) @name (string) @value))
+                       (class_declaration (constant_declaration (identifier) @name (number) @value))&quot;)
+      node nil))
+    (when var
+      (setq vars (append vars (list var))))
+    vars))
+</code></pre>
+<p>Finally, we write a function to generate a Swift initializer from our property list.</p>
+<pre><code class="language-{.commonlisp">(defun swift-class-or-struct-initializer-text (vars)
+  &quot;Generate a Swift initializer from property VARS.&quot;
+  (cl-assert (seq-contains local-minor-modes 'tree-sitter-mode) &quot;tree-sitter-mode not enabled&quot;)
+  (format
+   (string-trim
+    &quot;
+init(%s) {
+  %s
+}&quot;)
+   (seq-reduce (lambda (reduced var)
+                 (format &quot;%s%s%s: %s&quot;
+                         reduced
+                         (if (string-empty-p reduced)
+                             &quot;&quot; &quot;, &quot;)
+                         (map-elt var 'name)
+                         (map-elt var 'type)))
+               vars &quot;&quot;)
+   (string-join
+    (mapcar (lambda (var)
+              (format &quot;self.%s = %s&quot;
+                      (map-elt var 'name)
+                      (map-elt var 'name)))
+            vars)
+    &quot;\n  &quot;)))
+</code></pre>
+<p>We're so close now. All we need is a simple way invoke our code generator. We can use yasnippet for that, making <code>init</code> our expandable keyword.</p>
+<pre><code># -*- mode: snippet -*-
+# name: init all
+# key: init
+# --
+`(swift-class-or-struct-initializer-text (swift-class-or-struct-vars-at-point))`
+</code></pre>
+<p>And with all that, we've got our yasnippet vision accomplished!</p>
+<p><img src="https://xenodium.github.io/images/emacs-generate-a-swift-initializer/init-sitter_x2.webp" alt=""></p>
+<p>Be sure to check out this year's relevant <a href="https://emacsconf.org/">EmacsConf</a> talk: <a href="https://emacsconf.org/2022/talks/treesitter/">Tree-sitter beyond syntax highlighting</a>.</p>
+<p>All code is now pushed to my <a href="https://github.com/xenodium/dotsies/commit/9a44606935e8d57d7b3bde2d8d051defbf254a9e">config repo</a>. By the way, I'm not super knowledgable of neither yasnippet nor Tree-sitter. Improvements are totally welcome. Please reach out on the <a href="https://indieweb.social/@xenodium">Fediverse</a> if you have suggestions!</p>
+<h2>Update</h2>
+<p><a href="https://gitlab.com/woolsweater">Josh Caswell</a> kindly pointed out a couple of interesting items:</p>
+<ol>
+<li>tree-sitter-langs's <a href="https://www.reddit.com/r/emacs/comments/zkb7aq/comment/izzjx3l/">Swift grammar is fairly outdated/incomplete</a>.</li>
+<li>There are more up-to-date Swift grammar implementations currently available:
+<ul>
+<li><a href="https://gitlab.com/woolsweater/tree-sitter-swifter">tree-sitter-swifter</a> (by Josh Caswell himself)</li>
+<li><a href="https://github.com/alex-pinkus/tree-sitter-swift">tree-sitter-swift</a> (by <a href="https://twitter.com/alexpinkus">Alex Pinkus</a>)</li>
+</ul>
+</li>
+</ol>

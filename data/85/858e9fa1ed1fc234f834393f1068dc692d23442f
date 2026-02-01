@@ -1,0 +1,282 @@
+
+         
+         <p>Some users want to know how they should use Denote to handle recurring
+events, such as meetings with colleagues. With Denote, we typically
+create a new file and write whatever we need there. But these kind of
+files start to lose value when they have the same title and keywords
+across time. For example, we cannot tell much by looking at a list of
+files like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>- 20240915T105532--socratis__meeting.org
+- 20240916T161208--platon__meeting.org
+- 20240917T133627--aristotelis__meeting.org
+- 20240918T091245--socratis__meeting.org
+- 20240919T112950--platon__meeting.org
+- 20240920T165532--aristotelis__meeting.org
+</code></pre></div></div>
+
+<p>Those files all look the same and it is impossible for us to make any
+sense of them unless we go through all the contents. So either we will
+use more descriptive titles and meaningful keywords, or we need to
+write some custom code that does the following:</p>
+
+<ul>
+  <li>Ask for the name of a person among a list of known names.</li>
+  <li>Find the file that mentions this name. If our files always have a
+certain keyword, like <code class="language-plaintext highlighter-rouge">_meeting</code>, we can factor this into our code
+(I include an example below).</li>
+  <li>If there are multiple files that correspond to the selected person,
+select one among them.</li>
+  <li>Open the file that is about that person.</li>
+  <li>Go to the bottom of that file and write a new heading with the
+current date and time (or something else, but I use this for the
+example—contact me if you have different requirements).</li>
+</ul>
+
+<p>This way, we can keep one file per person/event to (i) still have the
+benefits of using Denote while (ii) not being forced to write many
+files that are virtually indistinguishable in a file listing.</p>
+
+<h2>The complete version of the code we need</h2>
+
+<p>Here is the entirety of it. In the next section I explain each bit in
+more detail. You want to include this in your configuration, evaluate
+it, modify the <code class="language-plaintext highlighter-rouge">my-denote-colleagues</code> to include the names you care
+about, and then use the command <code class="language-plaintext highlighter-rouge">my-denote-colleagues-new-meeting</code>.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-denote-colleagues</span> <span class="o">'</span><span class="p">(</span><span class="s">"socratis"</span> <span class="s">"platon"</span> <span class="s">"aristotelis"</span><span class="p">)</span>
+  <span class="s">"List of names I collaborate with.
+There is at least one file in the variable `denote-directory' that has
+the name of this person."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-denote-colleagues-prompt-history</span> <span class="no">nil</span>
+  <span class="s">"Minibuffer history for `my-denote-colleagues-new-meeting'."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-prompt</span> <span class="p">()</span>
+  <span class="s">"Prompt with completion for a name among `my-denote-colleagues'.
+Use the last input as the default value."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">default-value</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">my-denote-colleagues-prompt-history</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">completing-read</span>
+     <span class="p">(</span><span class="nv">format-prompt</span> <span class="s">"New meeting with COLLEAGUE"</span> <span class="nv">default-value</span><span class="p">)</span>
+     <span class="nv">my-denote-colleagues</span>
+     <span class="no">nil</span> <span class="ss">:require-match</span> <span class="no">nil</span>
+     <span class="ss">'my-denote-colleagues-prompt-history</span>
+     <span class="nv">default-value</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-get-file</span> <span class="p">(</span><span class="nv">name</span><span class="p">)</span>
+  <span class="s">"Find file in variable `denote-directory' for NAME colleague.
+If there are more than one files, prompt with completion for one among
+them.
+
+NAME is one among `my-denote-colleagues'."</span>
+  <span class="p">(</span><span class="nv">if-let</span> <span class="p">((</span><span class="nv">files</span> <span class="p">(</span><span class="nv">denote-directory-files</span> <span class="nv">name</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">length-of-files</span> <span class="p">(</span><span class="nb">length</span> <span class="nv">files</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">cond</span>
+       <span class="p">((</span><span class="nb">=</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">car</span> <span class="nv">files</span><span class="p">))</span>
+       <span class="p">((</span><span class="nb">&gt;</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Select a file: "</span> <span class="nv">files</span> <span class="no">nil</span> <span class="ss">:require-match</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">user-error</span> <span class="s">"No files for colleague with name `%s'"</span> <span class="nv">name</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-new-meeting</span> <span class="p">()</span>
+  <span class="s">"Prompt for the name of a colleague and insert a timestamped heading therein.
+The name of a colleague corresponds to at least one file in the variable
+`denote-directory'.  In case there are multiple files, prompt to choose
+one among them and operate therein.
+
+Names are defined in `my-denote-colleagues'."</span>
+  <span class="p">(</span><span class="k">declare</span> <span class="p">(</span><span class="nv">interactive-only</span> <span class="no">t</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">name</span> <span class="p">(</span><span class="nv">my-denote-colleagues-prompt</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">file</span> <span class="p">(</span><span class="nv">my-denote-colleagues-get-file</span> <span class="nv">name</span><span class="p">))</span>
+         <span class="p">(</span><span class="nb">time</span> <span class="p">(</span><span class="nv">format-time-string</span> <span class="s">"%F %a %R"</span><span class="p">)))</span>  <span class="c1">; remove %R if you do not want the time</span>
+    <span class="p">(</span><span class="nv">with-current-buffer</span> <span class="p">(</span><span class="nv">find-file</span> <span class="nv">file</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">))</span>
+      <span class="c1">;; Here I am assuming we are in `org-mode', hence the leading</span>
+      <span class="c1">;; asterisk for the heading.  Adapt accordingly.</span>
+      <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"* [%s]\n\n"</span> <span class="nb">time</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<h2>All the code with accompanying commentary</h2>
+
+<p>First we define a list of known names. We do this so that we can
+benefit from minibuffer completion. We could do without completion,
+but I think this is more convenient. The value of this variable is a
+list of strings.</p>
+
+<p>[ Note that when we write actual packages we use <code class="language-plaintext highlighter-rouge">defcustom</code> for stuff
+  that are meant to be customised by the user. Those variables are
+  called “user options”. The code base of <code class="language-plaintext highlighter-rouge">denote</code> is a case study of
+  good practices for packaging your Elisp code. ]</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-denote-colleagues</span> <span class="o">'</span><span class="p">(</span><span class="s">"socratis"</span> <span class="s">"platon"</span> <span class="s">"aristotelis"</span><span class="p">)</span>
+  <span class="s">"List of names I collaborate with.
+There is at least one file in the variable `denote-directory' that has
+the name of this person."</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Then we have the minibuffer prompt that uses minibuffer completion
+with the names we defined above:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-denote-colleagues-prompt-history</span> <span class="no">nil</span>
+  <span class="s">"Minibuffer history for `my-denote-colleagues-new-meeting'."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-prompt</span> <span class="p">()</span>
+  <span class="s">"Prompt with completion for a name among `my-denote-colleagues'.
+Use the last input as the default value."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">default-value</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">my-denote-colleagues-prompt-history</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">completing-read</span>
+     <span class="p">(</span><span class="nv">format-prompt</span> <span class="s">"New meeting with COLLEAGUE"</span> <span class="nv">default-value</span><span class="p">)</span>
+     <span class="nv">my-denote-colleagues</span>
+     <span class="no">nil</span> <span class="ss">:require-match</span> <span class="no">nil</span>
+     <span class="ss">'my-denote-colleagues-prompt-history</span>
+     <span class="nv">default-value</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>In the Emacs minibuffer, we have a history that we can access with
+<code class="language-plaintext highlighter-rouge">M-p</code> (<code class="language-plaintext highlighter-rouge">previous-history-element</code>) and <code class="language-plaintext highlighter-rouge">M-n</code> (<code class="language-plaintext highlighter-rouge">next-history-element</code>).
+If prompts do not have their own history variable, then we cycle
+through a shared history of inputs. This is generally not helpful, so
+practically all my minibuffer prompts have their own history.</p>
+
+<p>We can persist minibuffer histories across sessions by using the
+built-in <code class="language-plaintext highlighter-rouge">savehist-mode</code>.</p>
+
+<p>Also notice how the prompt has a default value, which is the last
+input we provided. The idea is that we can type <code class="language-plaintext highlighter-rouge">RET</code> to get this
+default if the minibuffer is empty. If this does not work with your
+completion framework, you will need to check how to input nothing at
+the prompt.</p>
+
+<p>The next part is a function that finds the file associated with the
+name of the person we selected at the previous prompt.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-get-file</span> <span class="p">(</span><span class="nv">name</span><span class="p">)</span>
+  <span class="s">"Find file in variable `denote-directory' for NAME colleague.
+If there are more than one files, prompt with completion for one among
+them.
+
+NAME is one among `my-denote-colleagues'."</span>
+  <span class="p">(</span><span class="nv">if-let</span> <span class="p">((</span><span class="nv">files</span> <span class="p">(</span><span class="nv">denote-directory-files</span> <span class="nv">name</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">length-of-files</span> <span class="p">(</span><span class="nb">length</span> <span class="nv">files</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">cond</span>
+       <span class="p">((</span><span class="nb">=</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">car</span> <span class="nv">files</span><span class="p">))</span>
+       <span class="p">((</span><span class="nb">&gt;</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Select a file: "</span> <span class="nv">files</span> <span class="no">nil</span> <span class="ss">:require-match</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">user-error</span> <span class="s">"No files for colleague with name `%s'"</span> <span class="nv">name</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>I have made it here so that we search the <code class="language-plaintext highlighter-rouge">denote-directory</code> for files
+that match <code class="language-plaintext highlighter-rouge">name</code>. So it would be something like this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">denote-directory-files</span> <span class="s">"socratis"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>If we want to be more precise with what we are matching to, for
+example, only include files that have the <code class="language-plaintext highlighter-rouge">_meeting</code> keyword as well
+as the given name, then we can modify the relevant snippet in the
+<code class="language-plaintext highlighter-rouge">my-denote-colleagues-get-file</code>:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">denote-directory-files</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"%s.*_meeting"</span> <span class="nv">name</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>[ Of course, we can make the entire query a parameter but I want to
+  have a streamlined experience with this. ]</p>
+
+<p>Let’s check again this function now:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-get-file</span> <span class="p">(</span><span class="nv">name</span><span class="p">)</span>
+  <span class="s">"Find file in variable `denote-directory' for NAME colleague.
+If there are more than one files, prompt with completion for one among
+them.
+
+NAME is one among `my-denote-colleagues'."</span>
+  <span class="p">(</span><span class="nv">if-let</span> <span class="p">((</span><span class="nv">files</span> <span class="p">(</span><span class="nv">denote-directory-files</span> <span class="nv">name</span><span class="p">))</span> <span class="c1">; OR (denote-directory-files (format "%s.*_meeting" name))</span>
+           <span class="p">(</span><span class="nv">length-of-files</span> <span class="p">(</span><span class="nb">length</span> <span class="nv">files</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">cond</span>
+       <span class="p">((</span><span class="nb">=</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">car</span> <span class="nv">files</span><span class="p">))</span>
+       <span class="p">((</span><span class="nb">&gt;</span> <span class="nv">length-of-files</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Select a file: "</span> <span class="nv">files</span> <span class="no">nil</span> <span class="ss">:require-match</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">user-error</span> <span class="s">"No files for colleague with name `%s'"</span> <span class="nv">name</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>You will notice that it has a <code class="language-plaintext highlighter-rouge">completing-read</code> inside of it in the
+case where the number of files we fin is greater than 1. This
+<code class="language-plaintext highlighter-rouge">completing-read</code> is what we use in the prompt we defined earlier, but
+here we do not use a history because the chances that we need one in
+such a workflow are few—if you do need a dedicated history, check
+how we did it above and adapt accordingly (though I think it makes
+sense to consolidate those files and ultimately not have to select
+anything at this stage).</p>
+
+<p>Now that we have set up all the helper functions, we can check the
+final piece, which is what you will call with <code class="language-plaintext highlighter-rouge">M-x</code> or a key binding:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-denote-colleagues-new-meeting</span> <span class="p">()</span>
+  <span class="s">"Prompt for the name of a colleague and insert a timestamped heading therein.
+The name of a colleague corresponds to at least one file in the variable
+`denote-directory'.  In case there are multiple files, prompt to choose
+one among them and operate therein.
+
+Names are defined in `my-denote-colleagues'."</span>
+  <span class="p">(</span><span class="k">declare</span> <span class="p">(</span><span class="nv">interactive-only</span> <span class="no">t</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">name</span> <span class="p">(</span><span class="nv">my-denote-colleagues-prompt</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">file</span> <span class="p">(</span><span class="nv">my-denote-colleagues-get-file</span> <span class="nv">name</span><span class="p">))</span>
+         <span class="p">(</span><span class="nb">time</span> <span class="p">(</span><span class="nv">format-time-string</span> <span class="s">"%F %a %R"</span><span class="p">)))</span>  <span class="c1">; remove %R if you do not want the time</span>
+    <span class="p">(</span><span class="nv">with-current-buffer</span> <span class="p">(</span><span class="nv">find-file</span> <span class="nv">file</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">))</span>
+      <span class="c1">;; Here I am assuming we are in `org-mode', hence the leading</span>
+      <span class="c1">;; asterisk for the heading.  Adapt accordingly.</span>
+      <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"* [%s]\n\n"</span> <span class="nb">time</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>[ In the Denote code base we have lots of examples of using the
+  <code class="language-plaintext highlighter-rouge">interactive</code> spec to make the function accept arguments from Lisp
+  but also in interactive uses. Here I am keeping it simple to not go
+  into too many technicalities. ]</p>
+
+<p>The above command ties together everything we have covered thus far.
+It then adds the final element, which is the heading at the bottom
+with the current date and time. If you want to modify how that looks,
+check the <code class="language-plaintext highlighter-rouge">format-time-string</code>. And if you want something else
+entirely at this point, just let me know and I will help you make it
+happen.</p>
+
+<p>I wrote a variant of this in the Denote manual in response to a
+question by Kosta Harlan. This was done via a private channel and the
+information is shared with permission.</p>
+
+<h2>Denote sources</h2>
+
+<p>Denote is a simple note-taking tool for Emacs.  It is based on the idea
+that notes should follow a predictable and descriptive file-naming
+scheme.  The file name must offer a clear indication of what the note is
+about, without reference to any other metadata.  Denote basically
+streamlines the creation of such files while providing facilities to
+link between them.</p>
+
+<p>Denote’s file-naming scheme is not limited to “notes”.  It can be used
+for all types of file, including those that are not editable in Emacs,
+such as videos.  Naming files in a consistent way makes their
+filtering and retrieval considerably easier.  Denote provides relevant
+facilities to rename files, regardless of file type.</p>
+
+<ul>
+  <li>Package name (GNU ELPA): <code class="language-plaintext highlighter-rouge">denote</code></li>
+  <li>Official manual: <a href="https://protesilaos.com/emacs/denote">https://protesilaos.com/emacs/denote</a></li>
+  <li>Change log: <a href="https://protesilaos.com/emacs/denote-changelog">https://protesilaos.com/emacs/denote-changelog</a></li>
+  <li>Git repositories:
+    <ul>
+      <li>GitHub: <a href="https://github.com/protesilaos/denote">https://github.com/protesilaos/denote</a></li>
+      <li>GitLab: <a href="https://gitlab.com/protesilaos/denote">https://gitlab.com/protesilaos/denote</a></li>
+    </ul>
+  </li>
+  <li>Video demo: <a href="https://protesilaos.com/codelog/2022-06-18-denote-demo/">https://protesilaos.com/codelog/2022-06-18-denote-demo/</a></li>
+  <li>Backronyms: Denote Everything Neatly; Omit The Excesses.  Don’t Ever
+Note Only The Epiphenomenal.</li>
+</ul>
+        
+      

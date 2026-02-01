@@ -1,0 +1,123 @@
+<p>Patching and building <a href="https://www.gnu.org/software/emacs/">Emacs</a> from source on macOS is fairly straightforward, but what if I'd like to patch my <a href="https://github.com/d12frosted/homebrew-emacs-plus">Emacs Plus Homebrew</a> builds?</p>
+<p>Let's cover both ways of patching our favourite editor…</p>
+<h2>Patching Emacs upstream sources</h2>
+<p>If you'd like to build from the <a href="https://cgit.git.savannah.gnu.org/cgit/emacs.git/log/">master</a> branch, you can check its sources out like so:</p>
+<pre><code class="language-{.bash">git clone git://git.sv.gnu.org/emacs.git
+cd emacs
+</code></pre>
+<p>Next, we'll patch Emacs source as needed. For example, I recently <a href="https://debbugs.gnu.org/cgi/bugreport.cgi?bug=79070">wanted to patch src/nsterm.m</a> to see if I could fix a <a href="https://lists.gnu.org/archive/html/bug-gnu-emacs/2025-03/msg00585.html">macOS dictation regression introduced on Emacs 30</a>.</p>
+<pre><code class="language-diff">diff --git a/src/nsterm.m b/src/nsterm.m
+index 003aadb9782..2b34894f36e 100644
+--- a/src/nsterm.m
++++ b/src/nsterm.m
+@@ -7413,7 +7413,24 @@ - (NSRange)selectedRange
+ {
+   if (NS_KEYLOG)
+     NSLog (@&quot;selectedRange request&quot;);
+-  return NSMakeRange (NSNotFound, 0);
++
++  struct window *w = XWINDOW (FRAME_SELECTED_WINDOW (emacsframe));
++  struct buffer *buf = XBUFFER (w-&gt;contents);
++  ptrdiff_t point = BUF_PT (buf);
++
++  if (NILP (BVAR (buf, mark_active)))
++    {
++      NSUInteger selection_location = point - BUF_BEGV (buf);
++      return NSMakeRange (selection_location, 0);
++    }
++
++  ptrdiff_t mark = marker_position (BVAR (buf, mark));
++  ptrdiff_t region_start = min (point, mark);
++  ptrdiff_t region_end = max (point, mark);
++  NSUInteger selection_location = region_start - BUF_BEGV (buf);
++  NSUInteger selection_length = region_end - region_start;
++
++  return NSMakeRange (selection_location, selection_length);
+ }
+
+ #if defined (NS_IMPL_COCOA) || GNUSTEP_GUI_MAJOR_VERSION &gt; 0 || \
+
+</code></pre>
+<p>Now we're ready to configure and build.</p>
+<pre><code class="language-{.bash">./autogen.sh
+./configure --with-ns --prefix=&quot;$PWD/nextstep/Emacs.app/Contents/MacOS&quot; --enable-locallisppath=&quot;${PWD}/nextstep/Emacs.app/Contents/MacOS&quot;
+make install
+</code></pre>
+<p>We've used <code>nextstep/Emacs.app/Contents/MacOS</code> as our target directory, so we can test our builds from exactly there… and there you have it, your newly built <code>Emacs.app</code>, ready for opening.</p>
+<pre><code class="language-{.bash">open nextstep/Emacs.app
+</code></pre>
+<h2>Patching Emacs Plus</h2>
+<p>While patching and building upstream Emacs sources as above is fairly common, patching <a href="https://github.com/d12frosted/homebrew-emacs-plus">Emacs Plus</a> may not be as well known.</p>
+<p>I'm a big fan of <a href="https://d12frosted.io/">Boris Buliga</a>'s excellent <a href="https://brew.sh/">Homebrew</a> recipe and use it daily, so it makes sense for me to get acquainted with its patching capabilities.</p>
+<p>First we check out the Emacs Plus Homebrew repo:</p>
+<pre><code class="language-{.bash">git clone https://github.com/d12frosted/homebrew-emacs-plus.git
+cd homebrew-emacs-plus
+</code></pre>
+<p>At this point, it's worth noting Emacs Plus enables building different Emacs versions (29, 30, and even master). It extends Emacs by applying its own patches at build time. For example, if we'd like to patch Emacs 30, we'll customise the 30 build to apply our own changes.</p>
+<p>Remember our <code>src/nsterm.m</code> patch above? We'll rebased it <a href="https://mirror.lyrahosting.com/gnu/emacs/emacs-30.1.tar.gz">against the Emacs 30 tarball</a> and save in the Emacs Plus patches directory:</p>
+<pre><code class="language-{.bash">./patches/emacs-30/dictation.patch
+</code></pre>
+<p>Next we'll need to generate a hash to complete our Emacs 30 patch details:</p>
+<pre><code class="language-bash">sha256sum ./patches/emacs-30/dictation.patch
+</code></pre>
+<p>Now we add our patch details to <code>./Formula/emacs-plus@30.rb</code>:</p>
+<pre><code class="language-ruby">local_patch &quot;dictation&quot;, sha: &quot;cb102525bba7385d7d85c52d31101af3d2cbbf076468dacbf505039082ec521c&quot;
+</code></pre>
+<p>With that, we're ready to build Emacs Plus, which comes with a handy build script. I'm a fan of <a href="https://github.com/SavchenkoValeriy/emacs-icons">Valeriy Savchenko's macOS icons</a>, so I'll throw in the optional icon flag. I should also mention Emacs Plus offers a <a href="https://github.com/d12frosted/homebrew-emacs-plus?tab=readme-ov-file#icons">rich catalog of app icons</a>. Now back to building…</p>
+<pre><code class="language-{.bash">HOMEBREW_DEVELOPER=1 ./build 30 --with-savchenkovaleriy-big-sur-curvy-3d-icon
+</code></pre>
+<p>The build output should look a little something like the following (look out for our applied patch)</p>
+<pre><code class="language-{.bash">./Formula/emacs-plus-local.rb --with-savchenkovaleriy-big-sur-curvy-3d-icon
+==&gt; Fetching downloads for: emacs-plus-local
+==&gt; Fetching emacs-plus-local
+==&gt; Downloading https://ftp.gnu.org/gnu/emacs/emacs-30.1.tar.xz
+Already downloaded: /Users/alvaro/Library/Caches/Homebrew/downloads/b2b29daf5d872710063495e32b8b5234c2fbfffccec82222b65e7f2b4e7fb4da--emacs-30.1.tar.xz
+==&gt; Patching
+==&gt; Applying fix-window-role.patch
+==&gt; Applying system-appearance.patch
+==&gt; Applying round-undecorated-frame.patch
+==&gt; Applying dictation.patch     &lt;---- Our patch 🎉
+==&gt; ./autogen.sh
+==&gt; ./configure --disable-silent-rules --enable-locallisppath=/opt/homebrew/share/emacs/site-lisp --infodir=/opt/homebrew/Cellar/emacs-plus-local/30.1/share/info/emacs --with-native-compilation=aot --with-xml2 --
+==&gt; gmake
+==&gt; gmake install
+==&gt; Injecting PATH value to Emacs.app/Contents/Info.plist
+Patching plist at /opt/homebrew/Cellar/emacs-plus-local/30.1/Emacs.app/Contents/Info.plist with following PATH value:
+
+
+...
+
+
+==&gt; Caveats
+Emacs.app was installed to:
+  /opt/homebrew/opt/emacs-plus-local
+
+To link the application to default Homebrew App location:
+  osascript -e 'tell application &quot;Finder&quot; to make alias file to posix file &quot;/opt/homebrew/opt/emacs-plus-local/Emacs.app&quot; at posix file &quot;/Applications&quot; with properties {name:&quot;Emacs.app&quot;}'
+
+Your PATH value was injected into Emacs.app/Contents/Info.plist
+
+Report any issues to https://github.com/d12frosted/homebrew-emacs-plus
+
+To start emacs-plus-local now and restart at login:
+  brew services start emacs-plus-local
+Or, if you don't want/need a background service you can just run:
+  /opt/homebrew/opt/emacs-plus-local/bin/emacs --fg-daemon
+==&gt; Summary
+🍺  /opt/homebrew/Cellar/emacs-plus-local/30.1: 7,470 files, 585.0MB, built in 8 minutes 59 seconds
+==&gt; Running `brew cleanup emacs-plus-local`...
+Disable this behaviour by setting HOMEBREW_NO_INSTALL_CLEANUP.
+Hide these hints with HOMEBREW_NO_ENV_HINTS (see `man brew`).
+alvaro@MacBookPro homebrew-emacs-plus %  osascript -e 'tell application &quot;Finder&quot; to make alias file to posix file &quot;/opt/homebrew/opt/emacs-plus-local/Emacs.app&quot; at posix file &quot;/Applications&quot; with properties {name:&quot;Emacs.app&quot;}'
+
+alias file Emacs.app of folder Applications of startup disk
+</code></pre>
+<p>At this point, your brand new patched Emacs Plus is ready for opening:</p>
+<pre><code class="language-{.bash">open /opt/homebrew/opt/emacs-plus-local/Emacs.app
+</code></pre>
+<p>Notice how <code>Emacs.app</code> is saved under emacs-plus-<code>local</code>, which is different from the default location: emacs-plus. In other words, your patched and regular builds can coexist.</p>
+<p>I've pushed the changes to my <a href="https://github.com/xenodium/homebrew-emacs-plus">Emacs Plus fork</a>. If keen to take a closer look, check out the <a href="https://github.com/xenodium/homebrew-emacs-plus/commit/2823118f934162bf8757e03bd884e5abd9c25c56">git commit</a>. Should this change be sent to Emacs Plus in a pull request? Maybe not just yet. We'll <a href="https://debbugs.gnu.org/cgi/bugreport.cgi?bug=79070">try to get it admitted upstream first</a>.</p>
+<p>Now you know at least two ways of building and patching Emacs on macOS. There are more, but these are my favourite two.</p>
+<h2>Make it all sustainable</h2>
+<p>Learned something new? Enjoying this <a href="https://xenodium.com/">blog</a> or <a href="https://github.com/xenodium">my projects</a>? Help make it sustainable by ✨<a href="https://github.com/sponsors/xenodium">sponsoring</a>✨</p>
+<p>Need a blog? <a href="https://lmno.lol">I can help with that</a>. Maybe buy my <a href="https://apps.apple.com/us/developer/xenodium-ltd/id304568690">iOS apps</a> too ;)</p>

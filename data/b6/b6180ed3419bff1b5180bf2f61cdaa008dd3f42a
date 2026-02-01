@@ -1,0 +1,45 @@
+<p>Some email provider accept regular expressions to blacklist additional spam. My blacklist is long and tedious to update, but hey… Emacs org babel can simplify things here.</p>
+<p>It's way easier to maintain a blacklist (with no regex) using an org table.</p>
+<h2>Blacklist</h2>
+<pre><code class="language-org">#+name: spam-entries
+| .spammy                |
+| dodgyfella@hotmail.com |
+| henryzeespammer.com    |
+| yumspam.com            |
+</code></pre>
+<p>and subsequently use org babel (elisp snippet) to generate the regex.</p>
+<h2>Regex gen</h2>
+<pre><code class="language-org">#+begin_src emacs-lisp :var rows=spam-entries
+  (require 'dash)
+  (require 's)
+
+  (concat &quot;^&quot;
+          (s-join &quot;|&quot;
+                  (mapcar (lambda (entry)
+                            (setq entry (regexp-quote
+                                         (s-trim entry)))
+                            (assert (s-present? entry))
+                            (cond
+                             ;; Blacklist email address: joe@spammer.spammy
+                             ((s-contains-p &quot;@&quot; entry)
+                              (format &quot;(%s)&quot; entry))
+                             ;; Blacklist top-level domain: .spammy
+                             ((s-starts-with-p &quot;\\.&quot; entry)
+                              (format &quot;([^.]*%s)&quot; entry))
+                             ;; Blacklist domain: @spammer.spammy
+                             (t
+                              (format &quot;(.*@%s)&quot; entry))))
+                          (-sort
+                           'string&lt;
+                           (-map (lambda (row)
+                                   (nth 0 row))
+                                 rows))))
+          &quot;$&quot;)
+
+#+end_src
+
+#+RESULTS:
+: ^([^.]*\.spammy)|(dodgyfella@hotmail\.com)|(.*@henryzeespammer\.com)|(.*@yumspam\.com)$
+</code></pre>
+<p>UPDATE: Tweaked elisp and regex (but not animation) also found John Bokma's post: <a href="http://johnbokma.com/blog/2019/05/13/blacklisting-domains-with-postfix.html">Blacklisting domains with Postfix</a>.</p>
+<p><img src="https://xenodium.github.io/images/spam-blacklisting-with-emacs-org-babel/blacklist.png" alt=""></p>

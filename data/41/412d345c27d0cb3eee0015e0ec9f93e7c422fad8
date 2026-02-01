@@ -1,0 +1,132 @@
+<p><em>UPDATE: I'm no longer using these steps. See <a href="https://xenodium.com/emacs-plus-with-native-comp/">Emacs plus –with-native-comp</a> for an easier alternative.</em></p>
+<p>Below are the instructions I use to build Andrea Corallo's <a href="http://akrl.sdf.org/gccemacs.html">gccemacs</a> on macOS. It is based on <a href="https://github.com/AllenDang">Allen Dang</a>'s handy <a href="https://gist.github.com/AllenDang/f019593e65572a8e0aefc96058a2d23e">instructions</a> plus some changes of my own.</p>
+<h2>Install gcc and libgccjit via homebrew</h2>
+<pre><code class="language-{.bash">brew install gcc libgccjit
+</code></pre>
+<h2>Save configure script</h2>
+<p>Create configure-gccemacs.sh</p>
+<pre><code class="language-{.bash">#!/bin/bash
+
+set -o nounset
+set -o errexit
+
+# Configures Emacs for building native comp support
+# http://akrl.sdf.org/gccemacs.html
+
+readonly GCC_DIR=&quot;$(realpath $(brew --prefix libgccjit))&quot;
+[[ -d $GCC_DIR ]] ||  { echo &quot;${GCC_DIR} not found&quot;; exit 1; }
+
+readonly SED_DIR=&quot;$(realpath $(brew --prefix gnu-sed))&quot;
+[[ -d $SED_DIR ]] ||  { echo &quot;${SED_DIR} not found&quot;; exit 1; }
+
+readonly GCC_INCLUDE_DIR=${GCC_DIR}/include
+[[ -d $GCC_INCLUDE_DIR ]] ||  { echo &quot;${GCC_INCLUDE_DIR} not found&quot;; exit 1; }
+
+readonly GCC_LIB_DIR=${GCC_DIR}/lib/gcc/10
+[[ -d $GCC_LIB_DIR ]] ||  { echo &quot;${GCC_LIB_DIR} not found&quot;; exit 1; }
+
+export PATH=&quot;${SED_DIR}/libexec/gnubin:${PATH}&quot;
+export CFLAGS=&quot;-O2 -I${GCC_INCLUDE_DIR}&quot;
+export LDFLAGS=&quot;-L${GCC_LIB_DIR} -I${GCC_INCLUDE_DIR}&quot;
+export LD_LIBRARY_PATH=&quot;${GCC_LIB_DIR}&quot;
+export DYLD_FALLBACK_LIBRARY_PATH=&quot;${GCC_LIB_DIR}&quot;
+
+echo &quot;Environment&quot;
+echo &quot;-----------&quot;
+echo PATH: $PATH
+echo CFLAGS: $CFLAGS
+echo LDFLAGS: $LDFLAGS
+echo DYLD_FALLBACK_LIBRARY_PATH: $DYLD_FALLBACK_LIBRARY_PATH
+echo &quot;-----------&quot;
+
+./autogen.sh
+
+./configure \
+     --prefix=&quot;$PWD/nextstep/Emacs.app/Contents/MacOS&quot; \
+     --enable-locallisppath=&quot;${PWD}/nextstep/Emacs.app/Contents/MacOS&quot; \
+     --with-mailutils \
+     --with-ns \
+     --with-imagemagick \
+     --with-cairo \
+     --with-modules \
+     --with-xml2 \
+     --with-gnutls \
+     --with-json \
+     --with-rsvg \
+     --with-native-compilation \
+     --disable-silent-rules \
+     --disable-ns-self-contained \
+     --without-dbus
+</code></pre>
+<p>Make it executable</p>
+<pre><code class="language-shell">chmod +x configure-gccemacs.sh
+</code></pre>
+<h2>Clone Emacs source</h2>
+<pre><code class="language-shell">git clone --branch master https://github.com/emacs-mirror/emacs gccemacs
+</code></pre>
+<h2>Configure build</h2>
+<pre><code class="language-{.bash">cd gccemacs
+../configure-gccemacs.sh
+</code></pre>
+<h2>Native lisp compiler found?</h2>
+<p>Verify native lisp compiler is found:</p>
+<pre><code class="language-fundamental">Does Emacs have native lisp compiler?                   yes
+</code></pre>
+<h2>Build</h2>
+<p>Put those cores to use. Find out how many you got with:</p>
+<pre><code class="language-{.bash">sysctl hw.logicalcpu
+</code></pre>
+<p>Ok so build with:</p>
+<pre><code class="language-{.bash">make -j4 NATIVE_FAST_BOOT=1
+cp -r lisp nextstep/Emacs.app/Contents/Resources/
+cp -r native-lisp nextstep/Emacs.app/Contents
+make install
+</code></pre>
+<p><strong>Note:</strong> Using <em>NATIVE_FAST_BOOT=1</em> significantly improves build time (totalling between 20-30 mins, depending on your specs). Without it, the build can take <strong>hours</strong>.</p>
+<p>The macOS app build (under nextstep/Emacs.app) is ready, but read on before launching.</p>
+<h2>Remove ~/emacs.d</h2>
+<p>You likely want to start with a clean install, byte-compiling all packages with the latest Emacs version. In any case, rename ~/emacs.d (for backup?) or remove ~/emacs.d.</p>
+<h2>init.el config</h2>
+<p>Ensure <em>exec-path</em> includes the script's &quot;–prefix=&quot; value, <em>LIBRARY_PATH</em> points to gcc's lib dir, and finally set <em>comp-deferred-compilation</em>. I wrapped the snippet in my <em>exec-path-from-shell</em> config, but setting early in init.el should be enough.</p>
+<pre><code class="language-{.commonlisp">(use-package exec-path-from-shell
+  :ensure t
+  :config
+  (exec-path-from-shell-initialize)
+  (if (and (fboundp 'native-comp-available-p)
+           (native-comp-available-p))
+      (progn
+        (message &quot;Native comp is available&quot;)
+        ;; Using Emacs.app/Contents/MacOS/bin since it was compiled with
+        ;; ./configure --prefix=&quot;$PWD/nextstep/Emacs.app/Contents/MacOS&quot;
+        (add-to-list 'exec-path (concat invocation-directory &quot;bin&quot;) t)
+        (setenv &quot;LIBRARY_PATH&quot; (concat (getenv &quot;LIBRARY_PATH&quot;)
+                                       (when (getenv &quot;LIBRARY_PATH&quot;)
+                                         &quot;:&quot;)
+                                       ;; This is where Homebrew puts gcc libraries.
+                                       (car (file-expand-wildcards
+                                             (expand-file-name &quot;~/homebrew/opt/gcc/lib/gcc/*&quot;)))))
+        ;; Only set after LIBRARY_PATH can find gcc libraries.
+        (setq comp-deferred-compilation t))
+    (message &quot;Native comp is *not* available&quot;)))
+</code></pre>
+<h2>Launch Emacs.app</h2>
+<p>You're good to go. Open Emacs.app via finder or shell:</p>
+<pre><code class="language-{.bash">open nextstep/Emacs.app
+</code></pre>
+<h2>Deferred compilation logs</h2>
+<p>After setting <em>comp-deferred-compilation</em> (in init.el config section), .elc files should be asyncronously compiled. Function definition should be updated to native compiled equivalent.</p>
+<p>Look out for an <strong><strong>Async-native-compile-log</strong></strong> buffer. Should have content like:</p>
+<pre><code class="language-fundamental">Compiling .emacs.d/elpa/moody-20200514.1946/moody.el...
+Compiling .emacs.d/elpa/minions-20200522.1052/minions.el...
+Compiling .emacs.d/elpa/persistent-scratch-20190922.1046/persistent-scratch.el...
+Compiling .emacs.d/elpa/which-key-20200721.1927/which-key.el...
+...
+</code></pre>
+<p>Can also check for .eln files:</p>
+<pre><code class="language-{.bash">find ~/.emacs.d -iname *.eln | wc -l
+</code></pre>
+<p>UPDATE1: Added <em>Symlink Emacs.app/Contents/eln-cache</em> section for <a href="http://akrl.sdf.org/gccemacs.html#org4b11ea1">update 11</a>.</p>
+<p>UPDATE2: Noted using NATIVE_FAST_BOOT makes the build much faster.</p>
+<p>UPDATE3: Removed symlinks and copied content instead. This simplifies things. Inspired by Ian Wahbe's <a href="https://github.com/iwahbe/doom-config/blob/master/build-emacs.sh">build-emacs.sh</a>.</p>
+<p>UPDATE4: Removed homebrew recipe patching. Thanks to Dmitry Shishkin's <a href="https://github.com/shshkn/emacs.d/blob/master/docs/nativecomp.md">instructions</a>.</p>
+<p>UPDATE5: Use new flag –with-native-compilation and master branch.</p>

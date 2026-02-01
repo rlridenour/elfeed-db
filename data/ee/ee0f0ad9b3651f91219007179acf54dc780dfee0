@@ -1,0 +1,42 @@
+<p>I wanted to show, just this once for this project, the <code>*compilation*</code> buffer in a bottom split. I also wanted the split to be dedicated, so no other buffers would occupy it by accident, and not be deleted (aka closed) when using <code>delete-other-windows</code>. That should be reserved for code buffers.</p>
+
+<p>The solution that I found is this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">display-in-side-window--bottom</span> <span class="p">(</span><span class="k">&amp;optional</span> <span class="nv">buffer</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"b"</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">buffer</span> <span class="p">(</span><span class="nb">or</span> <span class="nv">buffer</span> <span class="p">(</span><span class="nv">current-buffer</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">display-buffer-overriding-action</span> <span class="o">'</span><span class="p">((</span><span class="nv">display-buffer-in-side-window</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="nv">dedicated</span> <span class="o">.</span> <span class="no">t</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="nv">side</span> <span class="o">.</span> <span class="o">,</span><span class="nv">side</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="nv">window-parameters</span> <span class="o">.</span> <span class="p">((</span><span class="nv">no-delete-other-windows</span> <span class="o">.</span> <span class="no">t</span><span class="p">))))))</span>
+    <span class="p">(</span><span class="nv">display-buffer</span> <span class="nv">buffer</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>I tried to use <code>display-buffer-in-side-window</code> as a function and pass a buffer along, but no luck. It just wouldn’t work with a parameter. <a href="https://mastodon.catgirl.cloud/@mekeor/112687415183526648">Mekeor Melire</a> pointed out that the documentation mentions this limitation, which I glossed over:</p>
+
+<blockquote>
+  <p>It should be called only by ‘display-buffer’ or a function directly or indirectly called by the latter.</p>
+</blockquote>
+
+<p>So overriding the <code>display-buffer-alist</code> temporarily, via <code>display-buffer-overriding-action</code>, was the way to go.</p>
+
+<figure><video controls="" preload="none" src="https://christiantietze.de/posts/2024/06/embark-display-buffer-in-dedicated-side-window/embark-video.mp4"></video><figcaption>Video demo of splitting a buffer as a side-window from Embark</figcaption></figure>
+
+<p>Here is the actual macro version I use with <a href="https://github.com/oantolin/embark">Embark</a> that generates <code>display-in-side-window--bottom</code>, <code>display-in-side-window--left</code>, <code>display-in-side-window--right</code>. I don’t see a value in ‘top’, but you can use that anyway if you want:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defmacro</span> <span class="nv">ct/embark-display-in-side-window</span> <span class="p">(</span><span class="nv">side</span><span class="p">)</span>
+  <span class="o">`</span><span class="p">(</span><span class="nb">defun</span> <span class="o">,</span><span class="p">(</span><span class="nb">intern</span> <span class="p">(</span><span class="nv">concat</span> <span class="s">"display-in-side-window--"</span> <span class="p">(</span><span class="nb">symbol-name</span> <span class="nv">side</span><span class="p">)))</span> <span class="p">(</span><span class="k">&amp;optional</span> <span class="nv">buffer</span><span class="p">)</span>
+     <span class="p">(</span><span class="nv">interactive</span> <span class="s">"b"</span><span class="p">)</span>
+     <span class="p">(</span><span class="nv">when-let*</span> <span class="p">((</span><span class="nv">buffer</span> <span class="p">(</span><span class="nb">or</span> <span class="nv">buffer</span> <span class="p">(</span><span class="nv">current-buffer</span><span class="p">)))</span>
+                 <span class="p">(</span><span class="nv">display-buffer-overriding-action</span> <span class="o">'</span><span class="p">((</span><span class="nv">display-buffer-in-side-window</span><span class="p">)</span>
+                                                     <span class="p">(</span><span class="nv">dedicated</span> <span class="o">.</span> <span class="no">t</span><span class="p">)</span>
+                                                     <span class="p">(</span><span class="nv">side</span> <span class="o">.</span> <span class="o">,</span><span class="nv">side</span><span class="p">)</span>
+                                                     <span class="p">(</span><span class="nv">window-parameters</span> <span class="o">.</span> <span class="p">((</span><span class="nv">no-delete-other-windows</span> <span class="o">.</span> <span class="no">t</span><span class="p">))))))</span>
+       <span class="p">(</span><span class="nv">display-buffer</span> <span class="nv">buffer</span><span class="p">))))</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">embark-buffer-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s b"</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/embark-display-in-side-window</span> <span class="nv">bottom</span><span class="p">))</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">embark-buffer-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s l"</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/embark-display-in-side-window</span> <span class="nv">left</span><span class="p">))</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">embark-buffer-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s r"</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/embark-display-in-side-window</span> <span class="nv">right</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>This way I can <kbd>C-x b</kbd> show the buffer switcher and run Embark on it via <kbd>C-, ' s b</kbd> to split to bottom.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

@@ -1,0 +1,54 @@
+<p>With the power of <code>outline-minor-mode</code> in Emacs, you can turn any text buffer into an outline – with the killer feature of “cycling”, i.e. folding and unfolding outline elements.</p>
+
+<p>This includes <a href="https://github.com/dajva/rg.el"><code>rg.el</code>-managed buffers</a>, search results powered by ripgrep.</p>
+
+<p><strong>Update 2024-06-07:</strong> I changed the approach to a more robust regex! The form-feed insertion actually broke result navigation. <code>compilation-next-error</code> in turn would expect <em>not</em> to find a form-feed character at the start of a line. Working around that was more trouble.</p>
+
+<p>To tell <code>rg.el</code> buffers which line is a ‘heading’ in terms of <code>outline-minor-mode</code>, change the regular expression to match each line beginning with <code>"File:"</code>:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/rg-enable-folding</span> <span class="p">()</span>
+  <span class="s">"Configure outline-minor-mode on file entries in rg.el results."</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">outline-regexp</span> <span class="s">"^File: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">outline-minor-mode</span> <span class="no">t</span><span class="p">))</span>
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'rg-filter-hook</span> <span class="nf">#'</span><span class="nv">ct/rg-enable-folding</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">rg-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"&lt;tab&gt;"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">outline-cycle</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>With that, you can run a search and zoom out to all files via <code>M-x outline-hide-sublevels</code> and then zoom into each with a tab.</p>
+
+<p>Note that even though <code>outline-regexp</code>’s documentation says that we can assume we’re at the beginning of a line etc., omitting the <code>^</code> to denote the start of a line produces wonky results: it will fold, but sometimes, it would fold too much. I had file entries further down the buffer be folded away, too, and <code>outline-hide-sublevels</code> would hide the complete buffer.</p>
+
+<h2 id="my-previous-attempt-that-is-actually-broken-inserting-a-form-feed">My Previous Attempt That Is Actually Broken: Inserting a Form Feed</h2>
+
+<p>The default <code>outline-regexp</code> value contains the form-feed character. That gave me ideas</p>
+
+<p>I now decorate all <code>"File:"</code> lines, prepending a form-feed character:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;;; Warning: this breaks navigation in result buffers!</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/rg-add-form-feed</span> <span class="p">()</span>
+  <span class="s">"Prepend a form feed character to all file match lines."</span>
+  <span class="p">(</span><span class="nv">save-excursion</span>
+    <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">while</span> <span class="p">(</span><span class="nv">re-search-backward</span> <span class="s">"^File: "</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">match-beginning</span> <span class="mi">0</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">insert</span> <span class="s">"�\n"</span><span class="p">))))</span>
+<span class="c1">;; Do not add the hook to a broken function! :) </span>
+<span class="c1">; (add-hook 'rg-filter-hook #'ct/rg-add-form-feed)</span>
+</code></pre></div></div>
+
+<p>You can enter a literal Unicode <code>0x0C FORM FEED (FF)</code> character in Emacs by typing <kbd>C-q C-l</kbd>. I did that. But that doesn’t render well on the blog, so the code uses <a href="http://xahlee.info/emacs/emacs/elisp_unicode_representation_in_string.html">Unicode escape sequences</a>. (You could also use <code>"\f"</code> I learned later!)</p>
+
+<figure><a href="https://christiantietze.de/posts/2024/06/fold-search-results-away-in-rg-el/outline-minor-mode-form-feed.png"><img alt="" src="https://christiantietze.de/posts/2024/06/fold-search-results-away-in-rg-el/outline-minor-mode-form-feed.png" /></a><figcaption>Form-feed lines between results, with the topmost ones folded away</figcaption></figure>
+
+<p>I do render my form-feeds as lines, by the way. <a href="https://depp.brause.cc/form-feed/">Check out <code>form-feed-mode</code></a>; the code from my init file is:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">form-feed</span>
+  <span class="ss">:ensure</span>
+  <span class="ss">:delight</span>
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="nv">custom-set-variables</span>
+   <span class="o">'</span><span class="p">(</span><span class="nv">form-feed-include-modes</span> <span class="o">'</span><span class="p">(</span><span class="nv">prog-mode</span> <span class="nv">text-mode</span> <span class="nv">help-mode</span> <span class="nv">compilation-mode</span> <span class="nv">org-mode</span><span class="p">)))</span>
+  <span class="ss">:init</span>
+  <span class="p">(</span><span class="nv">global-form-feed-mode</span> <span class="mi">+1</span><span class="p">))</span>
+</code></pre></div></div>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

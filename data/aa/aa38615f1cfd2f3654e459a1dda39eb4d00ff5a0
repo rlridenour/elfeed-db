@@ -1,0 +1,90 @@
+<p>UPDATE: This is now available <a href="https://melpa.org/#/company-org-block">on melpa</a>.</p>
+<p>Back in 2015, I bound the &quot;&lt;&quot; key to a hydra for quickly inserting org blocks. The idea came from Oleg's post on <a href="https://oremacs.com/2015/03/07/hydra-org-templates/">org-mode block templates in Hydra</a>. The suggested binding settled in my muscle memory without much effort.</p>
+<p>Fast forward to Febrary 2019. I replaced the hydra with <em><a href="https://orgmode.org/manual/Easy-templates.html">org-insert-structure-template</a></em> when <em>org-try-structure-completion</em> was removed from org mode. No biggie, as I kept the same binding to &quot;&lt;&quot; and hardly noticed the change.</p>
+<p>Since my primary use-case for easy templates is inserting <a href="https://orgmode.org/manual/Working-with-source-code.html">source blocks</a>, I was keen to expedite choosing the source language as well as inserting the source block itself.</p>
+<p>Writing a small <a href="https://company-mode.github.io/">company mode</a> completion backend fits my primary use-case pretty well.</p>
+<p><img src="https://xenodium.github.io/images/emacs-org-block-company-completion/company-org-block.gif" alt=""></p>
+<p>The company backend looks as follow (<strong>Warning:</strong> <a href="https://twitter.com/tpanum/status/1197772426072997888">Snippet needs Org v9.2</a>).</p>
+<p>Note: This code is not up to date. Install via <a href="https://melpa.org/#/company-org-block">melpa</a> or see <a href="https://github.com/xenodium/company-org-block">its repository</a>.</p>
+<pre><code class="language-{.commonlisp">(require 'map)
+(require 'org)
+(require 'seq)
+
+(defvar company-org-block-bol-p t &quot;If t, detect completion when at
+begining of line, otherwise detect completion anywhere.&quot;)
+
+(defvar company-org--regexp &quot;&lt;\\([^ ]*\\)&quot;)
+
+(defun company-org-block (command &amp;optional arg &amp;rest ignored)
+  &quot;Complete org babel languages into source blocks.&quot;
+  (interactive (list 'interactive))
+  (cl-case command
+    (interactive (company-begin-backend 'company-org-block))
+    (prefix (when (derived-mode-p 'org-mode)
+              (company-org-block--grab-symbol-cons)))
+    (candidates (company-org-block--candidates arg))
+    (post-completion
+     (company-org-block--expand arg))))
+
+(defun company-org-block--candidates (prefix)
+  &quot;Return a list of org babel languages matching PREFIX.&quot;
+  (seq-filter (lambda (language)
+                (string-prefix-p prefix language))
+              ;; Flatten `org-babel-load-languages' and
+              ;; `org-structure-template-alist', join, and sort.
+              (seq-sort
+               #'string-lessp
+               (append
+                (mapcar #'prin1-to-string
+                        (map-keys org-babel-load-languages))
+                (map-values org-structure-template-alist)))))
+
+(defun company-org-block--template-p (template)
+  (seq-contains (map-values org-structure-template-alist)
+                template))
+
+(defun company-org-block--expand (insertion)
+  &quot;Replace INSERTION with actual source block.&quot;
+  (delete-region (point) (- (point) (1+ ;; Include &quot;&lt;&quot; in length.
+                                     (length insertion))))
+  (if (company-org-block--template-p insertion)
+      (company-org-block--wrap-point insertion
+                                     ;; May be multiple words.
+                                     ;; Take the first one.
+                                     (nth 0 (split-string insertion)))
+    (company-org-block--wrap-point (format &quot;src %s&quot; insertion)
+                                   &quot;src&quot;)))
+
+(defun company-org-block--wrap-point (begin end)
+  &quot;Wrap point with block using BEGIN and END.  For example:
+#+begin_BEGIN
+  |
+#+end_END&quot;
+  (insert (format &quot;#+begin_%s\n&quot; begin))
+  (insert (make-string org-edit-src-content-indentation ?\s))
+  ;; Saving excursion restores point to location inside code block.
+  (save-excursion
+    (insert (format &quot;\n#+end_%s&quot; end))))
+
+(defun company-org-block--grab-symbol-cons ()
+  &quot;Return cons with symbol and t whenever prefix of &lt; is found.
+For example: \&quot;&lt;e\&quot; -&gt; (\&quot;e\&quot; . t)&quot;
+  (when (looking-back (if company-org-block-bol-p
+                          (concat &quot;^&quot; company-org--regexp)
+                        company-org--regexp)
+                      (line-beginning-position))
+    (cons (match-string-no-properties 1) t)))
+</code></pre>
+<p>To use, add the backend enable <em>company-mode</em> in <em>org-mode</em>:</p>
+<pre><code class="language-{.commonlisp">(add-to-list 'company-backends 'company-org-block)
+(company-mode +1)
+</code></pre>
+<h2>Updates</h2>
+<ul>
+<li>Removed language-specific header logic (use <em><a href="https://www.orgmode.org/worg/org-contrib/babel/header-args.html">org-babel-default-header-args</a></em> instead).</li>
+<li>Also completes non-source block templates from <a href="https://orgmode.org/manual/Easy-templates.html">org-structure-template-alist</a>.</li>
+<li>Source in my <a href="https://github.com/xenodium/dotsies/blob/master/emacs/ar/company-org-block.el">dot files</a>.</li>
+<li>Removed unnecessary binding. Just add company backend as usual.</li>
+<li>Thanks to <a href="https://twitter.com/takaxp">Takaaki Ishikawa</a> for <a href="https://twitter.com/takaxp/status/1195884481535561729?s=20">suggesting `org-edit-src-content-indentation'</a>.</li>
+<li>Thanks to <a href="https://twitter.com/tpanum">Thomas Kobber</a> for <a href="https://twitter.com/xenodium/status/1194224168709083137">highlighting incompatibility</a> with older org versions.</li>
+</ul>

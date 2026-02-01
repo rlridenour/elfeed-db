@@ -1,0 +1,262 @@
+<p>Since moving off Hugo into this Astro blog I haven&#39;t had much time to write yet do much work to the site. One of the things on my list was adding comments but I didn&#39;t want to use a third party service for them. The only social media I use anymore is Mastodon so it seemed the right choice to just aggregate comments from the Toots I share on Mastodon into my blog posts. This is what I came up with as my first iteration. It&#39;s easy enough you should be able to quickly add it to your own Astro blog. Being a static site this will require builds to get the latest comments. I&#39;ll add to this post or start a new one on my setup for Cloudflare.</p>
+<h2>Step 1 - mastodon.js</h2>
+<p>Add a <code>/src/utils/mastodon.js</code> file with the following javascript which uses the Mastodon to get the comment data from a Toot.</p>
+<pre><code class="language-js">export async function getMastodonComments(statusId, instanceUrl) {
+  try {
+    const response = await fetch(`${instanceUrl}/api/v1/statuses/${statusId}/context`);
+    const data = await response.json();
+    
+    // Filter out replies that aren&#39;t direct responses
+    const comments = data.descendants.filter(comment =&gt; 
+      comment.in_reply_to_id === statusId
+    );
+    
+    return comments;
+  } catch (error) {
+    console.error(&#39;Failed to fetch Mastodon comments:&#39;, error);
+    return [];
+  }
+}
+</code></pre>
+<h2>Step 2 - Add to the schema</h2>
+<p>I use collections in Astro so I added mastodon to the schema for the frontmatter. Update the schema in <code>/src/content.config.ts</code>.</p>
+<pre><code class="language-js">schema: z.object({
+    title: z.string(),
+    excerpt: z.string().optional(),
+    publishDate: z.coerce.date(),
+    updatedDate: z.coerce.date().optional(),
+    isFeatured: z.boolean().default(false),
+    tags: z.array(z.string()).default([]),
+    seo: seoSchema.optional(),
+    // Add Mastodon to the Schema
+    mastodon: z.object({
+      statusId: z.string().optional(),
+      instanceUrl: z.string().optional(),
+    }).optional(),
+})
+</code></pre>
+<h2>Step 3 - Add a component</h2>
+<p>Add a new component <code>/src/components/MastodonComments.astro</code>. This is the UI for the comments. This site uses Tailwind. Use it or change it to suit your needs.</p>
+<pre><code class="language-js">---
+import { getMastodonComments } from &#39;../utils/mastodon.js&#39;;
+
+export interface Props {
+  statusId: string;
+  instanceUrl: string;
+}
+
+const { statusId, instanceUrl } = Astro.props;
+const comments = await getMastodonComments(statusId, instanceUrl);
+
+function formatDate(dateString: string) {
+  const date = new Date(dateString);
+  return date.toLocaleDateString(&#39;en-US&#39;, { 
+    year: &#39;numeric&#39;, 
+    month: &#39;short&#39;, 
+    day: &#39;numeric&#39;,
+    hour: &#39;2-digit&#39;,
+    minute: &#39;2-digit&#39;
+  });
+}
+
+function stripHtml(html: string) {
+  // Basic HTML stripping for display name - you might want a more robust solution
+  return html.replace(/&lt;[^&gt;]*&gt;/g, &#39;&#39;);
+}
+---
+
+&lt;section class=&quot;mt-12 border-t border-gray-200 pt-8&quot;&gt;
+  &lt;div class=&quot;flex items-center gap-2 mb-6&quot;&gt;
+    &lt;svg class=&quot;w-4 h-4&quot; fill=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;&gt;
+      &lt;path d=&quot;M21.327 8.566c0-4.339-3.501-7.84-7.84-7.84-4.339 0-7.84 3.501-7.84 7.84 0 4.339 3.501 7.84 7.84 7.84.433 0 .856-.035 1.269-.102v-6.344c-1.169 0-2.115-.946-2.115-2.115s.946-2.115 2.115-2.115 2.115.946 2.115 2.115c0 .434-.131.837-.355 1.174l2.141 2.141c.768-1.125 1.217-2.484 1.217-3.944z&quot;/&gt;
+    &lt;/svg&gt;
+    &lt;h3 class=&quot;text-xl font-semibold&quot;&gt;
+      Comments from Mastodon
+    &lt;/h3&gt;
+  &lt;/div&gt;
+
+  {comments.length === 0 ? (
+    &lt;div class=&quot;p-6 text-center&quot;&gt;
+      &lt;p class=&quot;mb-4&quot;&gt;
+        No comments yet. Start the conversation!
+      &lt;/p&gt;
+      &lt;a 
+        href={`${instanceUrl}/web/statuses/${statusId}`} 
+        target=&quot;_blank&quot; 
+        rel=&quot;noopener noreferrer&quot;
+        class=&quot;inline-flex items-center gap-2 bg-gray-300 hover:bg-gray-400 font-medium px-4 py-2 rounded-lg transition-colors&quot;
+      &gt;
+        &lt;svg class=&quot;w-4 h-4&quot; fill=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;&gt;
+          &lt;path d=&quot;M21.327 8.566c0-4.339-3.501-7.84-7.84-7.84-4.339 0-7.84 3.501-7.84 7.84 0 4.339 3.501 7.84 7.84 7.84.433 0 .856-.035 1.269-.102v-6.344c-1.169 0-2.115-.946-2.115-2.115s.946-2.115 2.115-2.115 2.115.946 2.115 2.115c0 .434-.131.837-.355 1.174l2.141 2.141c.768-1.125 1.217-2.484 1.217-3.944z&quot;/&gt;
+        &lt;/svg&gt;
+        Comment on Mastodon
+      &lt;/a&gt;
+    &lt;/div&gt;
+  ) : (
+    &lt;div class=&quot;space-y-6&quot;&gt;
+      &lt;p class=&quot;text-sm mb-4&quot;&gt;
+        {comments.length} {comments.length === 1 ? &#39;comment&#39; : &#39;comments&#39;} • 
+        &lt;a 
+          href={`${instanceUrl}/web/statuses/${statusId}`} 
+          target=&quot;_blank&quot; 
+          rel=&quot;noopener noreferrer&quot;
+          class=&quot;font-medium&quot;
+        &gt;
+          Join the discussion
+        &lt;/a&gt;
+      &lt;/p&gt;
+      
+      {comments.map(comment =&gt; (
+        &lt;article class=&quot;border border-gray-500 rounded-lg p-4 hover:shadow-md transition-shadow&quot;&gt;
+          &lt;header class=&quot;flex items-start gap-3 mb-3&quot;&gt;
+            &lt;a 
+              href={comment.account.url} 
+              target=&quot;_blank&quot; 
+              rel=&quot;noopener noreferrer&quot;
+              class=&quot;flex-shrink-0&quot;
+            &gt;
+              &lt;img 
+                src={comment.account.avatar} 
+                alt={`${stripHtml(comment.account.display_name)}&#39;s avatar`}
+                class=&quot;w-10 h-10 rounded-full ring-2 ring-gray-100 hover:ring-indigo-200 transition-colors&quot;
+                loading=&quot;lazy&quot;
+              /&gt;
+            &lt;/a&gt;
+            
+            &lt;div class=&quot;flex-1 min-w-0&quot;&gt;
+              &lt;div class=&quot;flex items-center gap-2 flex-wrap&quot;&gt;
+                &lt;a 
+                  href={comment.account.url} 
+                  target=&quot;_blank&quot; 
+                  rel=&quot;noopener noreferrer&quot;
+                  class=&quot;font-semibold transition-colors&quot;
+                  set:html={comment.account.display_name}
+                /&gt;
+                &lt;span class=&quot;text-sm&quot;&gt;
+                  @{comment.account.acct}
+                &lt;/span&gt;
+              &lt;/div&gt;
+              
+              &lt;div class=&quot;flex items-center gap-2 mt-1&quot;&gt;
+                &lt;time 
+                  datetime={comment.created_at}
+                  class=&quot;text-sm&quot;
+                &gt;
+                  {formatDate(comment.created_at)}
+                &lt;/time&gt;
+                &lt;span&gt;•&lt;/span&gt;
+                &lt;a 
+                  href={comment.url} 
+                  target=&quot;_blank&quot; 
+                  rel=&quot;noopener noreferrer&quot;
+                  class=&quot;text-sm font-medium transition-colors&quot;
+                &gt;
+                  View on Mastodon
+                &lt;/a&gt;
+              &lt;/div&gt;
+            &lt;/div&gt;
+          &lt;/header&gt;
+          
+          &lt;div 
+            class=&quot;ml-11 prose-dante prose-lg max-w-none leading-relaxed&quot;
+            set:html={comment.content}
+          /&gt;
+          
+          {comment.media_attachments &amp;&amp; comment.media_attachments.length &gt; 0 &amp;&amp; (
+            &lt;div class=&quot;mt-3 space-y-2&quot;&gt;
+              {comment.media_attachments.map(media =&gt; (
+                media.type === &#39;image&#39; ? (
+                  &lt;img 
+                    src={media.preview_url} 
+                    alt={media.description || &#39;Attached image&#39;}
+                    class=&quot;max-w-sm rounded-lg border border-gray-200&quot;
+                    loading=&quot;lazy&quot;
+                  /&gt;
+                ) : media.type === &#39;video&#39; ? (
+                  &lt;video 
+                    src={media.url} 
+                    poster={media.preview_url}
+                    controls
+                    class=&quot;max-w-sm rounded-lg border border-gray-200&quot;
+                  &gt;
+                    {media.description &amp;&amp; &lt;track kind=&quot;descriptions&quot; label={media.description} /&gt;}
+                  &lt;/video&gt;
+                ) : null
+              ))}
+            &lt;/div&gt;
+          )}
+          
+          {(comment.reblogs_count &gt; 0 || comment.favourites_count &gt; 0) &amp;&amp; (
+            &lt;div class=&quot;flex items-center gap-4 mt-3 pt-3 border-t border-gray-100&quot;&gt;
+              {comment.favourites_count &gt; 0 &amp;&amp; (
+                &lt;div class=&quot;flex items-center gap-1 text-sm&quot;&gt;
+                  &lt;svg class=&quot;w-4 h-4&quot; fill=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;&gt;
+                    &lt;path d=&quot;M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z&quot;/&gt;
+                  &lt;/svg&gt;
+                  {comment.favourites_count}
+                &lt;/div&gt;
+              )}
+              {comment.reblogs_count &gt; 0 &amp;&amp; (
+                &lt;div class=&quot;flex items-center gap-1 text-sm&quot;&gt;
+                  &lt;svg class=&quot;w-4 h-4&quot; fill=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;&gt;
+                    &lt;path d=&quot;M19 7v4H5.83l3.58-3.59L8 6l-6 6 6 6 1.41-1.41L5.83 13H21V7z&quot;/&gt;
+                  &lt;/svg&gt;
+                  {comment.reblogs_count}
+                &lt;/div&gt;
+              )}
+            &lt;/div&gt;
+          )}
+        &lt;/article&gt;
+      ))}
+      
+      &lt;div class=&quot;text-center pt-4&quot;&gt;
+        &lt;a 
+          href={`${instanceUrl}/web/statuses/${statusId}`} 
+          target=&quot;_blank&quot; 
+          rel=&quot;noopener noreferrer&quot;
+          class=&quot;inline-flex items-center gap-2 font-medium transition-colors&quot;
+        &gt;
+          View full conversation on Mastodon
+          &lt;svg class=&quot;w-4 h-4&quot; fill=&quot;none&quot; stroke=&quot;currentColor&quot; viewBox=&quot;0 0 24 24&quot;&gt;
+            &lt;path stroke-linecap=&quot;round&quot; stroke-linejoin=&quot;round&quot; stroke-width=&quot;2&quot; d=&quot;M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14&quot;/&gt;
+          &lt;/svg&gt;
+        &lt;/a&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  )}
+&lt;/section&gt;
+</code></pre>
+<h2>Step 4 - Update the blog post template</h2>
+<p>My site has the template for the blog post detail in <code>/src/pages/blog/[id].astro</code></p>
+<p>At the top of the file import the new component from Step 3 and after <code>post</code> from props method add the variables for the frontmatter you will add in Step 5.</p>
+<pre><code class="language-js">import MastodonComments from &#39;../../components/MastodonComments.astro&#39;;
+
+const { post, prevPost, nextPost } = Astro.props;
+
+// Add variables to extract Mastodon info from frontmatter
+const mastodonStatusId = post.data.mastodon?.statusId;
+const mastodonInstance = post.data.mastodon?.instanceUrl;
+</code></pre>
+<p>Add the component to the detail template where you want the comments to display. If no <code>mastodonStatusId</code> and/or <code>mastodonInstance</code> is provided in the frontmatter then this componenet will not be added to the render.</p>
+<pre><code class="language-js">{mastodonStatusId &amp;&amp; mastodonInstance &amp;&amp; (
+  &lt;MastodonComments 
+    statusId={mastodonStatusId} 
+    instanceUrl={mastodonInstance} 
+  /&gt;
+)}
+</code></pre>
+<h2>Step 5 - Frontmatter</h2>
+<p>After you toot your new blog post link, get the <code>statusId</code> from the Mastodon post and add it to the frontmatter of your blog post markdown file. Make sure you set the <code>instanceUrl</code> to whatever instance your account is on. For this example purposes I added mastodon.social with a dummy id.</p>
+<pre><code class="language-js">title: &#39;This is my blog post title&#39;
+excerpt: &#39;Description of this post.&#39;
+publishDate: &#39;July 30 2025&#39;
+isFeatured: true
+tags:
+  - astrojs
+mastodon:
+  statusId: &#39;1111111111111111&#39;
+  instanceUrl: &#39;https://mastodon.social&#39;
+</code></pre>
+<p>It&#39;s not ideal to have to publish a blog post, toot then update the frontmatter but it really does not take much time in the end. And if I don&#39;t care about comments on a particular post (or older posts) I just don&#39;t have to update the frontmatter to include Mastodon comments.</p>
+<p>At some point if this code stays stable or matures, I might package it into an Astro plugin.</p>
+<p>I hope this helps someone else using Astro. If you add it and like it shout at me. If you run into any issues let me know and I&#39;ll update the post accordingly.</p>

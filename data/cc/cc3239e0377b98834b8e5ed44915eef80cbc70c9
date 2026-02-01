@@ -1,0 +1,50 @@
+<p>Hey, recently I&rsquo;ve posted about <a href="https://codelearn.me/2018/03/23/format-curl-json.html">jq</a> and today I&rsquo;m going
+to explain how I used it to parse JSON from web (retrieved with CURL) and turn it to CSV.</p>
+<p>First of all let&rsquo;s see what JSON we have:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-javascript" data-lang="javascript"><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;data&#34;</span><span style="color:#f92672">:</span> [
+</span></span><span style="display:flex;"><span> {
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;short_data&#34;</span><span style="color:#f92672">:</span> {
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;name&#34;</span><span style="color:#f92672">:</span> <span style="color:#e6db74">&#34;value1&#34;</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;link&#34;</span><span style="color:#f92672">:</span> <span style="color:#e6db74">&#34;value2&#34;</span>
+</span></span><span style="display:flex;"><span> },
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;long_data&#34;</span><span style="color:#f92672">:</span> {
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;company_name&#34;</span> <span style="color:#e6db74">&#34;value3&#34;</span>,
+</span></span><span style="display:flex;"><span> <span style="color:#e6db74">&#34;company_position&#34;</span> <span style="color:#e6db74">&#34;value4&#34;</span>
+</span></span><span style="display:flex;"><span> }
+</span></span><span style="display:flex;"><span> },
+</span></span><span style="display:flex;"><span> {<span style="color:#75715e">/*...*/</span>},
+</span></span><span style="display:flex;"><span> {<span style="color:#75715e">/*...*/</span>},
+</span></span><span style="display:flex;"><span> {<span style="color:#75715e">/*...*/</span>}
+</span></span><span style="display:flex;"><span> ]
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><br/>
+<p>Ok, the CSV we want to get is:</p>
+<pre tabindex="0"><code>name,link,company_name,company_position
+value1,value2,value3,value4
+value1,value2,value3,value4
+...
+</code></pre><br/>
+<p>And here is how simple it is:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>jq -r <span style="color:#e6db74">&#39;.data | map(.short_data.name), map(.short_data.link), map(.long_data.company_name), map(.long_data.company_position) | @csv&#39;</span> <span style="color:#f92672">&lt;&lt;&lt;</span> $OUTPUT
+</span></span></code></pre></div><br/>
+<p><code>$OUTPUT</code> - is variable containing the JSON string (retrieved with CURL in my case)</p>
+<p>As you can see jq has it&rsquo;s own pipe and we can fetch values from json &ldquo;path&rdquo; and pass it to <code>@csv</code> handler.</p>
+<p>Looks great but the result is a bit different from what we were expected:</p>
+<pre tabindex="0"><code>value1,value1,value1,value1
+value2,value2,value2,value2
+value3,value3,value3,value3
+value4,value4,value4,value4
+...
+</code></pre><br/>
+<p>What do we need is transpose the output. <a href="https://github.com/Chris00/ocaml-csv">csvtool</a> is great package that allow us to do it.
+We can pipe our csv to <code>&lt;csv&gt; | csvtool transpose -</code> and get result we need.</p>
+<p>And final command:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>jq -r <span style="color:#e6db74">&#39;.data | map(.short_data.name), map(.short_data.link), map(.long_data.company_name), map(.long_data.company_position) | @csv&#39;</span> <span style="color:#f92672">&lt;&lt;&lt;</span> $OUTPUT | csvtool transpose -
+</span></span></code></pre></div><br/>
+<p>leads to result:</p>
+<pre tabindex="0"><code>value1,value2,value3,value4
+value1,value2,value3,value4
+...
+</code></pre><br/>
+exactly what we need.

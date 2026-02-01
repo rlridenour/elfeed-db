@@ -1,0 +1,463 @@
+<p>I have been playing around with local LLMs recently through ollama and decided to create the basis for an Emacs package to focus on interfacing to ollama specifically. My idea here is to implement something very minimal and as light-weight as possible and that could be run out-of-the-box with no configuration (obviously the ollama server just needs to be running). I have a deeper dive into my overall design thoughts and decisions in the github README and there are some simple demos:</p>
+<p><a href="https://github.com/captainflasmr/ollama-buddy">https://github.com/captainflasmr/ollama-buddy</a></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20250207092636-emacs--Ollama-Buddy-Local-LLM-Integration-for-Emacs.jpg" width="100%">
+</figure>
+
+<hr>
+<h2 id="overview">Overview</h2>
+<p>A friendly Emacs interface for interacting with Ollama models. This package provides a convenient way to integrate Ollama&rsquo;s local LLM capabilities directly into your Emacs workflow with little or no configuration required.</p>
+<p>The name is just something a little bit fun and it seems to always remind me of the &ldquo;bathroom buddy&rdquo; from the film Gremlins (although hopefully this will work better than that seemed to!)</p>
+<h2 id="screenshots-demos">Screenshots / Demos</h2>
+<p>Note that all the demos are in real time.</p>
+<p><strong>Switching to a better model</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/ollama-buddy-screen-recording_001.gif" width="100%">
+</figure>
+
+<p><strong>More conversational</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/ollama-buddy-screen-recording_002.gif" width="100%">
+</figure>
+
+<p><strong>Describing code with different models</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/ollama-buddy-screen-recording_003.gif" width="100%">
+</figure>
+
+<p><strong>Describing code with a more advanced model</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/ollama-buddy-screen-recording_004.gif" width="100%">
+</figure>
+
+<p><strong>The Menu</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/ollama-buddy-screenshot_001.png" width="100%">
+</figure>
+
+<h2 id="summary-of-my-design-ethos">Summary of my design ethos</h2>
+<ul>
+<li>
+<p><strong>Focused Design Philosophy</strong></p>
+<ul>
+<li>Dedicated solely to Ollama integration (unlike general-purpose LLM packages)</li>
+<li>Intentionally lightweight and minimal setup</li>
+<li>Particularly suitable for air-gapped systems</li>
+<li>Avoids complex backends and payload configurations</li>
+</ul>
+</li>
+<li>
+<p><strong>Interface Design Choices</strong></p>
+<ul>
+<li>Flexible, customizable menu through defcustom</li>
+<li>Easy-to-extend command system via simple alist modifications</li>
+<li>Region-based interaction model across all buffers</li>
+</ul>
+</li>
+<li>
+<p><strong>Buffer Implementation</strong></p>
+<ul>
+<li>Simple, editable chat buffer approach</li>
+<li>Avoids complex modes or bespoke functionality</li>
+<li>Trying to leverage standard Emacs text editing capabilities</li>
+</ul>
+</li>
+<li>
+<p><strong>User Experience</strong></p>
+<ul>
+<li>&ldquo;AI assistant&rdquo; style welcome interface</li>
+<li>Zero-config startup possible</li>
+<li>Built-in status monitoring and model listing</li>
+<li>Simple tutorial-style introduction</li>
+</ul>
+</li>
+<li>
+<p><strong>Technical Simplicity</strong></p>
+<ul>
+<li>REST-based Ollama</li>
+<li>Quickly switch between small local LLMs</li>
+<li>Backwards compatibility with older Emacs versions</li>
+<li>Minimal dependencies</li>
+<li>Straightforward configuration options</li>
+</ul>
+</li>
+</ul>
+<h2 id="design-ethos-expanded-why-create-this-package">Design ethos expanded / why create this package?</h2>
+<p>The Ollama Emacs package ecosystem is still emerging. Although there are some great implementations available, they tend to be LLM jack-of-all-trades, catering to various types of LLM integrations, including, of course, the major online offerings.</p>
+<p>Recently, I have been experimenting with a local solution using <code>ollama</code>. While using <code>ollama</code> through the terminal interface with <code>readline</code> naturally leans toward Emacs keybindings, there are a few limitations:</p>
+<ul>
+<li>Copy and paste do not use Emacs keybindings like readline navigation. This is due to the way key codes work in terminals, meaning that copying and pasting into Emacs would require using the mouse!</li>
+<li>Searching through a terminal with something like Emacs <code>isearch</code> can vary depending on the terminal.</li>
+<li>Workflow disruption occur when copying and pasting between Emacs and <code>ollama</code>.</li>
+<li>There is no easy way to save a session.</li>
+<li>It is not using Emacs!</li>
+</ul>
+<p>I guess you can see where this is going. The question is: how do I integrate a basic query-response mechanism to <code>ollama</code> into Emacs? This is where existing LLM Emacs packages come in, however, I have always found them to be more geared towards online models with some packages offering experimental implementations of <code>ollama</code> integration. In my case, I often work on an air-gapped system where downloading or transferring packages is not straightforward. In such an environment, my only option for LLM interaction is <code>ollama</code> anyway. Given the limitations mentioned earlier of interacting with <code>ollama</code> through a terminal, why not create a dedicated <code>ollama</code> Emacs package that is very simple to set up, very lightweight and leverages Emacs&rsquo;s editing capabilities to provide a basic query response interface to <code>ollama</code>?</p>
+<p>I have found that setting up <code>ollama</code> within the current crop of LLM Emacs packages can be quite involved. I often struggle with the setup, I get there in the end, but it feels like there&rsquo;s always a long list of payloads, backends, etc., to configure. But what if I just want to integrate Emacs with <code>ollama</code>? It has a RESTful interface, so could I create a package with minimal setup, allowing users to define a default model in their init file (or select one each time if they prefer)?  It could also query the current set of loaded models through the <code>ollama</code> interface and provide a <code>completing-read</code> type of model selection, with potentially no model configuration needed!</p>
+<p>Beyond just being lightweight and easy to configure, I also have another idea: a flexible menu system. For a while, I have been using a simple menu-based interface inspired by transient menus. However, I have chosen not to use <code>transient</code> because I want this package to be compatible with older Emacs versions. Additionally, I haven’t found a compelling use case for a complex transient menu and I prefer a simple, opaque top level menu.</p>
+<p>To achieve this, I have decided to create a flexible <code>defcustom</code> menu system. Initially, it will be configured for some common actions, but users can easily modify it through the Emacs customization interface by updating a simple alist.</p>
+<p>For example, to refactor code through an LLM, a prepended text string of something like &ldquo;Refactor the following code:&rdquo; is usually applied. To proofread text, &ldquo;Proofread the following:&rdquo; could be prepended to the body of the query. So, why not create a flexible menu where users can easily add their own commands? For instance, if someone wanted a command to uppercase some text (even though Emacs can already do this), they could simply add the following entry to the <code>ollama-buddy-menu-items</code> alist:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(<span style="color:#e6db74">?u</span> <span style="color:#f92672">.</span> (<span style="color:#e6db74">&#34;Upcase&#34;</span>
+</span></span><span style="display:flex;"><span>       (lambda () (ollama-buddy--send <span style="color:#e6db74">&#34;convert the following to uppercase:&#34;</span>))))
+</span></span></code></pre></div><p>Then the menu would present a menu item &ldquo;Upcase&rdquo; with a &ldquo;u&rdquo; selection, upcasing the selected region.  You could go nuts with this, and in order to double down on the autogeneration of a menu concept, I have provided a <code>defcustom</code> <code>ollama-buddy-menu-columns</code> variable so you can flatten out your auto-generated menu as much as you like!</p>
+<p>This is getting rambly, but another key design consideration is how prompts should be handled and in fact how do I go about sending text from within Emacs?. Many implementations rely on a chat buffer as the single focal point, which seems natural to me, so I will follow a similar approach.</p>
+<p>I&rsquo;ve seen different ways of defining a prompt submission mechanism, some using &lt;RET&gt;, others using a dedicated keybinding like C-c &lt;RET&gt;, so, how should I define my prompting mechanism? I have a feeling this could get complicated, so lets use the KISS principle, also, how should text be sent from within Emacs buffers? My solution? simply mark the text and send it, not just from any Emacs buffer, but also within the chat window. It may seem slightly awkward at first (especially in the chat buffer, where you will have to create your prompt and then mark it), but it provides a clear delineation of text and ensures a consistent interface across Emacs. For example, using M-h to mark an element requires minimal effort and greatly simplifies the package implementation. This approach also allows users to use the <strong><strong>scratch</strong></strong> buffer for sending requests if so desired!</p>
+<p>Many current implementations create a chat buffer with modes for local keybindings and other features. I have decided not to do this and instead, I will provide a simple editable buffer (ASCII text only) where all <code>ollama</code> interactions will reside. Users will be able to do anything in that buffer; there will be no bespoke Ollama/LLM functionality involved. It will simply be based on a <code>special</code> buffer and to save a session?, just use <code>save-buffer</code> to write it to a file, Emacs to the rescue again!</p>
+<p>Regarding the minimal setup philosophy of this package, I also want to include a fun AI assistant-style experience. Nothing complicated, just a bit of logic to display welcome text, show the current <code>ollama</code> status, and list available models. The idea is that users should be able to jump in immediately. If they know how to install/start <code>ollama</code>, they can install the package without any configuration, run `M-x ollama-buddy-menu`, and open the chat. At that point, the &ldquo;AI assistant&rdquo; will display the current <code>ollama</code> status and provide a simple tutorial to help them get started.</p>
+<p>The backend?, well I decided simply to use <code>curl</code> to stimulate the <code>ollama</code> RESTful API, so you will need <code>curl</code> to be installed.</p>
+<p>I have other thoughts regarding the use of local LLMs versus online AI behemoths. The more I use <code>ollama</code> with Emacs through this package, the more I realize the potential of smaller, local LLMs. This package allows for quick switching between these models while maintaining a decent level of performance on a regular home computer. I could, for instance, load up <code>qwen-coder</code> for code-related queries (I have found the 7B Q4/5 versions to work particularly well) and switch to a more general model for other queries, such as <code>llama</code> or even <code>deepseek-r1</code>.</p>
+<p>Phew! That turned into quite a ramble, maybe I should run this text through <code>ollama-buddy</code> for proofreading! :)</p>
+<h2 id="ai-assistant">AI assistant</h2>
+<p>A simple text information screen will be presented on the first opening of the chat, or when requested through the menu system:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span><span style="color:#f92672">====================</span>  n_____n  <span style="color:#f92672">====================</span>
+</span></span><span style="display:flex;"><span><span style="color:#f92672">====================</span> | o Y o | <span style="color:#f92672">====================</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    ╭──────────────────────────────────────╮
+</span></span><span style="display:flex;"><span>    │              Welcome to               │
+</span></span><span style="display:flex;"><span>    │             OLLAMA BUDDY              │
+</span></span><span style="display:flex;"><span>    │       Your Friendly AI Assistant      │
+</span></span><span style="display:flex;"><span>    ╰──────────────────────────────────────╯
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    Hi there!
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    ollama RUNNING
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    I<span style="color:#960050;background-color:#1e0010">&#39;</span>m here to help you with:
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    - Code refactoring and analysis
+</span></span><span style="display:flex;"><span>    - Writing clear commit messages
+</span></span><span style="display:flex;"><span>    - Proofreading and text improvements
+</span></span><span style="display:flex;"><span>    - And much more!
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    Quick Start/Tips:
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    - Try typing a prompt in this buffer
+</span></span><span style="display:flex;"><span>    - Select/mark all prompt text <span style="color:#f92672">(</span><span style="color:#66d9ef">select</span> region<span style="color:#f92672">)</span>
+</span></span><span style="display:flex;"><span>    - M-x ollama-buddy-menu
+</span></span><span style="display:flex;"><span>    - Select menu item
+</span></span><span style="display:flex;"><span>    - Now wait <span style="color:#66d9ef">for</span> ollama to <span style="color:#66d9ef">do</span> its magic!
+</span></span><span style="display:flex;"><span>    - You can switch models anytime with <span style="color:#f92672">[</span>m<span style="color:#f92672">]</span>
+</span></span><span style="display:flex;"><span>    - Use <span style="color:#f92672">[</span>x<span style="color:#f92672">]</span> to cancel a running request
+</span></span><span style="display:flex;"><span>    - You can send to this chat from any buffer
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>-------------------- | @ Y @ | --------------------
+</span></span></code></pre></div><h2 id="features">Features</h2>
+<ul>
+<li>Interactive menu-driven interface</li>
+<li>Dedicated chat buffer with streaming responses</li>
+<li>Easy model switching</li>
+<li>Quick actions for common tasks:
+<ul>
+<li>Code refactoring</li>
+<li>Git commit message generation</li>
+<li>Code description</li>
+<li>Text proofreading</li>
+<li>Text summarization</li>
+</ul>
+</li>
+<li>Cute ASCII art separators for chat messages</li>
+<li>Region-based interaction with any buffer</li>
+</ul>
+<h2 id="whats-new">Whats New</h2>
+<h3 id="20e477"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-02-07 Fri&gt;</span></span></h3>
+<p>Added query finished message.</p>
+<h3 id="33b51a"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-02-06 Thu&gt;</span></span></h3>
+<ul>
+<li>Initial release</li>
+<li>Basic chat functionality</li>
+<li>Menu-driven interface</li>
+<li>Region-based interactions</li>
+<li>Model switching support</li>
+</ul>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li><a href="https://ollama.ai/">Ollama</a> installed and running locally</li>
+<li>Emacs 27.1 or later</li>
+<li><code>curl</code> command-line tool</li>
+</ul>
+<h2 id="installation">Installation</h2>
+<h3 id="manual-installation">Manual Installation</h3>
+<p>Clone this repository:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-shell" data-lang="shell"><span style="display:flex;"><span>git clone https://github.com/captainflasmr/ollama-buddy.git
+</span></span></code></pre></div><p>Add to your <code>init.el</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(add-to-list <span style="color:#e6db74">&#39;load-path</span> <span style="color:#e6db74">&#34;path/to/ollama-buddy&#34;</span>)
+</span></span><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;ollama-buddy</span>)
+</span></span></code></pre></div><h3 id="melpa--coming-soon">MELPA (Coming Soon)</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(use-package ollama-buddy
+</span></span><span style="display:flex;"><span>  :ensure <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>  :bind (<span style="color:#e6db74">&#34;C-c l&#34;</span> <span style="color:#f92672">.</span> ollama-buddy-menu))
+</span></span></code></pre></div><h2 id="usage">Usage</h2>
+<ol>
+<li>Start your Ollama server locally</li>
+<li>Use <code>M-x ollama-buddy-menu</code> or the default keybinding <code>C-c l</code> to open the menu</li>
+<li>Select your preferred model using the [m] option</li>
+<li>Select text in any buffer</li>
+<li>Choose an action from the menu:</li>
+</ol>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Action</th>
+          <th>Description</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>o</td>
+          <td>Open chat buffer</td>
+          <td>Opens the main chat interface</td>
+      </tr>
+      <tr>
+          <td>m</td>
+          <td>Swap model</td>
+          <td>Switch between available Ollama models</td>
+      </tr>
+      <tr>
+          <td>h</td>
+          <td>Help assistant</td>
+          <td>Display help message</td>
+      </tr>
+      <tr>
+          <td>l</td>
+          <td>Send region</td>
+          <td>Send selected text directly to model</td>
+      </tr>
+      <tr>
+          <td>r</td>
+          <td>Refactor code</td>
+          <td>Get code refactoring suggestions</td>
+      </tr>
+      <tr>
+          <td>g</td>
+          <td>Git commit message</td>
+          <td>Generate commit message for changes</td>
+      </tr>
+      <tr>
+          <td>d</td>
+          <td>Describe code</td>
+          <td>Get code explanation</td>
+      </tr>
+      <tr>
+          <td>p</td>
+          <td>Proofread text</td>
+          <td>Check text for improvements</td>
+      </tr>
+      <tr>
+          <td>z</td>
+          <td>Make concise</td>
+          <td>Reduce wordiness while preserving meaning</td>
+      </tr>
+      <tr>
+          <td>c</td>
+          <td>Custom Prompt</td>
+          <td>Enter bespoke prompt through the minibuffer</td>
+      </tr>
+      <tr>
+          <td>x</td>
+          <td>Kill request</td>
+          <td>Cancel current Ollama request</td>
+      </tr>
+      <tr>
+          <td>q</td>
+          <td>Quit</td>
+          <td>Exit the menu</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="key-bindings">Key Bindings</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Key</th>
+          <th>Description</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td><code>C-c l</code></td>
+          <td>Open ollama-buddy menu</td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="customization">Customization</h2>
+<table>
+  <thead>
+      <tr>
+          <th>Custom variable</th>
+          <th>Description</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td>ollama-buddy-menu-columns</td>
+          <td>Number of columns to display in the Ollama Buddy menu.</td>
+      </tr>
+      <tr>
+          <td>ollama-buddy-menu-items</td>
+          <td>Menu items definition for Ollama Buddy.</td>
+      </tr>
+      <tr>
+          <td>ollama-buddy-current-model</td>
+          <td>Default Ollama model to use.</td>
+      </tr>
+      <tr>
+          <td>ollama-buddy-separator-1</td>
+          <td>Separator used for Ollama LLM output, variant 1.</td>
+      </tr>
+      <tr>
+          <td>ollama-buddy-separator-2</td>
+          <td>Separator used for Ollama LLM output, variant 2.</td>
+      </tr>
+  </tbody>
+</table>
+<p>Customize the package to the default startup using:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(setq ollama-buddy-current-model <span style="color:#e6db74">&#34;qwen-4q:latest&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Change number of menu columns</span>
+</span></span><span style="display:flex;"><span>(setq ollama-buddy-menu-columns <span style="color:#ae81ff">4</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Customize separators</span>
+</span></span><span style="display:flex;"><span>(setq ollama-buddy-separator-1 <span style="color:#e6db74">&#34;Your custom separator here&#34;</span>)
+</span></span><span style="display:flex;"><span>(setq ollama-buddy-separator-2 <span style="color:#e6db74">&#34;Another custom separator&#34;</span>)
+</span></span></code></pre></div><p>Available customization options:</p>
+<h2 id="contributing">Contributing</h2>
+<p>Contributions are welcome! Please:</p>
+<ol>
+<li>Fork the repository</li>
+<li>Create a feature branch</li>
+<li>Commit your changes</li>
+<li>Open a pull request</li>
+</ol>
+<h2 id="license">License</h2>
+<p><a href="https://opensource.org/licenses/MIT">MIT License</a></p>
+<h2 id="acknowledgments">Acknowledgments</h2>
+<ul>
+<li><a href="https://ollama.ai/">Ollama</a> for making local LLM inference accessible</li>
+<li>Emacs community for continuous inspiration</li>
+</ul>
+<h2 id="issues">Issues</h2>
+<p>Report issues on the <a href="https://github.com/captainflasmr/ollama-buddy/issues">GitHub Issues page</a></p>
+<h2 id="alternative-llm-based-packages">Alternative LLM based packages</h2>
+<p>To the best of my knowledge, there are currently a few Emacs packages related to Ollama, though the ecosystem is still relatively young:</p>
+<ol>
+<li>
+<p><strong>llm.el</strong> (by Jacob Hacker)</p>
+<ul>
+<li>A more general LLM interface package that supports Ollama as one of its backends</li>
+<li>GitHub: <a href="https://github.com/ahyatt/llm">https://github.com/ahyatt/llm</a></li>
+<li>Provides a more abstracted approach to interacting with language models</li>
+<li>Supports multiple backends including Ollama, OpenAI, and others</li>
+</ul>
+</li>
+<li>
+<p><strong>gptel</strong> (by Karthik Chikmagalur)</p>
+<ul>
+<li>While primarily designed for ChatGPT and other online services, it has experimental Ollama support</li>
+<li>GitHub: <a href="https://github.com/karthink/gptel">https://github.com/karthink/gptel</a></li>
+<li>Offers a more integrated chat buffer experience</li>
+<li>Has some basic Ollama integration, though it&rsquo;s not the primary focus</li>
+</ul>
+</li>
+<li>
+<p><strong>chatgpt-shell</strong> (by xenodium)</p>
+<ul>
+<li>Primarily designed for ChatGPT, but has some exploration of local model support</li>
+<li>GitHub: <a href="https://github.com/xenodium/chatgpt-shell">https://github.com/xenodium/chatgpt-shell</a></li>
+<li>Not specifically Ollama-focused, but interesting for comparison</li>
+</ul>
+</li>
+<li>
+<p><strong>ellama</strong></p>
+<ul>
+<li>TODO</li>
+</ul>
+</li>
+</ol>
+<h2 id="alternative-package-comparison">Alternative package comparison</h2>
+<p>Let&rsquo;s compare ollama-buddy to the existing solutions:</p>
+<ol>
+<li>
+<p><strong>llm.el</strong></p>
+<ul>
+<li>
+<p><strong>Pros</strong>:</p>
+<ul>
+<li>Provides a generic LLM interface</li>
+<li>Supports multiple backends</li>
+<li>More abstracted and potentially more extensible</li>
+</ul>
+</li>
+<li>
+<p><strong>Cons</strong>:</p>
+<ul>
+<li>Less Ollama-specific</li>
+<li>More complex configuration</li>
+<li>Might have overhead from supporting multiple backends</li>
+</ul>
+</li>
+</ul>
+<p><code>ollama-buddy</code> is more:</p>
+<ul>
+<li>Directly focused on Ollama</li>
+<li>Lightweight and Ollama-native</li>
+<li>Provides a more interactive, menu-driven approach</li>
+<li>Simpler to set up for Ollama specifically</li>
+</ul>
+</li>
+<li>
+<p><strong>gptel</strong></p>
+<ul>
+<li>
+<p><strong>Pros</strong>:</p>
+<ul>
+<li>Sophisticated chat buffer interface</li>
+<li>Active development</li>
+<li>Good overall UX</li>
+</ul>
+</li>
+<li>
+<p><strong>Cons</strong>:</p>
+<ul>
+<li>Primarily designed for online services</li>
+<li>Ollama support is experimental</li>
+<li>More complex architecture</li>
+</ul>
+</li>
+</ul>
+<p><code>ollama-buddy</code> differentiates by:</p>
+<ul>
+<li>Being purpose-built for Ollama</li>
+<li>Offering a more flexible, function-oriented approach</li>
+<li>Providing a quick, lightweight interaction model</li>
+<li>Having a minimal, focused design</li>
+</ul>
+</li>
+<li>
+<p><strong>chatgpt-shell</strong></p>
+<ul>
+<li>
+<p><strong>Pros</strong>:</p>
+<ul>
+<li>Mature shell-based interaction model</li>
+<li>Rich interaction capabilities</li>
+</ul>
+</li>
+<li>
+<p><strong>Cons</strong>:</p>
+<ul>
+<li>Not truly Ollama-native</li>
+<li>Primarily focused on online services</li>
+<li>More complex setup</li>
+</ul>
+</li>
+</ul>
+<p><code>ollama-buddy</code> stands out by:</p>
+<ul>
+<li>Being specifically designed for Ollama</li>
+<li>Offering a simpler, more direct interaction model</li>
+<li>Providing a quick menu-based interface</li>
+<li>Having minimal dependencies</li>
+</ul>
+</li>
+<li>
+<p><strong>ellama</strong></p>
+<ul>
+<li>TODO</li>
+</ul>
+</li>
+</ol>

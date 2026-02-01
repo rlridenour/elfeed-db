@@ -1,0 +1,34 @@
+<p>A common activity for a Software Engineer is to compare two directories, especially those that might require a level of merging.  My preferred tool of choice in this instance is <strong>Meld</strong></p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20240728141344-emacs--Sending-Dired-Directories-to-Meld.jpg" width="100%">
+</figure>
+
+<blockquote>
+<p>Meld is a visual diff and merge tool that is widely used for comparing files, directories, and version-controlled projects.</p>
+</blockquote>
+<p>For <strong>Meld</strong>, the workflow is generally straightforward: simply open a file explorer alongside and drag and drop the required directories.</p>
+<p>But what about comparing directories seamlessly as part of the Emacs ecosystem I hear you say? 🫢</p>
+<p>Well, I am trying to incorporate <code>ztree-diff</code> into my workflow, but after a few minutes of grappling with it, I always reach for Meld as I know it well (yes, I know this isn&rsquo;t really the Emacs way, in which an initial investment of blood, sweat and toil eventually reaps dividends).  I will persist with <code>ztree-diff</code>, but for now, to at least get a more seamless directory comparison experience from within Emacs I will have to just fall back on the tried and tested method of invoking an external application, and in this case by sending directories marked in <code>dired</code> to <strong>Meld</strong>, here is some elisp:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;cl-lib</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/dired-meld-diff-all-dwim ()
+</span></span><span style="display:flex;"><span><span style="color:#e6db74">&#34;Compare all marked directories in all visible Dired buffers using Meld.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">   The order of directories respects the order suggested by `dired-dwim-target`.&#34;</span>
+</span></span><span style="display:flex;"><span>(interactive)
+</span></span><span style="display:flex;"><span>(let ((files ()))
+</span></span><span style="display:flex;"><span>  (dolist (window (<span style="color:#a6e22e">window-list</span>))
+</span></span><span style="display:flex;"><span>    (with-current-buffer (<span style="color:#a6e22e">window-buffer</span> window)
+</span></span><span style="display:flex;"><span>      (when (and (derived-mode-p <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>              (dired-get-marked-files))
+</span></span><span style="display:flex;"><span>        (setq files (<span style="color:#a6e22e">append</span> files (dired-get-marked-files))))))
+</span></span><span style="display:flex;"><span>  (if (or (<span style="color:#a6e22e">&lt;=</span> (<span style="color:#a6e22e">length</span> files) <span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span>        (not (cl-every <span style="color:#e6db74">&#39;file-directory-p</span> files)))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">message</span> <span style="color:#e6db74">&#34;Please mark at least two directories.&#34;</span>)
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">apply</span> <span style="color:#e6db74">&#39;start-process</span> <span style="color:#e6db74">&#34;meld&#34;</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#34;meld&#34;</span> files))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(<span style="color:#a6e22e">define-key</span> dired-mode-map (kbd <span style="color:#e6db74">&#34;C-c m&#34;</span>) <span style="color:#e6db74">&#39;my/dired-meld-diff-all-dwim</span>)
+</span></span></code></pre></div><p><em>*edit: <span class="timestamp-wrapper"><span class="timestamp">&lt;2024-07-29 Mon&gt; </span></span> every is now obsolete, replaced with cl-every</em></p>
+<p>This method has the advantage of honouring <code>dired-dwim-target</code> through the <code>(window-list)</code> function which I am now pretty familiar with as I often use <code>dired-do-copy</code> and <code>dired-do-rename</code></p>
+<p>So how does this work?, well now I can split windows, bring up some dired buffers, mark directories to compare, and then make sure I am in the dired buffer that is to appear on the LHS of the Meld comparison before I then run the command.  The destination directory would then be defined according to <code>dired-dwim-target</code> which I have set to <code>t</code> which is the next dired visible buffer in a clockwise direction, but can be adjusted as desired.</p>
+<p>With a little experimentation I found out that <code>(dired-get-marked-files)</code> retrieves the dired item that the cursor is over, therefore each directory doesn&rsquo;t necessary even need to be explicitly marked!, so you could just split with two dired buffers, leave the cursor over the destination directory, switch to the source dired buffer and leave the cursor over the source directory before running the command above.</p>
+<p>More experimentation reveals that even three directories can be sent to Meld for comparison!, just open the dired buffers, hover cursor or mark, make sure they are visible, set up in the clockwise order and then focus the cursor on the source directory.</p>
+<p>Is it a little weird that I&rsquo;m talking about experimentation when this is a function I wrote myself? 😀  A three directory comparison is not something I have ever used but I deliberately left the function open and flexible enough and it doesn&rsquo;t really do any harm&hellip;</p>

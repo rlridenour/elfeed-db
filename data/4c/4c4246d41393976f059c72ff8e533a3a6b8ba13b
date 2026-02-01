@@ -1,0 +1,101 @@
+<p>While <a href="https://orgmode.org/">Org</a> babel's <a href="https://orgmode.org/manual/Noweb-Reference-Syntax.html">noweb</a> isn't something I've frequently used for literate programming, its simplicity makes it rather versatile to glue all sorts of babel things I hadn't previously considered.</p>
+<p>The idea is simple. Add a placeholder like <code>&lt;&lt;other-block&gt;&gt;</code> to an <a href="https://orgmode.org/manual/Working-with-Source-Code.html">org babel</a> source block, and it will be automatically replaced (verbatim) with the content (or result) of referred block before execution. You'll also need the <code>:noweb yes</code> header argument.</p>
+<pre><code class="language-org">#+NAME: other-block
+#+begin_src swift
+  print(&quot;Hello 0&quot;)
+#+end_src
+
+#+RESULTS: other-block
+: Hello 0
+
+#+BEGIN_SRC swift :noweb yes
+  &lt;&lt;other-block&gt;&gt;
+  print(&quot;Hello 1&quot;)
+#+END_SRC
+
+#+RESULTS:
+: Hello 0
+: Hello 1
+</code></pre>
+<p>Since <code>&lt;&lt;other-block&gt;&gt;</code> is replaced with the content of said block, at execution time, the block is effectively equivalent to executing:</p>
+<pre><code class="language-swift">print(&quot;Hello 0&quot;)
+print(&quot;Hello 1&quot;)
+</code></pre>
+<p>Why is this so versatile? Org babel can include/execute all sorts of languages, so you can mix and match the result from one language and massage it to appear as the body of another block using the same (or different) language.</p>
+<p>I was recently asked <a href="https://github.com/xenodium/chatgpt-shell/issues/102">how to include the result from one babel block in another</a> using <a href="https://github.com/xenodium/chatgpt-shell/#chatgpt-org-babel">ob-chatgpt-shell</a>. While the initial question was looking for a solution involving variables, we can use noweb to achieve a similar goal.</p>
+<p>Note that in this case, I'll be using <code>&lt;&lt;hello()&gt;&gt;</code>, with <code>()</code>, to refer to <code>#+RESULTS:</code> rather than the source block itself.</p>
+<pre><code class="language-org">#+NAME: hello
+#+BEGIN_SRC chatgpt-shell
+Say hello in spanish
+#+END_SRC
+
+#+RESULTS: hello
+Hola
+
+#+BEGIN_SRC chatgpt-shell :noweb yes
+&lt;&lt;hello()&gt;&gt;
+What does the previous line say verbatim?
+#+END_SRC
+</code></pre>
+<p>Executing the block</p>
+<pre><code class="language-{.chatgpt-shell">&lt;&lt;hello()&gt;&gt;
+What does the previous line say verbatim?
+</code></pre>
+<p>Gives us</p>
+<pre><code class="language-{=org}">#+RESULTS:
+</code></pre>
+<pre><code class="language-example">The previous line says &quot;Hola&quot;.
+</code></pre>
+<p>On a similar note, I was asked if the results from a previous source block could be <a href="https://indieweb.social/@kickingvegas@sfba.social/110562099134297469">fed to a Swift Chart block</a> using <a href="https://github.com/xenodium/ob-swiftui">ob-swiftui</a>.</p>
+<p>While I'm new to <a href="https://developer.apple.com/documentation/Charts">Swift Charts</a>, I do love glueing things via Emacs lisp. I figured I could write a little elisp to generate random data and feed it to a SwiftUI block via <code>&lt;&lt;data()&gt;&gt;</code>. The result is pretty neat, based on Apple's <a href="https://developer.apple.com/documentation/charts/linemark">LineMark example</a>.</p>
+<p><img src="https://xenodium.github.io/images/noweb-more-glue-for-your-org-toolbox/data-chart.gif" alt=""></p>
+<pre><code class="language-org">#+NAME: data
+#+begin_src emacs-lisp :lexical no
+  (concat (mapconcat (lambda (n)
+                       (format &quot;MonthlyHoursOfSunshine(city: \&quot;Seattle\&quot;, month: %d, hoursOfSunshine: %d),&quot;
+                               n (random 100)))
+                     (number-sequence 1 20) &quot;\n&quot;)
+          &quot;\n&quot;
+          (mapconcat (lambda (n)
+                       (format &quot;MonthlyHoursOfSunshine(city: \&quot;Cupertino\&quot;, month: %d, hoursOfSunshine: %d),&quot;
+                               n (random 100)))
+                     (number-sequence 1 20) &quot;\n&quot;))
+#+end_src
+
+#+begin_src swiftui :results file :noweb yes
+  import Charts
+
+  struct MonthlyHoursOfSunshine: Identifiable {
+    var city: String
+    var date: Date
+    var hoursOfSunshine: Double
+    var id = UUID()
+
+    init(city: String, month: Int, hoursOfSunshine: Double) {
+      let calendar = Calendar.autoupdatingCurrent
+      self.city = city
+      self.date = calendar.date(from: DateComponents(year: 2020, month: month))!
+      self.hoursOfSunshine = hoursOfSunshine
+    }
+  }
+
+  struct ContentView: View {
+    var data: [MonthlyHoursOfSunshine] = [
+&lt;&lt;data()&gt;&gt;
+    ]
+    var body: some View {
+      Chart(data) {
+        LineMark(
+          x: .value(&quot;Month&quot;, $0.date),
+          y: .value(&quot;Hours of Sunshine&quot;, $0.hoursOfSunshine)
+        )
+        .foregroundStyle(by: .value(&quot;City&quot;, $0.city))
+      }
+      .frame(minWidth: 800, minHeight: 300)
+      .padding()
+      .colorScheme(.dark)
+    }
+  }
+#+end_src
+</code></pre>
+<p>While I've shown fairly basic usages of noweb, we can accomplish some nifty integrations. Check out the <a href="https://orgmode.org/manual/Noweb-Reference-Syntax.html">noweb reference syntax</a> for more examples and additional header arguments like <code>tangle</code>, <code>strip-tangle</code>, and others.</p>

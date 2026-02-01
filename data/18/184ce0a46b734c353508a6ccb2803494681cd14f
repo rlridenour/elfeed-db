@@ -1,0 +1,236 @@
+<div class="assumed_audience" id="org51679bf">
+<p>
+Assumed audience: I'm mostly writing these notes
+for myself, because I'd forgotten how this
+actually works. Maybe it might be interesting for
+people who also like identifying their posts or
+sketches and who use Nginx.
+</p>
+
+</div>
+
+<p>
+Since August 2022, I've been identifying sketches
+with YYYY-MM-DD-NN, where NN is a number derived
+from my journaling system. I used to use just
+YYYY-MM-DD and the title, but sometimes I renamed
+sketches. Then I used YYYY-MM-DDa (ex:
+<a href="https://sketches.sachachua.com/filename/2022-08-01f%20What%20changes%20with%20the%20Supernote%20%23supernote%20%23kaizen.png">2022-08-01f</a>). Sometimes optical character
+recognition had a hard time distinguishing my
+hand-drawn "d" from "a", though. Numbers were
+generally more reliable. And besides, that way,
+there's room for growth in case I have more than
+26 journal entries or sketches in a day. (Not that
+I've gone anywhere near that volume.)
+</p>
+
+<p>
+Anyway, I want to have short URLs like
+<a href="https://sachachua.com/2025-07-31-10">sachachua.com/2025-07-31-10</a> or
+<a href="https://sach.ac/2025-07-31-10">sach.ac/2025-07-31-10</a> go to a blog post if one's
+available, or just the sketch if I haven't written
+about it yet, like <a href="https://sach.ac/2025-01-16-01">sach.ac/2025-01-16-01</a>. Here's
+how I do it.
+</p>
+
+<p>
+To publish my site, I export HTML files from Org Mode and I use the 11ty static site generator to put them together in a blog.
+</p>
+
+<p>
+One of my 11ty files is <code>map.11ty.cjs</code>, which has the following code:
+</p>
+
+<details><summary>map.11ty.cjs</summary>
+<div class="org-src-container">
+<pre class="src src-js"><code>module.exports = <span class="org-keyword">class</span> AllPosts {
+  data() {
+    <span class="org-keyword">return</span> {
+      permalink: <span class="org-string">'/conf/nginx.map'</span>,
+      eleventyExcludeFromCollections: <span class="org-constant">true</span>
+    };
+  }
+  <span class="org-keyword">async</span> render (data) {
+    <span class="org-keyword">let</span> <span class="org-variable-name">list</span> = data.collections._posts;
+    <span class="org-keyword">let</span> <span class="org-variable-name">cats</span> = data.siteCategoriesWithParents;
+    <span class="org-keyword">let</span> <span class="org-variable-name">nested</span> = cats.filter(o =&gt; o.parent);
+    <span class="org-keyword">let</span> <span class="org-variable-name">hash</span> = {};
+    <span class="org-keyword">await</span> list.reduce(<span class="org-keyword">async</span> (prev, o) =&gt; {
+      <span class="org-keyword">await</span> prev;
+      <span class="org-keyword">if</span> (o.data?.zid) {
+        hash[o.data.zid] = o.url;
+      }
+      <span class="org-keyword">let</span> <span class="org-variable-name">matches</span> = (<span class="org-keyword">await</span> o.template.inputContent).matchAll(<span class="org-string">/{% +sketchFull +\"([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](-[0-9][0-9]|[a-z]))?/</span>g);
+      <span class="org-keyword">for</span> (<span class="org-keyword">const</span> <span class="org-variable-name">m</span> <span class="org-keyword">of</span> matches) {
+        <span class="org-keyword">if</span> (m[1] &amp;&amp; !hash[m[1]]) {
+          hash[m[1]] = o.url;
+        }
+      }
+    });
+    <span class="org-keyword">let</span> <span class="org-variable-name">byZIDs</span> = Object.entries(hash).map((o) =&gt; <span class="org-string">`/${o[0]} ${o[1]};\n`</span>).join(<span class="org-string">''</span>);
+    <span class="org-keyword">let</span> <span class="org-variable-name">byBlogID</span> = list.filter(o =&gt; o.data.id).map((o) =&gt; <span class="org-string">`/blog/p/${o.data.id} ${o.url};`</span>).join(<span class="org-string">"\n"</span>) + <span class="org-string">"\n"</span>;
+    <span class="org-keyword">let</span> <span class="org-variable-name">nestedCategories</span> = nested.map((o) =&gt; {
+      <span class="org-keyword">let</span> <span class="org-variable-name">slugPath</span> = o.parentPath.map((p) =&gt; p.slug).join(<span class="org-string">'/'</span>) + <span class="org-string">'/'</span> + o.slug;
+      <span class="org-keyword">let</span> <span class="org-variable-name">catPage</span> = <span class="org-string">`/blog/category/${slugPath} /blog/category/${o.slug};\n`</span>;
+      <span class="org-keyword">let</span> <span class="org-variable-name">catFeed</span> = <span class="org-string">`/blog/category/${slugPath}/feed/ /blog/category/${o.slug}/feed/;\n`</span>;
+      <span class="org-keyword">let</span> <span class="org-variable-name">catAtom</span> = <span class="org-string">`/blog/category/${slugPath}/feed/atom/ /blog/category/${o.slug}/feed/atom/;\n`</span>;
+      <span class="org-keyword">return</span> catAtom + catFeed + catPage;
+    }).join(<span class="org-string">''</span>);
+    <span class="org-keyword">const</span> <span class="org-variable-name">result</span> = byBlogID + nestedCategories + byZIDs;
+    <span class="org-keyword">return</span> result;
+  }
+};
+</code></pre>
+</div>
+
+</details>
+
+<p>
+The code analyzes each of my blog posts and looks
+for full-sized sketches. If it finds a full-size
+sketch, it writes a rule that redirects that ID to
+that blog post. This is what part of the resulting
+<code>nginx.map</code> looks like:
+</p>
+
+<pre class="example" id="org4d727a8">
+/2025-07-31-10 /blog/2025/08/monthly-review-july-2025/;
+/2025-08-04-01 /blog/2025/08/turning-42-life-as-a-41-year-old/;
+/2025-08-03-08 /blog/2025/08/turning-42-life-as-a-41-year-old/;
+/2025-08-31-01 /blog/2025/08/emacs-elevator-pitch-tinkerers-unite/;
+</pre>
+
+<p>
+In my Nginx web server config (<code>nginx.conf</code>), I have:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-conf"><code><span class="org-type">http</span> {
+  <span class="org-comment-delimiter"># </span><span class="org-comment">...</span>
+  include /etc/nginx/redirections.map;
+  <span class="org-comment-delimiter"># </span><span class="org-comment">...</span>
+}
+</code></pre>
+</div>
+
+
+<p>
+And that <code>redirections.map</code> uses the <a href="https://nginx.org/en/docs/http/ngx_http_map_module.html">map module</a> and looks like this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-conf"><code><span class="org-type">map $request_uri $new_uri</span> {
+   default <span class="org-string">""</span>;
+   include /var/www/static-blog/conf/nginx.map;
+   / /blog;
+   <span class="org-comment-delimiter"># </span><span class="org-comment">...</span>
+}
+</code></pre>
+</div>
+
+
+<p>
+Then in my Nginx site configuration, I redirect to that <code>$new_uri</code> if available. As a fallback, I also detect yyyy-mm-dd-nn URLs and redirect them to my sketchbook.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-conf"><code><span class="org-type">server</span> {
+   <span class="org-comment-delimiter"># </span><span class="org-comment">... other rules</span>
+   <span class="org-type">if ($new_uri)</span> {
+       return 302 $new_uri;
+   }
+   <span class="org-type">location ~ ^/([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9](a-z|-[0-9][0-9])?)$</span> {
+      return 302 https://sketches.sachachua.com/$1;
+   }
+}
+</code></pre>
+</div>
+
+
+<p>
+The Node app that runs sketches.sachachua.com searches by ID if it gets one. Here's the code in the Express router:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><code>router.get(<span class="org-string">'/:filename'</span>, controller.serveImagePageByFilename);
+</code></pre>
+</div>
+
+
+<p>
+which calls this controller:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><code>exports.serveImagePageByFilename = <span class="org-keyword">async</span> (req, res) =&gt; {
+  <span class="org-keyword">if</span> (req.params.filename) {
+    <span class="org-keyword">let</span> <span class="org-variable-name">f</span> = <span class="org-keyword">await</span> findImageByFilename(req.params.filename);
+    <span class="org-keyword">if</span> (f) {
+      renderSingle(req, res, f);
+    } <span class="org-keyword">else</span> {
+      res.sendStatus(404);
+    }
+  } <span class="org-keyword">else</span> {
+    res.sendStatus(404);
+  }
+};
+</code></pre>
+</div>
+
+
+<p>
+which uses this function:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><code><span class="org-keyword">const</span> <span class="org-variable-name">findImageByFilename</span> = (filename) =&gt; {
+  <span class="org-keyword">return</span> getSketches().then((sketches) =&gt; {
+    <span class="org-keyword">let</span> <span class="org-variable-name">id</span> = filename.match(<span class="org-string">/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]([a-z]|-[0-9][0-9])/</span>);
+    <span class="org-keyword">let</span> <span class="org-variable-name">m</span> = filename.match(<span class="org-string">/^[^#]+/</span>);
+    <span class="org-keyword">let</span> <span class="org-variable-name">file</span> = sketches.find((x) =&gt; path.parse(x.filename).name == filename);
+    <span class="org-keyword">if</span> (!file) {
+      file = sketches.find((x) =&gt; x.filename.startsWith(id));
+    }
+    <span class="org-keyword">if</span> (!file &amp;&amp; m) {
+      file = sketches.find((x) =&gt; x.filename.startsWith(m[0]));
+    }
+    <span class="org-keyword">if</span> (!file) {
+      file = sketches.find((x) =&gt; path.parse(x.filename).name.replace(<span class="org-string">' #.*'</span>) == filename);
+    }
+    <span class="org-keyword">if</span> (!file) {
+      file = sketches.find((x) =&gt; x.filename.startsWith(filename));
+    }
+    <span class="org-keyword">return</span> file;
+  });
+};
+</code></pre>
+</div>
+
+
+<p>
+(getSketches just reads the JSON I've saved.)
+</p>
+
+<p>
+So my workflow for a public sketch is:
+</p>
+
+<ol class="org-ol">
+<li>Draw the sketch.</li>
+<li>In my journaling system, write the title and tags for the sketch. Get an ID.</li>
+<li>Write the ID on the sketch.</li>
+<li>Export the sketch from the iPad as a JPEG.</li>
+<li>Wait for things to sync in the background.</li>
+<li>Process the sketch. I can use <code>my-image-rename-current-image-based-on-id</code> to rename it manually, or I can use <code>my-sketch-process</code> to recognize the ID and process the text. (<a href="https://sachachua.com/dotemacs/">My Emacs configuration</a>)</li>
+<li>Wait for things to sync in the background. In the meantime, edit the text version of the sketch.</li>
+<li>Reload my <a href="https://sketches.sachachua.com">public sketches</a>, which regenerates the sketches.json that lists all the sketches.</li>
+<li>Use <code>my-write-about-sketch</code> or <code>my-insert-sketch-and-text</code> to include the sketch and the text in a draft blog post. (<a href="https://sachachua.com/dotemacs/">My Emacs configuration</a>) Do my usual blogging process.</li>
+</ol>
+<div><a href="https://sachachua.com/blog/2025/08/nginx-maps-how-i-redirect-sketch-ids-to-blog-posts-or-sketches/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K40NNQ6T6Q59CHGM7A99BZ2R" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F08%2Fnginx-maps-how-i-redirect-sketch-ids-to-blog-posts-or-sketches%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

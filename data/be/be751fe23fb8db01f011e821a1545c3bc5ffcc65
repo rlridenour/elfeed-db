@@ -1,0 +1,101 @@
+<p><img src="https://xenodium.github.io/images/swiftui-desk-clock/everclock.gif" alt=""></p>
+<p>For time display, I've gone back and forth between an always-displayed macOS's menu bar to an auto-hide menu bar, and letting Emacs display the time. Neither felt great nor settled.</p>
+<p>With some tweaks, Paul Hudson's <a href="https://www.hackingwithswift.com/quick-start/swiftui/how-to-use-a-timer-with-swiftui">How to use a timer with SwiftUI</a>, led me to build a simple desk clock. Ok, let's not get fancy. It's really just an always-on-top floating window, showing a swiftUI label, but hey I like the minimalist feel ;)</p>
+<p>Let's see if it sticks around or it gets in the way… Either way, here's standalone snippet. Run with <em>swift deskclock.swift</em>.</p>
+<pre><code class="language-swift">import Cocoa
+import SwiftUI
+
+let application = NSApplication.shared
+let appDelegate = AppDelegate()
+NSApp.setActivationPolicy(.regular)
+application.delegate = appDelegate
+application.mainMenu = NSMenu.makeMenu()
+application.run()
+
+struct ClockView: View {
+  @State var time = &quot;--:--&quot;
+
+  let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+  var body: some View {
+    GeometryReader { geometry in
+
+      VStack {
+        Text(time)
+          .onReceive(timer) { input in
+            let formatter = DateFormatter()
+            formatter.dateFormat = &quot;HH:mm&quot;
+            time = formatter.string(from: input)
+          }
+          .font(.system(size: 40))
+          .padding()
+      }.frame(width: geometry.size.width, height: geometry.size.height)
+        .background(Color.black)
+        .cornerRadius(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+  }
+}
+
+extension NSWindow {
+  static func makeWindow() -&gt; NSWindow {
+    let window = NSWindow(
+      contentRect: NSRect.makeDefault(),
+      styleMask: [.closable, .miniaturizable, .resizable, .fullSizeContentView],
+      backing: .buffered, defer: false)
+    window.level = .floating
+    window.setFrameAutosaveName(&quot;everclock&quot;)
+    window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenPrimary]
+    window.makeKeyAndOrderFront(nil)
+    window.isMovableByWindowBackground = true
+    window.titleVisibility = .hidden
+    window.backgroundColor = .clear
+    return window
+  }
+}
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+  var window = NSWindow.makeWindow()
+  var hostingView: NSView?
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    hostingView = NSHostingView(rootView: ClockView())
+    window.contentView = hostingView
+    NSApp.activate(ignoringOtherApps: true)
+  }
+}
+
+extension NSRect {
+  static func makeDefault() -&gt; NSRect {
+    let initialMargin = CGFloat(60)
+    let fallback = NSRect(x: 0, y: 0, width: 100, height: 150)
+
+    guard let screenFrame = NSScreen.main?.frame else {
+      return fallback
+    }
+
+    return NSRect(
+      x: screenFrame.maxX - fallback.width - initialMargin,
+      y: screenFrame.maxY - fallback.height - initialMargin,
+      width: fallback.width, height: fallback.height)
+  }
+}
+
+extension NSMenu {
+  static func makeMenu() -&gt; NSMenu {
+    let appMenu = NSMenuItem()
+    appMenu.submenu = NSMenu()
+
+    appMenu.submenu?.addItem(
+      NSMenuItem(
+        title: &quot;Quit \(ProcessInfo.processInfo.processName)&quot;,
+        action: #selector(NSApplication.terminate(_:)), keyEquivalent: &quot;q&quot;
+      ))
+
+    let mainMenu = NSMenu(title: &quot;Main Menu&quot;)
+    mainMenu.addItem(appMenu)
+    return mainMenu
+  }
+}
+
+</code></pre>

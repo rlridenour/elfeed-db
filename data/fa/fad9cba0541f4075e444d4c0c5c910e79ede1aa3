@@ -1,0 +1,83 @@
+ 
+          <p>Error Prone is <a href="https://errorprone.info/">Yet Another Programming Cog</a> invented by Google to improve their Java build system. I&rsquo;ve used the multi-language <a href="https://pmd.github.io/">PMD</a> static code analyser before (don&rsquo;t shoot the messenger!), but Error Prone takes it a step further: it hooks itself into your build system, converting programming errors as compile-time errors. Great, right, detecting errors earlier, without having to kick an external process like PMD into gear?</p>
+<p>Until you&rsquo;re forced to deal with hundreds of errors after enabling it: sure. Expect a world of hurt when your intention is to switch to Error Prone just to improve code linting, especially for big existing code bases. Luckily, there&rsquo;s a way to gradually tighten the screw: first let it generate a bunch of warnings and only when you&rsquo;ve tackled most of them, turn on <em>Error! Halt!</em> mode.</p>
+<p>When using Gradle with multiple subprojects, things get a bit more convoluted. This mainly serves as a recollection of things that finally worked&mdash;feeling of relief included. The root <code>build.gradle</code> file:</p>
+<div class="highlight"><pre tabindex="0" style="color:#d8dee9;background-color:#2e3440;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-groovy" data-lang="groovy"><span style="display:flex;"><span>plugins <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>  id <span style="color:#a3be8c">&#39;net.ltgt.errorprone&#39;</span> version <span style="color:#a3be8c">&#39;4.3.0&#39;</span> apply <span style="color:#81a1c1;font-weight:bold">false</span>
+</span></span><span style="display:flex;"><span><span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>configure<span style="color:#81a1c1">(</span>subprojects<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">findAll</span> <span style="color:#81a1c1">{</span> <span style="color:#81a1c1">![</span><span style="color:#a3be8c">&#39;platform&#39;</span><span style="color:#81a1c1">].</span><span style="color:#8fbcbb">contains</span><span style="color:#81a1c1">(</span>it<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">name</span><span style="color:#81a1c1">)</span> <span style="color:#81a1c1">})</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>    apply <span style="color:#8fbcbb">plugin:</span> <span style="color:#a3be8c">&#39;java&#39;</span>
+</span></span><span style="display:flex;"><span>    apply <span style="color:#8fbcbb">plugin:</span> <span style="color:#a3be8c">&#39;net.ltgt.errorprone&#39;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    tasks<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">withType</span><span style="color:#81a1c1">(</span>JavaCompile<span style="color:#81a1c1">).</span><span style="color:#8fbcbb">configureEach</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>        options<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">errorprone</span><span style="color:#81a1c1">.</span><span style="color:#8fbcbb">enabled</span> <span style="color:#81a1c1">=</span> <span style="color:#81a1c1;font-weight:bold">true</span> <span style="color:#616e87;font-style:italic">// feel free to switch
+</span></span></span><span style="display:flex;"><span><span style="color:#616e87;font-style:italic"></span>        options<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">errorprone</span><span style="color:#81a1c1">.</span><span style="color:#8fbcbb">disableWarningsInGeneratedCode</span> <span style="color:#81a1c1">=</span> <span style="color:#81a1c1;font-weight:bold">true</span>
+</span></span><span style="display:flex;"><span>        options<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">errorprone</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>            disable<span style="color:#81a1c1">(</span><span style="color:#a3be8c">&#34;YourIrritatingErrorHere&#34;</span><span style="color:#81a1c1">)</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    dependencies <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>        errorprone <span style="color:#a3be8c">&#39;com.google.errorprone:error_prone_core:2.43.0&#39;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span><span style="color:#81a1c1">}</span>
+</span></span></code></pre></div><p>The first time you enable it, you&rsquo;ll notice a lot of nonsensical errors popping up: that&rsquo;s what that <code>disable()</code> is for. We currently have the following errors disabled:</p>
+<ul>
+<li><code>DoNotCallSuggester</code>&mdash;that&rsquo;s a Google-specific one? I don&rsquo;t even agree with this thing being here&hellip;</li>
+<li><code>CanonicalDuration</code>&mdash;we&rsquo;d rather have <code>ofHours()</code> on every line next to each other</li>
+<li><code>JavaDurationGetSecondsToToSeconds</code>&mdash;we can&rsquo;t update to JDK9 just yet</li>
+<li><code>StringCaseLocaleUsage</code>&mdash;we&rsquo;re never going to run into this issue</li>
+<li><code>TypeParameterUnusedInFormals</code>&mdash;good luck with fixing that if you heavily rely on reflection</li>
+</ul>
+<p>Error Prone&rsquo;s powerful extendability resulted in Uber picking up where Google left off by releasing <a href="https://github.com/uber/NullAway">NullAway</a>, a plug-in that does annotation-based null checking fully supporting the <a href="https://jspecify.dev/">JSpecify standard</a>. That is, it checks for stupid stuff like:</p>
+<div class="highlight"><pre tabindex="0" style="color:#d8dee9;background-color:#2e3440;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-java" data-lang="java"><span style="display:flex;"><span><span style="color:#81a1c1">void</span> <span style="color:#88c0d0">sayHi</span><span style="color:#eceff4">(</span><span style="color:#d08770">@Nullable</span> Person person<span style="color:#eceff4">)</span> <span style="color:#eceff4">{</span>
+</span></span><span style="display:flex;"><span>  System<span style="color:#eceff4">.</span><span style="color:#8fbcbb">out</span><span style="color:#eceff4">.</span><span style="color:#8fbcbb">println</span><span style="color:#eceff4">(</span><span style="color:#a3be8c">&#34;Hello, &#34;</span> <span style="color:#81a1c1">+</span> person<span style="color:#eceff4">.</span><span style="color:#8fbcbb">getName</span><span style="color:#eceff4">());</span> <span style="color:#616e87;font-style:italic">// potential BOOM.</span>
+</span></span><span style="display:flex;"><span><span style="color:#eceff4">}</span>
+</span></span></code></pre></div><p>JSpecify is a good attempt at unifying these <code>@Nullable</code> annotations&mdash;last time I checked, IntelliJ suggested auto-importing them from five different packages&mdash;but the biggest problem is that you&rsquo;ll have to dutifully annotate where needed yourself. There are <a href="https://docs.openrewrite.org/recipes/java/jspecify">OpenRewrite JSpecify recipes</a> available to automatically add them but that won&rsquo;t even cover 20% of the cases, as when it comes to manual if null checks and the use of <code>Optional&lt;&gt;</code>, NullAway is just too stupid to understand what your intentions are.</p>
+<p>NullAway assumes non-null by default. This is important, because in Java object terminology, everything is nullable by default. You won&rsquo;t need to add a lot of <code>@NonNull</code> annotations, but adding <code>@Nullable</code> has a significant ripple effect: if that&rsquo;s nullable, then the object calling this object might also be, which means I should add this annotation here and here and here and here and here and&hellip; Uh oh.</p>
+<p>After 100 compile errors, Gradle gives up. I fixed 100 errors, recompiled, and 100 more appeared. This fun exercise lasted almost an entire day until I was the one giving up. The potential commit touched hundreds of files and added more bloat to an already bloated (it&rsquo;s Java, remember) code base I&rsquo;ve ever seen. Needless to say, we&rsquo;re currently evaluating our options here.</p>
+<p>I&rsquo;ve also had quite a bit of trouble picking the right combination of plug-ins for Gradle to get this thing working. In case you&rsquo;d like to give it a go, extend the above configuration with:</p>
+<div class="highlight"><pre tabindex="0" style="color:#d8dee9;background-color:#2e3440;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-gradle" data-lang="gradle"><span style="display:flex;"><span>plugins <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>  id <span style="color:#a3be8c">&#39;net.ltgt.nullaway&#39;</span> version <span style="color:#a3be8c">&#39;2.3.0&#39;</span> apply <span style="color:#81a1c1;font-weight:bold">false</span>
+</span></span><span style="display:flex;"><span><span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>configure<span style="color:#81a1c1">(</span>subprojects<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">findAll</span> <span style="color:#81a1c1">{</span> <span style="color:#81a1c1">![</span><span style="color:#a3be8c">&#39;platform&#39;</span><span style="color:#81a1c1">].</span><span style="color:#8fbcbb">contains</span><span style="color:#81a1c1">(</span>it<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">name</span><span style="color:#81a1c1">)</span> <span style="color:#81a1c1">})</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>    apply <span style="color:#8fbcbb">plugin:</span> <span style="color:#a3be8c">&#39;net.ltgt.nullaway&#39;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    tasks<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">withType</span><span style="color:#81a1c1">(</span>JavaCompile<span style="color:#81a1c1">).</span><span style="color:#8fbcbb">configureEach</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>        options<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">errorprone</span><span style="color:#81a1c1">.</span><span style="color:#8fbcbb">nullaway</span> <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>            error<span style="color:#81a1c1">()</span>
+</span></span><span style="display:flex;"><span>            annotatedPackages<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">add</span><span style="color:#81a1c1">(</span><span style="color:#a3be8c">&#34;org.myproject&#34;</span><span style="color:#81a1c1">)</span>
+</span></span><span style="display:flex;"><span>            externalInitAnnotations<span style="color:#81a1c1">.</span><span style="color:#8fbcbb">add</span><span style="color:#81a1c1">(</span><span style="color:#a3be8c">&#39;org.myproject.annotations.UsedForSerialization&#39;</span><span style="color:#81a1c1">)</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#616e87;font-style:italic">// ...
+</span></span></span><span style="display:flex;"><span><span style="color:#616e87;font-style:italic"></span>    <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>    dependencies <span style="color:#81a1c1">{</span>
+</span></span><span style="display:flex;"><span>        compileOnly <span style="color:#a3be8c">&#39;org.jspecify:jspecify&#39;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>        errorprone <span style="color:#a3be8c">&#39;com.google.errorprone:error_prone_core:2.43.0&#39;</span>
+</span></span><span style="display:flex;"><span>        errorprone <span style="color:#a3be8c">&#39;com.uber.nullaway:nullaway:0.12.12&#39;</span>
+</span></span><span style="display:flex;"><span>        annotationProcessor <span style="color:#a3be8c">&#39;com.google.errorprone:error_prone_core:2.43.0&#39;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#81a1c1">}</span>
+</span></span><span style="display:flex;"><span><span style="color:#81a1c1">}</span>
+</span></span></code></pre></div><p>You have to point NullAway to the base package path (<code>org.myproject</code>) otherwise it can&rsquo;t do its thing. Note the <code>externalInitAnnotations</code> configuration: we had a lot of POJOs with private constructors that set <code>final</code> fields to <code>null</code> while they actually cannot be null because of serialisation frameworks like Jackson/Gson. Annotate these with <code>@UsedForSerialization</code> and NullAway will ignore them.</p>
+<p>If you thought fixing all Error Prone errors was painful, wait until you enable NullAway. Every single <code>= null;</code> statement needs its <code>@Nullable</code> annotation. OpenRewrite can help, but up to a point, as for more complicated assignments you&rsquo;ll need to decide for yourself what to do.</p>
+<p>Not that the exercise didn&rsquo;t bear any fruit. I&rsquo;ve spotted more than a few potential <code>NullPointerException</code> mistakes we made in our code base this way, and it&rsquo;s fun to try and minimize nullability. The best option of course is to rewrite the whole thing in Kotlin and forget about the <code>?</code> suffix. All puns aside, I can see how Error Prone and its plug-ins can help catch bugs earlier, but it&rsquo;s going to come at a cost: that of added annotation bloat. You probably don&rsquo;t want to globally disable too many errors so <code>@SuppressWarnings</code> is also going to pop up much more often.</p>
+<p>A difficult team decision to make indeed.</p>
+
+
+          
+          <p>
+            Related topics: /
+                  <a href="https://brainbaking.com/tags/java">java</a> /</span>
+          </p>
+          
+          <p>
+            By <a href="/about">Wouter Groeneveld</a> on 25 November 2025.&nbsp;
+            <a href="mailto:hifromrss@brainbaking.com?subject=Re: Rendering%20Your%20Java%20Code%20Less%20Error%20Prone">Reply via email</a>.
+          </p>
+          
+      

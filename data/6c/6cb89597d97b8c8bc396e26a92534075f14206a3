@@ -1,0 +1,77 @@
+<p>While packages like <code>orderless</code> provide flexible “any word, any order” completion, sometimes you want something lightweight and easy to tweak (well I do anyway). In this post, I’ll show you how to implement a simple orderless-like completion style using only Emacs Lisp, and how to integrate it smoothly into your workflow.</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20250604085817-emacs--Building-Your-Own-Orderless-Style-Completion-in-Emacs-Lisp.jpg" width="100%">
+</figure>
+
+<p>Traditional completion in Emacs often matches prefixes or substrings, but sometimes you want to type a few key parts of a word, in any order, and jump straight to your target. That’s what <code>orderless</code> and similar completion styles allow. But what if you want to write your own, or experiment with the logic?, well I will show you how&hellip;</p>
+<p>Let’s walk through the logic:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun simple-orderless-completion (<span style="color:#a6e22e">string</span> table pred <span style="color:#a6e22e">point</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Enhanced orderless completion with better partial matching.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let* ((words (split-string <span style="color:#a6e22e">string</span> <span style="color:#e6db74">&#34;[-, ]+&#34;</span>))
+</span></span><span style="display:flex;"><span>         (patterns (<span style="color:#a6e22e">mapcar</span> (lambda (word)
+</span></span><span style="display:flex;"><span>                             (<span style="color:#a6e22e">concat</span> <span style="color:#e6db74">&#34;\\b.*&#34;</span> (<span style="color:#a6e22e">regexp-quote</span> word) <span style="color:#e6db74">&#34;.*&#34;</span>))
+</span></span><span style="display:flex;"><span>                           words))
+</span></span><span style="display:flex;"><span>         (full-regexp (<span style="color:#a6e22e">mapconcat</span> <span style="color:#e6db74">&#39;identity</span> patterns <span style="color:#e6db74">&#34;&#34;</span>)))
+</span></span><span style="display:flex;"><span>    (if (string-empty-p <span style="color:#a6e22e">string</span>)
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">all-completions</span> <span style="color:#e6db74">&#34;&#34;</span> table pred)
+</span></span><span style="display:flex;"><span>      (cl-remove-if-not
+</span></span><span style="display:flex;"><span>       (lambda (candidate)
+</span></span><span style="display:flex;"><span>         (let ((case-fold-search completion-ignore-case))
+</span></span><span style="display:flex;"><span>           (and (cl-every (lambda (word)
+</span></span><span style="display:flex;"><span>                            (string-match-p
+</span></span><span style="display:flex;"><span>                             (<span style="color:#a6e22e">concat</span> <span style="color:#e6db74">&#34;\\b.*&#34;</span> (<span style="color:#a6e22e">regexp-quote</span> word))
+</span></span><span style="display:flex;"><span>                             candidate))
+</span></span><span style="display:flex;"><span>                          words)
+</span></span><span style="display:flex;"><span>                <span style="color:#66d9ef">t</span>)))
+</span></span><span style="display:flex;"><span>       (<span style="color:#a6e22e">all-completions</span> <span style="color:#e6db74">&#34;&#34;</span> table pred)))))
+</span></span></code></pre></div><h2 id="what-s-happening-here"><strong>What’s Happening Here?</strong></h2>
+<ul>
+<li>
+<p><strong>Word Splitting:</strong></p>
+<p>The user&rsquo;s input (a string) is split into words on spaces, dashes, or commas. This produces a list of &ldquo;search terms.&rdquo; This means that, in the minibuffer, the word separator can be any of these characters. I was initially really faffing around and struggling to work out how to insert a space between words in the minibuffer, as it seems to perform some form of completion. However, I eventually figured out that <code>M-SPC</code> actually inserts a space, allowing you to separate words. I use <code>fido-mode</code>, so I&rsquo;m not sure if this is the same for other minibuffer completion systems.</p>
+<p>After initially adding in the comma separator however I found that I actually prefer it, it is easier to access and I don&rsquo;t think any keywords, functions e.t.c will typically contain a comma?</p>
+</li>
+<li>
+<p><strong>Pattern Construction:</strong></p>
+<p>For each word, a regex pattern is constructed: <code>\\b.*WORD.*</code>.
+This means: “find a word boundary, followed by any characters, then the word, then anything else.” This is a bit looser than strict word matching, and you can tune it.</p>
+</li>
+<li>
+<p><strong>Candidate Filtering:</strong></p>
+<p>We generate all possible completions with <code>all-completions</code> and then filter them down. For a candidate to match, all the search terms (words) must appear somewhere, in any order.</p>
+</li>
+<li>
+<p><strong>Case Sensitivity:</strong></p>
+<p>Matching respects <code>completion-ignore-case</code>, so your results will be case-insensitive if you want of course.</p>
+</li>
+</ul>
+<h2 id="registering-and-using-the-style"><strong>Registering and Using the Style</strong></h2>
+<p>To make Emacs aware of your new completion style, add it to <code>completion-styles-alist</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(add-to-list <span style="color:#e6db74">&#39;completion-styles-alist</span>
+</span></span><span style="display:flex;"><span>             <span style="color:#f92672">&#39;</span>(simple-orderless simple-orderless-completion
+</span></span><span style="display:flex;"><span>                                simple-orderless-completion))
+</span></span></code></pre></div><h2 id="contextual-use-minibuffer-only"><strong>Contextual Use: Minibuffer Only</strong></h2>
+<p>You might not want this style everywhere (which I suspect is likely). For example, in file completion you might prefer strict prefix matching. So, let’s activate it only in the minibuffer:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun setup-minibuffer-completion-styles ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Use orderless completion in minibuffer, regular completion elsewhere.&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#75715e">;; For minibuffer: use orderless first, then fallback to flex and basic</span>
+</span></span><span style="display:flex;"><span>  (setq-local completion-styles <span style="color:#f92672">&#39;</span>(basic simple-orderless flex <span style="color:#a6e22e">substring</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Hook into minibuffer setup</span>
+</span></span><span style="display:flex;"><span>(add-hook <span style="color:#e6db74">&#39;minibuffer-setup-hook</span> <span style="color:#a6e22e">#&#39;</span>setup-minibuffer-completion-styles)
+</span></span></code></pre></div><h2 id="tweaking-and-extending"><strong>Tweaking and Extending</strong></h2>
+<ul>
+<li>
+<p><strong>Pattern Tuning:</strong></p>
+<p>The regexes can be made stricter or looser (e.g., remove <code>\\b</code> for more “fuzzy” matching).</p>
+</li>
+<li>
+<p><strong>Word Separators:</strong></p>
+<p>You can split on other characters if your workflow uses different delimiters.</p>
+</li>
+<li>
+<p><strong>Order of Styles:</strong></p>
+<p>Adjust the order in <code>completion-styles</code> to prefer your custom style over others. I found that if the <code>simple-orderless</code> style was listed first, pressing Tab to bring up the completions buffer doesn&rsquo;t work, which I like to use sometimes, so that is why <code>basic</code> is first.</p>
+</li>
+</ul>
+<h3 id="conclusion"><strong>Conclusion</strong></h3>
+<p>With just a handful of lines, you can build your own orderless-like completion style, giving you full control and transparency. This is a great starting point for experimenting with more advanced completion logic, and a good illustration of the power of Emacs’ built-in completion framework!</p>

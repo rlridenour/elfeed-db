@@ -1,0 +1,34 @@
+<p><img src="https://xenodium.github.io/images/emacs-search-hackingwithswiftcom/hws.gif" alt=""></p>
+<p><a href="https://twitter.com/twostraws">Paul Hudson</a> authors excellent Swift material at <a href="https://www.hackingwithswift.com/">hackingwithswift.com</a>. I regularly land on the site while searching for snippets from the browser. I was wondering if I could search for snippets directly from Emacs.</p>
+<p>Turns out, hackingwithswift uses a JSON HTTP request for querying code examples. With this in mind, we can use <em>ivy-read</em> like Oleh Krehel's <a href="https://github.com/abo-abo/swiper/blob/8d840b2e8680e2768edb794c9ccecf975f6ba4cf/counsel.el#L6680">counsel-search</a> and search for Swift snippets from our favorite editor:</p>
+<pre><code class="language-{.commonlisp">(require 'request)
+(require 'json)
+
+(defun ar/counsel-hacking-with-swift-search ()
+  &quot;Ivy interface to query hackingwithswift.com.&quot;
+  (interactive)
+  (ivy-read &quot;hacking with swift: &quot;
+            (lambda (input)
+              (or
+               (ivy-more-chars)
+               (let ((request-curl-options (list &quot;-H&quot; (string-trim (url-http-user-agent-string)))))
+                 (request
+                   &quot;https://www.hackingwithswift.com/example-code/search&quot;
+                   :type &quot;GET&quot;
+                   :params (list
+                            (cons &quot;search&quot; input))
+                   :parser 'json-read
+                   :success (cl-function
+                             (lambda (&amp;key data &amp;allow-other-keys)
+                               (ivy-update-candidates
+                                (mapcar (lambda (item)
+                                          (let-alist item
+                                            (propertize .title 'url .url)))
+                                        data)))))
+                 0)))
+            :action (lambda (selection)
+                      (browse-url (concat &quot;https://www.hackingwithswift.com&quot;
+                                          (get-text-property 0 'url selection))))
+            :dynamic-collection t
+            :caller 'ar/counsel-hacking-with-swift-search))
+</code></pre>

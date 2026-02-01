@@ -1,0 +1,73 @@
+<p>I was recently browsing through an old archive of holiday photos (from <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> of course). I wanted to know where the photo was taken, which got me interested in extracting <a href="https://en.wikipedia.org/wiki/Exif">Exif</a> metadata.</p>
+<p>Luckily the <a href="https://exiftool.org/">exiftool</a> command line utility does the heavy lifting when it comes to extracting metadata. Since I want it quickly accessible from Emacs (in either dired or current buffer), a tiny elisp snippet would give me just that (via <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>).</p>
+<p><img src="https://xenodium.github.io/images/hey-emacs-where-did-i-take-that-photo/dwim-exif_x1.3.webp" alt=""></p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-image-exif-metadata ()
+  &quot;View EXIF metadata in image(s).&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;View EXIF&quot;
+   &quot;exiftool '&lt;&lt;f&gt;&gt;'&quot;
+   :utils &quot;exiftool&quot;))
+</code></pre>
+<p>The above makes all Exif metadata easily accessible, including the photo's GPS coordinates. But I haven’t quite answered the original question. Where did I take the photo? I now know the coordinates, but I can’t realistically deduce neither the country nor city unless I <em>manually</em> feed these values to a reverse geocoding service like <a href="https://www.openstreetmap.org/">OpenStreetMap</a>. <em>Manually</em> you say? This is Emacs, so we can throw more elisp glue at the problem, mixed in with a little shell script, and presto! We've now automated the process of extracting metadata, reverse geocoding, and displaying the photo's address in the minibuffer. Pretty nifty.</p>
+<p><img src="https://xenodium.github.io/images/hey-emacs-where-did-i-take-that-photo/minibuffer-address_x1.3.webp" alt=""></p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-image-reverse-geocode-location ()
+  &quot;Reverse geocode image(s) location.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Reverse geocode&quot;
+   &quot;lat=\&quot;$(exiftool -csv -n -gpslatitude -gpslongitude '&lt;&lt;f&gt;&gt;' | tail -n 1 | cut -s -d',' -f2-2)\&quot;
+    if [ -z \&quot;$lat\&quot; ]; then
+      echo \&quot;no latitude\&quot;
+      exit 1
+    fi
+    lon=\&quot;$(exiftool -csv -n -gpslatitude -gpslongitude '&lt;&lt;f&gt;&gt;' | tail -n 1 | cut -s -d',' -f3-3)\&quot;
+    if [ -z \&quot;$lon\&quot; ]; then
+      echo \&quot;no longitude\&quot;
+      exit 1
+    fi
+    json=$(curl \&quot;https://nominatim.openstreetmap.org/reverse?format=json&amp;accept-language=en&amp;lat=${lat}&amp;lon=${lon}&amp;zoom=18&amp;addressdetails=1\&quot;)
+    echo \&quot;json_start $json json_end\&quot;&quot;
+   :utils '(&quot;exiftool&quot; &quot;curl&quot;)
+   :silent-success t
+   :error-autofocus t
+   :on-completion
+   (lambda (buffer)
+     (with-current-buffer buffer
+       (goto-char (point-min))
+       (let ((matches '()))
+         (while (re-search-forward &quot;^json_start\\(.*?\\)json_end&quot; nil t)
+           (push (match-string 1) matches))
+         (message &quot;%s&quot; (string-join (seq-map (lambda (json)
+                                               (map-elt (json-parse-string json :object-type 'alist) 'display_name))
+                                             matches)
+                                    &quot;\n&quot;)))
+       (kill-buffer buffer)))))
+</code></pre>
+<p>Displaying the photo's address in the minibuffer is indeed pretty nifty, but what if I’d like to drop a pin in a map for further exploration? This is actually simpler, as there's no need for reverse geocoding. Following a similar recipe, we merely construct an <a href="https://www.openstreetmap.org/">OpenStreetMap</a> URL and open it in our favourite browser.</p>
+<p><img src="https://xenodium.github.io/images/hey-emacs-where-did-i-take-that-photo/photo-map_x1.4.webp" alt=""></p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-image-browse-location ()
+  &quot;Open image(s) location in browser.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Browse location&quot;
+   &quot;lat=\&quot;$(exiftool -csv -n -gpslatitude -gpslongitude '&lt;&lt;f&gt;&gt;' | tail -n 1 | cut -s -d',' -f2-2)\&quot;
+    if [ -z \&quot;$lat\&quot; ]; then
+      echo \&quot;no latitude\&quot;
+      exit 1
+    fi
+    lon=\&quot;$(exiftool -csv -n -gpslatitude -gpslongitude '&lt;&lt;f&gt;&gt;' | tail -n 1 | cut -s -d',' -f3-3)\&quot;
+    if [ -z \&quot;$lon\&quot; ]; then
+      echo \&quot;no longitude\&quot;
+      exit 1
+    fi
+    if [[ $OSTYPE == darwin* ]]; then
+      open \&quot;http://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}&amp;layers=C\&quot;
+    else
+      xdg-open \&quot;http://www.openstreetmap.org/?mlat=${lat}&amp;mlon=${lon}&amp;layers=C\&quot;
+    fi&quot;
+   :utils &quot;exiftool&quot;
+   :error-autofocus t
+   :silent-success t))
+</code></pre>
+<p>Got suggestions? Improvements? All three functions are now included in <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-commands.el">dwim-shell-commands.el</a> as part of <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>. Pull requests totally welcome ;)</p>

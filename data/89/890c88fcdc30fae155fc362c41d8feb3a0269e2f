@@ -1,0 +1,207 @@
+<p>While still finding my footing making Emacs videos, today I'm sharing my second video.</p>
+<p><a href="https://www.youtube.com/watch?v=qTumnhiE1c8">Bending Emacs Episode 02: From vanilla to your flavor</a></p>
+<p>The video is a little longer than I intended at 14:37, so plan accordingly.</p>
+<p>In this video, I show some of my favorite UI customizations, with additional tips and tricks along the way. Like my first video, I'm hoping you find unexpected goodies in there despite being familiar with the general topic.</p>
+<center>
+  <a href="https://www.youtube.com/watch?v=qTumnhiE1c8" class="overlayed">
+    <!-- Using hqdefault.jpg as maxresdefault.jpg doesn't work for older videos. -->
+    <img class="preview" src="https://img.youtube.com/vi/qTumnhiE1c8/hqdefault.jpg" alt="">
+    <svg class="center-absolute" version="1.1" viewBox="0 0 68 48" width="65px" alt="play button">
+      <path d="M66.52,7.74c-0.78-2.93-2.49-5.41-5.42-6.19C55.79,.13,34,0,34,0S12.21,.13,6.9,1.55 C3.97,2.33,2.27,4.81,1.48,7.74C0.06,13.05,0,24,0,24s0.06,10.95,1.48,16.26c0.78,2.93,2.49,5.41,5.42,6.19 C12.21,47.87,34,48,34,48s21.79-0.13,27.1-1.55c2.93-0.78,4.64-3.26,5.42-6.19C67.94,34.95,68,24,68,24S67.94,13.05,66.52,7.74z" fill="#2d2b2f"></path>
+      <path d="M 45,24 27,14 27,34" fill="#fff"></path>
+    </svg>
+  </a>
+</center>
+<p>Read on for all supporting material…</p>
+<h2>Evaluating elisp</h2>
+<p>Showcased a handful of ways to evaluate elisp.</p>
+<ul>
+<li>
+<p>M-x eval-last-sexp</p>
+</li>
+<li>
+<p>M-x eval-expression</p>
+</li>
+<li>
+<p>M-x eval-buffer</p>
+</li>
+<li>
+<p>M-x ielm</p>
+</li>
+<li>
+<p>M-x org-ctrl-c-ctrl-c (Evaluate org source blocks)</p>
+<p>Sample snippets:</p>
+<pre><code class="language-{.commonlisp">(set-face-attribute 'default nil :background &quot;DarkSlateGray&quot;)
+</code></pre>
+<pre><code class="language-{.commonlisp">(set-face-attribute 'default nil :background &quot;#212121&quot;)
+</code></pre>
+</li>
+</ul>
+<h2>Launching a separate Emacs instance</h2>
+<pre><code class="language-{.bash">path/to/emacs/nextstep/Emacs.app/Contents/MacOS/Emacs -Q --init-directory /tmp/secondary/.emacs.d --load path/to/other-emacs.el
+</code></pre>
+<p>other-emacs.el (minimal, almost vanilla setup):</p>
+<pre><code class="language-{.commonlisp">; -*- lexical-binding: t; -*-
+
+(server-force-delete)
+(make-directory &quot;/tmp/secondary/&quot; t)
+(setq server-socket-dir &quot;/tmp/secondary/&quot;)
+(setq server-name &quot;emacs-server&quot;)
+(server-start)
+
+(setq package-archives
+      '((&quot;melpa&quot; . &quot;https://melpa.org/packages/&quot;)))
+
+(setq package-archive-priorities
+      '((&quot;melpa&quot; .  4)))
+
+(require 'package)
+(package-initialize)
+(mapc #'package-delete (mapcar #'cadr package-alist))
+
+(add-to-list 'custom-theme-load-path &quot;path/to/emacs-materialized-theme&quot;)
+</code></pre>
+<h2>with-other-emacs macro (ie. evaluate elisp elsewhere)</h2>
+<pre><code class="language-{.commonlisp">(defmacro with-other-emacs (&amp;rest body)
+  &quot;Evaluate BODY in the current buffer of the other Emacs instance.&quot;
+  `(call-process &quot;emacsclient&quot; nil nil nil
+                 &quot;--socket-name=/tmp/secondary/emacs-server&quot;
+                 &quot;--eval&quot;
+                 (prin1-to-string
+                  '(with-current-buffer (window-buffer (selected-window))
+                     ,@body))))
+</code></pre>
+<h2>Looking up functions</h2>
+<ul>
+<li>M-x describe-function (built-in).</li>
+<li>M-x helpful-callable (via third-party <a href="https://github.com/Wilfred/helpful">helpful</a> package).</li>
+</ul>
+<h2>Advicing org-babel-expand-body:emacs-lisp</h2>
+<p>We want to extend source blocks to accept the <code>:other-emacs</code> header argument as follows:</p>
+<pre><code class="language-org">#+begin_src emacs-lisp :other-emacs t
+  (message (propertize &quot;Hello again twin&quot; 'face '(:height 6.0)))
+#+end_src
+</code></pre>
+<p>So we advice <code>org-babel-expand-body:emacs-lisp</code>:</p>
+<pre><code class="language-{.commonlisp">(defun adviced:org-babel-expand-body:emacs-lisp:other-emacs (orig-fn body header-args)
+  (if (map-elt header-args :other-emacs)
+      (format &quot;(with-other-emacs %s)&quot; (funcall orig-fn body header-args))
+    (funcall orig-fn body header-args)))
+
+(advice-add #'org-babel-expand-body:emacs-lisp
+            :around #'adviced:org-babel-expand-body:emacs-lisp:other-emacs)
+</code></pre>
+<h2>UI customizations</h2>
+<h3>Font (<a href="https://www.jetbrains.com/lp/mono/">JetBrains Mono</a>)</h3>
+<pre><code class="language-{.commonlisp">(set-face-attribute 'default nil
+                    :height 160 ;; 16pt
+                    ;; brew tap homebrew/cask-fonts &amp;&amp; brew install --cask font-jetbrains-mono
+                    :family &quot;JetBrains Mono&quot;)
+</code></pre>
+<h3>Theme (<a href="https://github.com/xenodium/emacs-materialized-theme">Materialized</a>)</h3>
+<pre><code class="language-{.commonlisp">(load-theme 'materialized t)
+</code></pre>
+<h3><a href="https://github.com/kickingvegas/calle24">Calle 24 toolbar</a> (macOS)</h3>
+<pre><code class="language-{.commonlisp">(use-package calle24 :ensure t
+  :config
+  (calle24-install)
+  (calle24-refresh-appearance)))
+</code></pre>
+<h3>Hide toolbar</h3>
+<pre><code class="language-{.commonlisp">(tool-bar-mode -1)
+</code></pre>
+<h3>Titlebar</h3>
+<p>No text in title bar</p>
+<pre><code class="language-{.commonlisp">(setq-default frame-title-format &quot;&quot;)
+</code></pre>
+<p>Transparent titlebar (macOS)</p>
+<pre><code class="language-{.commonlisp">(set-frame-parameter nil 'ns-transparent-titlebar t)
+(add-to-list 'default-frame-alist '(ns-transparent-titlebar . t))
+</code></pre>
+<h3>Hide scrollbars</h3>
+<pre><code class="language-{.commonlisp">(scroll-bar-mode -1)
+</code></pre>
+<h3>Mode line</h3>
+<p><a href="https://github.com/tarsius/minions">Minions</a></p>
+<pre><code class="language-{.commonlisp">(use-package minions
+  :ensure t
+  :custom
+  (mode-line-modes-delimiters nil)
+  (minions-mode-line-lighter &quot; …&quot;)
+  :config
+  (minions-mode +1)
+  (force-mode-line-update t))
+</code></pre>
+<p><a href="https://github.com/tarsius/moody">Moody</a></p>
+<pre><code class="language-{.commonlisp">(use-package moody
+  :ensure t
+  :config
+  (setq-default mode-line-format
+                '(&quot;&quot;
+                  mode-line-front-space
+                  mode-line-client
+                  mode-line-frame-identification
+                  mode-line-buffer-identification
+                  &quot; &quot;
+                  mode-line-position
+                  (vc-mode vc-mode)
+                  (multiple-cursors-mode mc/mode-line)
+                  mode-line-modes
+                  mode-line-end-spaces))
+  (moody-replace-mode-line-buffer-identification)
+  (moody-replace-vc-mode))
+</code></pre>
+<h3><a href="https://github.com/TeMPOraL/nyan-mode">Nyan Cat</a> (of course)</h3>
+<pre><code class="language-{.commonlisp">(use-package nyan-mode
+  :ensure t
+  :custom
+  (nyan-bar-length 10)
+  :config
+  (nyan-mode +1)))
+</code></pre>
+<h3>Welcome screen</h3>
+<p>A little static welcome screen I cooked up.</p>
+<pre><code class="language-{.commonlisp">(defun ar/show-welcome-buffer ()
+  &quot;Show *Welcome* buffer.&quot;
+  (with-current-buffer (get-buffer-create &quot;*Welcome*&quot;)
+    (setq truncate-lines t)
+    (setq cursor-type nil)
+    (read-only-mode +1)
+    (ar/refresh-welcome-buffer)
+    (local-set-key (kbd &quot;q&quot;) 'kill-this-buffer)
+    (add-hook 'window-size-change-functions
+              (lambda (_frame)
+                (ar/refresh-welcome-buffer)) nil t)
+    (add-hook 'window-configuration-change-hook
+              #'ar/refresh-welcome-buffer nil t)
+    (switch-to-buffer (current-buffer))))
+
+(defun ar/refresh-welcome-buffer ()
+  &quot;Refresh welcome buffer content for WINDOW.&quot;
+  (when-let* ((inhibit-read-only t)
+              (welcome-buffer (get-buffer &quot;*Welcome*&quot;))
+              (window (get-buffer-window welcome-buffer))
+              (image-path &quot;~/.emacs.d/emacs.png&quot;)
+              (image (create-image image-path nil nil :max-height 300))
+              (image-height (cdr (image-size image)))
+              (image-width (car (image-size image)))
+              (top-margin (floor (/ (- (window-height window) image-height) 2)))
+              (left-margin (floor (/ (- (window-width window) image-width) 2)))
+              (title &quot;Welcome to Emacs&quot;))
+    (with-current-buffer welcome-buffer
+      (erase-buffer)
+      (setq mode-line-format nil)
+      (goto-char (point-min))
+      (insert (make-string top-margin ?\n))
+      (insert (make-string left-margin ?\ ))
+      (insert-image image)
+      (insert &quot;\n\n\n&quot;)
+      (insert (make-string (- (floor (/ (- (window-width window) (string-width title)) 2)) 1) ?\ ))
+      (insert (propertize title 'face '(:height 1.2))))))
+
+(ar/show-welcome-buffer)
+</code></pre>
+<h2>Want more videos?</h2>
+<p>Liked the video? Please let me know. Got feedback? Leave <a href="https://www.youtube.com/watch?v=qTumnhiE1c8">me some comments</a>.</p>
+<p>Please go <a href="https://www.youtube.com/watch?v=qTumnhiE1c8">like my video</a>, share with others, and <a href="https://www.youtube.com/@xenodium">subscribe to my channel</a>.</p>
+<p>If there's enough interest, I'll continue making more videos!</p>

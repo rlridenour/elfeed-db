@@ -1,0 +1,167 @@
+<div class="assumed_audience" id="orgb8392f2">
+<p>
+Assumed audience: People who have lots of HTML
+files used as input for a static site generator,
+might need to do a batch operation on them, and
+are open to doing that with Emacs Lisp. Which
+might just be me, but who knows? =)
+</p>
+
+</div>
+
+<p>
+HTML defines a hierarchy of headings going from
+<code>&lt;h1&gt;</code> to <code>&lt;h6&gt;</code>, which comes in especially handy
+when people are <a href="https://usability.yale.edu/web-accessibility/articles/headings">navigating with a screenreader</a> or
+<a href="https://github.com/alphapapa/org-web-tools">converting web pages to Org Mode</a>. I think search
+engines might use them to get a sense of the
+page's structure, too. On my blog, the hierarchy
+usually goes like this:
+</p>
+
+<ul class="org-ul">
+<li><code>&lt;h1&gt;</code>: site title,</li>
+<li><code>&lt;h2&gt;</code>: blog post titles, since I put multiple
+blog posts on the <a href="https://sachachua.com/blog/">main page</a> and category pages
+(ex: <a href="https://sachachua.com/blog/category/blogging">blogging</a>)</li>
+<li><code>&lt;h3&gt;</code>: blog post's subheadings, if any</li>
+<li><code>&lt;h4&gt;</code>: I rarely need subsubheadings in my main blog posts, but they're there just in case</li>
+</ul>
+
+<p>
+While fiddling with my blog's CSS so that I could
+try this <a href="https://www.fluid-type-scale.com/calculate?minFontSize=16&amp;minWidth=400&amp;minRatio=1.25&amp;maxFontSize=22&amp;maxWidth=1280&amp;maxRatio=1.333&amp;steps=sm%2Cbase%2Cmd%2Clg%2Cxl%2Cxxl%2Cxxxl&amp;baseStep=base&amp;prefix=fs&amp;useContainerWidth=false&amp;includeFallbacks=true&amp;useRems=true&amp;remValue=16&amp;decimals=2&amp;previewFont=Inter&amp;previewText=Almost+before+we+knew+it%2C+we+had+left+the+ground&amp;previewWidth=1280">fluid type scale</a>, I realized that the
+subheadings in my exported blog entries started at
+<code>&lt;h2&gt;</code> instead of <code>&lt;h3&gt;</code>. This meant that the outline was this:
+</p>
+
+<ul class="org-ul">
+<li>Site title
+<ul class="org-ul">
+<li>Blog post 1</li>
+<li>Subheading 1</li>
+<li>Subheading 2</li>
+<li>Blog post 2</li>
+<li>Subheading 1</li>
+<li>Subheading 2</li>
+<li>Blog post 3</li>
+</ul></li>
+</ul>
+
+<p>
+I wanted the outline to be this:
+</p>
+
+<ul class="org-ul">
+<li>Site title
+<ul class="org-ul">
+<li>Blog post 1
+<ul class="org-ul">
+<li>Subheading 1</li>
+<li>Subheading 2</li>
+</ul></li>
+<li>Blog post 2
+<ul class="org-ul">
+<li>Subheading 1</li>
+<li>Subheading 2</li>
+</ul></li>
+<li>Blog post 3</li>
+</ul></li>
+</ul>
+
+<p>
+This was because I hadn't changed
+<code>org-html-toplevel-hlevel</code> during my 11ty export
+process. To solve this for new posts, I added a
+new option <code>org-11ty-toplevel-hlevel</code> that
+defaults to 3 in <a href="https://github.com/sachac/ox-11ty/blob/master/ox-11ty.el">ox-11ty.el</a>, re-exported
+one of my long blog posts to test it, and
+confirmed that my headings now started at <code>&lt;h3&gt;</code>.
+</p>
+
+<p>
+I still had all my old HTML files with the wrong
+levels of headings. I wrote some Emacs Lisp to
+shift the headings downwards (h5 to h6, h4 to h5,
+h3 to h4, h2 to h3) in a file if it had an <code>&lt;h2&gt;</code>
+in it. Regular expressions are usually not a good
+idea when it comes to HTML because there might be
+exceptions, but I figured it was a pretty small
+and low-risk change, so I decided not to use the
+full XML/DOM parsing functions. I saved all the
+blog posts under version control just in case I
+messed things up. Here's my function:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-html-shift-headings</span> (filename)
+  <span class="org-doc">"Shift heading tags in FILENAME."</span>
+  (<span class="org-keyword">interactive</span> <span class="org-string">"FFile: "</span>)
+  (<span class="org-keyword">let</span> ((case-fold-search t)) <span class="org-comment-delimiter">; </span><span class="org-comment">make the search case-insensitive</span>
+    (<span class="org-keyword">with-temp-buffer</span>
+      (insert-file-contents filename)
+      (goto-char (point-min))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Only modify the files where we have an h2</span>
+      (<span class="org-keyword">when</span> (<span class="org-keyword">or</span> (search-forward <span class="org-string">"&lt;h2"</span> nil t)
+                (search-forward <span class="org-string">"&lt;/h2&gt;"</span> nil t))
+        (goto-char (point-min))
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Handle both opening and closing tags</span>
+        (<span class="org-keyword">while</span> (re-search-forward <span class="org-string">"&lt;</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">/</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">?h</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[2-5]</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">\\&gt;"</span> nil t)
+          (<span class="org-keyword">let*</span> ((closing-tag (match-string 1))
+                 (heading-level (string-to-number (match-string 2)))
+                 (new-level (1+ heading-level)))
+            (replace-match (concat <span class="org-string">"&lt;"</span> closing-tag <span class="org-string">"h"</span> (number-to-string new-level)))))
+        (write-file filename)
+        filename))))
+</pre>
+</div>
+
+
+<p>
+Running it on all the source HTML files in
+specific subdirectories was easy with
+<code>directory-files-recursively</code>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">dolist</span> (dir <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"~/proj/static-blog/blog"</span>
+               <span class="org-string">"~/proj/static-blog/content"</span>))
+  (mapc <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-html-shift-headings</span>
+        (directory-files-recursively
+         dir
+         <span class="org-string">"\\.html\\'"</span>)))
+</pre>
+</div>
+
+
+<p>
+Then I could just rebuild my blog and get all the
+right heading levels. Spot-checks with Inspect
+Element show that the headings now have the right
+tags, and <code>org-web-tools-read-url-as-org</code> now
+picks up the right hierarchy for the page.
+</p>
+
+<p>
+Correcting the input files was easier and more
+efficient than modifying my 11ty template engine
+to shift the heading levels whenever I build my
+site (probably by defining a <a href="https://www.11ty.dev/docs/config-preprocessors/">preprocessor</a>). I
+could've written a NodeJS script to do that kind
+of file manipulation, but writing it in Emacs Lisp
+matched how I might think of doing it
+interactively. Using Emacs Lisp was also easy to
+test on one or two files, check the list of files
+matched by <code>directory-files-recursively</code>, and then
+run it on everything.
+</p>
+
+<p>
+Going forward, the new <code>org-11ty-toplevel-hlevel</code>
+variable should properly modify the behaviour of
+Org's HTML export to get the headings at the right
+level. We'll see!</p>
+
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F04%2Fusing-emacs-lisp-to-batch-demote-html-headings-for-my-static-site%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

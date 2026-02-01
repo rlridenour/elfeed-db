@@ -1,0 +1,71 @@
+<p><img src="/pihole-dashboard.png" alt="Pi-hole Dashboard"></p>
+<p>I wanted to setup Pi-hole to experiment wit for a while and see what the hype is about. I do get really tired of ads especially on weather apps and recipe websites. I could do this <a href="https://www.nodinrogers.com/post/2022-03-31-pihole-on-udm-pro/">install directly on my Unifi Dream Machine Pro</a> but I prefer to keep experimental things separate so I added another Raspberry Pi to my rack dedicated to Pi-hole.</p>
+<h2>Raspberry Pi Setup</h2>
+<p>I setup a new Raspberry pi on the network with a POE hat to power it.  I ordered the 4b  with a preloaded SD card (because I felt lazy AF).  I set it up in the rack with a little hack for the standoff since the rack mount for the Raspberry Pis takes up one of the screw locations for the POE hat&#39;s standoff.</p>
+<p>I created a ssh file in the root of the SD card per other documentation but was not able to ssh into the RPi after it booted.  Upon reading further, I found that the <a href="https://www.raspberrypi.com/news/raspberry-pi-bullseye-update-april-2022/">newer OS Bullseye does not set a default username and password</a> of <code>pi:raspberry</code>.</p>
+<p>I had to create a <code>userconf.txt</code> file in the root of the SD card and add the user/pass I wanted with the password encrypted.</p>
+<pre><code class="language-shell">echo &#39;mygreatpassword&#39; | openssl passwd -6 -stdin
+</code></pre>
+<p>After boot I ssh&#39;d into the RPi and got everything up to date before proceeding with Pi-hole installation</p>
+<pre><code class="language-shell">sudo apt update
+sudo apt upgrade
+</code></pre>
+<p>I changed the hostname for the RPi to <code>homelab-pihole</code>, something more meaningful for my controller dashboard and Tailscale. I changed the hostname in the hosts file to match, then rebooted the RPi.</p>
+<pre><code class="language-shell">sudo hostnamectl set-hostname homelab-pihole
+sudo nano /etc/hosts  # set localhost to homelab-pihole
+sudo reboot
+</code></pre>
+<h2>Pi-hole Install</h2>
+<p>Since this Raspberry Pi is dedicated to Pi-hole I used curl to install after setting the Raspberry pi to have a static IP address in the UDM controller. I didn&#39;t see any reason to use a Docker install but you can do that.</p>
+<pre><code class="language-shell">curl -sSL https://install.pi-hole.net | bash
+</code></pre>
+<p>I also went ahead and added the RPi to Tailscale since I plan on using that when we are not at home. <code>curl -fsSL https://tailscale.com/install.sh | sh</code></p>
+<p>To run tailscale with Pi-hole you have to start it with the flag <code>--accept-dns</code> to <code>false</code>.</p>
+<pre><code class="language-shell">tailscale up --accept-dns=false
+</code></pre>
+<h3>Required Pi-Hole DNS settings</h3>
+<p>In the Pi-hole settings for DNS &quot;permit all origins&quot; has to be selected. This is a safe setting since firewall rules will be set on the UDM controller.</p>
+<p><img src="/pihole-dns-settings.png" alt="Pi-hole DNS Settings"></p>
+<h2>UDM Pro DNS Setup</h2>
+<p>The process for getting DNS setup for Pi-hole in the unifi controller was simple. Adding a profile and firewall rules then set the DNS to point to the Pi-hole IP.</p>
+<h3>Step 1 - Profiles</h3>
+<p>In the controller go to networks &gt; settings &gt; profiles and create a new profile under &quot;IP Groups&quot;</p>
+<ol>
+<li>I set the profile name to &quot;DNS for port 53&quot;</li>
+<li>Type Port Group</li>
+<li>Set the port to 53 and save the change</li>
+</ol>
+<h3>Step 2 - Firewall &amp; Security</h3>
+<p>In networks &gt; settings &gt; firewall and security, I created two new firewall rules to control traffic (2000 and 2001 auto-assigned in my instance).</p>
+<p><img src="/firewall-rules.png" alt="UDM Firewall Rules"></p>
+<h4>Configuration for rule 2000 - Allow DNS on Pi-hole</h4>
+<ol>
+<li>I set the type to &quot;Internet Out&quot;</li>
+<li>Description &quot;Allow DNS on Pi-hole&quot;</li>
+<li>Rule applied &quot;Before predefined rules&quot;</li>
+<li>Action to &quot;Accept&quot;</li>
+<li>IPv4 Protocol to &quot;TCP and UDP&quot;</li>
+<li>Under source I set it to &quot;IP Address&quot; and set the IP to my Raspberry Pi&#39;s IP address on the network.</li>
+<li>Under Destination I set it to the defaults for Port/IP Group</li>
+</ol>
+<h4>Configuration for rule 2001 - Block DNS on other than Pi-hole</h4>
+<ol>
+<li>I set the type to &quot;Internet Out&quot;</li>
+<li>Description &quot;Block DNS on other than Pi-hole&quot;</li>
+<li>Rule applied &quot;Before predefined rules&quot;</li>
+<li>Action to &quot;Drop&quot;</li>
+<li>IPv4 Protocol to &quot;TCP and UDP&quot;</li>
+<li>Under source i set it to &quot;Port/IP Group&quot; and Any/Any</li>
+<li>Under destination I set it to &quot;Port/IP Group&quot; and under Port Group I selected the DNS for port 53 profile I created earlier</li>
+</ol>
+<h3>Setting the DNS for the network</h3>
+<p>Do this under the networks, NOT the WAN.  In my case I only have one default network right now and a virtual network for my IoT devices.  Note: since the virtual network I have setup for IoT devices inherits  settings from the default network I do see some of my devices showing up in Pi-hole so I might change that later or not - time will tell if it&#39;s a problem. I went to settings &gt; networks &gt; networks and selected my default network to enter the settings for the network.</p>
+<p>Under &quot;Advanced&quot; I set it to manual.  It was originally set to Auto.  I selected to open the accordion for DHCP Service Management which is hidden by default. There is a setting for &quot;DHCP DNS Server&quot; which might be set to Auto.  I unchecked auto and was presented with fields for DNS Servers.  I input the IP address of my Raspberry Pi under &quot;DNS server 1&quot; and saved the network settings.</p>
+<h2>Testing it out</h2>
+<p>I had to drop my wifi on a few of my devices to renew the DHCP lease and saw in the Pi-hole admin that it was already starting to block ads on our network.</p>
+<p><img src="/pihole-dashboard.png" alt="Pihole Dashboard"></p>
+<h2>Tailscale - Access Pi-hole from anywhere</h2>
+<p>In Tailscale all I had to do was get the IP of <code>homelab-pihole</code> registered as a device in Tailscale and set that as the global nameserver. I had to toggle on &quot;Override local DNS&quot; since we want our network-wide DNS to override any local DNS settings the devices have.  Easy to test, with Tailscale open on my phone, I shut of Wifi and opened up a weather app (one of the worst offenders) and had zero ads.</p>
+<h2>Apple Mail</h2>
+<p>I&#39;ve been using Apple Mail recently on my iOS devices and my Mac.  I noticed that images were being blocked in Apple Mail.  Easy fix.</p>
+<p>I ssh&#39;d into the RPi and in <code>/etc/pihole/pihole-FTL.conf</code> added an entry to set <code>BLOCK_ICLOUD_PR=false</code>, <a href="https://docs.pi-hole.net/ftldns/configfile/">which is set to <code>true</code> by default</a>.</p>

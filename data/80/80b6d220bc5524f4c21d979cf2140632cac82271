@@ -1,0 +1,74 @@
+<p>For your consideration, a possible quality of life improvement in using Emacs. Typically the next-to-the-smallest unit of point movement is by <em>word</em>. This is reinforced by binding <code>M-f</code> and <code>M-b</code> to forward and backwards word movement respectively.</p>
+<p>When editing prose, this is sensible. For editing code and commands, I would argue this is <em>less</em> so. This is because the unit of text I most want to move by is via <em>symbol</em>. Common examples of symbols include variable/function/class names, command line options &amp; arguments, and Makefile targets. Symbols frequently embed non-alphabetic characters (e.g. ‘foo-bar’, ‘bar_foo’, ‘foo/bar’) which are treated as word-separators by the commands <code>forward-word</code> and <code>backward-word</code>.</p>
+<p>Movement by symbol is what I want whenever I’m editing in the <strong>minibuffer</strong>. Muscle memory wants me to type <code>M-f</code> or <code>M-b</code>, which does the “wrong” thing here. But there are movement commands for a unit of text that handles symbols gracefully: that unit of text is called a <em>balanced expression</em> (aka sexp). By default, moving by balanced expression is bound to <code>C-M-f</code> for forwards movement, <code>C-M-b</code> for backwards.</p>
+<p>Personally, I’m loathe to use keybindings involving more than two keys, so I’ve taken this tack: Swap (<code>M-f</code>, <code>M-b</code>) for balanced expression movement and (<code>C-M-f</code>, <code>C-M-b</code>) for word movement in modes that involve a lot of symbols.</p>
+<p>Another detail to consider is moving the point so that it is at the start of a unit of text. Both <code>forward-word</code> and <code>forward-sexp</code> are implemented so that the point is set at the end of a text unit. In many cases this adds editing friction for me because what I really want is for the point to be at the start of a text unit. To allow for this, I’ve implemented a function for moving forward a balanced expression that places the point at the start of the next sexp (<code>cc/next-sexp</code>).</p>
+<p>Code showing the implementation of <code>cc/next-sexp</code> and configuring the minibuffer to swap the bindings for word and sexp movement is shown below:</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-mode-map</span><span class="w"> </span><span class="s">&quot;M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-mode-map</span><span class="w"> </span><span class="s">&quot;M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">cc/next-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-mode-map</span><span class="w"> </span><span class="s">&quot;C-M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-word</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-mode-map</span><span class="w"> </span><span class="s">&quot;C-M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;forward-word</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc/--next-sexp-raw</span><span class="w"> </span><span class="p">()</span>
+<span class="w">  </span><span class="s">&quot;Raw implementation to move point to the beginning of the next sexp.</span>
+
+<span class="s">This function has no error checking.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nv">forward-sexp</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span>
+<span class="w">  </span><span class="p">(</span><span class="nv">backward-sexp</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc/next-sexp</span><span class="w"> </span><span class="p">()</span>
+<span class="w">  </span><span class="s">&quot;Move point to beginning of the next balanced expression (sexp).&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="k">interactive</span><span class="p">)</span>
+<span class="w">  </span><span class="p">(</span><span class="k">condition-case</span><span class="w"> </span><span class="no">nil</span>
+<span class="w">      </span><span class="p">(</span><span class="nv">cc/--next-sexp-raw</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="ne">error</span><span class="w"> </span><span class="p">(</span><span class="k">condition-case</span><span class="w"> </span><span class="no">nil</span>
+<span class="w">               </span><span class="p">(</span><span class="nv">forward-sexp</span><span class="p">)</span>
+<span class="w">             </span><span class="p">(</span><span class="ne">error</span>
+<span class="w">              </span><span class="p">(</span><span class="nf">message</span>
+<span class="w">               </span><span class="s">&quot;Unable to move point to next balanced expression (sexp).&quot;</span><span class="p">))))))</span>
+</code></pre></div></td></tr></table></div>
+
+<p>The same swap can be applied when calling <code>eval-expression</code> (<code>M-:</code>). The keymap to configure here is <code>minibuffer-local-shell-command-map</code>.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-local-shell-command-map</span><span class="w"> </span><span class="s">&quot;M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-local-shell-command-map</span><span class="w"> </span><span class="s">&quot;M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">cc/next-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-local-shell-command-map</span><span class="w"> </span><span class="s">&quot;C-M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-word</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">minibuffer-local-shell-command-map</span><span class="w"> </span><span class="s">&quot;C-M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;forward-word</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>Why stop there? Let’s change it for Elisp mode:</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">emacs-lisp-mode-map</span><span class="w"> </span><span class="s">&quot;M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">emacs-lisp-mode-map</span><span class="w"> </span><span class="s">&quot;M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">cc/next-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">emacs-lisp-mode-map</span><span class="w"> </span><span class="s">&quot;C-M-b&quot;</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">backward-word</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">keymap-set</span><span class="w"> </span><span class="nv">emacs-lisp-mode-map</span><span class="w"> </span><span class="s">&quot;C-M-f&quot;</span><span class="w"> </span><span class="nf">#&#39;forward-word</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>This idea can be extended to other modes such as Eshell.</p>
+<h1>Closing Thoughts</h1>
+<p>I’ve been living with this setup for a month now and anecdotally I’ve found this to feel “right” enough to merit making a post. For those readers who do not consider this post’s suggestion heretical, I’d encourage to give these changes a try. Perhaps you’ll find yourself pleasantly surprised.</p>

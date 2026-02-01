@@ -1,0 +1,245 @@
+<p>I don’t care much about monitoring the traffic here, but analyzing web logs seemed like a good way to practice using <a href="https://pandas.pydata.org/docs/index.html">Pandas</a>. I used some old data analysis friends, like <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.groupby.html"><code>groupby</code></a>, and made some new ones, like the vectorized <a href="https://pandas.pydata.org/docs/reference/api/pandas.Series.str.html"><code>str</code></a> functions. I also reacquainted myself with <a href="https://leancrew.com/all-this/man/man1/rsync.html"><code>rsync</code></a>, which I used to run quite often in my Linux days.</p>
+<p>Let’s start by laying out the problem. My web server is running Apache 2, and it generates access log files in the <a href="https://httpd.apache.org/docs/2.4/logs.html#combined">combined format</a>. I wanted my script, called <code>top-pages</code>, to download and parse the necessary log files from the server and report on the top pages accessed either yesterday or today. Today, running <code>top-pages</code> with no options returns this:</p>
+<pre><code>                           Sunday, November 23, 2025
+                                   Page path  Visits
+ 1                    2015/01/apple-leverage     651
+ 2   2025/11/some-maya-calendar-calculations     315
+ 3               2025/11/casting-about-again     222
+ 4              2025/11/charting-malpractice     185
+ 5                 2025/11/variance-of-a-sum     179
+ 6   2025/11/the-wait-for-new-siri-continues     178
+ 7                   2025/11/snow-and-memory     123
+ 8          2025/11/the-problem-with-dollars     114
+ 9                  2025/10/other-wavy-paths     109
+10          2025/10/vectors-and-weathervanes     105
+                                   All pages  10,050
+</code></pre>
+<p>These are the ten individual blog posts with the most hits yesterday and the total number of hits on all individual posts. As you can see, <code>top-pages</code> doesn’t report on hits to the home page, my RSS feeds, image files, or anything other than blog posts.</p>
+<p>To see the options <code>top-pages</code> can handle, here’s the output from running <code>top-pages -h</code>:</p>
+<pre><code>usage: top-pages [-h] [-t | -y] [-n [N]]
+
+Table of the top pages from ANIAT weblogs.
+
+options:
+  -h, --help  show this help message and exit
+  -t          today's top pages
+  -y          yesterday's top pages (default)
+  -n [N]      number of pages in table (default: 10)
+</code></pre>
+<p>So I can change the length of the table with the <code>-n</code> option, and I can have it show today’s top pages (so far) with the <code>-t</code> option. The <code>-t</code> and <code>-y</code> options are mutually exclusive. If I try to run <code>top-pages -t -y</code>, it will return</p>
+<pre><code>usage: top-pages [-h] [-t | -y] [-n [N]]
+top-pages: error: argument -y: not allowed with argument -t
+</code></pre>
+<p>Because <code>top-pages</code> runs on my MacBook Pro, it has to download the necessary log files from the server. This is not efficient, but right now I’m more interested in writing <code>top-pages</code> than in running it. If I suddenly get the urge to run it on a regular basis, I’ll move it to the server and set up a <a href="https://leancrew.com/all-this/man/man8/cron.html"><code>cron</code></a> job there to run it every day and email me the results.</p>
+<p>The access log files are in the <code>/var/log/apache2</code> directory on the server. At present, that directory contains these files:</p>
+<pre><code>access.log
+access.log.1
+access.log.2.gz
+access.log.3.gz
+[more access logs]
+error.log.1
+error.log.2.gz
+error.log.3.gz
+[more error logs]
+</code></pre>
+<p><code>access.log</code> is the current access log file. It’s being continually updated as the site gets visited. Every morning at 6:25 am (in the server’s time zone), the current access log is archived into <code>access.log.1</code> and a new version of <code>access.log</code> is started. At the same time, what used to be <code>access.log.1</code> gets <a href="https://leancrew.com/all-this/man/man1/gzip.html"><code>gzip</code></a>‘d into <code>access.log.2.gz</code>, and the older <code>gzip</code>‘d access logs get their numbers incremented.</p>
+<p>The upshot of this is that the only access logs <code>top-pages</code> needs to determine the hits from yesterday and today are <code>access.log</code>, <code>access.log.1</code>, and <code>access.log.2.gz</code>. We’ll see this when we get into the source code.</p>
+<p>Which I guess it’s time to do:</p>
+<pre><code>python:
+  1:  #!/usr/bin/env python3
+  2:  
+  3:  import pandas as pd
+  4:  from datetime import datetime, timedelta
+  5:  from zoneinfo import ZoneInfo
+  6:  import argparse
+  7:  import subprocess
+  8:  import os.path
+  9:  
+ 10:  # Functions for later use.
+ 11:  def day_params(whichDay):
+ 12:    '''Return the title, start, and end parameters for whichDay.
+ 13:  
+ 14:    The whichday argument can be either "today" or "yesterday."
+ 15:    Any value other than "today" is treated as "yesterday."
+ 16:    '''
+ 17:  
+ 18:    if whichDay == 'today':
+ 19:      theDay = datetime.now(tz=ZoneInfo('America/Chicago'))
+ 20:    else:
+ 21:      theDay = datetime.now(tz=ZoneInfo('America/Chicago')) - timedelta(days=1)
+ 22:    dTitle = f'{theDay:%A, %B %-e, %Y}'
+ 23:    dStart = theDay.replace(hour=0, minute=0, second=0, microsecond=0)
+ 24:    dEnd = theDay.replace(hour=23, minute=59, second=59, microsecond=999_999)
+ 25:    return dTitle, dStart, dEnd
+ 26:  
+ 27:  def date_slug(request, width):
+ 28:    '''Return a series of yyyy/mm/slug strings from the request series.
+ 29:  
+ 30:    The strings are width characters long, truncated or left-padded,
+ 31:    as necessary.
+ 32:    '''
+ 33:  
+ 34:    # The page URL is between two space characters.
+ 35:    dslug = request.str.replace(r'^[^ ]+ ([^ ]+) .+', r'\1', regex=True)
+ 36:    # Strip everything but the yyyy/mm/slug.
+ 37:    dslug = dslug.str.replace(r'(https?://(www\.)?leancrew\.com)?/all-this/',
+ 38:                              r'', regex=True)
+ 39:    dslug = dslug.str.replace(r'(^\d\d\d\d/\d\d/[^/]+).*$', r'\1', regex=True)
+ 40:    # Shorten if necessary.
+ 41:    long = dslug[dslug.str.len()&gt;width]
+ 42:    dslug[long.index] = dslug[long.index].str.slice_replace(start=width-3,
+ 43:                                                            repl='...')
+ 44:    return dslug.str.pad(width)
+ 45:  
+ 46:  def read_apache_access(f):
+ 47:    '''Return a dataframe from an Apache access log file.
+ 48:  
+ 49:    The log is in combined format and the returned dataframe has columns for
+ 50:    Request, Status, and Datetime. The Datetime is determined via the Timestamp
+ 51:    and Zone columns, which are not part of the returned dataframe.
+ 52:    '''
+ 53:  
+ 54:    # CSV reading code adapted from https://stackoverflow.com/questions/58584444
+ 55:    headers = 'Timestamp Zone Request Status'.split()
+ 56:    df = pd.read_csv(f, sep=' ', escapechar='\\', quotechar='"',
+ 57:                              usecols=[3, 4, 5, 6], names=headers)
+ 58:  
+ 59:    # Turn the Timestamp and Zone into a single Datetime column.
+ 60:    df['Datetime'] = pd.to_datetime(df.Timestamp.str.slice(start=1) +
+ 61:                                    df.Zone.str.slice(stop=-1),
+ 62:                                    format='%d/%b/%Y:%H:%M:%S%z',
+ 63:                                    utc=True)
+ 64:  
+ 65:    # Don't include the Timestamp and Zone columns in the returned dataframe.
+ 66:    return df.drop(labels=['Timestamp','Zone'], axis='columns')
+ 67:  
+ 68:  
+ 69:  ########## Main program ##########
+ 70:  
+ 71:  # Handle the arguments.
+ 72:  desc = 'Table of the top pages from ANIAT weblogs.'
+ 73:  parser = argparse.ArgumentParser(description=desc)
+ 74:  group = parser.add_mutually_exclusive_group()
+ 75:  group.add_argument('-t',
+ 76:            help="today's top pages",
+ 77:            default=False,
+ 78:            action='store_true')
+ 79:  group.add_argument('-y',
+ 80:            help="yesterday's top pages (default)",
+ 81:            default=True,
+ 82:            action='store_true')
+ 83:  parser.add_argument('-n',
+ 84:            help="number of pages in table (default: 10)",
+ 85:            nargs='?',
+ 86:            default=10,
+ 87:            const=10,
+ 88:            type=int)
+ 89:  args = parser.parse_args()
+ 90:  
+ 91:  # Set the printing parameters.
+ 92:  iwidth = len(str(args.n))                   # index
+ 93:  pwidth = 40                                 # page path
+ 94:  vwidth = 7                                  # visits
+ 95:  fwidth = iwidth + 2 + pwidth + 1 + vwidth   # full table
+ 96:  twidth = iwidth + 2 + pwidth                # "All pages" position
+ 97:  
+ 98:  # Set the day's title, start, and end parameters.
+ 99:  if args.t:
+100:    dTitle, dStart, dEnd = day_params('today')
+101:  else:
+102:    dTitle, dStart, dEnd = day_params('yesterday')
+103:  
+104:  # Set the local log file parameters.
+105:  logdir = os.path.join(os.environ['HOME'],
+106:            'Library/Mobile Documents/com~apple~CloudDocs/personal/weblogs/')
+107:  af = [os.path.join(logdir, 'access.log.2'),
+108:        os.path.join(logdir, 'access.log.1'),
+109:        os.path.join(logdir, 'access.log')]
+110:  
+111:  # Update the log files.
+112:  rsync = f"rsync -az -e 'ssh -p 1234'\
+113:   --include=access.log.2.gz\
+114:   --include=access.log.1\
+115:   --include=access.log\
+116:   --exclude=*\
+117:   user@server.com:/var/log/apache2/ '{logdir}'"
+118:  subprocess.run(rsync, shell=True)
+119:  
+120:  # Gunzip the oldest log file if necessary. Keep the gzipped file.
+121:  gzfile = af[0] + '.gz'
+122:  if (not os.path.exists(af[0])) or\
+123:     (os.path.getmtime(af[0]) &lt; os.path.getmtime(gzfile)):
+124:    subprocess.run(f"gunzip -fk '{gzfile}'", shell=True)
+125:  
+126:  # Read the log files into a dataframe.
+127:  df = pd.concat((read_apache_access(f) for f in af), ignore_index=True)
+128:  
+129:  # Limit to one day's successes using my timezone.
+130:  df = df[(df.Datetime &gt;= dStart) &amp;
+131:           (df.Datetime &lt;= dEnd) &amp;
+132:           (df.Request.str.slice(stop=4) == 'GET ') &amp;
+133:           (df.Status == 200)]
+134:  
+135:  # Limit to just the requests for individual pages.
+136:  df = df[df.Request.str.contains(r'all-this/\d\d\d\d/\d\d', regex=True)]
+137:  
+138:  # Get the yyyy/mm/slug from Requests and add it as a new column.
+139:  dslug = date_slug(df.Request, pwidth)
+140:  df.insert(0, 'Page path', dslug)
+141:  
+142:  # Group by Page path, count the entries, and sort in descending order.
+143:  # All of the columns have the same count, so I chose to include just the
+144:  # Status column and renamed it Visits for presentation.
+145:  # Limit it to just the first args.n rows.
+146:  top = df.groupby('Page path')\
+147:               .count()\
+148:               .sort_values('Status', ascending=False)\
+149:                 ['Status'].reset_index(name='Visits')[:args.n]
+150:  
+151:  # Make the index column one-based, not zero-based, and left-padded.
+152:  top.index = [ f'{i+1:{iwidth}}' for i in range(args.n) ]
+153:  
+154:  # Print out the date, the top pages and the count of all pages.
+155:  print(f'{dTitle:&gt;{fwidth}s}')
+156:  print(top.to_string(formatters=[lambda p: f'{p:s}',
+157:                                  lambda v: f'{v:{vwidth},d}']))
+158:  print(f'{'All pages':&gt;{twidth}} {len(df):{vwidth},d}')
+</code></pre>
+<p>This is distinctly longer than most of the scripts I post here, so the explanation will be longer, too. Apologies in advance. I’m going to start the description with the main body of the program—we’ll deal with the functions as they get called.</p>
+<p>The first section, Lines 72–89, uses the <code>argparse</code> library to define and process the command-line arguments. The <code>-t</code> and <code>-y</code> options are defined as members of a mutually exclusive group so they give us the behavior shown above. The <code>-n</code> option is separate, with a default value of 10. No one who watched as much David Letterman as I did would set the default to anything other than a Top Ten list.</p>
+<p>The next few sections set global parameters that the balance of the program uses.</p>
+<p>The printing parameters (Lines 92–96) are the widths and positions of the various columns in the table. For reasons I don’t quite understand, Pandas likes to put two spaces after the <a href="https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.index.html">index column</a> but just one space between the others. That’s why you see the 2 and the 1 in the <code>fwidth</code> and <code>twidth</code> definitions.</p>
+<p>The date and time parameters (Lines 99–102) control the title of the table and the datetime limits used to filter the entries that get counted. This section calls the <code>day_params</code> function that’s defined in Lines 11–25. The key feature of <code>day_params</code> is that it bases its definitions of “today” and “yesterday” according to my home timezone here in the Chicago area. This makes the <code>dStart</code> and <code>dEnd</code> values timezone-aware. As we’ll see later, we can compare them with the datetime values from the access logs, which are set to UTC, and get correct results.</p>
+<p>The local log file parameters (Lines 105–109) set the directory and full file paths to the access log files after they’ve been downloaded to my MacBook Pro. As you probably know, your iCloud Drive folder is this directory:</p>
+<pre><code>~/Library/Mobile Documents/com~apple~CloudDocs
+</code></pre>
+<p>I keep the access log files in a <code>personal/weblogs</code> subdirectory in iCloud Drive.</p>
+<p>With the parameters defined, it’s time to start analyzin’. The first thing we need to do is make sure the local copies of the log files are up to date. That’s done through the longish <a href="https://leancrew.com/all-this/man/man1/rsync.html"><code>rsync</code></a> command that’s defined on Lines 112–117 and executed on Line 118. The port, user, and server you see in these lines are, of course, fictional, but the rest of the command is exactly as I use it. Basically, it downloads the <code>access.log</code>, <code>access.log.1</code>, and <code>access.log.2.gz</code> files if they are older on the server than they are on my Mac.</p>
+<p>The next section, Lines 121–124, uncompresses the <code>access.log.2.gz</code> if necessary. The decision is made based on the presence of an (uncompressed) <code>access.log.2</code> file and its modification date. The <a href="https://leancrew.com/all-this/man/man1/gzip.html"><code>gunzip</code></a> command is run if either</p>
+<ul>
+<li>there is no uncompressed file, or</li>
+<li>the uncompressed file is older than the compressed file.</li>
+</ul>
+<p>The sharp-eyed among you will note that I could save some downloading here by noting whether <code>top-pages</code> is being asked to return a table for yesterday or today. I decided to ignore this optimization because I wanted to focus on Pandas. And if this script ever gets moved to the server, none of this <code>rsync</code> stuff will be necessary.</p>
+<p>With these preliminaries over, it’s time to move into the Pandas stuff. The first step is to read the log files into a dataframe. This is done on Line 127, which uses the <code>read_apache_access</code> function defined on Lines 46–66. To help understand <code>read_apache_access</code>, we should take a look at an example log file entry:</p>
+<pre><code>34.96.45.20 - - [23/Nov/2025:06:56:36 -0600] "GET /all-this/2025/11/some-maya-calendar-calculations/ HTTP/1.1" 200 8111 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/53.0.2785.143 Safari/537.36"
+</code></pre>
+<p>Sorry about the very long line, but that’s how they look in the access log file.</p>
+<p>The fields are separated by space characters. If a space character is part of a field, the field is surrounded by double quotation marks. Except, unfortunately, for the date/time field. For some reason, that field is surrounded by square brackets instead of double quotes, which makes the parsing in <code>read_apache_access</code> a little tricky.</p>
+<p>The solution is in the <a href="https://pandas.pydata.org/docs/reference/api/pandas.read_csv.html"><code>read_csv</code></a> call in Lines 56–57. By setting the <code>sep</code>, <code>escapechar</code>, and <code>quotechar</code> parameters as shown, we get all the fields the way we want except the date/time, which gets parsed as two fields, one with the timestamp (and a leading bracket) and the other with the timezone offset from UTC (and a trailing bracket). For the example above, the Timestamp field is</p>
+<pre><code>[23/Nov/2025:06:56:36
+</code></pre>
+<p>and the Zone field is</p>
+<pre><code>-0600]
+</code></pre>
+<p>Lines 60–63 then combine these two fields—after stripping the brackets—with the <a href="https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html"><code>to_datetime</code></a> function and add a new Datetime field to the dataframe. The <code>utc=True</code> parameter in the call to <code>to_datetime</code> does exactly what you think: it makes the resulting datetime value timezone-aware and set to UTC. <code>read_apache_access</code> then returns the dataframe with three fields: Request, Status, and Datetime. In the example, Request is</p>
+<pre><code>GET /all-this/2025/11/some-maya-calendar-calculations/ HTTP/1.1
+</code></pre>
+<p>Status is 200, and Datetime (in UTC) is 12:56:36 on 2025-11-23.</p>
+<p>Line 127 uses a <a href="https://wiki.python.org/moin/Generators">generator expression</a> to loop through the three access log files, creating a dataframe for each and putting them together with <a href="https://pandas.pydata.org/docs/reference/api/pandas.concat.html"><code>concat</code></a>.</p>
+<p>The next section, Lines 130–133, filters the dataframe to include only successful <code>GET</code>s within the specified day. Line 136 further filters the dataframe to just individual posts. It does this by searching for the <code>all-this/yyyy/mm</code> pattern that all the posts at ANIAT have.</p>
+<p>The next section, Lines 139–140, adds a new field, Page path, by normalizing the page URLs in the Requests field. It does this through a call to the <code>date_slug</code> function, which is defined on Lines 27–44. <code>date_slug</code> goes through a series of regex replacements to strip out all the inessential parts, leaving just the <code>yyyy/mm/slug</code> part of the URL. It also pads or shortens the string to <code>width</code> characters.</p>
+<p>We’re getting near the end now. The next section, Lines 146–149 is a <a href="https://developers.cloudflare.com/1.1.1.1/setup/ios/"><code>groupby</code></a> call that counts the entries, sorts them by count, and puts the top ten (or whatever you gave to the <code>-n</code> option) in a new dataframe called <code>top</code>. It also calls <a href="https://pandas.pydata.org/pandas-docs/stable/reference/api/pandas.DataFrame.reset_index.html"><code>reset_index</code></a> to renumber the rows of <code>top</code>. Without that call, the indices of <code>top</code> would be the row numbers of the original <code>df</code> dataframe.</p>
+<p>Because I wasn’t a computer science major, I don’t think a list of the top ten items should be numbered from zero to nine. Line 152 adds 1 to all the index numbers and right-aligns them.</p>
+<p>Finally, Lines 155–158 print out the table that we saw back near the top of the post. The columns are formatted using <a href="https://fstring.help/cheat/">f-string</a> rules.</p>
+<p>Although there was a lot of non-Pandas stuff in this script, I think it was a good exercise. The filtering and <code>groupby</code> parts matched up with a lot of the Pandas work I’ve done in the past, but the vectorized regex calls certainly didn’t. Most of my previous analysis has been with dataframes filled with either numbers or boolean values, so this was a nice stretch for me. It wouldn’t be hard to rejigger <code>top-pages</code> to count hits on my RSS feed or list the top referring sites. If I ever decide to care about such things.</p>

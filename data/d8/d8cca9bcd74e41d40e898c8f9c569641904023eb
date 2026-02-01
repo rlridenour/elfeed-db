@@ -1,0 +1,487 @@
+<p> ※ Links are at the bottom of the post. </p>
+<p> <code>Elfeed</code> is an Emacs package for experiencing one&rsquo;s RSS feeds. There are others. I leave it as an exercise for the reader to learn more. </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil">(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed</span>
+  <span style="color: #483d8b;">:custom</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(elfeed-db-directory (expand-file-name "elfeed" user-emacs-directory)) ; uncomment this line and </span>
+  (elfeed-db-directory <span style="color: #8b2252;">"~/plrjorg/elfeed"</span>) <span style="color: #b22222;">; </span><span style="color: #b22222;">comment this line if you want elfeed to write to your .emacs.d</span>
+  (elfeed-enclosure-default-dir <span style="color: #8b2252;">"~/plrjorg/Downloads/"</span>) <span style="color: #b22222;">; </span><span style="color: #b22222;">or wherever you want downloads to go</span>
+  (elfeed-search-remain-on-entry t)
+  (elfeed-search-title-max-width 100)
+  (elfeed-search-title-min-width 30)
+  (elfeed-search-trailing-width 25)
+  (elfeed-show-truncate-long-urls t)
+  (elfeed-sort-order 'descending)
+  <span style="color: #483d8b;">:bind</span>
+  (<span style="color: #8b2252;">"C-c w e"</span> . bjm/elfeed-load-db-and-open)
+  (<span style="color: #483d8b;">:map</span> elfeed-search-mode-map
+        (<span style="color: #8b2252;">"w"</span> . elfeed-search-yank)
+        (<span style="color: #8b2252;">"R"</span> . elfeed-update)
+        (<span style="color: #8b2252;">"q"</span> . bjm/elfeed-save-db-and-bury)
+        (<span style="color: #8b2252;">"Q"</span> . elfeed-kill-buffer)
+        )
+  (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+        (<span style="color: #8b2252;">"S"</span>     . elfeed-show-new-live-search) <span style="color: #b22222;">; </span><span style="color: #b22222;">moved to free up '</span><span style="color: #008b8b;">s</span><span style="color: #b22222;">'</span>
+        (<span style="color: #8b2252;">"c"</span>     . (<span style="color: #a020f0;">lambda</span> () (<span style="color: #a020f0;">interactive</span>) (org-capture nil <span style="color: #8b2252;">"capture"</span>)))
+        (<span style="color: #8b2252;">"e"</span>     . email-elfeed-entry)
+        (<span style="color: #8b2252;">"f"</span>     . elfeed-show-fetch-full-text)
+        (<span style="color: #8b2252;">"w"</span>     . elfeed-show-yank)
+        )
+  <span style="color: #483d8b;">:hook</span>
+  (elfeed-show-mode . visual-line-mode) <span style="color: #b22222;">; </span><span style="color: #b22222;">make reading pretty</span>
+  (elfeed-show-mode . olivetti-mode   ) <span style="color: #b22222;">; </span><span style="color: #b22222;">make reading pretty</span>
+  )
+</pre>
+</div>
+<p> <code>elfeed-org</code> helps me with adding tags to my feeds. Need refinement as it&rsquo;s not doing exactly what I want at the moment. </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil"><span style="color: #b22222;">;; </span><span style="color: #b22222;">Configure Elfeed with org mode</span>
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-org</span>
+  <span style="color: #483d8b;">:after</span> elfeed
+  <span style="color: #483d8b;">:custom</span>
+  (rmh-elfeed-org-files
+   (list <span style="color: #8b2252;">"~/.emacs.d/elfeed.org"</span>))
+)
+
+(<span style="color: #a020f0;">with-eval-after-load</span> 'elfeed
+  (elfeed-org))
+</pre>
+</div>
+<p> <code>~/plrjorg/</code> is my Nextcloud Files directory. I use it for synchronizing things, including <code>elfeed</code>. </p>
+<p> When we talk about syncing <code>elfeed</code>, there are two components: feed sync and database sync. They are independent of each other. One does not need either. </p>
+<p> First is feed synchronization. There are many platforms that provide a protocol to do this, and some of them will work with <code>elfeed</code> et al. See <code>elfeed-protocol</code> for what&rsquo;s supported. One can chose to not use a protocol and put their feeds in their Emacs config or in an <code>elfeed-org</code> file (see below). One can then copy them to other Emacsen one may have. </p>
+<p> Second is database synchronization, which is specific to <code>elfeed</code> and Emacs. This is only sort-of supported by <code>elfeed</code>. I use a combination of some functions and Nextcloud sync to make this part happen, but the reader can find articles about using syncthing or other tools. </p>
+<p> <b>WARNING!!!</b> Not all modern file sync methods are appropriate for this! iCloud, Box, Synology Drive, and others don&rsquo;t really like permanently keeping files on a system. While one can mark a folder as &ldquo;Make available offline&rdquo; or similar, it may still cause problems. I use Nextcloud because it works like Dropbox used to (still does? I dunno) and doesn&rsquo;t rely on 🍎&rsquo;s or M$&rsquo;s newer APIs. Again, feel free to search for more information as my understanding may be faulty &amp;| out of date. </p>
+<p> <b>NOTE</b> Nextcloud sync is not a perfect solution out of the box. The client wants to notify about <i>every. little. thing.</i>, so one will want to mute all but urgent notifications. Also, while Nextcloud has some version control for files, it is far from robust. Backups are still a must. </p>
+<p> I like the modern convenience of syncing state in and out of Emacs, so I make use of <code>elfeed-protocol</code>. I&rsquo;ve used it to connect to a Nextcloud News install, but currently point it at my self-hosted FreshRSS install. For the sake of this article, it&rsquo;s url is <code>http：//freshrss.example</code> so edit that as needed. Eventually I will move the authentication into <code>.authinfo.gpg</code> where it belongs. </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil">(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-protocol</span>
+  <span style="color: #483d8b;">:after</span> (elfeed elfeed-org)
+  <span style="color: #483d8b;">:bind</span>
+  (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+        (<span style="color: #8b2252;">"s"</span> . elfeed-protocol-fever-star-tag)
+        )
+  <span style="color: #483d8b;">:custom</span>
+  (elfeed-use-curl t)			<span style="color: #b22222;">; </span><span style="color: #b22222;">My FreshRSS wants curl</span>
+  (elfeed-curl-extra-arguments '(<span style="color: #8b2252;">"--insecure"</span>))
+  (elfeed-curl-max-connections 10)
+  (elfeed-protocol-feeds '((<span style="color: #8b2252;">"fever+http://paul@freshrss.example/"</span> <span style="color: #483d8b;">:api-url</span> <span style="color: #8b2252;">"http://freshrss.example/api/fever.php"</span> <span style="color: #483d8b;">:password</span> <span style="color: #8b2252;">"somecoollongpassword"</span>)))
+  (elfeed-protocol-fever-fetch-category-as-tag t)
+  (elfeed-protocol-fever-maxsize 10000)
+  (elfeed-protocol-fever-update-unread-only t)
+  (elfeed-protocol-lazy-sync t)
+  (elfeed-set-timeout 36000)
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(elfeed-log-level 'debug)  ; for debugging when needed</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(elfeed-protocol-fever-maxsize 10)  ; for debugging when needed</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">:hook</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(after-init . toggle-debug-on-error)   ; for debugging when needed</span>
+  )
+
+(<span style="color: #a020f0;">with-eval-after-load</span> 'elfeed
+  (elfeed-protocol-enable))
+</pre>
+</div>
+<p> I&rsquo;ll take this moment to describe the <code>with-eval-after-load</code> items. Basically, these packages don&rsquo;t load quickly as a whole. I don&rsquo;t need them until I actually do something with <code>elfeed</code>. My config essentially keeps them hanging around until I do do something with <code>elfeed</code>, then they load. </p>
+<p> I don&rsquo;t kill my Emacs often. As such I don&rsquo;t care a lot about load times. <b>But</b> I do have a geriatric Intel MacBook Air I use when and where I don&rsquo;t want to take my fancy M3 MBA. For her sake and my eventual foray into Emacs on Android I will care a little bit. Also, <a href="https://peterprevos.com/">Dr Peter Prevos</a> and <a href="https://batsov.com">Bozhidar Batsov</a> put me on to how to improve my use of <code>use-package</code> in this regard, but it&rsquo;s outside of the scope of this article. </p>
+<p> Again, for the sake of completeness, here is the rest of my <code>elfeed</code> config: </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil">(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-tube</span>
+  <span style="color: #483d8b;">:after</span> elfeed
+  <span style="color: #483d8b;">:bind</span> (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+         (<span style="color: #8b2252;">"F"</span> . elfeed-tube-fetch)
+         ([remap save-buffer] . elfeed-tube-save)
+         <span style="color: #483d8b;">:map</span> elfeed-search-mode-map
+         (<span style="color: #8b2252;">"F"</span> . elfeed-tube-fetch)
+         ([remap save-buffer] . elfeed-tube-save)
+         )
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">:config</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(setq elfeed-tube-auto-save-p nil) ; default value</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(setq elfeed-tube-auto-fetch-p t)  ; default value</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(elfeed-tube-setup)</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">:hook</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(after-init . elfeed-tube-setup)</span>
+  )
+
+(<span style="color: #a020f0;">with-eval-after-load</span> 'elfeed-tube
+  (elfeed-tube-setup))
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-tube-mpv</span>
+  <span style="color: #483d8b;">:bind</span> (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+              (<span style="color: #8b2252;">"C-c C-f"</span> . elfeed-tube-mpv-follow-mode)
+              (<span style="color: #8b2252;">"C-c C-w"</span> . elfeed-tube-mpv-where)
+              )
+  )
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-webkit</span>
+  <span style="color: #483d8b;">:after</span> elfeed
+  <span style="color: #483d8b;">:bind</span> (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+              (<span style="color: #8b2252;">"%"</span> . elfeed-webkit-toggle)
+              )
+  )
+
+(<span style="color: #a020f0;">with-eval-after-load</span> 'elfeed
+  (elfeed-webkit-auto-toggle-by-tag))
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">elfeed-curate</span>
+  <span style="color: #483d8b;">:after</span> elfeed
+  <span style="color: #483d8b;">:bind</span>
+  (<span style="color: #483d8b;">:map</span> elfeed-search-mode-map
+        (<span style="color: #8b2252;">"a"</span> . elfeed-curate-edit-entry-annoation)
+        (<span style="color: #8b2252;">"x"</span> . elfeed-curate-export-entries)
+        )
+  (<span style="color: #483d8b;">:map</span> elfeed-show-mode-map
+        (<span style="color: #8b2252;">"a"</span> . elfeed-curate-edit-entry-annoation)
+        (<span style="color: #8b2252;">"m"</span> . my/elfeed-curate-toggle-star)
+        )
+  )
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">Easy insertion of weblinks</span>
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">org-web-tools</span>
+  <span style="color: #483d8b;">:bind</span>
+  ((<span style="color: #8b2252;">"C-c w w"</span> . org-web-tools-insert-link-for-url)))
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">Internet</span>
+
+(<span style="color: #a020f0;">use-package</span> <span style="color: #008b8b;">emacs</span>
+  <span style="color: #483d8b;">:custom</span>
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(shr-fill-text nil)			; Emacs 30.1+</span>
+  (url-queue-parallel-processes 10)
+  (url-queue-timeout 30)
+  <span style="color: #483d8b;">:ensure</span> nil
+  )
+</pre>
+</div>
+<p> Note that not all of these bits are working as I&rsquo;d like. <code>elfeed-webkit</code> works but needs refining in my config, as does <code>elfeed-org</code>. </p>
+<p> This is where things get dodgier: my functions, most of which I copied from an older config. I might not be using them all, especially as <code>elfeed</code> has seen it&rsquo;s own refinement over the years. </p>
+<p> First are the functions I&rsquo;m using to sync: </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil">(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-protocol-fever-sync-unread-stat</span> (host-url)
+  <span style="color: #8b2252;">"Set all entries in search view to read and fetch latest unread entries.</span>
+<span style="color: #8b2252;">HOST-URL is the host name of Fever server with user field authentication info,</span>
+<span style="color: #8b2252;">for example \"https://user@myhost.com\".</span>
+
+<span style="color: #8b2252;">Author: Andrey Listopadov</span>
+<span style="color: #8b2252;">URL https://github.com/fasheng/elfeed-protocol/issues/71#issuecomment-2483697511</span>
+<span style="color: #8b2252;">Created: 2024-11-18</span>
+<span style="color: #8b2252;">Updated: 2025-06-12"</span>
+  (<span style="color: #a020f0;">interactive</span>
+   (list (completing-read
+          <span style="color: #8b2252;">"feed: "</span>
+          (mapcar (<span style="color: #a020f0;">lambda</span> (fd)
+                    (string-trim-left (car fd) <span style="color: #8b2252;">"[</span><span style="color: #8b2252;">^</span><span style="color: #8b2252;">+]*\\+"</span>))
+                  elfeed-protocol-feeds))))
+  (<span style="color: #a020f0;">save-mark-and-excursion</span>
+    (mark-whole-buffer)
+    (<span style="color: #a020f0;">cl-loop</span> for entry in (elfeed-search-selected)
+             do (elfeed-untag-1 entry 'unread))
+    (elfeed-protocol-fever--do-update host-url 'update-unread))
+  )
+
+<span style="color: #b22222;">;;</span><span style="color: #b22222;">functions to support syncing .elfeed between machines</span>
+<span style="color: #b22222;">;;</span><span style="color: #b22222;">makes sure elfeed reads index from disk before launching</span>
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">bjm/elfeed-load-db-and-open</span> ()
+  <span style="color: #8b2252;">"Wrapper to load the elfeed db from disk before opening</span>
+
+<span style="color: #8b2252;">URL https://pragmaticemacs.wordpress.com/2016/08/17/read-your-rss-feeds-in-emacs-with-elfeed/</span>
+<span style="color: #8b2252;">Created: 2016-08-17</span>
+<span style="color: #8b2252;">Updated: 2025-06-13"</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (elfeed)
+  (elfeed-db-load)
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">(elfeed-search-update--force)</span>
+  (elfeed-update)
+  (elfeed-db-save)
+  )
+
+<span style="color: #b22222;">;;</span><span style="color: #b22222;">write to disk when quiting</span>
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">bjm/elfeed-save-db-and-bury</span> ()
+  <span style="color: #8b2252;">"Wrapper to save the elfeed db to disk before burying buffer</span>
+
+<span style="color: #8b2252;">URL https://pragmaticemacs.wordpress.com/2016/08/17/read-your-rss-feeds-in-emacs-with-elfeed/</span>
+<span style="color: #8b2252;">Created: 2016-08-17</span>
+<span style="color: #8b2252;">Updated: 2025-06-13"</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (elfeed-update)
+  (elfeed-db-save)
+  (quit-window))
+</pre>
+</div>
+<p> These are the rest. </p>
+<div class="org-src-container">
+<label class="org-src-name"><em></em></label></p>
+<pre class="src src-emacs-lisp" id="nil"><span style="color: #b22222;">;; </span><span style="color: #b22222;">Elfeed functions</span>
+
+(org-link-set-parameters <span style="color: #8b2252;">"elfeed"</span>
+  <span style="color: #483d8b;">:follow</span> #'elfeed-link-open
+  <span style="color: #483d8b;">:store</span>  #'elfeed-link-store-link
+  <span style="color: #483d8b;">:export</span> #'elfeed-link-export-link)
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-link-export-link</span> (link desc format _protocol)
+  <span style="color: #8b2252;">"Export `</span><span style="color: #008b8b;">org-mode</span><span style="color: #8b2252;">' `</span><span style="color: #008b8b;">elfeed</span><span style="color: #8b2252;">' LINK with DESC for FORMAT.</span>
+
+<span style="color: #8b2252;">Author: Jeremy Friesen</span>
+<span style="color: #8b2252;">URL https://takeonrules.com/2024/08/11/exporting-org-mode-elfeed-links/</span>
+<span style="color: #8b2252;">Created: 2024-08-11</span>
+<span style="color: #8b2252;">Updated:20205-06-10"</span>
+  (<span style="color: #a020f0;">if</span> (string-match <span style="color: #8b2252;">"</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">(</span><span style="color: #8b2252;">[</span><span style="color: #8b2252;">^</span><span style="color: #8b2252;">#]+</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">)</span><span style="color: #8b2252;">#</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">(</span><span style="color: #8b2252;">.+</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">)</span><span style="color: #8b2252;">"</span> link)
+    (<span style="color: #a020f0;">if-let*</span> ((entry
+                (elfeed-db-get-entry
+                  (cons (match-string 1 link)
+                    (match-string 2 link))))
+               (url
+                 (elfeed-entry-link entry))
+               (title
+                 (elfeed-entry-title entry)))
+      (<span style="color: #a020f0;">pcase</span> format
+        ('html (format <span style="color: #8b2252;">"&lt;a href=\"%s\"&gt;%s&lt;/a&gt;"</span> url desc))
+        ('md (format <span style="color: #8b2252;">"[%s](%s)"</span> desc url))
+        ('latex (format <span style="color: #8b2252;">"\\href{%s}{%s}"</span> url desc))
+        ('texinfo (format <span style="color: #8b2252;">"@uref{%s,%s}"</span> url desc))
+        (_ (format <span style="color: #8b2252;">"%s (%s)"</span> desc url)))
+      (format <span style="color: #8b2252;">"%s (%s)"</span> desc url))
+    (format <span style="color: #8b2252;">"%s (%s)"</span> desc link)))
+
+<span style="color: #b22222;">;;</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">I think elfeed handles buffers and the scrolling better now, so disable these.</span>
+<span style="color: #b22222;">;;</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">(defun elfeed-display-buffer (buf &amp;optional act)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">"URL https://karthinks.com/software/lazy-elfeed/"</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(pop-to-buffer buf)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(elfeed-show-refresh)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(set-window-text-height (get-buffer-window) (round (* 0.7 (frame-height))))</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(elfeed-show-refresh)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">)</span>
+
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(defun elfeed-search-show-entry-pre (&amp;optional lines)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">"Returns a function to scroll forward or back in the Elfeed</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">search results, displaying entries without switching to them."</span>
+<span style="color: #b22222;">;;       </span><span style="color: #b22222;">(lambda (times)</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(interactive "p")</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(forward-line (* times (or lines 0)))</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(recenter)</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(call-interactively #'elfeed-search-show-entry)</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(select-window (previous-window))</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(unless elfeed-search-remain-on-entry (forward-line -1))))</span>
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">(defun elfeed-scroll-up-command (&amp;optional arg)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">"Scroll up or go to next feed item in Elfeed"</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(interactive "^P")</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(let ((scroll-error-top-bottom nil))</span>
+<span style="color: #b22222;">;;     </span><span style="color: #b22222;">(condition-case-unless-debug nil</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(scroll-up-command arg)</span>
+<span style="color: #b22222;">;;       </span><span style="color: #b22222;">(error (elfeed-show-next)))))</span>
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">(defun elfeed-scroll-down-command (&amp;optional arg)</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">"Scroll up or go to next feed item in Elfeed"</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(interactive "^P")</span>
+<span style="color: #b22222;">;;   </span><span style="color: #b22222;">(let ((scroll-error-top-bottom nil))</span>
+<span style="color: #b22222;">;;     </span><span style="color: #b22222;">(condition-case-unless-debug nil</span>
+<span style="color: #b22222;">;;         </span><span style="color: #b22222;">(scroll-down-command arg)</span>
+<span style="color: #b22222;">;;       </span><span style="color: #b22222;">(error (elfeed-show-prev)))))</span>
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-tag-selection-as</span> (mytag)
+    <span style="color: #8b2252;">"Returns a function that tags an elfeed entry or selection as</span>
+<span style="color: #8b2252;">MYTAG"</span>
+    (<span style="color: #a020f0;">lambda</span> ()
+      <span style="color: #8b2252;">"Toggle a tag on an Elfeed search selection"</span>
+      (<span style="color: #a020f0;">interactive</span>)
+      (elfeed-search-toggle-all mytag)))
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-show-eww-open</span> (<span style="color: #228b22;">&amp;optional</span> use-generic-p)
+  <span style="color: #8b2252;">"open with eww"</span>
+  (<span style="color: #a020f0;">interactive</span> <span style="color: #8b2252;">"P"</span>)
+  (<span style="color: #a020f0;">let</span> ((browse-url-browser-function #'eww-browse-url))
+    (elfeed-show-visit use-generic-p)))
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-search-eww-open</span> (<span style="color: #228b22;">&amp;optional</span> use-generic-p)
+  <span style="color: #8b2252;">"open with eww"</span>
+  (<span style="color: #a020f0;">interactive</span> <span style="color: #8b2252;">"P"</span>)
+  (<span style="color: #a020f0;">let</span> ((browse-url-browser-function #'eww-browse-url))
+    (elfeed-search-browse-url use-generic-p)))
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">browse-url-mpv</span> (url <span style="color: #228b22;">&amp;optional</span> single)
+  (start-process <span style="color: #8b2252;">"mpv"</span> nil <span style="color: #8b2252;">"mpv"</span> (shell-quote-argument url)))
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">email-elfeed-entry</span> ()
+  <span style="color: #8b2252;">"Capture the elfeed entry and put it in an email.</span>
+
+<span style="color: #8b2252;">URL https://github.com/jkitchin/scimax/blob/master/scimax-elfeed.el</span>
+<span style="color: #8b2252;">Created: 2021-11-16</span>
+<span style="color: #8b2252;">Updated: 2025-06-10"</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (<span style="color: #a020f0;">let*</span> ((title (elfeed-entry-title elfeed-show-entry))
+         (url (elfeed-entry-link elfeed-show-entry))
+         (content (elfeed-entry-content elfeed-show-entry))
+         (entry-id (elfeed-entry-id elfeed-show-entry))
+         (entry-link (elfeed-entry-link elfeed-show-entry))
+         (entry-id-str (concat (car entry-id)
+                               <span style="color: #8b2252;">"|"</span>
+                               (cdr entry-id)
+                               <span style="color: #8b2252;">"|"</span>
+                               url)))
+    (compose-mail)
+    (message-goto-subject)
+    (insert title)
+    (message-goto-body)
+    (insert (format <span style="color: #8b2252;">"You may find this interesting:</span>
+<span style="color: #8b2252;">%s\n\n"</span> url))
+    (insert (elfeed-deref content))
+
+    (message-goto-body)
+    (<span style="color: #a020f0;">while</span> (re-search-forward <span style="color: #8b2252;">"&lt;br&gt;"</span> nil t)
+      (replace-match <span style="color: #8b2252;">"\n\n"</span>))
+
+    (message-goto-body)
+    (<span style="color: #a020f0;">while</span> (re-search-forward <span style="color: #8b2252;">"&lt;.*?&gt;"</span> nil t)
+      (replace-match <span style="color: #8b2252;">""</span>))
+
+    (message-goto-body)
+    (fill-region (point) (point-max))
+
+    (message-goto-to)
+    (ivy-contacts nil)))
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">* store links to elfeed entries</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">These are copied from org-elfeed</span>
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">org-elfeed-open</span> (path)
+  <span style="color: #8b2252;">"Open an elfeed link to PATH."</span>
+  (<span style="color: #a020f0;">cond</span>
+   ((string-match <span style="color: #8b2252;">"^entry-id:</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">(</span><span style="color: #8b2252;">.+</span><span style="color: #8b2252; font-weight: bold;">\\</span><span style="color: #8b2252; font-weight: bold;">)</span><span style="color: #8b2252;">"</span> path)
+    (<span style="color: #a020f0;">let*</span> ((entry-id-str (substring-no-properties (match-string 1 path)))
+           (parts (split-string entry-id-str <span style="color: #8b2252;">"|"</span>))
+           (feed-id-str (car parts))
+           (entry-part-str (cadr parts))
+           (entry-id (cons feed-id-str entry-part-str))
+           (entry (elfeed-db-get-entry entry-id)))
+      (elfeed-show-entry entry)))
+   (t (<span style="color: #ff0000; font-weight: bold;">error</span> <span style="color: #8b2252;">"%s %s"</span> <span style="color: #8b2252;">"elfeed: Unrecognised link type - "</span> path))))
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">org-elfeed-store-link</span> ()
+  <span style="color: #8b2252;">"Store a link to an elfeed entry."</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (<span style="color: #a020f0;">cond</span>
+   ((eq major-mode 'elfeed-show-mode)
+    (<span style="color: #a020f0;">let*</span> ((title (elfeed-entry-title elfeed-show-entry))
+           (url (elfeed-entry-link elfeed-show-entry))
+           (entry-id (elfeed-entry-id elfeed-show-entry))
+           (entry-id-str (concat (car entry-id)
+                                 <span style="color: #8b2252;">"|"</span>
+                                 (cdr entry-id)
+                                 <span style="color: #8b2252;">"|"</span>
+                                 url))
+           (org-link (concat <span style="color: #8b2252;">"elfeed:entry-id:"</span> entry-id-str)))
+      (org-link-store-props
+       <span style="color: #483d8b;">:description</span> title
+       <span style="color: #483d8b;">:type</span> <span style="color: #8b2252;">"elfeed"</span>
+       <span style="color: #483d8b;">:link</span> org-link
+       <span style="color: #483d8b;">:url</span> url
+       <span style="color: #483d8b;">:entry-id</span> entry-id)
+      org-link))
+   (t nil)))
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">Duplicate of above!</span>
+<span style="color: #b22222;">;;  </span><span style="color: #b22222;">⮯⮮</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">(org-link-set-parameters</span>
+<span style="color: #b22222;">;;  </span><span style="color: #b22222;">"elfeed"</span>
+<span style="color: #b22222;">;;  </span><span style="color: #b22222;">:follow 'org-elfeed-open</span>
+<span style="color: #b22222;">;;  </span><span style="color: #b22222;">:store 'org-elfeed-store-link)</span>
+
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">my/elfeed-show-entry-advice: ensures we store the entry and refresh the article after it has been rendered. The run-at-time trick delays just enough to avoid incomplete rendering.</span>
+<span style="color: #b22222;">;;</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">my/elfeed-refresh-on-resize: triggers refresh if the window is resized and you're currently in elfeed-show-mode.</span>
+<span style="color: #b22222;">;;</span>
+<span style="color: #b22222;">;; </span><span style="color: #b22222;">It tracks the current entry so you don’t get errors from nil.</span>
+
+(<span style="color: #a020f0;">defvar</span> <span style="color: #a0522d;">my/elfeed-current-entry</span> nil
+  <span style="color: #8b2252;">"Currently displayed Elfeed entry (used to trigger refresh on resize)."</span>)
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">my/elfeed-show-entry-advice</span> (entry)
+  <span style="color: #8b2252;">"Store the currently shown ENTRY and reflow after display."</span>
+  (<span style="color: #a020f0;">setq</span> my/elfeed-current-entry entry)
+  <span style="color: #b22222;">;; </span><span style="color: #b22222;">Run refresh a bit later so it's sure the buffer is fully rendered</span>
+  (run-at-time <span style="color: #8b2252;">"0.05 sec"</span> nil
+               (<span style="color: #a020f0;">lambda</span> ()
+                 (<span style="color: #a020f0;">when</span> (eq major-mode 'elfeed-show-mode)
+                   (elfeed-show-refresh)))))
+
+(advice-add 'elfeed-show-entry <span style="color: #483d8b;">:after</span> #'my/elfeed-show-entry-advice)
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">my/elfeed-refresh-on-resize</span> (_frame)
+  <span style="color: #8b2252;">"Reflow Elfeed article when the window is resized."</span>
+  (<span style="color: #a020f0;">when</span> (<span style="color: #a020f0;">and</span> (eq major-mode 'elfeed-show-mode)
+             my/elfeed-current-entry)
+    <span style="color: #b22222;">;; </span><span style="color: #b22222;">this ensures we re-render the article on resize</span>
+    (elfeed-show-refresh)))
+
+(add-hook 'window-size-change-functions #'my/elfeed-refresh-on-resize)
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-show-fetch-full-text</span> ()
+  <span style="color: #8b2252;">"Fetch the full text of the current Elfeed entry using eww-readable."</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (<span style="color: #a020f0;">let*</span> ((entry elfeed-show-entry)
+         (url (elfeed-entry-link entry)))
+    (eww url)  <span style="color: #b22222;">;; </span><span style="color: #b22222;">Open the URL in eww</span>
+    (run-at-time <span style="color: #8b2252;">"0.5 sec"</span> nil
+                 (<span style="color: #a020f0;">lambda</span> ()
+                   (<span style="color: #a020f0;">with-current-buffer</span> <span style="color: #8b2252;">"*eww*"</span>
+                     (eww-readable))))))  <span style="color: #b22222;">;; </span><span style="color: #b22222;">Call eww-readable after a short delay</span>
+
+(<span style="color: #a020f0;">defvar</span> <span style="color: #a0522d;">elfeed-curate-exit-keys</span> <span style="color: #8b2252;">"C-x C-s"</span>
+  <span style="color: #8b2252;">"Save the content from the recursive edit buffer to an entry annotation."</span>
+  )
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">my/elfeed-curate-toggle-star</span> ()
+  <span style="color: #8b2252;">"Wrapper to refresh the entry to see the star tag in the entry."</span>
+  (<span style="color: #a020f0;">interactive</span>)
+  (elfeed-curate-toggle-star)
+  (elfeed-show-refresh)
+  )
+
+(<span style="color: #a020f0;">defun</span> <span style="color: #0000ff;">elfeed-curate-edit-annotation</span> (title default-string)
+  <span style="color: #8b2252;">"Edit annotation string for the group TITLE with the DEFAULT-STRING.</span>
+<span style="color: #8b2252;">  Returns the annotation buffer content."</span>
+  (<span style="color: #a020f0;">with-temp-buffer</span>
+    (org-mode)
+    (<span style="color: #a020f0;">setq</span> buffer-read-only nil)
+    <span style="color: #b22222;">;; </span><span style="color: #b22222;">(setq mode-line-format nil)</span>
+    (outline-show-all)
+    (rename-buffer elfeed-curate-capture-buffer-name t)
+    (insert default-string)
+    (goto-char (point-max))
+    (<span style="color: #a020f0;">let</span> ((title-str (propertize (concat <span style="color: #8b2252;">" '"</span> (elfeed-curate-truncate-string title elfeed-curate-title-length) <span style="color: #8b2252;">"'"</span>)
+                                 'face 'mode-line-buffer-id)))
+      (<span style="color: #a020f0;">setq</span> header-line-format
+            (list
+             (elfeed-curate--key-emphasis <span style="color: #8b2252;">"Annotate"</span>)
+             title-str
+             <span style="color: #8b2252;">" --&gt; Save: '"</span> (elfeed-curate--key-emphasis elfeed-curate-exit-keys)
+             <span style="color: #8b2252;">"', Delete: '"</span> (elfeed-curate--key-emphasis elfeed-curate-delete-keys)
+             <span style="color: #8b2252;">"', Abort: '"</span>  (elfeed-curate--key-emphasis elfeed-curate-abort-keys)
+             <span style="color: #8b2252;">"'"</span>)))
+    (switch-to-buffer (current-buffer))
+    (use-local-map (elfeed-curate--annotation-keymap))
+    (font-lock-mode)
+    (recursive-edit)
+    (buffer-substring-no-properties (point-min) (point-max))
+    )
+  )
+</pre>
+</div>
+<p> The main dependency outside of Emacs is <code>curl</code>. For the <code>elfeed-tube</code> stuff, <code>mpv</code> and <code>yt-dlp</code>. Check the relevant documentation. </p>
+<div id="outline-container-org2b8e81d" class="outline-2">
+<h2 id="org2b8e81d">Works cited</h2>
+<div class="outline-text-2" id="text-org2b8e81d">
+<p> <i>Not really a works cited, just used to that.</i> </p>
+<p> <a href="https://github.com/skeeto/elfeed">GitHub &#8211; skeeto/elfeed: An Emacs web feeds client</a> <a href="https://github.com/remyhonig/elfeed-org">GitHub &#8211; remyhonig/elfeed-org: Configure the Elfeed RSS reader with an Orgmod&#x2026;</a> <a href="https://github.com/fasheng/elfeed-protocol">GitHub &#8211; fasheng/elfeed-protocol: Provide extra protocols to make like Fever,&#x2026;</a> <a href="https://github.com/fritzgrabo/elfeed-webkit">GitHub &#8211; fritzgrabo/elfeed-webkit: Emacs: Render elfeed entries in embedded w&#x2026;</a> <a href="https://github.com/karthink/elfeed-tube">GitHub &#8211; karthink/elfeed-tube: Youtube integration for Elfeed, the feed reade&#x2026;</a> <a href="https://github.com/rnadler/elfeed-curate">GitHub &#8211; rnadler/elfeed-curate</a> <a href="https://github.com/alphapapa/org-web-tools">GitHub &#8211; alphapapa/org-web-tools: View, capture, and archive Web pages in Org&#x2026;</a> </p>
+<p> See also the URLs in the code above. </p>
+<p> <a href="https://github.com/pprevos/emacs-writing-studio">GitHub &#8211; pprevos/emacs-writing-studio: Emacs configuration for authors who re&#x2026;</a> <a href="https://batsov.com/articles/2025/04/17/using-use-package-the-right-way/">Using use-package the right way &#8211; (think)</a> <a href="https://batsov.com/articles/2025/04/07/emacs-startup-time-does-not-matter/">Emacs Startup Time Doesn’t Matter &#8211; (think)</a> </p>
+<p> <a href="https://github.com/FreshRSS/FreshRSS">GitHub &#8211; FreshRSS/FreshRSS: A free, self-hostable news aggregator…</a> <a href="https://github.com/nextcloud/news">GitHub &#8211; nextcloud/news: 📰 RSS/Atom feed reader</a> </p>
+</div>
+</div>

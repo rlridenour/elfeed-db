@@ -1,0 +1,280 @@
+<p>NGL, I’ve always found the default Emacs Help menu to be a bit too <em>extra</em>.</p>
+<p><img alt="img" src="http://yummymelon.com/devnull/images/customizing-help/help-menu-original_resize_350x.png"></p>
+<p>While the Help menu is commendable in trying to assist new users, I’ve long outgrown it as most of its offerings I can access via the keyboard. The Help menu though lacks a feature that I sorely miss from other apps: The ability to open a separate GUI window (in Emacs parlance, a <em>frame</em>) to read help in.</p>
+<p>As always though with Emacs, you can customize nearly everything about it and that includes the Help menu which this post will cover. Readers are invited to  adopt or adapt these customizations for their own. Consider this a followup to an earlier post of mine “<a href="http://yummymelon.com/devnull/customizing-the-emacs-tools-menu.html">Customizing the Emacs Tools Menu</a>”.</p>
+<p>A design challenge to building a menu for Emacs Help is that there are no less than four different help subsystems provided by it:</p>
+<ul>
+<li>The Emacs Info reader for Texinfo files.</li>
+<li>Elisp docstrings rendered by the <code>describe-</code> family of functions.</li>
+<li>The Man page reader for <code>troff</code> formatted files.</li>
+<li><code>shortdoc</code> for an overview of functions relevant for a topic.</li>
+</ul>
+<p>For my Help menu I’ve decided to make three ways to create a new frame:</p>
+<ul>
+<li><strong>Info in New Frame:</strong> Create a new frame with the Emacs Info reader.</li>
+<li><strong>New Info in New Frame:</strong> Create a new frame with a different Emacs Info reader instance. The user will be prompted for a manual to render.</li>
+<li><strong>Man Page in New Frame:</strong> Create a new frame with a Man page reader. The user will be prompted for a man page to render.</li>
+</ul>
+<p>I’ve found the relatively recent addition of <code>describe-symbol</code> to generalize search of all docstrings to be a welcome one. Promoting it and <code>describe-key</code> to the first level of the menu seemed appropriate.</p>
+<p>A recent TIL is the command <code>finder-commentary</code> which will display the commentary section of an Elisp library. I’ve found this command nice to have around but its name to be completely unmemorable, which makes it perfect to put in the menu labeled as “Library Commentary…”.</p>
+<p>With existing Help menu items, I’ve decided to either remove or re-arrange them to taste. The result of my customizations looks like this:</p>
+<p><img alt="img" src="http://yummymelon.com/devnull/images/customizing-help/help-menu-kickingvegas_resize_350x.png"></p>
+<p>Be forewarned, some Elisp ahead.</p>
+<h1>Implementation</h1>
+<p>To customize the Help menu it helps to know the internal key of a menu item. These keys are Elisp symbols. Here’s a utility function to help show these key symbols in string form:</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span>
+<span class="normal">6</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc/show-global-map-keys</span><span class="w"> </span><span class="p">(</span><span class="nv">keypath</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Show formatted keys for keymap in </span><span class="ss">`global-map&#39;</span><span class="s"> given KEYPATH.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="k">interactive</span><span class="p">)</span>
+<span class="w">  </span><span class="p">(</span><span class="nf">mapcar</span><span class="w"> </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">(</span><span class="nv">x</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nf">format</span><span class="w"> </span><span class="s">&quot;%s&quot;</span><span class="w"> </span><span class="nv">x</span><span class="p">))</span>
+<span class="w">          </span><span class="p">(</span><span class="nf">mapcar</span><span class="w"> </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">(</span><span class="nv">x</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nf">listp</span><span class="w"> </span><span class="nv">x</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nf">car</span><span class="w"> </span><span class="nv">x</span><span class="p">)))</span>
+<span class="w">                  </span><span class="p">(</span><span class="nf">cdr</span><span class="w"> </span><span class="p">(</span><span class="nf">lookup-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="nv">keypath</span><span class="p">)))))</span>
+</code></pre></div></td></tr></table></div>
+
+<p>With <code>cc/show-global-map-keys</code> evaluated, we can run it in IELM as shown below for the keypath <code>[menu-bar help-menu]</code>.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span>
+<span class="normal">6</span>
+<span class="normal">7</span>
+<span class="normal">8</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nv">ELISP&gt;</span><span class="w"> </span><span class="p">(</span><span class="nv">cc/show-global-map-keys</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">])</span>
+<span class="p">(</span><span class="s">&quot;emacs-tutorial&quot;</span><span class="w"> </span><span class="s">&quot;emacs-tutorial-language-specific&quot;</span><span class="w"> </span><span class="s">&quot;emacs-faq&quot;</span>
+<span class="w"> </span><span class="s">&quot;emacs-news&quot;</span><span class="w"> </span><span class="s">&quot;emacs-known-problems&quot;</span><span class="w"> </span><span class="s">&quot;emacs-manual-bug&quot;</span>
+<span class="w"> </span><span class="s">&quot;send-emacs-bug-report&quot;</span><span class="w"> </span><span class="s">&quot;emacs-psychotherapist&quot;</span><span class="w"> </span><span class="s">&quot;sep1&quot;</span>
+<span class="w"> </span><span class="s">&quot;search-documentation&quot;</span><span class="w"> </span><span class="s">&quot;describe&quot;</span><span class="w"> </span><span class="s">&quot;emacs-manual&quot;</span><span class="w"> </span><span class="s">&quot;more-manuals&quot;</span>
+<span class="w"> </span><span class="s">&quot;find-emacs-packages&quot;</span><span class="w"> </span><span class="s">&quot;external-packages&quot;</span><span class="w"> </span><span class="s">&quot;sep2&quot;</span>
+<span class="w"> </span><span class="s">&quot;getting-new-versions&quot;</span><span class="w"> </span><span class="s">&quot;describe-copying&quot;</span><span class="w"> </span><span class="s">&quot;describe-no-warranty&quot;</span>
+<span class="w"> </span><span class="s">&quot;sep4&quot;</span><span class="w"> </span><span class="s">&quot;about-emacs&quot;</span><span class="w"> </span><span class="s">&quot;about-gnu-project&quot;</span><span class="w"> </span><span class="s">&quot;nil&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>We’ll return back to these keys later.</p>
+<p>Opening a new frame (aka GUI window) can be achieved with the function <code>other-frame-prefix</code>. We can wrap this function so that any interactive command can be invoked in a new frame as shown below.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc/--command-in-new-frame</span><span class="w"> </span><span class="p">(</span><span class="nv">cmd</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Invoke CMD in a new frame.</span>
+<span class="s">This command creates a new frame populated by CMD.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nv">other-frame-prefix</span><span class="p">)</span>
+<span class="w">  </span><span class="p">(</span><span class="nf">call-interactively</span><span class="w"> </span><span class="nv">cmd</span><span class="p">))</span>
+</code></pre></div></td></tr></table></div>
+
+<p>With <code>cc/--command-in-new-frame</code> in place, we can now add menu items using <code>easy-menu-add-item</code>. The next code example shows how to invoke <code>info</code> in a new frame as a menu item added before <code>emacs-tutorial</code>.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span>
+<span class="normal">6</span>
+<span class="normal">7</span>
+<span class="normal">8</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Info in New Frame&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">()</span>
+<span class="w">    </span><span class="p">(</span><span class="k">interactive</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">cc/--command-in-new-frame</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">info</span><span class="p">))</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Show Info manual in new frame.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>Let’s add some more menu items to support viewing a Man page and for <code>describe-symbol</code> and <code>describe-key</code>.  In addition, we’ll re-arrange some existing menu items by replicating their entry in <code>global-map</code> in a desired position and later deleting the older menu item with the same command.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span>
+<span class="normal">31</span>
+<span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span>
+<span class="normal">39</span>
+<span class="normal">40</span>
+<span class="normal">41</span>
+<span class="normal">42</span>
+<span class="normal">43</span>
+<span class="normal">44</span>
+<span class="normal">45</span>
+<span class="normal">46</span>
+<span class="normal">47</span>
+<span class="normal">48</span>
+<span class="normal">49</span>
+<span class="normal">50</span>
+<span class="normal">51</span>
+<span class="normal">52</span>
+<span class="normal">53</span>
+<span class="normal">54</span>
+<span class="normal">55</span>
+<span class="normal">56</span>
+<span class="normal">57</span>
+<span class="normal">58</span>
+<span class="normal">59</span>
+<span class="normal">60</span>
+<span class="normal">61</span>
+<span class="normal">62</span>
+<span class="normal">63</span>
+<span class="normal">64</span>
+<span class="normal">65</span>
+<span class="normal">66</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;New Info in New Frame…&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">()</span>
+<span class="w">    </span><span class="p">(</span><span class="k">interactive</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">cc/--command-in-new-frame</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">info-display-manual</span><span class="p">))</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Show new Info manual in new frame.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Man Page in New Frame…&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">()</span>
+<span class="w">    </span><span class="p">(</span><span class="k">interactive</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">cc/--command-in-new-frame</span><span class="w"> </span><span class="nf">#&#39;</span><span class="nv">man</span><span class="p">))</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Show man page in new frame.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Describe Symbol…&quot;</span>
+<span class="w">  </span><span class="nv">describe-symbol</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Describe symbol.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Describe Key or Mouse…&quot;</span>
+<span class="w">  </span><span class="nv">describe-key</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Describe key or mouse operation.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Library Commentary…&quot;</span>
+<span class="w">  </span><span class="nv">finder-commentary</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Show commentary for Elisp library.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;emacs-tutorial</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Emacs FAQ&quot;</span>
+<span class="w">  </span><span class="nv">view-emacs-FAQ</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;View Emacs FAQ.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;describe-copying</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Emacs News&quot;</span>
+<span class="w">  </span><span class="nv">view-emacs-news</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;View Emacs news about this release.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;describe-copying</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Emacs Known Problems&quot;</span>
+<span class="w">  </span><span class="nv">view-emacs-problems</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;View Emacs known problems.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;describe-copying</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">easy-menu-add-item</span>
+<span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="o">&#39;</span><span class="p">(</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="p">)</span>
+<span class="w"> </span><span class="p">[</span><span class="s">&quot;Send Bug Report…&quot;</span>
+<span class="w">  </span><span class="nv">report-emacs-bug</span>
+<span class="w">  </span><span class="nb">:help</span><span class="w"> </span><span class="s">&quot;Send Emacs bug report.&quot;</span><span class="p">]</span>
+<span class="w"> </span><span class="ss">&#39;describe-copying</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>So far all we’ve done is add more menu items. Here’s how to get rid of the items using the keys obtained via <code>cc/show-global-map-keys</code>.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-tutorial</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-tutorial-language-specific</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-psychotherapist</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">more-manuals</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-manual</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">getting-new-versions</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">describe-copying</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">describe-no-warranty</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">about-gnu-project</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">external-packages</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-faq</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-news</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-known-problems</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">emacs-manual-bug</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">send-emacs-bug-report</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">getting-new-versions</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">define-key</span><span class="w"> </span><span class="nv">global-map</span><span class="w"> </span><span class="p">[</span><span class="nv">menu-bar</span><span class="w"> </span><span class="nv">help-menu</span><span class="w"> </span><span class="nv">about-gnu-project</span><span class="p">]</span><span class="w"> </span><span class="no">nil</span><span class="w"> </span><span class="no">t</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<h1>Closing Thoughts</h1>
+<p>I’ve been living with this customized Help menu for several months now and upon reflection a couple of thoughts:</p>
+<ul>
+<li>
+<p>How did I live so long without this?</p>
+<p>Easy and non-disruptive access to Help in a separate GUI window is baseline for a proper application. Vanilla Emacs makes doing this way more onerous than need be:</p>
+<ol>
+<li>Create a new frame either from the menu “Edit › New Frame” or by recalling the arcane incantation <code>C-x 5 2</code>. (really?)</li>
+<li>Run <code>M-x info</code> in the new frame.</li>
+</ol>
+<p>With my reconfigured Help menu, I can just go to “Help › Info in New Frame” via mouse and it does the right thing without altering any existing Emacs window configuration. Simple pleasures.</p>
+</li>
+<li>
+<p>To my surprise, I use Info so much more now.</p>
+<p>Having the Info reader in a separate GUI window lets me treat it like a web browser window but with the benefits of:</p>
+<ol>
+<li>Local access - never worry about a network connection.</li>
+<li>You’re still in Emacs.</li>
+</ol>
+<p>Couple that with my <a href="http://yummymelon.com/devnull/announcing-casual-info.html">Casual interface for Info</a> and I’d argue that Info is actually pleasurable to use. (Alongside that the same goes for <a href="http://yummymelon.com/devnull/announcing-casual-man-and-help.html">Casual Man and Help</a>.)</p>
+<p>Info is not exclusive to just Emacs manuals. You can read manuals for GNU coreutils, Make, Bash, Gnuplot, and many others. These days, whenever I’m dealing with software, I actively look to see if there’s Texinfo documentation for it.</p>
+</li>
+</ul>
+<p>If you’ve made it to here, thanks for reading!</p>

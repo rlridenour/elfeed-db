@@ -1,0 +1,85 @@
+<p>
+<a href="https://nrw.social/@HaraldKi/115870799140566745">@HaraldKi@nrw.social</a> said:
+</p>
+
+<blockquote>
+<p>
+Emacs can do everything. Except the most simple thing ever as I learned after 40 years in which I
+never needed it: Edit one file twice at the same time.
+</p>
+
+<p>
+I can open a new Emacs "window" and re-open the file. But Emacs notices and this and shows the
+file's buffer in the new window, not a new buffer.
+</p>
+
+<p>
+But why? Well, when editing and SVG file, you can switch between the XML and the rendered image with
+C-c C-c, but I would like to see the XML and the rendered next to each other.😀
+</p>
+</blockquote>
+
+<p>
+You might think this is easy, just use <code>M-x clone-indirect-buffer-other-window</code>. But image-mode adds a wrinkle. It uses text properties to display the image, so even if you have two views of the same buffer thanks to <code>clone-indirect-buffer</code>, <code>C-c C-c</code> will toggle both of them. If we want to edit a file as both text and an SVG at the same time, we need to actually have two separate file buffers.
+</p>
+
+<p>
+I started off by looking at how <code>find-file</code> works. From there, I went to <code>find-file-noselect</code>.  Normally, <code>find-file-no-select</code> reuses any existing buffers visiting the same file. If it doesn't find any, it calls <code>find-file-noselect-1</code>. That lets me write this short function to jump straight to that step.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-find-file-always</span> (filename <span class="org-type">&amp;optional</span> buffer-name)
+  (<span class="org-keyword">interactive</span> (list (read-file-name <span class="org-string">"File: "</span>)))
+  (<span class="org-keyword">setq</span> buffer-name (<span class="org-keyword">or</span> (create-file-buffer filename)))
+  (<span class="org-keyword">let*</span> ((truename (abbreviate-file-name (file-truename filename)))
+         (attributes (file-attributes truename))
+         (number (file-attribute-file-identifier attributes)))
+    (<span class="org-keyword">with-current-buffer</span>
+        (find-file-noselect-1
+         (get-buffer-create buffer-name)
+         truename
+         t nil truename number)
+      (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+        (switch-to-buffer (current-buffer)))
+      (current-buffer))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-clone-file-other-window</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (display-buffer-other-window (my-find-file-always (buffer-file-name))))
+</code></pre>
+</div>
+
+
+<p>
+This code unconditionally opens a buffer visiting a file, so you could have multiple buffers, looking at the same file independently. With <code>global-auto-revert-mode</code>, editing the file in one buffer and saving it will result in changes in the other.
+</p>
+
+<p>
+I sometimes play around with SVGs, and it might be helpful to be able to experiment with the source code of the SVG while seeing the changes refreshed automatically.
+</p>
+
+<p>
+I really like how in Emacs, you can follow the trail of the functions to find out how they actually work.
+</p>
+
+<div class="media-post" id="org37a32cd">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2026/01/emacs-lisp-editing-one-file-twice-at-the-same-time/2026-01-14_14.08.37.webm" type="video/webm"><track kind="subtitles" label="Captions" src="https://sachachua.com/home/sacha/sync/orgzly/1" srclang="en" default=""><a href="https://sachachua.com/blog/2026/01/emacs-lisp-editing-one-file-twice-at-the-same-time/2026-01-14_14.08.37.webm">Download the video</a></video><figcaption><div>Screencast demonstrating my-find-file-always</div></figcaption></figure>
+<p></p>
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;">
+                  <summary><strong>Transcript</strong></summary>
+<p>
+</p><div class="transcript-heading"><span class="audio-time" data-start="0.000000">00:00:00</span> <strong>The problem: clone-indirect-buffer-other-window and image-mode</strong></div><span class="audio-time caption" data-start="0.000000" data-stop="4.679000">@HaraldKi@nrw.social said,</span> <span class="audio-time caption" data-start="4.680000" data-stop="5.879000">"Emacs can do everything</span> <span class="audio-time caption" data-start="5.880000" data-stop="7.679000">except the most simple thing ever,</span> <span class="audio-time caption" data-start="7.680000" data-stop="8.999000">as I learned after 40 years</span> <span class="audio-time caption" data-start="9.000000" data-stop="10.599000">in which I never needed it:</span> <span class="audio-time caption" data-start="10.600000" data-stop="13.519000">edit one file twice at the same time."</span> <span class="audio-time caption" data-start="13.520000" data-stop="15.039000">You might think this is easy,</span> <span class="audio-time caption" data-start="15.040000" data-stop="18.999000">just use M-x clone-indirect-buffer-other-window,</span> <span class="audio-time caption" data-start="19.000000" data-stop="21.159000">but image mode adds a wrinkle.</span> <span class="audio-time caption" data-start="21.160000" data-stop="23.599000">So let's show you how that works.</span> <span class="audio-time caption" data-start="23.600000" data-stop="26.679000">I've got my test SVG here.</span> <span class="audio-time caption" data-start="26.680000" data-stop="29.999000">We can say clone-indirect-buffer-other-window.</span> <span class="audio-time caption" data-start="30.000000" data-stop="31.559000">But if I use C-c C-c,</span> <span class="audio-time caption" data-start="31.560000" data-stop="34.679000">you'll notice that both of the windows change.</span> <span class="audio-time caption" data-start="34.680000" data-stop="37.359000">That's because image mode uses text properties</span> <span class="audio-time caption" data-start="37.360000" data-stop="40.839000">instead of some other kind of display.</span> <span class="audio-time caption" data-start="40.840000" data-stop="44.239000">I mean, it's the same buffer that's being reused</span> <span class="audio-time caption" data-start="44.240000" data-stop="48.199000">for the clone. So that doesn't work.</span> <div class="transcript-heading"><span class="audio-time" data-start="48.000000">00:00:48</span> <strong>A quick tour of find-file</strong></div><span class="audio-time caption" data-start="48.200000" data-stop="51.439000">What I did was I looked at how find-file works.</span> <span class="audio-time caption" data-start="51.440000" data-stop="54.639000">And then from there, I went to find-file-noselect.</span> <span class="audio-time caption" data-start="54.640000" data-stop="58.399000">So this is find-file over here.</span> <span class="audio-time caption" data-start="58.400000" data-stop="59.799000">If you look at the source code,</span> <span class="audio-time caption" data-start="59.800000" data-stop="62.279000">you'll see how it uses find-file...</span> <span class="audio-time caption" data-start="62.280000" data-stop="63.399000">It's a very short function, actually.</span> <span class="audio-time caption" data-start="63.400000" data-stop="66.199000">It uses find-file-noselect.</span> <span class="audio-time caption" data-start="66.200000" data-stop="73.919000">And find-file-noselect reuses a buffer if it can.</span> <span class="audio-time caption" data-start="73.920000" data-stop="77.719000">Let's show you where we're looking for this. Ah, yes.</span> <span class="audio-time caption" data-start="77.720000" data-stop="80.759000">So here's another buffer here.</span> <span class="audio-time caption" data-start="80.760000" data-stop="82.959000">And what we want to do is</span> <span class="audio-time caption" data-start="82.960000" data-stop="87.359000">we want to open a new file buffer no matter what.</span> <span class="audio-time caption" data-start="87.360000" data-stop="90.119000">The way that find-file-noselect actually works</span> <span class="audio-time caption" data-start="90.120000" data-stop="93.079000">is it calls this find-file-noselect1.</span> <span class="audio-time caption" data-start="93.080000" data-stop="95.639000">And by taking a look at how it figured out</span> <span class="audio-time caption" data-start="95.640000" data-stop="97.479000">the raw file and the true name and the number</span> <span class="audio-time caption" data-start="97.480000" data-stop="99.439000">to send to it, I was able to write</span> <span class="audio-time caption" data-start="99.440000" data-stop="104.839000">this short function, my-find-file-always,</span> <span class="audio-time caption" data-start="104.840000" data-stop="106.839000">and a my-clone-file-other-window.</span> <div class="transcript-heading"><span class="audio-time" data-start="106.000000">00:01:46</span> <strong>Demonstration of my-find-file-always</strong></div><span class="audio-time caption" data-start="106.840000" data-stop="111.759000">So if I say my-find-file-always,</span> <span class="audio-time caption" data-start="111.760000" data-stop="114.839000">then it will always open that file,</span> <span class="audio-time caption" data-start="114.840000" data-stop="117.719000">even if it's already open elsewhere.</span> <div class="transcript-heading"><span class="audio-time" data-start="117.000000">00:01:57</span> <strong>Cloning it into the other window</strong></div><span class="audio-time caption" data-start="117.720000" data-stop="120.119000">Let's show you how it works</span> <span class="audio-time caption" data-start="120.120000" data-stop="123.119000">when I clone it in the other window.</span> <span class="audio-time caption" data-start="123.120000" data-stop="126.679000">All right, so if I switch this one to text mode,</span> <span class="audio-time caption" data-start="126.680000" data-stop="131.879000">I can make changes to it. More stuff goes here.</span> <span class="audio-time caption" data-start="131.880000" data-stop="135.039000">And as you can see, that added this over here.</span> <span class="audio-time caption" data-start="135.040000" data-stop="136.999000">I have global-auto-revert mode on,</span> <span class="audio-time caption" data-start="137.000000" data-stop="140.159000">so it just refreshes automatically.</span> <span class="audio-time caption" data-start="140.160000" data-stop="143.640000">So yeah, that's this function.</span>
+<p></p>
+
+
+</details>
+
+</div>
+<div><a href="https://sachachua.com/blog/2026/01/emacs-lisp-editing-one-file-twice-at-the-same-time/index.org">View org source for this post</a></div>
+<p>You can <a href="https://sachachua.com/blog/2026/01/emacs-lisp-editing-one-file-twice-at-the-same-time/#comment">view 1 comment</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Femacs-lisp-editing-one-file-twice-at-the-same-time%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

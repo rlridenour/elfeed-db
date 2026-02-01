@@ -1,0 +1,149 @@
+<p>
+I often want to copy the toot URL after posting a
+new toot about a blog post so that I can update
+the blog post with it. Since I post from Emacs
+using <a href="https://codeberg.org/martianh/mastodon.el">mastodon.el</a>, I can probably figure out how
+to get the URL after tooting. A quick-and-dirty
+way is to retrieve the latest status.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-mastodon-toot-posted-hook</span> nil <span class="org-doc">"Called with the item."</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-mastodon-copy-toot-url</span> (toot)
+  (<span class="org-keyword">interactive</span> (list (my-mastodon-latest-toot)))
+  (kill-new (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">url</span> toot)))
+(add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-mastodon-toot-posted-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-mastodon-copy-toot-url</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-mastodon-latest-toot</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">require</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">mastodon-http</span>)
+  (<span class="org-keyword">let*</span> ((json-array-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">list</span>)
+         (json-object-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">alist</span>))
+    (car
+     (mastodon-http&#45;&#45;get-json
+      (mastodon-http&#45;&#45;api
+       (format <span class="org-string">"accounts/%s/statuses?count=1&amp;limit=1&amp;exclude_reblogs=t"</span>
+               (mastodon-auth&#45;&#45;get-account-id)))
+      nil <span class="org-builtin">:silent</span>))))
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-toot</span>
+  (<span class="org-keyword">when</span> (functionp <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-toot-send</span>)
+    (advice-add
+     <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">mastodon-toot-send</span>
+     <span class="org-builtin">:after</span>
+     (<span class="org-keyword">lambda</span> (<span class="org-type">&amp;rest</span> _)
+       (run-hook-with-args <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-mastodon-toot-posted-hook</span> (my-mastodon-latest-toot)))))
+  (<span class="org-keyword">when</span> (functionp <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">mastodon-toot&#45;&#45;send</span>)
+    (advice-add
+     <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">mastodon-toot&#45;&#45;send</span>
+     <span class="org-builtin">:after</span>
+     (<span class="org-keyword">lambda</span> (<span class="org-type">&amp;rest</span> _)
+       (run-hook-with-args <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-mastodon-toot-posted-hook</span> (my-mastodon-latest-toot))))))
+</pre>
+</div>
+
+
+<p>
+I considered overriding the keybinding in
+<code>mastodon-toot-mode-map</code>, but I figured using
+advice would mean I can copy things even after
+automated toots.
+</p>
+
+<p>
+A more elegant way to do this might be to modify
+<code>mastodon-toot-send</code> to <code>run-hook-with-args</code> a
+variable with the <code>response</code> as an argument, but
+this will do for now.
+</p>
+
+<p>
+I used a hook in my advice so that I can change
+the behaviour from other functions. For example, I
+have some code to compose a toot with <a href="https://sachachua.com/dotemacs#mastodon-tooting-a-link-to-the-current-post">a link to
+the current post</a>. After I send a toot, I want to
+check if the toot contains the current entry's
+permalink. If it has and I don't have a Mastodon
+toot field yet, maybe I can automatically set that
+property, assuming I end up back in the Org Mode
+file I started it from.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-mastodon-org-maybe-set-toot-url</span> (toot)
+  (<span class="org-keyword">when</span> (derived-mode-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-mode</span>)
+    (<span class="org-keyword">let</span> ((permalink (org-entry-get-with-inheritance <span class="org-string">"EXPORT_ELEVENTY_PERMALINK"</span>)))
+      (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> permalink
+                 (string-match (regexp-quote permalink) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">content</span> toot))
+                 (not (org-entry-get-with-inheritance <span class="org-string">"MASTODON"</span>)))
+        (<span class="org-keyword">save-excursion</span>
+          (goto-char (org-find-property <span class="org-string">"EXPORT_ELEVENTY_PERMALINK"</span>
+                                        permalink))
+          (org-entry-put
+           (point)
+           <span class="org-string">"EXPORT_MASTODON"</span>
+           (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">url</span> toot))
+          (message <span class="org-string">"Toot URL set: %s, republish if needed"</span> toot))))))
+(add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-mastodon-toot-posted-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-mastodon-org-maybe-set-toot-url</span>)
+</pre>
+</div>
+
+
+<p>
+If I combine that with a development copy of my
+blog that ignores most of my posts so it compiles
+faster and a function that copies just the current
+post's files over, I can quickly make a post
+available at its permalink (which means the link
+in the toot will work) before I recompile the rest
+of the blog, which takes a number of minutes.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-11ty-copy-just-this-post</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">when</span> (derived-mode-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-mode</span>)
+    (<span class="org-keyword">let</span> ((file (org-entry-get-with-inheritance <span class="org-string">"EXPORT_ELEVENTY_FILE_NAME"</span>))
+          (path my-11ty-base-dir))
+      (call-process <span class="org-string">"chmod"</span> nil nil nil <span class="org-string">"ugo+rwX"</span> <span class="org-string">"-R"</span> (expand-file-name file (expand-file-name <span class="org-string">"_local"</span> path)))
+      (call-process <span class="org-string">"rsync"</span> nil (get-buffer-create <span class="org-string">"*rsync*"</span>) nil <span class="org-string">"-avze"</span> <span class="org-string">"ssh"</span>
+                    (expand-file-name file (expand-file-name <span class="org-string">"_local"</span> path))
+                    (concat <span class="org-string">"web:/var/www/static-blog/"</span> file))
+      (browse-url (concat (replace-regexp-in-string <span class="org-string">"/$"</span> <span class="org-string">""</span> my-blog-base-url)
+                          (org-entry-get-with-inheritance <span class="org-string">"EXPORT_ELEVENTY_PERMALINK"</span>))))))
+</pre>
+</div>
+
+
+<p>
+The proper blog updates (index page, RSS/ATOM
+feeds, category pages, prev/next links, etc.) can happen when the
+publishing is finished.
+</p>
+
+<p>
+So my draft workflow is:
+</p>
+
+<ol class="org-ol">
+<li>Write the post.</li>
+<li>Export it to the local <code>NODE_ENV=dev npx eleventy &#45;&#45;serve &#45;&#45;quiet</code> with <a href="https://github.com/sachac/ox-11ty">ox-11ty</a>.</li>
+<li>Check that it looks okay locally.</li>
+<li>Use <code>my-org-11ty-copy-just-this-post</code> and confirm that it looks fine.</li>
+<li>Compose a toot with <a href="https://sachachua.com/dotemacs#mastodon-tooting-a-link-to-the-current-post">my-mastodon-11ty-toot-post</a>
+and check if sending it updates the Mastodon
+toot.</li>
+<li>Re-export the post.</li>
+<li>Run my blog publishing process. <code>NODE_ENV=production npx eleventy &#45;&#45;quiet</code> and then rsync.</li>
+</ol>
+
+<p>
+Let's see if this works&#x2026;
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#mastodon">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2025/03/mastodon-el-copy-toot-url-after-posting-also-copying-just-this-post-with-11ty/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JQ2TC154Z4YXG35A52NQPKG8" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Fmastodon-el-copy-toot-url-after-posting-also-copying-just-this-post-with-11ty%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

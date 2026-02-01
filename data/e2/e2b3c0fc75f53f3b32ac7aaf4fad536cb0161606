@@ -1,0 +1,361 @@
+
+<p class="wp-block-paragraph">Want a private blog or small business site that nobody can reach unless they use the Tor Browser?<br>Below is a step-by-step guide that keeps the server lean, secure, and accessible <strong>only</strong> via an <em>.onion</em> address.<br>All commands are for Ubuntu/Debian; adjust paths if you&#8217;re on another distribution.</p>
+
+
+
+<span id="more-8401"></span>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Security note: This setup hides your IP but still exposes the WordPress install to the internet (through Tor).<br>Treat it like any public site: keep software updated, use strong passwords, and monitor logs.</p>
+</blockquote>
+
+
+
+<h2 class="wp-block-heading" id="orga25abeb">Prepare a Clean Server</h2>
+
+
+
+<ul class="wp-block-list">
+<li>Pick a fresh VPS or a dedicated local machine.</li>
+
+
+
+<li>Remove unneeded packages:</li>
+</ul>
+
+
+
+<pre class="wp-block-code"><code>sudo apt update &amp;&amp; sudo apt upgrade -y
+</code></pre>
+
+
+
+<ul class="wp-block-list">
+<li>Disable unused services (e.g., <code>bluetoothd</code> if you don&#8217;t need it).</li>
+</ul>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Why? A minimal footprint reduces the attack surface and makes troubleshooting easier.</p>
+</blockquote>
+
+
+
+<h2 class="wp-block-heading" id="orgff184f9">Install Tor</h2>
+
+
+
+<pre class="wp-block-code"><code>sudo apt install tor -y
+sudo systemctl enable --now tor
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Verify it&#8217;s running:</p>
+
+
+
+<pre class="wp-block-code"><code>systemctl status tor | grep Active
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Tor will create its default data directory at&nbsp;<code>/var/lib/tor</code>.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph"><strong>Why?</strong>&nbsp;Tor provides the hidden-service layer that masks your real IP.</p>
+</blockquote>
+
+
+
+<h2 class="wp-block-heading" id="orgc2a4180">Create a Hidden Service</h2>
+
+
+
+<p class="wp-block-paragraph">Edit the Tor configuration:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/tor/torrc
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Add (or uncomment) these lines:</p>
+
+
+
+<pre id="org1869e0e" class="wp-block-code"><code>HiddenServiceDir /var/lib/tor/wp/
+HiddenServicePort 80 127.0.0.1:8080
+</code></pre>
+
+
+
+<ul class="wp-block-list">
+<li><code>HiddenServiceDir</code> &#8211; where Tor writes the .onion address and private key.</li>
+
+
+
+<li><code>HiddenServicePort</code> &#8211; forwards traffic from port 80 of the hidden service to localhost 8080 (our web server).</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Restart Tor:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo systemctl restart tor
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Check the generated address:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo cat /var/lib/tor/wp/hostname
+# e.g., b5u6p7q9r1s3t4u5v6w7x8y9z0a1b2c3d4e5f6g7h.onion
+</code></pre>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Why? The .onion file contains the public key; anyone with that address can reach your site through Tor.</p>
+</blockquote>
+
+
+
+<p class="wp-block-paragraph">Secure the hidden service directory permissions:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo chown -R debian-tor:debian-tor /var/lib/tor/wp
+sudo chmod 700 /var/lib/tor/wp
+</code></pre>
+
+
+
+<h3 class="wp-block-heading" id="orge857407">Install WordPress</h3>
+
+
+
+<h4 class="wp-block-heading" id="org58e66d9">Option A: Lightweight LAMP (Nginx + MariaDB)</h4>
+
+
+
+<pre class="wp-block-code"><code># Nginx
+sudo apt install nginx -y
+
+# MariaDB
+sudo apt install mariadb-server php-fpm php-mysql -y
+sudo mysql_secure_installation
+
+# PHP extensions for WP
+sudo apt install php-curl php-gd php-xml php-zip -y
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Create a database:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo mysql -u root -p
+CREATE DATABASE wp_hidden;
+GRANT ALL PRIVILEGES ON wp_hidden.* TO 'wp_user'@'localhost' IDENTIFIED BY 'StrongPass!23';
+FLUSH PRIVILEGES;
+EXIT;
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Download WordPress and configure:</p>
+
+
+
+<pre class="wp-block-code"><code>cd /var/www
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xzf latest.tar.gz
+sudo mv wordpress wp_hidden_site
+sudo chown -R www-data:www-data wp_hidden_site
+
+# Edit wp-config.php
+cd wp_hidden_site
+sudo cp wp-config-sample.php wp-config.php
+sudo nano wp-config.php
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Replace the DB settings with your credentials.</p>
+
+
+
+<h4 class="wp-block-heading" id="orgb0e4517">Option B: Docker/WordOps (Optional)</h4>
+
+
+
+<p class="wp-block-paragraph">If you prefer containers, use WordOps or a simple Docker Compose file.<br>The steps are analogous; just map port 8080 inside the container to 127.0.0.1:8080 on the host.</p>
+
+
+
+<h2 class="wp-block-heading" id="org9443c04">Configure the Web Server to Listen on localhost</h2>
+
+
+
+<p class="wp-block-paragraph"><strong>Nginx example:</strong></p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/nginx/sites-available/wp_hidden_site
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Insert:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+server {
+    listen 127.0.0.1:8080;
+    server_name _;
+
+    add_header X-Frame-Options "SAMEORIGIN";
+    add_header X-Content-Type-Options "nosniff";
+    add_header Referrer-Policy "no-referrer";
+    add_header Permissions-Policy "geolocation=(), camera=(), microphone=()";
+
+    root /var/www/wp_hidden_site;
+    index index.php index.html index.htm;
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock; # adjust PHP version
+    }
+
+    location ~ /\.ht { deny all; }
+}
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">Enable the site and reload Nginx:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo ln -s /etc/nginx/sites-available/wp_hidden_site /etc/nginx/sites-enabled/
+sudo nginx -t &amp;&amp; sudo systemctl reload nginx
+</code></pre>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Why? Binding to&nbsp;<code>127.0.0.1</code>&nbsp;ensures that only Tor&#8217;s hidden service can reach the web server; no one can hit your IP directly.</p>
+</blockquote>
+
+
+
+<h2 class="wp-block-heading" id="org1707882">Secure WordPress</h2>
+
+
+
+<ul class="wp-block-list">
+<li><strong>Updates:</strong> <code>wp-cli core update</code>, <code>wp-cli plugin update --all</code>, <code>wp-cli theme update --all</code>.</li>
+
+
+
+<li><strong>Passwords &amp; 2FA:</strong> Use a strong admin password and enable two-factor authentication via the &#8220;Two-Factor&#8221; plugin.</li>
+
+
+
+<li><strong>File Editing Disabled:</strong> Add to <code>wp-config.php</code>:</li>
+</ul>
+
+
+
+<pre id="orga609161" class="wp-block-code"><code>define('DISALLOW_FILE_EDIT', true);
+</code></pre>
+
+
+
+<ul class="wp-block-list">
+<li><strong>Security Plugins:</strong> Install &#8220;Wordfence&#8221; or &#8220;iThemes Security&#8221; for additional hardening (just be mindful of extra load).</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgc483d38">Test via Tor Browser</h2>
+
+
+
+<ol class="wp-block-list">
+<li>Open the <strong>Tor Browser</strong>.</li>
+
+
+
+<li>Enter your .onion address (<code>http://your_onion_address.onion</code>).</li>
+
+
+
+<li>If you used a self-signed cert, accept the warning or add the certificate to the browser&#8217;s trust store.</li>
+
+
+
+<li>Verify that:
+<ul class="wp-block-list">
+<li>The page loads over HTTPS (or HTTP if you skipped TLS).</li>
+
+
+
+<li>No other IP is exposed in the request headers.</li>
+</ul>
+</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Tor already encrypts traffic end-to-end between the user and the service.<br>HTTPS over Tor adds another layer, but is optional. Use it only if you need browser trust indicators or plugin compatibility.</p>
+
+
+
+<h2 class="wp-block-heading" id="org718bddb">Final Checklist</h2>
+
+
+
+<ul class="wp-block-list">
+<li><code>[ ]</code> Tor running, hidden service configured.</li>
+
+
+
+<li><code>[ ]</code> WordPress installed on localhost port 8080.</li>
+
+
+
+<li><code>[ ]</code> Web server bound only to 127.0.0.1.</li>
+
+
+
+<li><code>[ ]</code> Security hardening applied.</li>
+
+
+
+<li><code>[ ]</code> Site reachable only through the .onion address.</li>
+
+
+
+<li><code>[ ]</code> Backup WordPress and <em>var/lib/tor/wp</em> regularly.<br>The latter contains your private onion key &#8211; lose it and your address changes.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Now you have a fully functional WordPress site that&#8217;s invisible to anyone who isn&#8217;t using Tor.</p>
+
+
+
+<p class="wp-block-paragraph">Happy blogging in the shadows!</p>

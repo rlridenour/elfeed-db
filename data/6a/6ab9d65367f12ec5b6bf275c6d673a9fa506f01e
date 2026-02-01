@@ -1,0 +1,268 @@
+<h1>Table of Contents</h1>
+
+<ol>
+<li><a href="https://turtleware.eu/rss.xml#org1c64900">Version 1: Using Gadgets and Layouts</a></li>
+<li><a href="https://turtleware.eu/rss.xml#org75eb118">Version 2: Using the CLIM Command Loop</a></li>
+<li><a href="https://turtleware.eu/rss.xml#org2717fde">Conclusion</a></li>
+</ol>
+
+<p>For the last two months I've been polishing the upcoming release of
+<a href="https://mcclim.common-lisp.dev/main.html">McCLIM</a>. The most notable change is
+the rewriting of the input editing and accepting-values abstractions. As it
+happens, I got tired of it, so as a breather I've decided to tackle something I
+had in mind for some time to improve the McCLIM manual &#x2013; namely the
+<a href="https://eugenkiss.github.io/7guis/">7GUIs: A GUI Programming Benchmark</a>.</p>
+
+<p>This challenge presents seven distinct tasks commonly found in graphical
+interface requirements. In this post I'll address the first challenge - The
+Counter. It is a fairly easy task, a warm-up of sorts. The description states:</p>
+
+<blockquote>
+<p>Challenge: Understanding the basic ideas of a language/toolkit.</p>
+
+<p>The task is to build a frame containing a label or read-only textfield T and a
+button B. Initially, the value in T is "0" and each click of B increases the
+value in T by one.</p>
+
+<p>Counter serves as a gentle introduction to the basics of the language, paradigm
+and toolkit for one of the simplest GUI applications imaginable. Thus, Counter
+reveals the required scaffolding and how the very basic features work together
+to build a GUI application. A good solution will have almost no scaffolding.</p>
+</blockquote>
+
+<p>In this first post, to make things more interesting, I'll solve it in two ways:</p>
+
+<ul>
+<li>using contemporary abstractions like layouts and gadgets</li>
+<li>using CLIM-specific abstractions like presentations and translators</li>
+</ul>
+
+<p>In CLIM it is possible to mix both paradigms for defining graphical interfaces.
+Layouts and gadgets are predefined components that are easy to use, while using
+application streams enables a high degree of flexibility and composability.</p>
+
+<p>First, we define a package shared by both versions:</p>
+
+<pre><code>(eval-when (:compile-toplevel :load-toplevel :execute)
+  (unless (member :mcclim *features*)
+    (ql:quickload &quot;mcclim&quot;)))
+
+(defpackage &quot;EU.TURTLEWARE.7GUIS/TASK1&quot;
+  (:use  &quot;CLIM-LISP&quot; &quot;CLIM&quot; &quot;CLIM-EXTENSIONS&quot;)
+  (:export &quot;COUNTER-V1&quot; &quot;COUNTER-V2&quot;))
+(in-package &quot;EU.TURTLEWARE.7GUIS/TASK1&quot;)
+</code></pre>
+
+<p>Note that &quot;CLIM-EXTENSIONS&quot; package is McCLIM-specific.</p>
+
+<p><a id="org1c64900"></a></p>
+
+<h1>Version 1: Using Gadgets and Layouts</h1>
+
+<p>Assuming that we are interested only in the functionality and we are willing to
+ignore the visual aspect of the program, the definition will look like this:</p>
+
+<pre><code>(define-application-frame counter-v1 ()
+  ((value :initform 0 :accessor value))
+  (:panes
+   ;;      v type v initarg
+   (tfield :label :label (princ-to-string (value *application-frame*))
+                  :background +white+)
+   (button :push-button :label &quot;Count&quot;
+                        :activate-callback (lambda (gadget)
+                                             (declare (ignore gadget))
+                                             (with-application-frame (frame)
+                                               (incf (value frame))
+                                               (setf (label-pane-label (find-pane-named frame 'tfield))
+                                                     (princ-to-string (value frame)))))))
+  (:layouts (default (vertically () tfield button))))
+
+;;; Start the application (if not already running).
+;; (find-application-frame 'counter-v1)
+</code></pre>
+
+<p><img alt="" src="https://turtleware.eu/static/images/7guis-task1-version-1-variant-1.png" /></p>
+
+<p>The macro <code>define-application-frame</code> is like <code>defclass</code> with additional clauses.
+In our program we store the current value as a slot with an accessor.</p>
+
+<p>The clause <code>:panes</code> is responsible for defining named panes (sub-windows). The
+first element is the pane name, then we specify its type, and finally we specify
+initargs for it. Panes are created in a dynamic context where the application
+frame is already bound to <code>*application-frame*</code>, so we can use it there.</p>
+
+<p>The clause <code>:layouts</code> allows us to arrange panes on the screen. There may be
+multiple layouts that can be changed at runtime, but we define only one. The
+macro <code>vertically</code> creates another (anonymous) pane that arranges one gadget
+below another.</p>
+
+<p>Gadgets in CLIM operate directly on top of the event loop. When the pointer
+button is pressed, it is handled by activating the callback, that updates the
+frame's value and the label. Effects are visible immediately.</p>
+
+<p>Now if we want the demo to look nicer, all we need to do is to fiddle a bit with
+<code>spacing</code> and <code>bordering</code> in the <code>:layouts</code> section:</p>
+
+<pre><code>(define-application-frame counter-v1 ()
+  ((value :initform 0 :accessor value))
+  (:panes
+   (tfield :label :label (princ-to-string (value *application-frame*))
+                  :background +white+)
+   (button :push-button :label &quot;Count&quot;
+                        :activate-callback (lambda (gadget)
+                                             (declare (ignore gadget))
+                                             (with-application-frame (frame)
+                                               (incf (value frame))
+                                               (setf (label-pane-label (find-pane-named frame 'tfield))
+                                                     (princ-to-string (value frame)))))))
+  (:layouts (default
+             (spacing (:thickness 10)
+              (horizontally ()
+                (100
+                 (bordering (:thickness 1 :background +black+)
+                   (spacing (:thickness 4 :background +white+) tfield)))
+                15
+                (100 button))))))
+
+;;; Start the application (if not already running).
+;; (find-application-frame 'counter-v1)
+</code></pre>
+
+<p><img alt="" src="https://turtleware.eu/static/images/7guis-task1-version-1-variant-2.png" /></p>
+
+<p>This gives us a layout that is roughly similar to the example presented on the
+7GUIs page.</p>
+
+<p><a id="org75eb118"></a></p>
+
+<h1>Version 2: Using the CLIM Command Loop</h1>
+
+<p>Unlike gadgets, stream panes in CLIM operate on top of the command loop. A
+single command may span multiple events after which we redisplay the stream to
+reflect the new state of the model. This is closer to the interaction type found
+in the command line interfaces:</p>
+
+<pre><code>  (define-application-frame counter-v2 ()
+    ((value :initform 0 :accessor value))
+    (:pane :application
+     :display-function (lambda (frame stream)
+                         (format stream &quot;~d&quot; (value frame)))))
+
+  (define-counter-v2-command (com-incf-value :name &quot;Count&quot; :menu t)
+      ()
+    (with-application-frame (frame)
+      (incf (value frame))))
+
+;; (find-application-frame 'counter-v2)
+</code></pre>
+
+<p><img alt="" src="https://turtleware.eu/static/images/7guis-task1-version-2-variant-1.png" /></p>
+
+<p>Here we've used <code>:pane</code> option this is a syntactic sugar for when we have only
+one named pane. Skipping <code>:layouts</code> clause means that named panes will be
+stacked vertically one below another.</p>
+
+<p>Defining the application frame defines a command-defining macro. When we define
+a command with <code>define-counter-v2-command</code>, then this command will be inserted
+into a command table associated with the frame. Passing the option <code>:menu t</code>
+causes the command to be available in the frame menu as a top-level entry.</p>
+
+<p>After the command is executed (in this case it modifies the counter value), the
+application pane is redisplayed; that is a display function is called, and its
+output is captured. In more demanding scenarios it is possible to refine both
+the time of redisplay and the scope of changes.</p>
+
+<p>Now we want the demo to look nicer and to have a button counterpart placed
+beside the counter value, to resemble the example more:</p>
+
+<pre><code>(define-presentation-type counter-button ())
+
+(define-application-frame counter-v2 ()
+  ((value :initform 0 :accessor value))
+  (:menu-bar nil)
+  (:pane :application
+   :width 250 :height 32
+   :borders nil :scroll-bars nil
+   :end-of-line-action :allow
+   :display-function (lambda (frame stream)
+                       (formatting-item-list (stream :n-columns 2)
+                         (formatting-cell (stream :min-width 100 :min-height 32)
+                           (format stream &quot;~d&quot; (value frame)))
+                         (formatting-cell (stream :min-width 100 :min-height 32)
+                           (with-output-as-presentation (stream nil 'counter-button :single-box t)
+                             (surrounding-output-with-border (stream :padding-x 20 :padding-y 0
+                                                                     :filled t :ink +light-grey+)
+                               (format stream &quot;Count&quot;))))))))
+
+(define-counter-v2-command (com-incf-value :name &quot;Count&quot; :menu t)
+    ()
+  (with-application-frame (frame)
+    (incf (value frame))))
+
+(define-presentation-to-command-translator act-incf-value
+    (counter-button com-incf-value counter-v2)
+    (object)
+  `())
+
+;; (find-application-frame 'counter-v2)
+</code></pre>
+
+<p><img alt="" src="https://turtleware.eu/static/images/7guis-task1-version-2-variant-2.png" /></p>
+
+<p>The main addition is the definition of a new presentation type <code>counter-button</code>.
+This faux button is printed inside a cell and surrounded with a background.
+Later we define a translator that converts clicks on the counter button to the
+<code>com-incf-value</code> command. The translator body returns arguments for the command.</p>
+
+<p>Presenting an object on the stream associates a semantic meaning with the
+output. We can now extend the application with new gestures (names <code>:scroll-up</code>
+and <code>:scroll-down</code> are McCLIM-specific):</p>
+
+<pre><code>(define-counter-v2-command (com-scroll-value :name &quot;Increment&quot;)
+    ((count 'integer))
+  (with-application-frame (frame)
+    (if (plusp count)
+        (incf (value frame) count)
+        (decf (value frame) (- count)))))
+
+(define-presentation-to-command-translator act-scroll-up-value
+    (counter-button com-scroll-value counter-v2 :gesture :scroll-up)
+    (object)
+  `(10))
+
+(define-presentation-to-command-translator act-scroll-dn-value
+    (counter-button com-scroll-value counter-v2 :gesture :scroll-down)
+    (object)
+  `(-10))
+
+(define-presentation-action act-popup-value
+    (counter-button nil counter-v2 :gesture :describe)
+    (object frame)
+  (notify-user frame (format nil &quot;Current value: ~a&quot; (value frame))))
+</code></pre>
+
+<p>A difference between presentation to command translators and presentation
+actions is that the latter does not automatically progress the command loop.
+Actions are often used for side effects, help, inspection etc.</p>
+
+<p><a id="org2717fde"></a></p>
+
+<h1>Conclusion</h1>
+
+<p>In this short post we've solved the first task from the 7GUIs challenge. We've
+used two techniques available in CLIM &#x2013; using layouts and gadgets, and using
+display and command tables. Both techniques can be combined, but differences are
+visible at a glance:</p>
+
+<ul>
+<li>gadgets provide easy and reusable components for rudimentary interactions</li>
+<li>streams provide extensible and reusable abstractions for semantic interactions</li>
+</ul>
+
+<p>This post only scratched the capabilities of the latter, but the second version
+demonstrates why the command loop and presentations scale better than
+gadget-only solutions.</p>
+
+<p>Following tasks have gradually increasing level of difficulty that will help us
+to emphasize how useful are presentations and commands when we want to write
+maintainable applications with reusable user-defined graphical metaphors.</p>

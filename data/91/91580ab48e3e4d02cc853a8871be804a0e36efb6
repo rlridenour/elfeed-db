@@ -1,0 +1,452 @@
+
+<p>OpenVAS is a katana forged for vulnerability scanning:</p>
+
+
+
+<ul class="wp-block-list">
+<li>open source</li>
+
+
+
+<li>container-ready</li>
+
+
+
+<li>minimal noise</li>
+
+
+
+<li>maximum signal</li>
+</ul>
+
+
+
+<p>It thrives in Docker.<br>But what happens in the daemonless, rootless underworld?</p>
+
+
+
+<p>The Ghost maps the terrain.</p>
+
+
+
+<span id="more-7795"></span>
+
+
+
+<h3 class="wp-block-heading" id="orga2cbb1a">Sharpen the blade</h3>
+
+
+
+<p>The Docker Compose file is a map. Follow it to find the way in Podman:<br><a href="https://greenbone.github.io/docs/latest/_static/docker-compose.yml">https://greenbone.github.io/docs/latest/_static/docker-compose.yml</a></p>
+
+
+
+<p><code>podman-compose</code>&nbsp;still limps. It won&#8217;t create volumes for you.</p>
+
+
+
+<p>volumes.txt:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+gpg_data_vol
+scap_data_vol
+cert_data_vol
+data_objects_vol
+gvmd_data_vol
+psql_data_vol
+vt_data_vol
+notus_data_vol
+psql_socket_vol
+gvmd_socket_vol
+ospd_openvas_socket_vol
+redis_socket_vol
+openvas_data_vol
+openvas_log_data_vol
+</pre></div>
+
+
+<p>Manually carve them out:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+while read i; do podman volume create $i; done &lt; volumes.txt 
+</pre></div>
+
+
+<p>Your&nbsp;<code>podman-compose.yaml</code>&nbsp;must be transformed for Podman:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+version: &quot;3.8&quot;
+
+services:
+  vulnerability-tests:
+    image: registry.community.greenbone.net/community/vulnerability-tests
+    environment:
+      FEED_RELEASE: &quot;24.10&quot;
+    volumes:
+      - vt_data_vol:/mnt
+
+  notus-data:
+    image: registry.community.greenbone.net/community/notus-data
+    volumes:
+      - notus_data_vol:/mnt
+
+  scap-data:
+    image: registry.community.greenbone.net/community/scap-data
+    volumes:
+      - scap_data_vol:/mnt
+
+  cert-bund-data:
+    image: registry.community.greenbone.net/community/cert-bund-data
+    volumes:
+      - cert_data_vol:/mnt
+
+  dfn-cert-data:
+    image: registry.community.greenbone.net/community/dfn-cert-data
+    volumes:
+      - cert_data_vol:/mnt
+    depends_on:
+      - cert-bund-data
+
+  data-objects:
+    image: registry.community.greenbone.net/community/data-objects
+    environment:
+      FEED_RELEASE: &quot;24.10&quot;
+    volumes:
+      - data_objects_vol:/mnt
+
+  report-formats:
+    image: registry.community.greenbone.net/community/report-formats
+    environment:
+      FEED_RELEASE: &quot;24.10&quot;
+    volumes:
+      - data_objects_vol:/mnt
+    depends_on:
+      - data-objects
+
+  gpg-data:
+    image: registry.community.greenbone.net/community/gpg-data
+    volumes:
+      - gpg_data_vol:/mnt
+
+  redis-server:
+    image: registry.community.greenbone.net/community/redis-server
+    restart: on-failure
+    volumes:
+      - redis_socket_vol:/run/redis/
+
+  pg-gvm:
+    image: registry.community.greenbone.net/community/pg-gvm:stable
+    restart: on-failure
+    volumes:
+      - psql_data_vol:/var/lib/postgresql
+      - psql_socket_vol:/var/run/postgresql
+
+  gvmd:
+    image: registry.community.greenbone.net/community/gvmd:stable
+    restart: on-failure
+    volumes:
+      - gvmd_data_vol:/var/lib/gvm
+      - scap_data_vol:/var/lib/gvm/scap-data/
+      - cert_data_vol:/var/lib/gvm/cert-data
+      - data_objects_vol:/var/lib/gvm/data-objects/gvmd
+      - vt_data_vol:/var/lib/openvas/plugins
+      - psql_data_vol:/var/lib/postgresql
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+      - psql_socket_vol:/var/run/postgresql
+    depends_on:
+      pg-gvm:
+        condition: service_started
+      scap-data:
+        condition: service_completed_successfully
+      cert-bund-data:
+        condition: service_completed_successfully
+      dfn-cert-data:
+        condition: service_completed_successfully
+      data-objects:
+        condition: service_completed_successfully
+      report-formats:
+        condition: service_completed_successfully
+
+  gsa:
+    image: registry.community.greenbone.net/community/gsa:stable
+    restart: on-failure
+    ports:
+      - 127.0.0.1:9392:9392
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+    depends_on:
+      - gvmd
+
+  configure-openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    volumes:
+      - openvas_data_vol:/mnt
+      - openvas_log_data_vol:/var/log/openvas
+    command:
+      - /bin/sh
+      - -c
+      - |
+        printf &quot;table_driven_lsc = yes\nopenvasd_server = http://openvasd:80\n&quot; &gt; /mnt/openvas.conf
+        sed &quot;s/127/128/&quot; /etc/openvas/openvas_log.conf | sed &#039;s/gvm/openvas/&#039; &gt; /mnt/openvas_log.conf
+        chmod 644 /mnt/openvas.conf
+        chmod 644 /mnt/openvas_log.conf
+        touch /var/log/openvas/openvas.log
+        chmod 666 /var/log/openvas/openvas.log
+
+  openvas:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    restart: on-failure
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat /etc/openvas/openvas.conf
+        tail -f /var/log/openvas/openvas.log
+    depends_on:
+      configure-openvas:
+        condition: service_completed_successfully
+
+  openvasd:
+    image: registry.community.greenbone.net/community/openvas-scanner:stable
+    restart: on-failure
+    hostname: openvasd
+    environment:
+      OPENVASD_MODE: service_notus
+      GNUPGHOME: /etc/openvas/gnupg
+      LISTENING: 0.0.0.0:80
+    volumes:
+      - openvas_data_vol:/etc/openvas
+      - openvas_log_data_vol:/var/log/openvas
+      - gpg_data_vol:/etc/openvas/gnupg
+      - notus_data_vol:/var/lib/notus
+    depends_on:
+      vulnerability-tests:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+      gpg-data:
+        condition: service_completed_successfully
+
+  ospd-openvas:
+    image: registry.community.greenbone.net/community/ospd-openvas:stable
+    restart: on-failure
+    hostname: ospd-openvas.local
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+    command:
+      &#91;
+        &quot;ospd-openvas&quot;,
+        &quot;-f&quot;,
+        &quot;--config&quot;,
+        &quot;/etc/gvm/ospd-openvas.conf&quot;,
+        &quot;--notus-feed-dir&quot;,
+        &quot;/var/lib/notus/advisories&quot;,
+        &quot;-m&quot;,
+        &quot;666&quot;,
+      ]
+    volumes:
+      - gpg_data_vol:/etc/openvas/gnupg
+      - vt_data_vol:/var/lib/openvas/plugins
+      - notus_data_vol:/var/lib/notus
+      - ospd_openvas_socket_vol:/run/ospd
+      - redis_socket_vol:/run/redis/
+      - openvas_data_vol:/etc/openvas/
+      - openvas_log_data_vol:/var/log/openvas
+    depends_on:
+      redis-server:
+        condition: service_started
+      gpg-data:
+        condition: service_completed_successfully
+      vulnerability-tests:
+        condition: service_completed_successfully
+      configure-openvas:
+        condition: service_completed_successfully
+
+  gvm-tools:
+    image: registry.community.greenbone.net/community/gvm-tools
+    volumes:
+      - gvmd_socket_vol:/run/gvmd
+      - ospd_openvas_socket_vol:/run/ospd
+    depends_on:
+      - gvmd
+      - ospd-openvas
+
+volumes:
+  gpg_data_vol:
+  scap_data_vol:
+  cert_data_vol:
+  data_objects_vol:
+  gvmd_data_vol:
+  psql_data_vol:
+  vt_data_vol:
+  notus_data_vol:
+  psql_socket_vol:
+  gvmd_socket_vol:
+  ospd_openvas_socket_vol:
+  redis_socket_vol:
+  openvas_data_vol:
+  openvas_log_data_vol:
+
+</pre></div>
+
+
+<p>Pull in the the arsenal:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman-compose -f podman-compose.yaml pull
+</pre></div>
+
+
+<p>OpenVAS is not monolithic.<br>Each container does one job.<br>Silent. Sharp. Modular.</p>
+
+
+
+<p>Summon the system:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman-compose -f podman-compose.yaml up -d
+</pre></div>
+
+
+<p>Some containers like&nbsp;<code>vulnerability-tests</code>,&nbsp;<code>notus-data</code>,&nbsp;<code>scap-data</code>&nbsp;are ghosts themselves.<br>They appear, inject knowledge, vanish.</p>
+
+
+
+<p>In case of noise &#8211; logs never lie:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+podman-compose -f podman-compose.yaml logs -f
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="orgc01470b">Cut</h3>
+
+
+
+<p>Once online, scan like a specter.<br>Open browser -&gt;&nbsp;<a href="http://localhost:9392">http://localhost:9392</a></p>
+
+
+
+<p>Use credentials:</p>
+
+
+
+<p><code>admin / admin</code></p>
+
+
+
+<p>Then change the password.<br>The shadows are always watching.</p>
+
+
+
+<h3 class="wp-block-heading" id="org3614d0f">A Ghost&#8217;s vision is limited… for now</h3>
+
+
+
+<p>When you log in:</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p>You are currently using the free Greenbone Community Feed &#8211; this shows only a few vulnerabilities for business critical enterprise software such as MS Exchange, Cisco, VMware, Citrix and many more.<br>Over 60% of all relevant exploits remain hidden.</p>
+</blockquote>
+
+
+
+<p>Translation?<br>You&#8217;re flying low-res.&nbsp;<a href="https://www.greenbone.net/en/feed-comparison/">The Community Feed is a shadow of the full arsenal.</a></p>
+
+
+
+<p>Ghosts don&#8217;t panic. They adapt.</p>
+
+
+
+<p>If you&#8217;re hunting in the enterprise jungle, you either:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Maintain multiple scanners</li>
+
+
+
+<li>Supplement with external intel</li>
+
+
+
+<li>Or switch to the Greenbone Enterprise Feed &#8211; at a price.</li>
+</ul>
+
+
+
+<p>In this operation we fly free.</p>
+
+
+
+<p>But always remember:<br><strong>60% of the cracks are in the dark.</strong></p>
+
+
+
+<h3 class="wp-block-heading" id="orgf7944a4">Clean it up</h3>
+
+
+
+<p>No trace. No fingerprint. No echo.</p>
+
+
+
+<p>Stop the containters:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman-compose down
+</pre></div>
+
+
+<p>Purge the volumes:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+while read i; do podman volume rm openvas_$i; done &lt; volumes.txt 
+</pre></div>
+
+
+<p>Erase the images:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: bash; title: ; notranslate">
+podman image ls |grep greenbone |awk '{print $3}' |xargs podman image rm --
+</pre></div>
+
+
+<p>The system breathes clean.<br>Only the ghost remains.</p>
+
+
+
+<p>—</p>
+
+
+
+<p><strong>Whisper to DeadSwitch on Matrix:</strong>&nbsp;<code>@deadswitch:matrix.org</code><br><em>Maybe the Ghost signals back.</em></p>
+
+
+
+<p><strong>DeadSwitch | The Silent Architect</strong><br><em>In silence, I rise. In structure, I endure.</em></p>
+
+
+
+<p></p>

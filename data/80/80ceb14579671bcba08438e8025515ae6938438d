@@ -1,0 +1,943 @@
+<div class="sticky-toc" id="org78e19a3">
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="https://sachachua.com/blog/feed/index.xml#moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-exploring-my-disqus-xml-with-xq-org-babel-and-seaborn">Exploring my disqus.xml with xq, Org Babel, and seaborn</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-deleting-spam-comments-via-the-disqus-web-interface-and-spookfox">Deleting spam comments via the Disqus web interface and Spookfox</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-modifying-eleventy-import-disqus-for-my-site">Modifying eleventy-import-disqus for my site</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-next-steps">Next steps</a></li>
+</ul>
+</div>
+
+</div>
+
+<div class="assumed_audience" id="orgdecdaa5">
+<p>
+<a href="https://maggieappleton.com/assumed-audience/">Assumed audience</a>: Technical bloggers who like:
+</p>
+<ul class="org-ul">
+<li>static site generators: this post is about moving more things into my SSG</li>
+<li>XML: check out the mention of xq, which offers a jq-like interface</li>
+<li>or Org Mode: some notes here about Org Babel source blocks and graphing</li>
+</ul>
+
+</div>
+
+<p>
+I've been thinking of getting rid of the <a href="https://disqus.com/">Disqus</a>
+blog commenting system for a while. I used to use
+it in the hopes that it would handle spam
+filtering and the "someone has replied to your
+comment" notification for me. Getting rid of
+Disqus means one less thing that needs Javascript,
+one less thing that tracks people in ways we don't
+want, one less thing that shows ads and wants to
+sell our attention. Comments are rare enough these
+days, so I think I can handle e-mailing people
+when there are replies.
+</p>
+
+<p>
+There are plenty of alternative commenting systems
+to choose from. <a href="https://gitlab.com/comentario/comentario">Comentario</a> and <a href="https://isso-comments.de/">Isso</a> are
+self-hosted, while <a href="https://commento.io/pricing">Commento</a> (USD 10/month) and
+<a href="https://talk.hyvor.com/pricing">Hyvor Talk</a> (12 euro/month) are services.
+<a href="https://utteranc.es/">Utterances</a> uses Github issues, which is probably
+not something I'll try as quite a few people in
+the Emacs community are philosophically opposed to
+Github. Along those lines, if I can find something
+that works without Javascript, that would be even
+better.
+</p>
+
+<p>
+I could spend a few years trying to figure out
+which system I might like in terms of user
+interface, integration, and spam-filtering, but
+for now, I want to:
+</p>
+<ul class="org-ul">
+<li>remove Disqus</li>
+<li>keep the comments, since they add a lot to the page (ex: the conversation on <a href="https://sachachua.com/blog/2021/01/a-list-of-sharks-that-are-obligate-ram-ventilators/">A list of sharks that are obligate ram ventilators</a>)</li>
+</ul>
+
+<p>
+Fortunately, there's <a href="https://github.com/11ty/eleventy-import-disqus">11ty/eleventy-import-disqus</a> (<a href="https://www.zachleat.com/web/disqus-import/">see zachleat's blog post: Import your Disqus Comments to Eleventy</a>)
+</p>
+<div id="outline-container-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-exploring-my-disqus-xml-with-xq-org-babel-and-seaborn" class="outline-2">
+<h3 id="moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-exploring-my-disqus-xml-with-xq-org-babel-and-seaborn">Exploring my disqus.xml with xq, Org Babel, and seaborn</h3>
+<div class="outline-text-2" id="text-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-exploring-my-disqus-xml-with-xq-org-babel-and-seaborn">
+<p>
+One challenge: there are a <i>lot</i> of comments. How
+many? I got curious about analyzing the XML, and
+then of course I wanted to do that from Emacs. I
+used <code>pipx install yq</code> to install <a href="https://github.com/mikefarah/yq">yq</a> so that I
+could use the xq tool to <a href="https://www.ashbyhq.com/blog/engineering/jq-and-yq">query the XML</a>, much like
+<a href="https://jqlang.org/">jq</a> works.
+</p>
+
+<p>
+My uncompressed Disqus XML export was 28MB. I spent
+some time deleting spam comments through the web
+interface, which helped with the filtering. I also
+deleted some more comments from the XML file as I
+noticed them. I needed to change <code>/wp/</code> to <code>/blog/</code>, too.
+</p>
+
+<p>
+This is how I analyzed the archive for non-deleted
+posts, uniquified based on message. I'll include
+the full Org source of that block (including the
+header lines) in my blog post so that you can see
+how I call it later.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+NAME: analyze-disqus</span>
+<span class="org-org-block-begin-line">#+begin_src shell :var rest="| length | \"\\(.) unique comments\"" :exports results</span>
+<span class="org-org-block">~/.local/bin/xq -r </span><span class="org-org-block"><span class="org-string">"[.disqus.post[] |</span></span>
+<span class="org-org-block"><span class="org-string">   select(.isDeleted != \"true\" and .message) |</span></span>
+<span class="org-org-block"><span class="org-string">   {key: .message, value: .}] |</span></span>
+<span class="org-org-block"><span class="org-string">  map(.value) |</span></span>
+<span class="org-org-block"><span class="org-string">  unique_by(.message) ${rest}"</span></span><span class="org-org-block"> &lt; disqus.xml</span>
+<span class="org-org-block-end-line">#+end_src</span>
+</pre>
+</div>
+
+
+<p>
+When I evaluate that with <code>C-c C-c</code>, I get:
+</p>
+
+<p>
+8265 unique comments
+</p>
+
+<p>
+I was curious about how it broke down by year. Because I named the source code block and used a variable to specify how to process the filtered results earlier, I can call that with a different value.
+</p>
+
+<p>
+Here's the call in my Org Mode source:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+CALL: analyze-disqus(rest="| map(.createdAt[0:4]) | group_by(.) | map([(.[0]), length]) | reverse | [\"Year\", \"Count\"], .[] | @csv") :results table output :wrap my_details Table of comment count by year</span>
+</pre>
+</div>
+
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;">
+                  <summary><strong>Table of comment count by year</strong></summary>
+<table>
+
+
+<colgroup>
+<col class="org-right">
+
+<col class="org-right">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-right">Year</td>
+<td class="org-right">Count</td>
+</tr>
+
+<tr>
+<td class="org-right">2025</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2024</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2023</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2022</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2021</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2020</td>
+<td class="org-right">131</td>
+</tr>
+
+<tr>
+<td class="org-right">2019</td>
+<td class="org-right">107</td>
+</tr>
+
+<tr>
+<td class="org-right">2018</td>
+<td class="org-right">139</td>
+</tr>
+
+<tr>
+<td class="org-right">2017</td>
+<td class="org-right">186</td>
+</tr>
+
+<tr>
+<td class="org-right">2016</td>
+<td class="org-right">196</td>
+</tr>
+
+<tr>
+<td class="org-right">2015</td>
+<td class="org-right">593</td>
+</tr>
+
+<tr>
+<td class="org-right">2014</td>
+<td class="org-right">740</td>
+</tr>
+
+<tr>
+<td class="org-right">2013</td>
+<td class="org-right">960</td>
+</tr>
+
+<tr>
+<td class="org-right">2012</td>
+<td class="org-right">784</td>
+</tr>
+
+<tr>
+<td class="org-right">2011</td>
+<td class="org-right">924</td>
+</tr>
+
+<tr>
+<td class="org-right">2010</td>
+<td class="org-right">966</td>
+</tr>
+
+<tr>
+<td class="org-right">2009</td>
+<td class="org-right">1173</td>
+</tr>
+
+<tr>
+<td class="org-right">2008</td>
+<td class="org-right">1070</td>
+</tr>
+
+<tr>
+<td class="org-right">2007</td>
+<td class="org-right">98</td>
+</tr>
+</tbody>
+</table>
+
+
+</details>
+
+<p>
+I tried fiddling around with <a href="https://orgmode.org/manual/Org-Plot.html">Org's #+PLOT keyword</a>,
+but I couldn't figure out how to get the bar graph
+the way I wanted it to be. Someday, if I ever
+figure that out, I'll definitely save the <a href="http://yummymelon.com/devnull/beautifying-org-plot-with-yasnippet-and-context-menus.html">Gnuplot
+setup as a snippet</a>. For now, I visualized it using
+<a href="https://seaborn.pydata.org/">seaborn</a> instead.
+</p>
+
+<details><summary>Code for graphing comments by year</summary>
+<div class="org-src-container">
+<pre class="src src-python"><span class="org-keyword">import</span> pandas <span class="org-keyword">as</span> pd
+<span class="org-keyword">import</span> seaborn <span class="org-keyword">as</span> sns
+<span class="org-keyword">import</span> matplotlib.pyplot <span class="org-keyword">as</span> plt
+<span class="org-keyword">import</span> numpy <span class="org-keyword">as</span> np
+
+<span class="org-variable-name">df</span> <span class="org-operator">=</span> pd.DataFrame(data[1:], columns<span class="org-operator">=</span>data[0])
+<span class="org-variable-name">df</span>[<span class="org-string">'Count'</span>] <span class="org-operator">=</span> df[<span class="org-string">'Count'</span>].astype(<span class="org-builtin">int</span>)
+<span class="org-variable-name">df</span>[<span class="org-string">'Year'</span>] <span class="org-operator">=</span> df[<span class="org-string">'Year'</span>].astype(<span class="org-builtin">int</span>)
+<span class="org-variable-name">df</span> <span class="org-operator">=</span> df.sort_values(<span class="org-string">'Year'</span>)
+plt.figure(figsize<span class="org-operator">=</span>(12, 6))
+<span class="org-variable-name">ax</span> <span class="org-operator">=</span> sns.barplot(x<span class="org-operator">=</span><span class="org-string">'Year'</span>, y<span class="org-operator">=</span><span class="org-string">'Count'</span>, data<span class="org-operator">=</span>df)
+plt.title(<span class="org-string">'Comments by Year (2007-2025)'</span>, fontsize<span class="org-operator">=</span>16, fontweight<span class="org-operator">=</span><span class="org-string">'bold'</span>)
+plt.xlabel(<span class="org-string">'Year'</span>)
+plt.ylabel(<span class="org-string">'Comments'</span>)
+plt.xticks(rotation<span class="org-operator">=</span>45)
+plt.grid(axis<span class="org-operator">=</span><span class="org-string">'y'</span>)
+<span class="org-keyword">for</span> i, v <span class="org-keyword">in</span> <span class="org-builtin">enumerate</span>(df[<span class="org-string">'Count'</span>]):
+<span class="org-highlight-indentation"> </span>   ax.text(i, v <span class="org-operator">+</span> 20, <span class="org-builtin">str</span>(v), ha<span class="org-operator">=</span><span class="org-string">'center'</span>, fontsize<span class="org-operator">=</span>9)
+plt.tight_layout()
+plt.savefig(<span class="org-string">'year_count_plot.svg'</span>)
+<span class="org-keyword">return</span> <span class="org-string">'year_count_plot.svg'</span>
+</pre>
+</div>
+
+</details>
+
+
+<figure id="org7651eec">
+<img src="https://sachachua.com/blog/2025/03/moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site/year_count_plot.svg" alt="year_count_plot.svg" class="org-svg" data-link="t">
+
+</figure>
+
+<p>
+Ooooooh, I can probably cross-reference this with
+the number of posts from my <a href="https://sachachua.com/blog/all/index.json">/blog/all/index.json</a> file.
+I used <a href="https://claude.ai">Claude AI</a>'s help to come up with the code below, since merging data and plotting them nicely is still challenging for me. Now that I have the example, though, maybe I can do other graphs more easily. (This looks like a related tutorial on <a href="https://www.geeksforgeeks.org/combining-barplots-and-lineplots-with-different-y-axes-a-technical-guide/">combining barplots and lineplots</a>.)
+</p>
+
+<details><summary>Code for graphing</summary>
+<div class="org-src-container">
+<pre class="src src-python"><span class="org-keyword">import</span> pandas <span class="org-keyword">as</span> pd
+<span class="org-keyword">import</span> seaborn <span class="org-keyword">as</span> sns
+<span class="org-keyword">import</span> matplotlib.pyplot <span class="org-keyword">as</span> plt
+<span class="org-keyword">import</span> numpy <span class="org-keyword">as</span> np
+<span class="org-keyword">import</span> json
+<span class="org-keyword">from</span> matplotlib.ticker <span class="org-keyword">import</span> FuncFormatter
+<span class="org-keyword">from</span> datetime <span class="org-keyword">import</span> datetime
+
+<span class="org-keyword">with</span> <span class="org-builtin">open</span>(<span class="org-string">'/home/sacha/proj/static-blog/_site/blog/all/index.json'</span>, <span class="org-string">'r'</span>) <span class="org-keyword">as</span> f:
+<span class="org-highlight-indentation"> </span>   <span class="org-variable-name">posts_data</span> <span class="org-operator">=</span> json.load(f)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Process post data</span>
+<span class="org-variable-name">posts_df</span> <span class="org-operator">=</span> pd.DataFrame(posts_data)
+<span class="org-variable-name">posts_df</span>[<span class="org-string">'Year'</span>] <span class="org-operator">=</span> pd.to_datetime(posts_df[<span class="org-string">'date'</span>]).dt.year
+<span class="org-variable-name">post_counts</span> <span class="org-operator">=</span> posts_df.groupby(<span class="org-string">'Year'</span>).size().reset_index(name<span class="org-operator">=</span><span class="org-string">'post_count'</span>)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Convert to DataFrame</span>
+<span class="org-variable-name">comments_df</span> <span class="org-operator">=</span> pd.DataFrame(comment_data[1:], columns<span class="org-operator">=</span>comment_data[0])
+<span class="org-variable-name">comments_df</span>[<span class="org-string">'Count'</span>] <span class="org-operator">=</span> comments_df[<span class="org-string">'Count'</span>].astype(<span class="org-builtin">int</span>)
+<span class="org-variable-name">comments_df</span>[<span class="org-string">'Year'</span>] <span class="org-operator">=</span> comments_df[<span class="org-string">'Year'</span>].astype(<span class="org-builtin">int</span>)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Merge the two dataframes</span>
+<span class="org-variable-name">merged_df</span> <span class="org-operator">=</span> pd.merge(post_counts, comments_df, on<span class="org-operator">=</span><span class="org-string">'Year'</span>, how<span class="org-operator">=</span><span class="org-string">'outer'</span>).fillna(0)
+<span class="org-variable-name">merged_df</span> <span class="org-operator">=</span> merged_df.sort_values(<span class="org-string">'Year'</span>)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Calculate comments per post ratio</span>
+<span class="org-variable-name">merged_df</span>[<span class="org-string">'comments_per_post'</span>] <span class="org-operator">=</span> merged_df[<span class="org-string">'Count'</span>] <span class="org-operator">/</span> merged_df[<span class="org-string">'post_count'</span>]
+<span class="org-variable-name">merged_df</span>[<span class="org-string">'comments_per_post'</span>] <span class="org-operator">=</span> merged_df[<span class="org-string">'comments_per_post'</span>].replace([np.inf, <span class="org-operator">-</span>np.inf], np.nan).fillna(0)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Create a single figure instead of two subplots</span>
+<span class="org-variable-name">fig</span>, <span class="org-variable-name">ax1</span> <span class="org-operator">=</span> plt.subplots(figsize<span class="org-operator">=</span>(15, 8))
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Custom colors</span>
+<span class="org-variable-name">post_color</span> <span class="org-operator">=</span> <span class="org-string">"#1f77b4"</span>    <span class="org-comment-delimiter"># </span><span class="org-comment">blue</span>
+<span class="org-variable-name">comment_color</span> <span class="org-operator">=</span> <span class="org-string">"#ff7f0e"</span> <span class="org-comment-delimiter"># </span><span class="org-comment">orange</span>
+<span class="org-variable-name">ratio_color</span> <span class="org-operator">=</span> <span class="org-string">"#2ca02c"</span>   <span class="org-comment-delimiter"># </span><span class="org-comment">green</span>
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Setting up x-axis positions</span>
+<span class="org-variable-name">x</span> <span class="org-operator">=</span> np.arange(<span class="org-builtin">len</span>(merged_df))
+<span class="org-variable-name">width</span> <span class="org-operator">=</span> 0.35
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Bar charts on first y-axis</span>
+<span class="org-variable-name">bars1</span> <span class="org-operator">=</span> ax1.bar(x <span class="org-operator">-</span> width<span class="org-operator">/</span>2, merged_df[<span class="org-string">'post_count'</span>], width, color<span class="org-operator">=</span>post_color, label<span class="org-operator">=</span><span class="org-string">'Posts'</span>)
+<span class="org-variable-name">bars2</span> <span class="org-operator">=</span> ax1.bar(x <span class="org-operator">+</span> width<span class="org-operator">/</span>2, merged_df[<span class="org-string">'Count'</span>], width, color<span class="org-operator">=</span>comment_color, label<span class="org-operator">=</span><span class="org-string">'Comments'</span>)
+ax1.set_ylabel(<span class="org-string">'Count (Posts &amp; Comments)'</span>, fontsize<span class="org-operator">=</span>12)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Add post count values above bars</span>
+<span class="org-keyword">for</span> i, bar <span class="org-keyword">in</span> <span class="org-builtin">enumerate</span>(bars1):
+<span class="org-highlight-indentation"> </span>   <span class="org-variable-name">height</span> <span class="org-operator">=</span> bar.get_height()
+<span class="org-highlight-indentation"> </span>   <span class="org-keyword">if</span> height <span class="org-operator">&gt;</span> 0:
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   ax1.text(bar.get_x() <span class="org-operator">+</span> bar.get_width()<span class="org-operator">/</span>2., height <span class="org-operator">+</span> 5,
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   f<span class="org-string">'</span>{<span class="org-builtin">int</span>(height)}<span class="org-string">'</span>, ha<span class="org-operator">=</span><span class="org-string">'center'</span>, va<span class="org-operator">=</span><span class="org-string">'bottom'</span>, color<span class="org-operator">=</span>post_color, fontsize<span class="org-operator">=</span>9)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Add comment count values above bars</span>
+<span class="org-keyword">for</span> i, bar <span class="org-keyword">in</span> <span class="org-builtin">enumerate</span>(bars2):
+<span class="org-highlight-indentation"> </span>   <span class="org-variable-name">height</span> <span class="org-operator">=</span> bar.get_height()
+<span class="org-highlight-indentation"> </span>   <span class="org-keyword">if</span> height <span class="org-operator">&gt;</span> 20:  <span class="org-comment-delimiter"># </span><span class="org-comment">Only show if there's enough space</span>
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   ax1.text(bar.get_x() <span class="org-operator">+</span> bar.get_width()<span class="org-operator">/</span>2., height <span class="org-operator">+</span> 5,
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   f<span class="org-string">'</span>{<span class="org-builtin">int</span>(height)}<span class="org-string">'</span>, ha<span class="org-operator">=</span><span class="org-string">'center'</span>, va<span class="org-operator">=</span><span class="org-string">'bottom'</span>, color<span class="org-operator">=</span>comment_color, fontsize<span class="org-operator">=</span>9)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Line graph on second y-axis</span>
+<span class="org-variable-name">ax2</span> <span class="org-operator">=</span> ax1.twinx()
+<span class="org-variable-name">line</span> <span class="org-operator">=</span> ax2.plot(x, merged_df[<span class="org-string">'comments_per_post'</span>], marker<span class="org-operator">=</span><span class="org-string">'o'</span>, color<span class="org-operator">=</span>ratio_color,
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span> linewidth<span class="org-operator">=</span>2, label<span class="org-operator">=</span><span class="org-string">'Comments per Post'</span>)
+ax2.set_ylabel(<span class="org-string">'Comments per Post'</span>, color<span class="org-operator">=</span>ratio_color, fontsize<span class="org-operator">=</span>12)
+ax2.tick_params(axis<span class="org-operator">=</span><span class="org-string">'y'</span>, labelcolor<span class="org-operator">=</span>ratio_color)
+ax2.set_ylim(bottom<span class="org-operator">=</span>0)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Add ratio values near line points</span>
+<span class="org-keyword">for</span> i, ratio <span class="org-keyword">in</span> <span class="org-builtin">enumerate</span>(merged_df[<span class="org-string">'comments_per_post'</span>]):
+<span class="org-highlight-indentation"> </span>   <span class="org-keyword">if</span> ratio <span class="org-operator">&gt;</span> 0:
+<span class="org-highlight-indentation"> </span>   <span class="org-highlight-indentation"> </span>   ax2.text(i, ratio <span class="org-operator">+</span> 0.2, f<span class="org-string">'</span>{ratio:.1f}<span class="org-string">'</span>, ha<span class="org-operator">=</span><span class="org-string">'center'</span>, color<span class="org-operator">=</span>ratio_color, fontsize<span class="org-operator">=</span>9)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Set x-axis labels</span>
+ax1.set_xticks(x)
+ax1.set_xticklabels(merged_df[<span class="org-string">'Year'</span>], rotation<span class="org-operator">=</span>45)
+ax1.set_title(<span class="org-string">'Blog Posts, Comments, and Comments per Post by Year'</span>, fontsize<span class="org-operator">=</span>16, fontweight<span class="org-operator">=</span><span class="org-string">'bold'</span>)
+ax1.grid(axis<span class="org-operator">=</span><span class="org-string">'y'</span>)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Add combined legend</span>
+<span class="org-variable-name">lines1</span>, <span class="org-variable-name">labels1</span> <span class="org-operator">=</span> ax1.get_legend_handles_labels()
+<span class="org-variable-name">lines2</span>, <span class="org-variable-name">labels2</span> <span class="org-operator">=</span> ax2.get_legend_handles_labels()
+ax1.legend(lines1 <span class="org-operator">+</span> lines2, labels1 <span class="org-operator">+</span> labels2, loc<span class="org-operator">=</span><span class="org-string">'upper left'</span>)
+
+<span class="org-comment-delimiter"># </span><span class="org-comment">Layout and save</span>
+plt.tight_layout()
+plt.savefig(<span class="org-string">'posts_comments_analysis.svg'</span>)
+<span class="org-keyword">return</span> <span class="org-string">'posts_comments_analysis.svg'</span>
+</pre>
+</div>
+
+</details>
+
+
+<figure id="org8363737">
+<img src="https://sachachua.com/blog/2025/03/moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site/posts_comments_analysis.svg" alt="posts_comments_analysis.svg" class="org-svg" data-link="t">
+
+</figure>
+
+<p>
+Timeline notes:
+</p>
+
+<ul class="org-ul">
+<li>In this graph, comments are reported by the
+timestamp of the comment, not the date of the
+post.</li>
+<li>In 2007 or so, I moved to Wordpress from
+planner-rss.el. I think I eventually imported
+those Wordpress comments into Disqus when I got
+annoyed with Wordpress comments (Akismet?
+notifications?).</li>
+<li>In 2008 and 2009, I was working on enterprise
+social computing at IBM. I made a few
+presentations that were popular. Also, mentors
+and colleagues posted lots of comments.</li>
+<li>In 2012, I started my <a href="https://sachachua.com/blog/category/experiment/">5-year experiment with semi-retirement</a>.</li>
+<li>In 2016, A+ was born, so I wrote much fewer posts.</li>
+<li>In 2019/2020, I wrote a lot of blog posts
+documenting how I was <a href="https://sachachua.com/blog/category/emacs/">running EmacsConf with
+Emacs</a>, and other Emacs tweaks along the way. The
+code is probably very idiosyncratic (&#x2026; unless
+you happen to know other conference organizers
+who like to do as much as possible within Emacs?
+Even then, there are lots of assumptions in the
+code), but maybe people picked up useful ideas
+anyway. =)</li>
+</ul>
+
+<p>
+What were my top 20 most-commented posts?
+</p>
+
+<details><summary>Emacs Lisp code for most-commented posts</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">let*</span> ((json-object-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">alist</span>)
+       (json-array-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">list</span>)
+       (comments-json (json-read-file <span class="org-string">"~/proj/static-blog/_data/commentsCounts.json"</span>))
+       (posts-json (json-read-file <span class="org-string">"~/proj/static-blog/_site/blog/all/index.json"</span>))
+       (post-map (make-hash-table <span class="org-builtin">:test</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">equal</span>)))
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">map permalink to title</span>
+  (<span class="org-keyword">dolist</span> (post posts-json)
+    (<span class="org-keyword">let</span> ((permalink (cdr (assoc <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">permalink</span> post)))
+          (title (cdr (assoc <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> post))))
+      (puthash permalink title post-map)))
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">Sort comments by count (descending)</span>
+  (mapcar
+   (<span class="org-keyword">lambda</span> (row)
+     (list
+      (cdr row)
+            (org-link-make-string
+       (concat <span class="org-string">"https://sachachua.com"</span> (symbol-name (car row)))
+       (<span class="org-keyword">with-temp-buffer</span>
+         (insert (<span class="org-keyword">or</span> (gethash (symbol-name (car row)) post-map) (symbol-name (car row))))
+         (mm-url-decode-entities)
+         (buffer-string)))))
+   (seq-take
+    (sort comments-json
+          (<span class="org-keyword">lambda</span> (a b) (&gt; (cdr a) (cdr b))))
+    n)))
+</pre>
+</div>
+
+</details>
+
+<table>
+
+
+<colgroup>
+<col class="org-right">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-right">97</td>
+<td class="org-left"><a href="https://sachachua.com/blog/contact/"><i>blog/contact</i></a></td>
+</tr>
+
+<tr>
+<td class="org-right">88</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2010/05/even-more-awesome-lotusscript-mail-merge-for-lotus-notes-microsoft-excel/">Even more awesome LotusScript mail merge for Lotus Notes + Microsoft Excel</a></td>
+</tr>
+
+<tr>
+<td class="org-right">75</td>
+<td class="org-left"><a href="https://sachachua.com/blog/about/"><i>blog/about</i></a></td>
+</tr>
+
+<tr>
+<td class="org-right">45</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2013/05/how-to-learn-emacs-a-hand-drawn-one-pager-for-beginners/">How to Learn Emacs: A Hand-drawn One-pager for Beginners / A visual tutorial</a></td>
+</tr>
+
+<tr>
+<td class="org-right">42</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2011/11/planning-an-emacs-based-personal-wiki-org-muse-hmm/">Planning an Emacs-based personal wiki – Org? Muse? Hmm…</a></td>
+</tr>
+
+<tr>
+<td class="org-right">38</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2010/10/married/">Married!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">37</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2010/02/moving-from-testing-to-development/">Moving from testing to development</a></td>
+</tr>
+
+<tr>
+<td class="org-right">36</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2009/12/what-can-i-help-you-learn-looking-for-mentees/">What can I help you learn? Looking for mentees</a></td>
+</tr>
+
+<tr>
+<td class="org-right">33</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2009/07/lotus-notes-mail-merge-from-a-microsoft-excel-spreadsheet/">Lotus Notes mail merge from a Microsoft Excel spreadsheet</a></td>
+</tr>
+
+<tr>
+<td class="org-right">30</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2009/04/nothing-quite-like-org-for-emacs/">Nothing quite like Org for Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">30</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2012/05/org-mode-and-habits/">Org-mode and habits</a></td>
+</tr>
+
+<tr>
+<td class="org-right">29</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2012/08/zomg-evernote-emacs/">zomg, Evernote and Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">25</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2012/06/literate-programming-emacs-configuration-file/">Literate programming and my Emacs configuration file</a></td>
+</tr>
+
+<tr>
+<td class="org-right">25</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2014/04/reinvesting-time-and-money-into-emacs/">Reinvesting time and money into Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">23</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2008/05/the-gen-y-guide-to-web-20-at-work/">The Gen Y Guide to Web 2.0 at Work</a></td>
+</tr>
+
+<tr>
+<td class="org-right">22</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2011/08/drupal-overriding-drupal-autocompletion-to-pass-more-parameters/">Drupal: Overriding Drupal autocompletion to pass more parameters</a></td>
+</tr>
+
+<tr>
+<td class="org-right">21</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2011/07/rhetoric-and-the-manila-zoo-reflections-on-conversations-and-a-request-for-insight/">Rhetoric and the Manila Zoo; reflections on conversations and a request for insight</a></td>
+</tr>
+
+<tr>
+<td class="org-right">20</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2010/07/this-is-a-test-post-from-org2blog/">This is a test post from org2blog</a></td>
+</tr>
+
+<tr>
+<td class="org-right">19</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2010/01/agendas/">Agendas</a></td>
+</tr>
+
+<tr>
+<td class="org-right">19</td>
+<td class="org-left"><a href="https://sachachua.com/blog/2012/09/paper-tablet-and-tablet-pc-comparing-tools-for-sketchnoting/">Paper, Tablet, and Tablet PC: Comparing tools for sketchnoting</a></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Top 3 by year. Note that this goes by the
+timestamp of the post, not the comment, so even
+old posts are in here.
+</p>
+
+<details><summary>Emacs Lisp code for most-commented posts by year</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org9bd8774">(<span class="org-keyword">let*</span> ((json-object-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">alist</span>)
+       (json-array-type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">list</span>)
+       (comments-json (json-read-file <span class="org-string">"~/proj/static-blog/_data/commentsCounts.json"</span>))
+       (posts-json (json-read-file <span class="org-string">"~/proj/static-blog/_site/blog/all/index.json"</span>))
+       by-year)
+  (<span class="org-keyword">setq</span> posts-json
+        (mapcar
+         (<span class="org-keyword">lambda</span> (post)
+           (<span class="org-keyword">let</span> ((comments (alist-get (intern (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">permalink</span> post)) comments-json)))
+             (<span class="org-keyword">if</span> comments
+                 (cons (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">comments</span> (alist-get (intern (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">permalink</span> post)) comments-json 0))
+                       post)
+               post)))
+         posts-json))
+  (<span class="org-keyword">setq</span> by-year
+        (seq-group-by
+         (<span class="org-keyword">lambda</span> (o)
+           (format-time-string <span class="org-string">"%Y"</span>
+                               (date-to-time
+                                (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">date</span> o))
+                               <span class="org-string">"America/Toronto"</span>))
+         (seq-filter (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">comments</span> o)) posts-json)))
+  (org-list-to-org
+   (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">unordered</span>
+         (seq-keep
+          (<span class="org-keyword">lambda</span> (year)
+            (list
+             (org-link-make-string (concat <span class="org-string">"https://sachachua.com/blog/"</span> (car year))
+                                   (car year))
+             (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">unordered</span>
+                   (mapcar
+                    (<span class="org-keyword">lambda</span> (entry)
+                      (list (format <span class="org-string">"%s (%d)"</span>
+                                    (org-link-make-string
+                                     (concat <span class="org-string">"https://sachachua.com"</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">permalink</span> entry))
+                                     (<span class="org-keyword">with-temp-buffer</span>
+                                       (insert (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> entry))
+                                       (mm-url-decode-entities)
+                                       (buffer-string)))
+                                    (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">comments</span> entry))))
+                    (seq-take
+                     (sort
+                      (cdr year)
+                      (<span class="org-keyword">lambda</span> (a b) (&gt; (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">comments</span> a)
+                                       (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">comments</span> b))))
+                     n)))))
+          (nreverse by-year)))))
+</pre>
+</div>
+
+</details>
+
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2025">2025</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2025/01/using-image-dired-to-browse-the-latest-screenshots-from-multiple-directories/">Using image-dired to browse the latest screenshots from multiple directories</a> (2)</li>
+<li><a href="https://sachachua.com/blog/2025/01/changing-planet-emacslife-com/">Changing planet.emacslife.com</a> (2)</li>
+<li><a href="https://sachachua.com/blog/2025/03/2025-03-03-emacs-news/">2025-03-03 Emacs news</a> (2)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2024">2024</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2024/01/using-an-emacs-lisp-macro-to-define-quick-custom-org-mode-links-to-project-files/">Using an Emacs Lisp macro to define quick custom Org Mode links to project files; plus URLs and search</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2024/11/excerpts-from-a-conversation-with-john-wiegley-johnw-and-adam-porter-alphapapa-about-personal-information-management/">Excerpts from a conversation with John Wiegley (johnw) and Adam Porter (alphapapa) about personal information management</a> (5)</li>
+<li><a href="https://sachachua.com/blog/2024/01/yay-emacs-2024-01-12-emacsconf-2023-report-svg-animation-embark-org-mode-links/">Yay Emacs 1: EmacsConf 2023 report, SVG animation, Embark, Org Mode links</a> (4)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2023">2023</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2023/09/how-i-keep-track-of-new-emacs-packages/">How I keep track of new Emacs packages</a> (3)</li>
+<li><a href="https://sachachua.com/blog/2023/12/automatically-refiling-org-mode-headings-based-on-tags/">Automatically refiling Org Mode headings based on tags</a> (3)</li>
+<li><a href="https://sachachua.com/blog/2023/01/building-up-my-tech-notes/">Building up my tech notes</a> (2)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2022">2022</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2022/08/recoloring-my-sketches-with-python/">Recoloring my sketches with Python</a> (5)</li>
+<li><a href="https://sachachua.com/blog/2022/11/late-night-braindumps-by-talking-to-myself/">Late-night braindumps by talking to myself</a> (3)</li>
+<li><a href="https://sachachua.com/blog/2022/01/2022-01-24-emacs-news/">2022-01-24 Emacs news</a> (2)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2021">2021</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2021/01/a-list-of-sharks-that-are-obligate-ram-ventilators/">A list of sharks that are obligate ram ventilators</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2021/04/org-mode-insert-youtube-video-with-separate-captions/">Org Mode: Insert YouTube video with separate captions</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2021/12/thinking-about-emacs-community-maintenance/">Thinking about Emacs community maintenance</a> (6)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2020">2020</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2020/07/why-i-love-free-software/">Why I love free software</a> (9)</li>
+<li><a href="https://sachachua.com/blog/2020/06/pythonfontforgeorg-i-made-a-font-based-on-my-handwriting/">Python+FontForge+Org: I made a font based on my handwriting!</a> (7)</li>
+<li><a href="https://sachachua.com/blog/2020/12/2020-12-14-emacs-news/">2020-12-14 Emacs news</a> (5)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2019">2019</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2019/06/turning-an-org-mode-outline-into-an-html-table-with-a-column-for-more-notes/">Turning an Org Mode outline into an HTML table with a column for more notes</a> (10)</li>
+<li><a href="https://sachachua.com/blog/2019/07/tweaking-emacs-on-android-via-termux-xclip-xdg-open-syncthing-conflicts/">Tweaking Emacs on Android via Termux: xclip, xdg-open, syncthing conflicts</a> (9)</li>
+<li><a href="https://sachachua.com/blog/2019/03/visual-book-notes-no-drama-discipline-2014/">Visual Book Notes: No-Drama Discipline (2014)</a> (6)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2018">2018</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2018/04/2018-04-09-emacs-news/">2018-04-09 Emacs news</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2018/01/a-and-household-life/">A- and household life</a> (5)</li>
+<li><a href="https://sachachua.com/blog/2018/03/using-org-mode-latex-beamer-and-medibang-paint-to-make-a-childrens-book/">Using Org Mode, LaTeX, Beamer, and Medibang Paint to make a children's book</a> (4)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2017">2017</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2017/06/quick-notes-on-my-current-interface-for-time-tracking/">Quick notes on my current interface for time-tracking</a> (9)</li>
+<li><a href="https://sachachua.com/blog/2017/12/working-around-my-phone-plans-lack-of-roaming/">Working around my phone plan’s lack of roaming</a> (8)</li>
+<li><a href="https://sachachua.com/blog/2017/04/emacs-pasting-with-the-mouse-without-moving-the-point-mouse-yank-at-point/">Emacs: Pasting with the mouse without moving the point – mouse-yank-at-point</a> (5)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2016">2016</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2016/12/using-categories-organize-org-agenda/">Using categories to organize your Org agenda</a> (16)</li>
+<li><a href="https://sachachua.com/blog/2016/01/2016-01-16-emacs-hangout/">2016-01-16 Emacs Hangout</a> (9)</li>
+<li><a href="https://sachachua.com/blog/2016/03/microphthalmia-small-eye/">Microphthalmia: small eye</a> (8)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2015">2015</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2015/02/lets-virtual-emacs-conference-august-help-make-happen/">Let’s have a virtual Emacs conference in August – help me make it happen!</a> (18)</li>
+<li><a href="https://sachachua.com/blog/2015/01/thinking-make-better-use-yasnippet-emacs-workflow/">Thinking about how to make better use of Yasnippet in my Emacs workflow</a> (17)</li>
+<li><a href="https://sachachua.com/blog/2015/07/july-2015-emacs-hangout/">July 2015 Emacs Hangout</a> (13)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2014">2014</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2014/04/reinvesting-time-and-money-into-emacs/">Reinvesting time and money into Emacs</a> (25)</li>
+<li><a href="https://sachachua.com/blog/2014/12/can-improve-organize-notes-org-mode/">Improving how I organize notes with Org Mode</a> (19)</li>
+<li><a href="https://sachachua.com/blog/2014/12/emacs-m-y-helm-show-kill-ring/">Emacs: M-y as helm-show-kill-ring</a> (18)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2013">2013</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2013/05/how-to-learn-emacs-a-hand-drawn-one-pager-for-beginners/">How to Learn Emacs: A Hand-drawn One-pager for Beginners / A visual tutorial</a> (45)</li>
+<li><a href="https://sachachua.com/blog/2013/04/brainstorming-ways-to-help-build-the-emacs-community/">Brainstorming ways to help build the Emacs community</a> (19)</li>
+<li><a href="https://sachachua.com/blog/2013/08/emacs-how-i-organize-my-org-files/">Emacs: How I organize my Org files</a> (19)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2012">2012</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2012/05/org-mode-and-habits/">Org-mode and habits</a> (30)</li>
+<li><a href="https://sachachua.com/blog/2012/08/zomg-evernote-emacs/">zomg, Evernote and Emacs</a> (29)</li>
+<li><a href="https://sachachua.com/blog/2012/06/literate-programming-emacs-configuration-file/">Literate programming and my Emacs configuration file</a> (25)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2011">2011</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2011/11/planning-an-emacs-based-personal-wiki-org-muse-hmm/">Planning an Emacs-based personal wiki – Org? Muse? Hmm…</a> (42)</li>
+<li><a href="https://sachachua.com/blog/2011/08/drupal-overriding-drupal-autocompletion-to-pass-more-parameters/">Drupal: Overriding Drupal autocompletion to pass more parameters</a> (22)</li>
+<li><a href="https://sachachua.com/blog/2011/07/rhetoric-and-the-manila-zoo-reflections-on-conversations-and-a-request-for-insight/">Rhetoric and the Manila Zoo; reflections on conversations and a request for insight</a> (21)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2010">2010</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2010/05/even-more-awesome-lotusscript-mail-merge-for-lotus-notes-microsoft-excel/">Even more awesome LotusScript mail merge for Lotus Notes + Microsoft Excel</a> (88)</li>
+<li><a href="https://sachachua.com/blog/2010/10/married/">Married!</a> (38)</li>
+<li><a href="https://sachachua.com/blog/2010/02/moving-from-testing-to-development/">Moving from testing to development</a> (37)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2009">2009</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2009/12/what-can-i-help-you-learn-looking-for-mentees/">What can I help you learn? Looking for mentees</a> (36)</li>
+<li><a href="https://sachachua.com/blog/2009/07/lotus-notes-mail-merge-from-a-microsoft-excel-spreadsheet/">Lotus Notes mail merge from a Microsoft Excel spreadsheet</a> (33)</li>
+<li><a href="https://sachachua.com/blog/2009/04/nothing-quite-like-org-for-emacs/">Nothing quite like Org for Emacs</a> (30)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2008">2008</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2008/05/the-gen-y-guide-to-web-20-at-work/">The Gen Y Guide to Web 2.0 at Work</a> (23)</li>
+<li><a href="https://sachachua.com/blog/2008/01/outlining-your-notes-with-org/">Outlining Your Notes with Org</a> (18)</li>
+<li><a href="https://sachachua.com/blog/2008/01/tagging-in-org-plus-bonus-code-for-timeclocks-and-tags/">Tagging in Org – plus bonus code for timeclocks and tags!</a> (14)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2007">2007</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2007/12/clocking-time-with-emacs-org/">Clocking Time with Emacs Org</a> (18)</li>
+<li><a href="https://sachachua.com/blog/2007/12/emacs-choosing-between-org-and-planner/">Emacs: Choosing between Org and Planner</a> (13)</li>
+<li><a href="https://sachachua.com/blog/2007/12/wicked-cool-emacs-get-in-on-the-action/">Wicked Cool Emacs: get in on the action!</a> (10)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2006">2006</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2006/04/how-to-wear-a-malong/">How to wear a malong</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2006/09/what-makes-a-good-life/">What makes a good life?</a> (6)</li>
+<li><a href="https://sachachua.com/blog/2006/09/emacs-linkedin-another-totally-idiosyncratic-bit-of-code/">Emacs + LinkedIn: Another totally idiosyncratic bit of code</a> (3)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2005">2005</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2005/11/emacs-its-all-about-people/">Emacs: It’s all about people</a> (4)</li>
+<li><a href="https://sachachua.com/blog/2005/12/learning-bisaya/">Learning Bisaya</a> (4)</li>
+<li><a href="https://sachachua.com/blog/2005/03/networking/">Networking</a> (3)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2004">2004</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2004/02/nethack-el/">nethack-el</a> (4)</li>
+<li><a href="https://sachachua.com/blog/2004/03/rmail-labels/">RMAIL labels</a> (4)</li>
+<li><a href="https://sachachua.com/blog/2004/11/sketch-website-design/">Sketch website design</a> (3)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2003">2003</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2003/11/cookordie-day-2-veal-sausage-and-potatoes/">CookOrDie Day 2: Veal sausage and potatoes</a> (4)</li>
+<li><a href="https://sachachua.com/blog/2003/06/look-into-literate-programming/">Look into literate programming</a> (3)</li>
+<li><a href="https://sachachua.com/blog/2003/08/automatically-detecting-proxy-settings/">Automatically detecting proxy settings</a> (3)</li>
+</ul></li>
+<li><a href="https://sachachua.com/blog/2002">2002</a>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2002/06/hello-world-school-teaching-games/">Hello world, school, teaching, games ()</a> (1)</li>
+</ul></li>
+</ul>
+
+<p>
+As you can probably tell, I love writing about
+Emacs, especially when people drop by in the
+comments to:
+</p>
+
+<ul class="org-ul">
+<li>share that they'd just learned about some small
+thing I mentioned in passing and that it was
+really useful for this other part of their
+workflow that I totally wouldn't have guessed</li>
+<li>point out a simpler package or built-in Emacs
+function that also does whatever clever hack I
+wrote about, just in a more polished way</li>
+<li>link to a blog post or code snippet where
+they've borrowed the idea and added their own
+spin</li>
+</ul>
+
+<p>
+I want to keep having those sorts of
+conversations.
+</p>
+</div>
+</div>
+<div id="outline-container-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-deleting-spam-comments-via-the-disqus-web-interface-and-spookfox" class="outline-2">
+<h3 id="moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-deleting-spam-comments-via-the-disqus-web-interface-and-spookfox">Deleting spam comments via the Disqus web interface and Spookfox</h3>
+<div class="outline-text-2" id="text-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-deleting-spam-comments-via-the-disqus-web-interface-and-spookfox">
+<p>
+8000+ comments are a lot to read, but it should be
+pretty straightforward to review the comments at
+least until 2016 or so, and then just clean out
+spam as I come across it after that. I used the
+Disqus web interface to delete spam comments since
+the <code>isSpam</code> attribute didn't seem to be reliable.
+The web interface pages through comments 25 items
+at a time and doesn't seem to let you select all
+of them, so I started tinkering around with using
+<a href="https://github.com/bitspook/spookfox">Spookfox</a> to automate this. Spookfox lets me
+control Mozilla Firefox from Emacs Lisp.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">progn</span>
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">select all</span>
+  (spookfox-eval-js-in-active-tab <span class="org-string">"document.querySelector('.mod-bar__check input').click()"</span>)
+  (wait-for 1)
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">delete</span>
+  (spookfox-eval-js-in-active-tab <span class="org-string">"document.querySelectorAll('</span><span class="org-string"><span class="org-constant">.mod-bar__button</span></span><span class="org-string">')[2].click()"</span>)
+  (wait-for 2)
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">click OK, which should make the list refresh</span>
+  (spookfox-eval-js-in-active-tab <span class="org-string">"btn = document.querySelectorAll('</span><span class="org-string"><span class="org-constant">.mod-bar__button</span></span><span class="org-string">')[1]; if (btn.textContent.match('</span><span class="org-string"><span class="org-constant">OK</span></span><span class="org-string">')) btn.click();"</span>)
+  (wait-for 4)
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">backup: (spookfox-eval-js-in-active-tab "window.location.href = '</span><span class="org-comment"><span class="org-constant">https://sachac.disqus.com/admin/moderate/spam</span></span><span class="org-comment">'")</span>
+  )
+</pre>
+</div>
+
+
+<p>
+I got to the end of the spam comments after maybe
+10 or 20 pages, though, so maybe Disqus had
+auto-deleted most of the spam comments.
+</p>
+
+<p>
+It's almost amusing, paging through all these
+spammy attempts at link-building and product
+promotion. I didn't want to click on any of the
+links since there might be malware, so sometimes I
+used <code>curl</code> to check the site. Most of the old
+spam links I checked don't even have working
+domains any more. Anything that needed spam didn't
+really have lasting power. It was all very "My
+name is Ozymandias, king of kings: / Look on my
+works, ye Mighty, and despair!"&#x2026; and then gone.
+</p>
+</div>
+</div>
+<div id="outline-container-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-modifying-eleventy-import-disqus-for-my-site" class="outline-2">
+<h3 id="moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-modifying-eleventy-import-disqus-for-my-site">Modifying eleventy-import-disqus for my site</h3>
+<div class="outline-text-2" id="text-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-modifying-eleventy-import-disqus-for-my-site">
+<p>
+Back to eleventy-import-disqus. I followed the
+directions to make a contentMap.json and removed
+the trailing <code>,</code> from the last entry so that the
+JSON could be parsed.
+</p>
+
+<p>
+<a href="https://github.com/sachac/eleventy-import-disqus-sachachua.com/tree/sachachua.com">Modifications to eleventy-import-disqus:</a>
+</p>
+<ul class="org-ul">
+<li>The original code created all the files in the same directory, so I changed it to create the same kind of nested structure I use (generally <code>./blog/yyyy/mm/post-slug/index.html</code> and <code>./blog/yyyy/mm/post-slug/index.11tydata.json</code>). I decided to store the Disqus comments in <code>index.json</code>, which is lower-priority than <code>.11tydata.json.</code> <a href="https://stackoverflow.com/questions/13542667/create-directory-when-writing-to-file-in-node-js">fs-extra</a> made this easier by creating all the parent directories.</li>
+<li>Ignored deleted messages</li>
+<li>Discarded avatars</li>
+<li>Did some reporting to help me review potential spam</li>
+<li>Reparented messages if I deleted their parent posts</li>
+<li>Indent the thread JSON nicely in case I want to add or remove comments by hand</li>
+</ul>
+
+<p>
+With the thread JSON files, my blog takes 143
+seconds to generate, versus 133 seconds without
+the comments. +10 seconds isn't too bad. I was
+worried that it would be longer, since I added
+2,088 data JSON files to the build process, but I
+guess 11ty is pretty efficient.
+</p>
+</div>
+</div>
+<div id="outline-container-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-next-steps" class="outline-2">
+<h3 id="moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-next-steps">Next steps</h3>
+<div class="outline-text-2" id="text-moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site-next-steps">
+<p>
+It had been nice to have a comment form that
+people could fill in from anywhere and which
+shared their comments without needing my (often
+delayed) intervention. I learned lots of things
+from what people shared. Sometimes people even had
+discussions with each other, which was extra cool.
+Still, I think it might be a good time to
+experiment with alternatives. <a href="mailto:sacha@sachachua.com">Plain e-mail</a> for
+now, I guess, maybe with a nudge asking people if
+I could share their comments. <a href="https://sachachua.com/blog/2025/03/tweaking-my-11ty-blog-to-link-to-the-mastodon-post-defined-in-an-org-mode-property/">Mastodon</a>, too -
+could be fun to make it easy to add a toot to the
+static comments from <a href="https://codeberg.org/martianh/mastodon.el">mastodon.el</a> or from my Org
+Mode inbox. (<mark>Update 2025-03-30:</mark> <a href="https://sachachua.com/dotemacs#mastodon-adding-mastodon-toots-as-comments-in-my-11ty-static-blog">Adding Mastodon
+toots as comments in my 11ty static blog</a>) Might be
+good to figure out <a href="https://webmention.io/">Webmentions</a>, too. (But then
+<a href="https://brainbaking.com/post/2023/05/why-i-retired-my-webmention-server/">other people have been dealing with spam
+Webmentions, of course</a>.)
+</p>
+
+<p>
+Comment counts can be useful social signals for
+interesting posts. I haven't added comment counts
+to the lists of blog posts yet.
+eleventy-import-disqus created a
+commentsCounts.json, which I could use in my
+templates. However, I might change the comments in
+the per-post .json file if I figure out how to
+include Mastodon comments, so I may need to update
+that file or recalculate it from the posts.
+</p>
+
+<p>
+Many of the blogs I read have shifted away from
+commenting systems, and the ones who still have
+comments on seem to be bracing for <a href="https://www.zylstra.org/blog/2025/03/incoming-ai-generated-comment-spam/">AI-generated
+comment spam</a>. I'm not sure I like the way the
+Internet is moving, but maybe in this little
+corner, we can still have conversations across
+time. Comments are such a wonderful part of
+learning out loud. I wonder how we can keep
+learning together.</p>
+</div>
+</div>
+<div><a href="https://sachachua.com/blog/2025/03/moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site/index.org">View org source for this post</a></div>
+
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JQM0XSA0W90C9Y4WKA808MTY" target="_blank" rel="noopener noreferrer">comment on Mastodon</a>, <a href="https://sachachua.com/blog/2025/03/moving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site/#comment">view 8 comments</a>, or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Fmoving-18-years-of-comments-out-of-disqus-and-into-my-11ty-static-site%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

@@ -1,0 +1,45 @@
+<p>Recently wanted to chain org babel blocks. That is, aggregate separate source blocks and execute as one combined block.</p>
+<p><img src="https://xenodium.github.io/images/emacs-chaining-org-babel-blocks/chain.gif" alt=""></p>
+<p>I wanted the chaining primarily driven through header arguments as follows:</p>
+<pre><code class="language-org">#+name: block-0
+#+begin_src swift
+  print(&quot;hello 0&quot;)
+#+end_src
+
+#+name: block-1
+#+begin_src swift :include block-0
+  print(&quot;hello 1&quot;)
+#+end_src
+
+#+RESULTS: block-1
+: hello 0
+: hello 1
+</code></pre>
+<p>I didn't find the above syntax and behaviour supported out of the box (or didn't search hard enough?). Fortunately, this is our beloved and malleable editor, so we can always bend it our way! Wasn't quite sure how to go about it, so I looked at other babel packages for inspiration. <a href="https://github.com/astahlman/ob-async">ob-async</a> was great for that.</p>
+<p>Turns out, advicing <em>org-babel-execute-src-block</em> did the job:</p>
+<pre><code class="language-{.commonlisp">(defun adviced:org-babel-execute-src-block (&amp;optional orig-fun arg info params)
+  (let ((body (nth 1 info))
+        (include (assoc :include (nth 2 info)))
+        (named-blocks (org-element-map (org-element-parse-buffer)
+                          'src-block (lambda (item)
+                                       (when (org-element-property :name item)
+                                         (cons (org-element-property :name item)
+                                               item))))))
+    (while include
+      (unless (cdr include)
+        (user-error &quot;:include without value&quot; (cdr include)))
+      (unless (assoc (cdr include) named-blocks)
+        (user-error &quot;source block \&quot;%s\&quot; not found&quot; (cdr include)))
+      (setq body (concat (org-element-property :value (cdr (assoc (cdr include) named-blocks)))
+                         body))
+      (setf (nth 1 info) body)
+      (setq include (assoc :include
+                           (org-babel-parse-header-arguments
+                            (org-element-property :parameters (cdr (assoc (cdr include) named-blocks)))))))
+    (funcall orig-fun arg info params)))
+
+(advice-add 'org-babel-execute-src-block :around 'adviced:org-babel-execute-src-block)
+</code></pre>
+<p>Before I built my own support, I did find that <a href="https://orgmode.org/manual/Noweb-Reference-Syntax.html">noweb</a> got me most of what I needed, but required sprinkling blocks with placeholder references.</p>
+<p><img src="https://xenodium.github.io/images/emacs-chaining-org-babel-blocks/noweb.gif" alt=""></p>
+<p>Combining <a href="https://orgmode.org/manual/Noweb-Reference-Syntax.html">:noweb</a> and <a href="https://org-babel.readthedocs.io/en/latest/header-args/#prologue">:prologue</a> would have been a great match, if only prologue did expand the noweb reference. I'm sure there's an alternative I'm missing. Either way, it was fun to poke at babel blocks and build my own chaining support.</p>

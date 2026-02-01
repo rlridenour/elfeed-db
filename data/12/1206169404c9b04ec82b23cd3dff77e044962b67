@@ -1,0 +1,159 @@
+
+<h2 class="wp-block-heading" id="orgc009cd6">Understanding the Sequence</h2>
+
+
+
+<p class="wp-block-paragraph">Systemd is the heartbeat of most modern Linux systems.<br>When you run:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo systemctl restart nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">you trigger a full chain of actions &#8211; not a single binary reload.<br>Systemd reads unit definitions, resolves dependencies, checks targets, and updates logs.<br>Knowing what happens gives you clarity when a service misbehaves.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">You don&#8217;t need to&nbsp;<strong>fight</strong>&nbsp;systemd. You just need to understand its rhythm.</p>
+</blockquote>
+
+
+
+<span id="more-8336"></span>
+
+
+
+<h3 class="wp-block-heading" id="org173f0b4">Step 1: Unit Discovery</h3>
+
+
+
+<p class="wp-block-paragraph">Every service in systemd is a&nbsp;<strong>unit</strong>.<br>Units are configuration files stored under&nbsp;<code>/lib/systemd/system</code>&nbsp;or&nbsp;<code>/etc/systemd/system</code>.<br>When you type the&nbsp;<code>restart</code>&nbsp;command, systemd first finds the matching unit file:</p>
+
+
+
+<pre class="wp-block-code"><code>systemctl cat nginx.service
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">This shows the full definition: ExecStart, ExecReload, dependencies, environment.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">The unit file is the truth &#8211; not the documentation.</p>
+</blockquote>
+
+
+
+<h3 class="wp-block-heading" id="orgbc498e9">Step 2: Dependency Resolution</h3>
+
+
+
+<p class="wp-block-paragraph">Systemd checks what&nbsp;<code>nginx.service</code>&nbsp;depends on.<br>Run:</p>
+
+
+
+<pre class="wp-block-code"><code>systemctl list-dependencies nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">You&#8217;ll see other units like&nbsp;<code>network.target</code>&nbsp;or&nbsp;<code>syslog.target</code>.<br>Before restarting, systemd ensures these are active or starts them in the correct order.<br>That&#8217;s why&nbsp;<code>systemd</code>&nbsp;feels reliable &#8211; it builds a temporary dependency graph before acting.</p>
+
+
+
+<h3 class="wp-block-heading" id="org8978c09">Step 3: The Stop Phase</h3>
+
+
+
+<p class="wp-block-paragraph">Systemd sends a&nbsp;<code>SIGTERM</code>&nbsp;signal to the main Nginx process defined in the unit.<br>If it doesn&#8217;t exit in the allowed timeout (usually 90 seconds), systemd escalates with&nbsp;<code>SIGKILL</code>.<br>You can adjust this safely in your custom override:</p>
+
+
+
+<pre class="wp-block-preformatted">sudo systemctl edit nginx
+</pre>
+
+
+
+<p class="wp-block-paragraph">Then add:</p>
+
+
+
+<pre class="wp-block-code"><code>&#091;Service]
+TimeoutStopSec=15s
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Shorter timeouts improve recovery speed, but always test before deploying.</p>
+
+
+
+<h3 class="wp-block-heading" id="org52e8631">Step 4: The Start Phase</h3>
+
+
+
+<p class="wp-block-paragraph">After the old process stops cleanly, systemd launches Nginx again using the&nbsp;<code>ExecStart</code>&nbsp;line.<br>The PID is tracked, logs go to journald, and the service status is refreshed.</p>
+
+
+
+<p class="wp-block-paragraph">Check it directly:</p>
+
+
+
+<pre class="wp-block-code"><code>systemctl status nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">You see the process tree, exit codes, and journal output &#8211; all in one view.</p>
+
+
+
+<h3 class="wp-block-heading" id="orgf2d5e2d">Step 5: Logging and Verification</h3>
+
+
+
+<p class="wp-block-paragraph">Systemd records everything under the journal.<br>To see what actually happened during the restart:</p>
+
+
+
+<pre class="wp-block-code"><code>journalctl -u nginx --since "5 minutes ago"
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">If something fails, this is your first stop.<br>It replaces long tail commands and greps across log files &#8211; structured and timestamped.</p>
+
+
+
+<h3 class="wp-block-heading" id="org4d3ee08">Step 6: Overrides and Control</h3>
+
+
+
+<p class="wp-block-paragraph">Never edit system files directly.<br>Use:</p>
+
+
+
+<pre class="wp-block-code"><code>systemctl edit nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">It creates an override in&nbsp;<code>/etc/systemd/system/nginx.service.d/</code>.<br>This keeps changes persistent across package upgrades.<br>Control belongs to the operator, not the package maintainer.</p>
+
+
+
+<h3 class="wp-block-heading" id="orge4335d9">Field Note</h3>
+
+
+
+<p class="wp-block-paragraph">Systemd is not an enemy. It&#8217;s an evolution of process management.<br>When you know how its pieces connect &#8211; unit, dependency, journal &#8211; it becomes predictable.<br>Predictability is control, and control is stability.</p>
+
+
+
+<p class="wp-block-paragraph">–<br><strong>Tom</strong></p>

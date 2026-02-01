@@ -1,0 +1,48 @@
+<p>The <a href="http://www.sbcl.org/news.html#2.0.9">latest SBCL</a> handles slot
+<code>:initform</code> and <code>:type</code> options in a new way. It&rsquo;s mentioned in the
+release notes.</p>
+
+<blockquote>
+  <p>minor incompatible change: the compiler signals a warning at
+  compile-time when an initform of T, NIL or 0 does not match a
+  STANDARD-CLASS slot&rsquo;s declared type._</p>
+</blockquote>
+
+<p>Sounds pretty benign, but it <a href="http://report.quicklisp.org/2020-09-28/failure-report.html">breaks dozens of
+projects</a>
+in Quicklisp. (To be fair, most of the failures are caused by a small
+number of core systems on which many other systems depend.)</p>
+
+<p>Here&rsquo;s an example of the new behavior:</p>
+
+<pre><code>(defclass foo ()
+  ((name :type string :initform nil)))
+</code></pre>
+
+<p>With the above defclass form, SBCL 2.0.9 will signal a warning at
+compile time:</p>
+
+<pre><code>; processing (DEFCLASS FOO ...)
+
+; file: foo.lisp
+; in: DEFCLASS FOO
+;     (NAME :TYPE STRING :INITFORM NIL)
+; ==&gt;
+;   (SB-KERNEL:THE* (STRING :SOURCE-FORM NIL :USE-ANNOTATIONS T) NIL)
+; 
+; caught WARNING:
+;   Constant NIL conflicts with its asserted type STRING.
+;   See also:
+;     The SBCL Manual, Node "Handling of Types"
+; 
+; compilation unit finished
+;   caught 1 WARNING condition
+</code></pre>
+
+<p>This compile-time warning means &ldquo;failure&rdquo; as far as loading with ASDF
+is concerned.</p>
+
+<p>If you have both <code>:type</code> and <code>:initform</code> in your slot definitions, and
+you want to be compatible with the latest SBCL, make sure the initform
+type matches the slot type. If you want to use NIL as the initform,
+one easy option is to set the type to <code>(or null &lt;actual type&gt;)</code>.</p>

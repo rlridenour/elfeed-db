@@ -1,0 +1,96 @@
+<p>Once you learn a little <a href="https://en.wikipedia.org/wiki/Emacs_Lisp">elisp</a>, <a href="https://www.gnu.org/software/emacs/">Emacs</a> becomes this hyper malleable editor/platform. A live playground of sorts, where almost everything is up for grabs at runtime. Throw some elisp at it, and you can customize or extend almost anything to your heart's content. I say almost, as there's a comparatively small native core, that would typically require recompiling if you wanted to make further (native) mods. But that isn't entirely true. <a href="https://www.masteringemacs.org/article/whats-new-in-emacs-25-1">Emacs 25</a> enabled us to further extend things by loading native <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Dynamic-Modules.html">dynamic modules</a>, back in 2016.</p>
+<p>Most of my Emacs-bending adventures have been powered by elisp, primarily on macOS. I also happen to have an iOS dev background, so when <a href="https://github.com/SavchenkoValeriy">Valeriy Savchenko</a> <a href="https://www.reddit.com/r/emacs/comments/wemj1z/writing_emacs_dynamic_modules_in_swift/">announced</a> his project bringing <a href="https://github.com/SavchenkoValeriy/emacs-swift-module">Emacs dynamic modules powered by Swift</a>, I added it to my never-ending list of things to try out.</p>
+<p>Fast-forward to a year later, and <a href="https://github.com/roife">Roife</a>'s <a href="https://www.reddit.com/r/emacs/comments/17vrmrk/emt_emacs_macos_tokenizer_for_enhanced_cjk_word/">introduction</a> to <a href="https://github.com/roife/emt">emt</a> finally gave me that much-needed nudge to give <a href="https://github.com/SavchenkoValeriy/emacs-swift-module">emacs-swift-module</a> a try. While I wish I had done it earlier, I also wish <a href="https://github.com/SavchenkoValeriy/emacs-swift-module">emacs-swift-module</a> had gotten more visibility. Native extensions written in Swift can open up some some neat integrations using native macOS UX/APIs.</p>
+<p>While I'm new to Savchenko's <a href="https://github.com/SavchenkoValeriy/emacs-swift-module">emacs-swift-module</a>, the project has <a href="https://savchenkovaleriy.github.io/emacs-swift-module/documentation/emacsswiftmodule/">wonderful documentation</a>. It quickly got me on my way to build an experimental dynamic module introducing a native context menu for sharing files from my beloved editor.</p>
+<p><img src="https://xenodium.github.io/images/native-emacsmacos-ux-integrations-via-swift-modules/emacs-share.webp" alt=""></p>
+<p>Most of the elisp/native bridging magic happens with fairly little Swift code:</p>
+<pre><code class="language-swift">try env.defun(
+  &quot;macos-module--share&quot;,
+  with: &quot;&quot;&quot;
+    Share files in ARG1.
+
+    ARG1 must be a vector (not a list) of file paths.
+    &quot;&quot;&quot;
+) { (env: Environment, files: [String]) in
+  let urls = files.map { URL(fileURLWithPath: $0) }
+
+  let picker = NSSharingServicePicker(items: urls)
+  guard let view = NSApp.mainWindow?.contentView else {
+    return
+  }
+
+  let x = try env.funcall(&quot;macos--emacs-point-x&quot;) as Int
+  let y = try env.funcall(&quot;macos--emacs-point-y&quot;) as Int
+
+  let rect = NSRect(
+    x: x + 15, y: Int(view.bounds.height) - y + 15, width: 1, height: 1
+  )
+  picker.show(relativeTo: rect, of: view, preferredEdge: .maxY)
+}
+</code></pre>
+<p>This produced an elisp <code>macos-module--share</code> function I could easily access from elisp like so:</p>
+<pre><code class="language-{.commonlisp">(defun macos-share ()
+  &quot;Share file(s) with other macOS apps.
+
+If visiting a buffer with associated file, share it.
+
+While in `dired', any selected files, share those.  If region is
+active, share files in region.  Otherwise share file at point.&quot;
+  (interactive)
+  (macos-module--share (vconcat (macos--files-dwim))))
+</code></pre>
+<p>On a side note, <code>(macos--files-dwim)</code> chooses files depending on context. That is, <a href="https://xenodium.com/emacs-dwim-do-what-i-mean/">do what I mean (DWIM) style</a>. If there's a file associated with current buffer, share it. When in <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> (the directory editor, aka file manager), look at region, selected files, or default to file at point.</p>
+<pre><code class="language-{.commonlisp">(defun macos--files-dwim ()
+  &quot;Return buffer file (if available) or marked/region files for a `dired' buffer.&quot;
+  (if (buffer-file-name)
+      (list (buffer-file-name))
+    (or
+     (macos--dired-paths-in-region)
+     (dired-get-marked-files))))
+
+(defun macos--dired-paths-in-region ()
+  &quot;If `dired' buffer, return region files.  nil otherwise.&quot;
+  (when (and (equal major-mode 'dired-mode)
+             (use-region-p))
+    (let ((start (region-beginning))
+          (end (region-end))
+          (paths))
+      (save-excursion
+        (save-restriction
+          (goto-char start)
+          (while (&lt; (point) end)
+            ;; Skip non-file lines.
+            (while (and (&lt; (point) end) (dired-between-files))
+              (forward-line 1))
+            (when (dired-get-filename nil t)
+              (setq paths (append paths (list (dired-get-filename nil t)))))
+            (forward-line 1))))
+      paths)))
+</code></pre>
+<p>I got one more example of a native macOS integration I added. Being an even simpler one, and in hindsight, I prolly should have introduced it first. In any case, this one reveals <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> files in macOS's Finder app (including the selection itself).</p>
+<p><img src="https://xenodium.github.io/images/native-emacsmacos-ux-integrations-via-swift-modules/reveal.webp" alt=""></p>
+<pre><code class="language-swift">try env.defun(
+  &quot;macos-module--reveal-in-finder&quot;,
+  with: &quot;&quot;&quot;
+    Reveal (and select) files in ARG1 in macOS Finder.
+
+    ARG1 mus be a vector (not a list) of file paths.
+    &quot;&quot;&quot;
+) { (env: Environment, files: [String]) in
+  NSWorkspace.shared.activateFileViewerSelecting(files.map { URL(fileURLWithPath: $0) })
+}
+</code></pre>
+<p>The corresponding elisp is nearly identical to its <code>macos-share</code> sibling:</p>
+<pre><code class="language-{.commonlisp">(defun macos-reveal-in-finder ()
+  &quot;Reveal file(s) in macOS Finder.
+
+If visiting a buffer with associated file, reveal it.
+
+While in `dired', any selected files, reveal those.  If region is
+active, reveal files in region.  Otherwise reveal file at point.&quot;
+  (interactive)
+  (macos-module--reveal-in-finder (vconcat (macos--files-dwim))))
+</code></pre>
+<p>My Swift module experiment introduces two native macOS UX integrations, now available via <code>M-x macos-share</code> and <code>M-x macos-reveal-in-finder</code>. I've pushed all code to it's own <a href="https://github.com/xenodium/EmacsMacOSModule">repo</a>.</p>
+<p>I hope this post brings visibility to the wonderful <a href="https://github.com/SavchenkoValeriy/emacs-swift-module">emacs-swift-module</a> project and sparks new, native, and innovative integrations for those on macOS. Can't wait to see what others can do with it.</p>
+<p><em>Enjoying this content? Find it useful? Consider ✨<a href="https://github.com/sponsors/xenodium">sponsoring</a>✨.</em></p>

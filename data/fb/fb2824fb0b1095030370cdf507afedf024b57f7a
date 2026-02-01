@@ -1,0 +1,288 @@
+
+	
+<p>
+We all hate the experience of calling a service provider and being placed on hold for a very long time. Organisations that take their level of service seriously plan their call centres. Good planning ensures that waiting times for customers are within acceptable limits. Having said this, making people wait for something can, in some instances, increase perceived value. This article shows how to implement call centre workforce planning with the R language.</p>
+<p>
+Contact centre workforce planning involves an exciting mix of rational production management and the soft skills of providing service with a smile. The mathematics of managing a call centre ensures customers have a great experience by limiting waiting times.</p>
+<p>
+The Grade of Service can numerically express call centre performance. This KPI is the percentage of calls answered within a specific time. For example, 90% of calls are responded to within 30 seconds. This Grade of Service depends on the following:</p>
+<ul>
+<li>The volume of calls made to the centre.</li>
+<li>The number of available agents</li>
+<li>The time it takes to service a customer.</li>
+</ul>
+<p>Working in a call centre can be chaotic, so we need some maths to understand it. The <a href="https://www.callcentrehelper.com/erlang-c-formula-example-121281.htm">Erlang C formula</a> describes the relationship between the Grade of Service and various variables to bring some order to the chaos.</p>
+<p>
+Call centre workforce planning is a complex activity that is a perfect problem to solve in R code. This article explains using the Erlang C formula in the R language to manage a contact centre. The presented code calculates the number of agents needed to meet a required Grade of Service. This approach is extended to a Monte Carlo situation to understand the real world&#39;s stochastic nature better.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+The Erlang C Formula
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>The Erlang C formula describes the probability that a customer needs to queue instead of being immediately serviced $(P_w)$. This formula is closely related to the <a href="https://en.wikipedia.org/wiki/Poisson_distribution">Poisson distribution</a>, which describes queues such as traffic lights or hospital waiting lists.</p>
+<p>
+$$P_w = \frac{\frac{A^N}{N!}\frac{N}{N-A}}{\Big( \sum_{i=0}^{N-1} \frac{A^i}{i!} \Big)+\frac{A^N}{N!}\frac{N}{N-A}}$$</p>
+<p>
+The intensity of traffic $A$ is the number of calls per hour multiplied by the average duration of a call. Traffic intensity is measured in dimensionless Erlang units, which expresses the time it would take to manage all calls if they arrived sequentially. The intensity measures the effort that needs to be undertaken in an hour. In reality, calls arrive at random times during the hour, which is where the Poisson distribution comes in. The waiting time is also influenced by the number of available operators $N$.</p>
+<p>
+Both common sense and the formula show that increasing the number of calls or decreasing the number of operators increases the likelihood that customers are placed in a queue. The more staff, the higher the service level, but how many people do you need to achieve your desired grade of service efficiently?</p>
+<p>
+The Grade of Service $S$ is a function of the outcome of the Erlang C formula ($P_w$), the number of agents ($N$), the call intensity ($A$), call duration ($\lambda$) and lastly the target answering time ($t$).</p>
+<p>
+The Erlang C formula can be reworked to provide that answer. I sourced this solution from <a href="https://www.callcentrehelper.com/erlang-c-formula-example-121281.htm">callcenterhelper.com</a>. We now have a toolset for call centre planning which we can implement in the R language.</p>
+<p>
+$$S = 1 - \Large[ P_w e^ {-[(N-A](t/ \lambda)]} \large]$$</p>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Erlang C in R
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The Erlang C formula contains some factorials and powers, which become problematic when dealing with significant call volumes or many agents. The Multiple Precision Arithmetic library enables working with <a href="https://lucidmanager.org/data-science/project-euler-20/">large integer factorials</a>, but there is no need to wield such strong computing powers. To make life easier, the Erlang C formula includes the <a href="https://en.wikipedia.org/wiki/Erlang_(unit)#Erlang_B_formula">Erlang B formula</a>, the inverse of which can be calculated using a small loop.</p>
+<p>
+This implementation is very similar to an unpublished R package by <a href="https://github.com/phubers/erlang">Patrick Hubers</a>, enhanced with work from <a href="https://www.callcentrehelper.com/erlang-c-formula-example-121281.htm">callcenterhelper.com</a>. This code contains four functions:</p>
+<ol>
+<li><code class="verbatim">intensity</code>: Determines intensity in <a href="https://en.wikipedia.org/wiki/Erlang_(unit)">Erlangs</a> based on the rate of calls per interval, the total call handling time and the interval time in minutes. All functions default to an interval time of sixty minutes. Erlangs are a dimensionless unit as a measure of the offered load.</li>
+<li><code class="verbatim">erlang_c</code>: Processes the Erlang C formula using the number of agents and the variables determining intensity (call rate and call handling time). The output is the probability that a customer has to wait for service.</li>
+<li><code class="verbatim">service_level</code>: Calculates the service level. The inputs are the same as above, plus the period for the Grade of Service in seconds.</li>
+<li><code class="verbatim">resource</code>: Seeks the number of agents needed to meet a Grade of Service. This function starts with the minimum number of agents (the intensity plus one agent) and keeps searching until it finds the number of agents that achieve the desired Grade of Service.</li>
+</ol>
+<div id="outline-container-headline-3" class="outline-3">
+<h3 id="headline-3">
+Erlang C Code
+</h3>
+<div id="outline-text-headline-3" class="outline-text-3">
+<p>
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Call Centre Workforce Planning Using Erlang C in R language</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Erlang-C Functions</span>
+</span></span><span style="display:flex;"><span>  intensity <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rate, duration, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>) {
+</span></span><span style="display:flex;"><span>      (rate <span style="color:#333">/</span> interval) <span style="color:#333">*</span> duration
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  erlang_c <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(agents, rate, duration, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>) {
+</span></span><span style="display:flex;"><span>      int <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">intensity</span>(rate, duration, interval)
+</span></span><span style="display:flex;"><span>      erlang_b_inv <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#080;font-weight:bold">for</span> (i <span style="color:#080;font-weight:bold">in</span> <span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>agents) {
+</span></span><span style="display:flex;"><span>          erlang_b_inv <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">+</span> erlang_b_inv <span style="color:#333">*</span> i <span style="color:#333">/</span> int
+</span></span><span style="display:flex;"><span>      }
+</span></span><span style="display:flex;"><span>      erlang_b <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">/</span> erlang_b_inv
+</span></span><span style="display:flex;"><span>      agents <span style="color:#333">*</span> erlang_b <span style="color:#333">/</span> (agents <span style="color:#333">-</span> int <span style="color:#333">*</span> (<span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">-</span> erlang_b))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  service_level <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(agents, rate, duration, target, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>) {
+</span></span><span style="display:flex;"><span>      pw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">erlang_c</span>(agents, rate, duration, interval)
+</span></span><span style="display:flex;"><span>      int <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">intensity</span>(rate, duration, interval)
+</span></span><span style="display:flex;"><span>      <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">-</span> (pw <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">exp</span>(<span style="color:#333">-</span>(agents <span style="color:#333">-</span> int) <span style="color:#333">*</span> (target <span style="color:#333">/</span> duration)))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  resource <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rate, duration, target, gos_target, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>) {
+</span></span><span style="display:flex;"><span>      agents <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">round</span>(<span style="color:#06b;font-weight:bold">intensity</span>(rate, duration, interval) <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>      gos <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">service_level</span>(agents, rate, duration, target, interval)
+</span></span><span style="display:flex;"><span>      <span style="color:#080;font-weight:bold">while</span> (gos <span style="color:#333">&lt;</span> gos_target <span style="color:#333">*</span> (gos_target <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">1</span>) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">100</span>) {
+</span></span><span style="display:flex;"><span>          agents <span style="color:#333">&lt;-</span> agents <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>          gos <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">service_level</span>(agents, rate, duration, target, interval)
+</span></span><span style="display:flex;"><span>      }
+</span></span><span style="display:flex;"><span>      <span style="color:#080;font-weight:bold">return</span>(<span style="color:#06b;font-weight:bold">c</span>(agents, gos))
+</span></span><span style="display:flex;"><span>  }</span></span></code></pre></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-4" class="outline-2">
+<h2 id="headline-4">
+Call centre workforce planning using R
+</h2>
+<div id="outline-text-headline-4" class="outline-text-2">
+<p>For example, you manage a call centre with 100 calls every 30 minutes and an average handling time of 3 minutes. These numbers result in an intensity of <code class="verbatim">intensity(100, 3, 30)</code> 10 Erlangs or ten calls hours of traffic per hour. This result means we need at least ten agents, assuming all calls arrive neatly after each other.</p>
+<p>
+The reality of a contact centre is chaotic, as calls arrive randomly, so there is a high probability that an operator will be busy if we only use ten agents. You can enter this data into the Erlang C in R function to find the chance a customer needs to wait. With ten agents, the likelihood is 100%. With 11 agents, it is 68%. The <code class="verbatim">sapply</code> function helps to view the impact of adding more customer service
+agents.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">erlang_c</span>(<span style="color:#60e;font-weight:bold">11</span>, <span style="color:#60e;font-weight:bold">100</span>, <span style="color:#60e;font-weight:bold">3</span>, <span style="color:#60e;font-weight:bold">30</span>)
+</span></span><span style="display:flex;"><span>  [1] <span style="color:#60e;font-weight:bold">0.6821182</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">sapply</span>(<span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">20</span>, erlang_c, rate <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">100</span>, duration <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>)
+</span></span><span style="display:flex;"><span>  [1] <span style="color:#60e;font-weight:bold">1.000000000</span> <span style="color:#60e;font-weight:bold">0.682118205</span> <span style="color:#60e;font-weight:bold">0.449388224</span> <span style="color:#60e;font-weight:bold">0.285270453</span> <span style="color:#60e;font-weight:bold">0.174131934</span> <span style="color:#60e;font-weight:bold">0.102042367</span>
+</span></span><span style="display:flex;"><span>  [7] <span style="color:#60e;font-weight:bold">0.057340331</span> <span style="color:#60e;font-weight:bold">0.030876110</span> <span style="color:#60e;font-weight:bold">0.015928277</span> <span style="color:#60e;font-weight:bold">0.007873558</span> <span style="color:#60e;font-weight:bold">0.003731126</span></span></span></code></pre></div>
+</div>
+<p>
+The likelihood of a customer having to wait is the main target for any service that involves queueing. We need to set a target service level or Grade of Service. The service_level function calculates the Grade of Service using the previous parameters plus the target in seconds. Let&#39;s make some assumptions:</p>
+<ul>
+<li>Required Grade of Service 80%</li>
+<li>Target answer time: 20 seconds</li>
+</ul>
+<p>Using the function, we can quickly see that with 11 agents and 100 calls per 30 minutes, we only have a Grade of Service of 39%, much less than the required 80%. Using <code class="verbatim">sapply()</code>, we can see that we need just over 13 available agents.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/call-centre-example.png" alt="Grade of Service for a call centre with 100 calls per 30 minutes and 3-minute contacts" title="Grade of Service for a call centre with 100 calls per 30 minutes and 3-minute contacts" width="600"/>
+<figcaption>
+Grade of Service for a call centre with 100 calls per 30 minutes and 3-minute contacts.
+</figcaption>
+</figure>
+<p>
+The <code class="verbatim">resource()</code> function ties everything together and seeks the number of agents needed to meet the required grade of service. We need at least 14 available agents to answer 80% of calls within 20 seconds, which gives us an actual predicted Grade of Service of 88%.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Example</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">service_level</span>(agents <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">11</span>, rate <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">100</span>, duration <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>, target <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">20</span> <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">60</span>, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  service <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data.frame</span>(agents <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">20</span>,
+</span></span><span style="display:flex;"><span>                        GoS <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">sapply</span>(<span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">20</span>, service_level, rate <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">100</span>, duration <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>, target <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">20</span> <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">60</span>, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggplot2)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>(service, <span style="color:#06b;font-weight:bold">aes</span>(agents, GoS)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_line</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(breaks <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">20</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_y_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span>percent) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_hline</span>(yintercept <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.8</span>, col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;blue&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Call Centre Simulation&#34;</span>,
+</span></span><span style="display:flex;"><span>         subtitle <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Erlang-C Formula&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggsave</span>(<span style="background-color:#fff0f0">&#34;call-centre-example.png&#34;</span>, width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">6</span>, height <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">4</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">resource</span>(rate <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">100</span>, duration <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>, target <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">20</span><span style="color:#333">/</span><span style="color:#60e;font-weight:bold">60</span>, gos_target <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">80</span>, interval<span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>)</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-5" class="outline-2">
+<h2 id="headline-5">
+Call Centre Workforce Planning with Erlang C Monte Carlo Simulation
+</h2>
+<div id="outline-text-headline-5" class="outline-text-2">
+<p>I used the Erlang C model to recommend staffing levels in a contact centre some years ago. This experience taught me that the mathematical model is the first step towards call centre workforce planning. Several other metrics can be built on the Erlang C model, such as agents&#39; average occupancy and handling time.</p>
+<p>
+Like all mathematical models, the Erlang C formula is an idealised version of reality. Agents are not always available; they need breaks, toilet stops and might even go on leave. Employers call this loss of labour shrinkage, a somewhat negative term to describe something positive for the employee. The Erlang C model provides the number of &#39;bums on seats&#39;.</p>
+<p>
+Like every model, the Erlang C formula is not a perfect representation of reality. The formula tends to overestimate the required resources because it assumes that people will stay on hold indefinitely, while the queue will automatically shorten as people lose patience.</p>
+<p>
+The number of employees needed to provide this capacity depends on the working conditions at the call centre. For example, if employees are only available to take calls 70% of their contracted time, you will need $1/0.7=1.4$ staff members for each live agent to meet the Grade of Service.</p>
+<p>
+Another problem is the stochastic nature of call volumes and handling times. The Erlang C model requires a manager to estimate call volume and handling time (intensity) as a static variable, while in reality, it is stochastic and subject to variation. Time series analysis can help to predict call volumes, but every prediction has a degree of uncertainty. We can manage this uncertainty by using a Monte Carlo simulation.</p>
+<p>
+All the functions listed above can be rewritten to provide a vector of possible answers based on the average call volume and duration and their standard deviation. This simulation assumes a normal distribution for both call volume and the length of each call. The outcome of this simulation is a distribution of service levels.</p>
+<div id="outline-container-headline-6" class="outline-3">
+<h3 id="headline-6">
+Monte Carlo Simulation
+</h3>
+<div id="outline-text-headline-6" class="outline-text-3">
+<p>A <a href="https://lucidmanager.org/data-science/monte-carlo-cost-estimates/">Monte Carlo simulation</a> is a method to simulate reality by defining a probability distribution of the events in the model.</p>
+<p>
+For example, a call centre receives, on average, 100 calls per half hour with a standard deviation of 10 calls. The average time to manage a call, including wrap-up time after the call, is 180 seconds, with a standard deviation of 20 seconds. The centre needs to answer 80% of calls within 20 seconds. What is the likelihood of achieving this level of service?</p>
+<p>
+The average intensity of this scenario is 10 Erlangs. Using the resource formula suggests that we need 14 agents to meet the Grade of Service. Simulating the intensity of the scenario 1000 times indicates that the intensity is between 5.4 and 15.9 Erlangs (see code at the end of this article).</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">resource</span>(<span style="color:#60e;font-weight:bold">100</span>, <span style="color:#60e;font-weight:bold">180</span>, <span style="color:#60e;font-weight:bold">20</span>, <span style="color:#60e;font-weight:bold">80</span>, <span style="color:#60e;font-weight:bold">30</span>)
+</span></span><span style="display:flex;"><span>  [1] <span style="color:#60e;font-weight:bold">14.0000000</span> <span style="color:#60e;font-weight:bold">0.88835</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">intensity_mc</span>(<span style="color:#60e;font-weight:bold">100</span>, <span style="color:#60e;font-weight:bold">10</span>, <span style="color:#60e;font-weight:bold">180</span>, <span style="color:#60e;font-weight:bold">20</span>) <span style="color:#333">%&gt;%</span> <span style="color:#06b;font-weight:bold">summary</span>()
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  Min. <span style="color:#60e;font-weight:bold">1</span>st Qu. Median Mean <span style="color:#60e;font-weight:bold">3</span>rd Qu. Max.
+</span></span><span style="display:flex;"><span>  <span style="color:#60e;font-weight:bold">5.480</span> <span style="color:#60e;font-weight:bold">8.975</span> <span style="color:#60e;font-weight:bold">9.939</span> <span style="color:#60e;font-weight:bold">10.025</span> <span style="color:#60e;font-weight:bold">10.993</span> <span style="color:#60e;font-weight:bold">15.932</span></span></span></code></pre></div>
+</div>
+<p>
+The next step is to simulate the expected service level for this scenario. The plot visualises the outcome of the Monte Carlo simulation and shows that in 95% of situations, the Grade of Service is more than 77% and half the time, it is more than 94%.</p>
+<pre class="example">
+  service_level_mc(15, 100, 10, 180, 20, 20, 30, sims = 1000) %&gt;%
+  + quantile(c(.05, .5, .95))
+  5% 50% 95%
+  0.7261052 0.9427592 0.9914338
+</pre>
+<p>
+This article shows that Erlang C in R helps managers plan call centre workforce. We may need a Shiny application to develop a tool to manage the complexity of these functions. I would love to hear from people with practical experience in managing call centres in how they analyse data.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/call-centre-monte-carlo.png" alt="Simulated service levels using Erlang C and Monte Carlo simulation" title="Simulated service levels using Erlang C and Monte Carlo simulation" width="600"/>
+<figcaption>
+Simulated service levels using Erlang C and Monte Carlo simulation.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-7" class="outline-3">
+<h3 id="headline-7">
+Monte Carlo Simulation Code
+</h3>
+<div id="outline-text-headline-7" class="outline-text-3">
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Monte Carlo Simulation</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  intensity_mc <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(rate_m, rate_sd, duration_m, duration_sd, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>, sims <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1000</span>) {
+</span></span><span style="display:flex;"><span>    (<span style="color:#06b;font-weight:bold">rnorm</span>(sims, rate_m, rate_sd) <span style="color:#333">/</span> (<span style="color:#60e;font-weight:bold">60</span> <span style="color:#333">*</span> interval)) <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">rnorm</span>(sims, duration_m, duration_sd)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">intensity_mc</span>(<span style="color:#60e;font-weight:bold">100</span>, <span style="color:#60e;font-weight:bold">10</span>, <span style="color:#60e;font-weight:bold">180</span>, <span style="color:#60e;font-weight:bold">20</span>, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">summary</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  erlang_c_mc <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(agents, rate_m, rate_sd, duration_m, duration_sd, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>) {
+</span></span><span style="display:flex;"><span>    int <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">intensity_mc</span>(rate_m, rate_sd, duration_m, duration_sd, interval)
+</span></span><span style="display:flex;"><span>    erlang_b_inv <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#080;font-weight:bold">for</span> (i <span style="color:#080;font-weight:bold">in</span> <span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>agents) {
+</span></span><span style="display:flex;"><span>      erlang_b_inv <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">+</span> erlang_b_inv <span style="color:#333">*</span> i <span style="color:#333">/</span> int
+</span></span><span style="display:flex;"><span>    }
+</span></span><span style="display:flex;"><span>    erlang_b <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">/</span> erlang_b_inv
+</span></span><span style="display:flex;"><span>    agents <span style="color:#333">*</span> erlang_b <span style="color:#333">/</span> (agents <span style="color:#333">-</span> int <span style="color:#333">*</span> (<span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">-</span> erlang_b))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  service_level_mc <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(agents, rate_m, rate_sd, duration_m, duration_sd, target, interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">60</span>, sims <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1000</span>) {
+</span></span><span style="display:flex;"><span>    pw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">erlang_c_mc</span>(agents, rate_m, rate_sd, duration_m, duration_sd, interval)
+</span></span><span style="display:flex;"><span>    int <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">intensity_mc</span>(rate_m, rate_sd, duration_m, duration_sd, interval, sims)
+</span></span><span style="display:flex;"><span>    <span style="color:#60e;font-weight:bold">1</span> <span style="color:#333">-</span> (pw <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">exp</span>(<span style="color:#333">-</span>(agents <span style="color:#333">-</span> int) <span style="color:#333">*</span> (target <span style="color:#333">/</span> <span style="color:#06b;font-weight:bold">rnorm</span>(sims, duration_m, duration_sd))))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">tibble</span>(ServiceLevel <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">service_level_mc</span>(agents <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">14</span>,
+</span></span><span style="display:flex;"><span>                                         rate_m <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">100</span>,
+</span></span><span style="display:flex;"><span>                                         rate_sd <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>,
+</span></span><span style="display:flex;"><span>                                         duration_m <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">180</span>,
+</span></span><span style="display:flex;"><span>                                         duration_sd <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">20</span>,
+</span></span><span style="display:flex;"><span>                                         target <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">20</span>,
+</span></span><span style="display:flex;"><span>                                         interval <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">30</span>,
+</span></span><span style="display:flex;"><span>                                         sims <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1000</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(ServiceLevel)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_histogram</span>(binwidth <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.05</span>, fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;#008da1&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(labels <span style="color:#333">=</span> scales<span style="color:#333">::</span>percent) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Call Centre Monte Carlo Simulation&#34;</span>)</span></span></code></pre></div>
+</div>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+</div>
+</div>
+
+      

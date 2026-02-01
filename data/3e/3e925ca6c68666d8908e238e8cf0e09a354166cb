@@ -1,0 +1,227 @@
+<p>A commonplace activity is to copy source code from a web page into an Org file. Ideally such code is kept structurally intact by wrapping it in an <a href="https://orgmode.org/manual/Working-with-Source-Code.html">Org source block</a>. This is typically done as follows:</p>
+<ol>
+<li>Select source code text in web page.</li>
+<li>Copy source code text.</li>
+<li>Paste source code into Org file.</li>
+<li>Annotate the pasted source code with an Org source block, specifying language. (<code>#+BEGIN_SRC {language}</code>, <code>#+END_SRC</code>)<ul>
+<li>Either done manually or using the command <code>org-insert-structure-template</code> (<code>C-c C-,</code>)</li>
+</ul>
+</li>
+</ol>
+<p>While the above is not complicated, it can get onerous if done frequently. Thankfully Org provides you with the means to automate this. For example with Org protocol, the above steps can be reduced to:</p>
+<ol>
+<li>Select source code text in web page (no need to copy!).</li>
+<li>Run web bookmark to capture selected text to Emacs.</li>
+<li>Select source code language via mini-buffer completion in Emacs and commit capture (<code>C-c C-c</code>).</li>
+</ol>
+<p>Interested? Read on. Some Elisp ahead, but hopefully not too challenging.</p>
+<h1>Capturing code with Org protocol</h1>
+<p>A convenient way to capture content from a web page is through <a href="https://orgmode.org/manual/Protocols.html">Org protocol</a> which builds on top of <a href="https://orgmode.org/manual/Capture.html">Org capture</a>. <a href="https://orgmode.org/worg/org-contrib/org-protocol.html">Some setup is required</a> before using it, but the effort is rewarded in saved time for a future you.</p>
+<p>Shown below is a capture template with key name “code”.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="s">&quot;code&quot;</span>
+<span class="w"> </span><span class="s">&quot;Source Code (Org Protocol)&quot;</span>
+<span class="w"> </span><span class="nv">entry</span>
+<span class="w"> </span><span class="p">(</span><span class="nv">file</span><span class="w"> </span><span class="s">&quot;~/org/notes.org&quot;</span><span class="p">)</span>
+<span class="w"> </span><span class="p">(</span><span class="k">function</span><span class="w"> </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">()</span>
+<span class="w">             </span><span class="p">(</span><span class="nv">string-join</span>
+<span class="w">              </span><span class="p">(</span><span class="nf">list</span><span class="w"> </span><span class="s">&quot;* Source: %:description&quot;</span>
+<span class="w">                    </span><span class="s">&quot;:PROPERTIES:&quot;</span>
+<span class="w">                    </span><span class="s">&quot;:CREATED: %U&quot;</span>
+<span class="w">                    </span><span class="s">&quot;:END:&quot;</span>
+<span class="w">                    </span><span class="s">&quot;%:link&quot;</span>
+<span class="w">                    </span><span class="p">(</span><span class="nf">concat</span><span class="w"> </span><span class="s">&quot;#+BEGIN_SRC &quot;</span>
+<span class="w">                            </span><span class="p">(</span><span class="nv">cc-org-capture--code-choices</span><span class="w"> </span><span class="s">&quot;elisp&quot;</span><span class="p">))</span>
+<span class="w">                    </span><span class="s">&quot;%i&quot;</span>
+<span class="w">                    </span><span class="s">&quot;#+END_SRC&quot;</span>
+<span class="w">                    </span><span class="s">&quot;&quot;</span>
+<span class="w">                    </span><span class="s">&quot;%?&quot;</span><span class="p">)</span>
+<span class="w">              </span><span class="s">&quot;\n&quot;</span><span class="p">)))</span>
+<span class="w"> </span><span class="nb">:empty-lines</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>The Elisp function <code>cc-org-capture--code-choices</code> will generate capture expansion markup to choose a language with mini-buffer completion. It is configured here to use “elisp” as the default language. The set of languages to choose from via completion is defined in <code>cc-org-capture--src-languages</code>. Both their definitions are shown below:</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc-org-capture--code-choices</span><span class="w"> </span><span class="p">(</span><span class="nv">lang</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Create selection of programming language choices with default LANG.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nf">concat</span>
+<span class="w">   </span><span class="s">&quot;%^{Language|&quot;</span>
+<span class="w">   </span><span class="nv">lang</span>
+<span class="w">   </span><span class="s">&quot;|&quot;</span>
+<span class="w">   </span><span class="p">(</span><span class="nv">string-join</span><span class="w"> </span><span class="nv">cc-org-capture--src-languages</span><span class="w"> </span><span class="s">&quot;|&quot;</span><span class="p">)</span>
+<span class="w">   </span><span class="s">&quot;}&quot;</span><span class="p">))</span>
+
+<span class="p">(</span><span class="k">defvar</span><span class="w"> </span><span class="nv">cc-org-capture--src-languages</span>
+<span class="w">  </span><span class="p">(</span><span class="nf">list</span>
+<span class="w">   </span><span class="s">&quot;C&quot;</span><span class="w"> </span><span class="s">&quot;F90&quot;</span><span class="w"> </span><span class="s">&quot;R&quot;</span><span class="w"> </span><span class="s">&quot;awk&quot;</span><span class="w"> </span><span class="s">&quot;clojure&quot;</span><span class="w"> </span><span class="s">&quot;cpp&quot;</span><span class="w"> </span><span class="s">&quot;css&quot;</span><span class="w"> </span><span class="s">&quot;ditaa&quot;</span><span class="w"> </span><span class="s">&quot;dot&quot;</span><span class="w"> </span><span class="s">&quot;elisp&quot;</span><span class="w"> </span><span class="s">&quot;eshell&quot;</span>
+<span class="w">   </span><span class="s">&quot;forth&quot;</span><span class="w"> </span><span class="s">&quot;gnuplot&quot;</span><span class="w"> </span><span class="s">&quot;haskell&quot;</span><span class="w"> </span><span class="s">&quot;java&quot;</span><span class="w"> </span><span class="s">&quot;js&quot;</span><span class="w"> </span><span class="s">&quot;julia&quot;</span><span class="w"> </span><span class="s">&quot;kotlin&quot;</span><span class="w"> </span><span class="s">&quot;latex&quot;</span><span class="w"> </span><span class="s">&quot;lisp&quot;</span><span class="w"> </span><span class="s">&quot;lua&quot;</span>
+<span class="w">   </span><span class="s">&quot;makefile&quot;</span><span class="w"> </span><span class="s">&quot;matlab&quot;</span><span class="w"> </span><span class="s">&quot;max&quot;</span><span class="w"> </span><span class="s">&quot;ocaml&quot;</span><span class="w"> </span><span class="s">&quot;octave&quot;</span><span class="w"> </span><span class="s">&quot;org&quot;</span><span class="w"> </span><span class="s">&quot;perl&quot;</span><span class="w"> </span><span class="s">&quot;plantuml&quot;</span>
+<span class="w">   </span><span class="s">&quot;processing&quot;</span><span class="w"> </span><span class="s">&quot;python&quot;</span><span class="w"> </span><span class="s">&quot;ruby&quot;</span><span class="w"> </span><span class="s">&quot;sass&quot;</span><span class="w"> </span><span class="s">&quot;scheme&quot;</span><span class="w"> </span><span class="s">&quot;sed&quot;</span><span class="w"> </span><span class="s">&quot;shell&quot;</span><span class="w"> </span><span class="s">&quot;sql&quot;</span><span class="w"> </span><span class="s">&quot;sqlite&quot;</span>
+<span class="w">   </span><span class="s">&quot;swift&quot;</span><span class="w"> </span><span class="s">&quot;swiftui&quot;</span><span class="w"> </span><span class="s">&quot;tcl&quot;</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;List of supported Org capture languages.&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>To exercise the capture template named “code” from your JavaScript enabled web-browser, create a bookmark with the following JavaScript code as its location. When you find code you want to capture, select the code and run this bookmark.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nx">javascript</span><span class="o">:</span><span class="nx">location</span><span class="p">.</span><span class="nx">href</span><span class="o">=</span><span class="s1">&#39;org-protocol://capture?&#39;</span><span class="w"> </span><span class="o">+</span>
+<span class="w">      </span><span class="ow">new</span><span class="w"> </span><span class="nx">URLSearchParams</span><span class="p">({</span>
+<span class="w">            </span><span class="nx">template</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;code&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">url</span><span class="o">:</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">location</span><span class="p">.</span><span class="nx">href</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">title</span><span class="o">:</span><span class="w"> </span><span class="nb">document</span><span class="p">.</span><span class="nx">title</span><span class="p">,</span><span class="w"> </span><span class="nx">body</span><span class="o">:</span><span class="w"> </span><span class="nb">window</span><span class="p">.</span><span class="nx">getSelection</span><span class="p">()});</span>
+<span class="w">      </span><span class="ow">void</span><span class="p">(</span><span class="mf">0</span><span class="p">);</span>
+</code></pre></div></td></tr></table></div>
+
+<p>Aside: if you use Emacs for macOS, you’ll want <a href="http://yummymelon.com/scrim">Scrim</a> to get Org protocol to work.</p>
+<h1>Capturing source code by copying</h1>
+<p>Often it is desirable to just copy the source code (putting it in the <code>kill-ring</code>) and paste (or rather capture) it direct into an Org (or Markdown) file of one’s choosing. The following capture template named “cc” can accomplish this.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span>
+<span class="normal">2</span>
+<span class="normal">3</span>
+<span class="normal">4</span>
+<span class="normal">5</span>
+<span class="normal">6</span>
+<span class="normal">7</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="s">&quot;cc&quot;</span>
+<span class="w"> </span><span class="s">&quot;Code&quot;</span>
+<span class="w"> </span><span class="nv">plain</span>
+<span class="w"> </span><span class="p">(</span><span class="nv">here</span><span class="p">)</span>
+<span class="w"> </span><span class="p">(</span><span class="k">function</span><span class="w"> </span><span class="nv">cc-org-capture--code-select-body</span><span class="p">)</span>
+<span class="w"> </span><span class="nb">:empty-lines</span><span class="w"> </span><span class="mi">1</span>
+<span class="w"> </span><span class="nb">:immediate-finish</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>In the above template, the target <code>(here)</code> is used to insert the captured source code at the current point. The template type is set to <code>plain</code> to not give the captured source code any special treatment with respect to Org structure. The <code>:immediate-finish</code> key is set to non-nil to not create a separate capture window.</p>
+<p>The “cc” template is intended to be invoked with a multiple-key sequence starting with ’c’, so the following entry in <code>org-capture-templates</code> is expected.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal">1</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="s">&quot;c&quot;</span><span class="w"> </span><span class="s">&quot;Code&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+
+<p>The work of constructing the wrapped source code (in this case, presumed to be in the <code>kill-ring</code> via system copy) is done in <code>cc-org-capture--code-select-body</code>. Its source is shown below.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span>
+<span class="normal">13</span>
+<span class="normal">14</span>
+<span class="normal">15</span>
+<span class="normal">16</span>
+<span class="normal">17</span>
+<span class="normal">18</span>
+<span class="normal">19</span>
+<span class="normal">20</span>
+<span class="normal">21</span>
+<span class="normal">22</span>
+<span class="normal">23</span>
+<span class="normal">24</span>
+<span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc-org-capture--code-select-body</span><span class="w"> </span><span class="p">()</span>
+<span class="w">  </span><span class="s">&quot;Body capture code in </span><span class="ss">`kill-ring&#39;</span><span class="s"> head with language prompt.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nv">cc-org-capture--code-body-from-kill-ring</span>
+<span class="w">   </span><span class="p">(</span><span class="nv">cc-org-capture--code-choices</span><span class="w"> </span><span class="s">&quot;elisp&quot;</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc-org-capture--code-body-from-kill-ring</span><span class="w"> </span><span class="p">(</span><span class="nv">lang</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Generate capture body for LANG code at head of the </span><span class="ss">`kill-ring&#39;</span><span class="s">.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="nv">string-join</span>
+<span class="w">   </span><span class="p">(</span><span class="nf">list</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">cc-org-capture--src-block-begin</span><span class="w"> </span><span class="nv">lang</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="k">if</span><span class="w"> </span><span class="nv">kill-ring</span><span class="w"> </span><span class="s">&quot;%c&quot;</span><span class="w"> </span><span class="s">&quot;&quot;</span><span class="p">)</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">cc-org-capture--src-block-end</span><span class="p">))</span>
+<span class="w">   </span><span class="s">&quot;\n&quot;</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc-org-capture--src-block-begin</span><span class="w"> </span><span class="p">(</span><span class="kp">&amp;optional</span><span class="w"> </span><span class="nv">lang</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Annotate begin of source code block for given LANG and MODE.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="k">let*</span><span class="w"> </span><span class="p">((</span><span class="nv">lang</span><span class="w"> </span><span class="p">(</span><span class="k">if</span><span class="w"> </span><span class="nv">lang</span><span class="w"> </span><span class="nv">lang</span><span class="w"> </span><span class="s">&quot;elisp&quot;</span><span class="p">))</span>
+<span class="w">         </span><span class="p">(</span><span class="nv">mode</span><span class="w"> </span><span class="p">(</span><span class="k">if</span><span class="w"> </span><span class="nv">mode</span><span class="w"> </span><span class="nv">mode</span><span class="w"> </span><span class="nv">major-mode</span><span class="p">)))</span>
+<span class="w">    </span><span class="p">(</span><span class="k">cond</span>
+<span class="w">     </span><span class="p">((</span><span class="nf">eq</span><span class="w"> </span><span class="p">(</span><span class="nv">derived-mode-p</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span><span class="w"> </span><span class="ss">&#39;org-mode</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nf">concat</span><span class="w"> </span><span class="s">&quot;#+BEGIN_SRC&quot;</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="nv">lang</span><span class="p">))</span>
+<span class="w">     </span><span class="p">((</span><span class="nf">eq</span><span class="w"> </span><span class="p">(</span><span class="nv">derived-mode-p</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span><span class="w"> </span><span class="ss">&#39;markdown-mode</span><span class="p">)</span><span class="w"> </span><span class="p">(</span><span class="nf">concat</span><span class="w"> </span><span class="s">&quot;```&quot;</span><span class="w"> </span><span class="nv">lang</span><span class="p">))</span>
+<span class="w">     </span><span class="p">(</span><span class="no">t</span><span class="w"> </span><span class="p">(</span><span class="nf">concat</span><span class="w"> </span><span class="s">&quot;#+BEGIN_SRC&quot;</span><span class="w"> </span><span class="s">&quot; &quot;</span><span class="w"> </span><span class="nv">lang</span><span class="p">)))))</span>
+
+<span class="p">(</span><span class="nb">defun</span><span class="w"> </span><span class="nv">cc-org-capture--src-block-end</span><span class="w"> </span><span class="p">(</span><span class="kp">&amp;optional</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span>
+<span class="w">  </span><span class="s">&quot;Annotate end of source code block for given MODE.&quot;</span>
+<span class="w">  </span><span class="p">(</span><span class="k">let*</span><span class="w"> </span><span class="p">((</span><span class="nv">mode</span><span class="w"> </span><span class="p">(</span><span class="k">if</span><span class="w"> </span><span class="nv">mode</span><span class="w"> </span><span class="nv">mode</span><span class="w"> </span><span class="nv">major-mode</span><span class="p">)))</span>
+<span class="w">    </span><span class="p">(</span><span class="k">cond</span>
+<span class="w">     </span><span class="p">((</span><span class="nf">eq</span><span class="w"> </span><span class="p">(</span><span class="nv">derived-mode-p</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span><span class="w"> </span><span class="ss">&#39;org-mode</span><span class="p">)</span><span class="w"> </span><span class="s">&quot;#+END_SRC&quot;</span><span class="p">)</span>
+<span class="w">     </span><span class="p">((</span><span class="nf">eq</span><span class="w"> </span><span class="p">(</span><span class="nv">derived-mode-p</span><span class="w"> </span><span class="nv">mode</span><span class="p">)</span><span class="w"> </span><span class="ss">&#39;markdown-mode</span><span class="p">)</span><span class="w"> </span><span class="s">&quot;```&quot;</span><span class="p">)</span>
+<span class="w">     </span><span class="p">(</span><span class="no">t</span><span class="w"> </span><span class="s">&quot;#+END_SRC&quot;</span><span class="p">))))</span>
+</code></pre></div></td></tr></table></div>
+
+<p>The implementation of <code>cc-org-capture--code-select-body</code> will check the current major mode (<code>major-mode</code>) and depending if it is Org or Markdown, wrap the copied source code in the <code>kill-ring</code> (expanded by the term “%c”) accordingly.</p>
+<p>The following code shows how the “cc” template can be added to <code>org-capture-templates</code>.</p>
+<div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span class="normal"> 1</span>
+<span class="normal"> 2</span>
+<span class="normal"> 3</span>
+<span class="normal"> 4</span>
+<span class="normal"> 5</span>
+<span class="normal"> 6</span>
+<span class="normal"> 7</span>
+<span class="normal"> 8</span>
+<span class="normal"> 9</span>
+<span class="normal">10</span>
+<span class="normal">11</span>
+<span class="normal">12</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="p">(</span><span class="nv">add-hook</span>
+<span class="w"> </span><span class="ss">&#39;org-mode-hook</span>
+<span class="w"> </span><span class="p">(</span><span class="nb">lambda</span><span class="w"> </span><span class="p">()</span>
+<span class="w">   </span><span class="p">(</span><span class="nv">add-to-list</span><span class="w"> </span><span class="ss">&#39;org-capture-templates</span>
+<span class="w">                </span><span class="o">&#39;</span><span class="p">(</span><span class="s">&quot;cc&quot;</span>
+<span class="w">                  </span><span class="s">&quot;Code&quot;</span>
+<span class="w">                  </span><span class="nv">plain</span>
+<span class="w">                  </span><span class="p">(</span><span class="nv">here</span><span class="p">)</span>
+<span class="w">                  </span><span class="p">(</span><span class="k">function</span><span class="w"> </span><span class="nv">cc-org-capture--code-select-body</span><span class="p">)</span>
+<span class="w">                  </span><span class="nb">:empty-lines</span><span class="w"> </span><span class="mi">1</span>
+<span class="w">                  </span><span class="nb">:immediate-finish</span><span class="w"> </span><span class="mi">1</span><span class="p">)</span>
+<span class="w">                </span><span class="no">t</span><span class="p">)))</span>
+</code></pre></div></td></tr></table></div>
+
+<p>If you have <code>C-c c</code> bound to <code>org-capture</code> then you should see the “cc” template in the ’c’ sub-menu.</p>
+<h1>Caveats</h1>
+<p>If the source code to be captured contains any text that matches a <a href="https://orgmode.org/manual/Template-expansion.html">capture template expansion</a> then it will be processed, likely resulting in unintended behavior. Look out for text that starts with ’%’.</p>
+<h1>Closing Thoughts</h1>
+<p>If you’re still here thanks for your attention! This post required a fair amount of Elisp understanding, but the reward for knowing it is the ability to build very bespoke Org capture workflows. Motivated readers are encouraged to take these examples and run with them. To this end I’ve deliberately left out a capture template example of “hard-coding” a language as an exercise to the reader.</p>
+<p>If you end up making a template that you think others would find useful, please share it!</p>
+<h1>Links</h1>
+<p>If you're on macOS and have Org protocol setup, you might be interested in this post "<a href="http://yummymelon.com/devnull/capturing-an-org-note-via-macos-shortcuts.html">Capturing an Org note via macOS Shortcuts</a>".</p>

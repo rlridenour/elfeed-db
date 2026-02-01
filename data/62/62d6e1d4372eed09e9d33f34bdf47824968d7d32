@@ -1,0 +1,29 @@
+<p>On a recent Reddit <a href="https://www.reddit.com/r/emacs/comments/y2dfma/comment/is4ygl8/?utm_source=share&amp;utm_medium=web2x&amp;context=3">comment</a>, tdstoff7 asked if I had considered writing an &quot;Open with&quot; DWIM shell command for those times one would like to open a file externally using an app other than the default. I hadn't, but nice idea.</p>
+<p>Take images as an example. Though Emacs can display them quickly, I also open images externally using the default app (<a href="https://en.wikipedia.org/wiki/Preview_(macOS)">Preview</a> in my case). But then there are those times when I'd like to open with a different app for editing (maybe something like GIMP). It'd be nice to quickly choose which app to open with.</p>
+<p><img src="https://xenodium.github.io/images/emacs-open-with-macos-app/open-with_x2.webp" alt=""></p>
+<p>There isn't much to the code. Get a list of apps, ask user to pick one (via <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Programmed-Completion.html">completing-read</a>), and launch the external app via <code>dwim-shell-command-on-marked-files</code>.</p>
+<p>There's likely a better way of getting a list of available apps (happy to take suggestions), but searching in &quot;/Applications&quot; &quot;~/Applications&quot; and &quot;/System/Applications&quot; does the job for now.</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-macos-open-with ()
+  &quot;Convert all marked images to jpg(s).&quot;
+  (interactive)
+  (let* ((apps (seq-sort
+                #'string-lessp
+                (seq-mapcat (lambda (paths)
+                              (directory-files-recursively
+                               paths &quot;\\.app$&quot; t (lambda (path)
+                                                  (not (string-suffix-p &quot;.app&quot; path)))))
+                            '(&quot;/Applications&quot; &quot;~/Applications&quot; &quot;/System/Applications&quot;))))
+         (selection (progn
+                      (cl-assert apps nil &quot;No apps found&quot;)
+                      (completing-read &quot;Open with: &quot;
+                                       (mapcar (lambda (path)
+                                                 (propertize (file-name-base path) 'path path))
+                                               apps)))))
+    (dwim-shell-command-on-marked-files
+     &quot;Open with&quot;
+     (format &quot;open -a '%s' '&lt;&lt;*&gt;&gt;'&quot; (get-text-property 0 'path selection))
+     :silent-success t
+     :no-progress t
+     :utils &quot;open&quot;)))
+</code></pre>
+<p><code>dwim-shell-commands-macos-open-with</code> is now included in <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>, available on <a href="https://melpa.org/#/dwim-shell-command">melpa</a>. What other uses can you find for it?</p>

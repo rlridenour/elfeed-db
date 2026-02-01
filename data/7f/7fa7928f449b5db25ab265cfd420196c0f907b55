@@ -1,0 +1,52 @@
+<p>
+Not entirely sure if this is already a thing, but here goes.
+</p>
+
+<p>
+I'm using <a href="https://github.com/SalOrak/whaler.el">whaler.el</a> instead of project.el, because it's important to me to be able to treat arbitrary, non-git repositories as projects. I also like that it's minimal and easy to understand. I've also swapped to using <a href="https://github.com/jaypei/emacs-neotree">neotree</a> instead of <a href="https://github.com/Alexander-Miller/treemacs">treemacs</a>, and generally I'm trying to build a more tab-oriented workflow for myself.
+</p>
+
+<p>
+It would be nice, then, if neotree automatically updated to show the right project directory when I change tabs, but this isn't default functionality with whaler. Here's my solution, copied from my <a href="https://git.cyan.sh/BirDt/theurgy">config</a>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">tab-bar-select-tab-hook</span> nil <span class="org-doc">"Hook for `</span><span class="org-doc"><span class="org-constant">tab-bar-select-tab</span></span><span class="org-doc">'"</span>)
+(advice-add 'tab-bar-select-tab <span class="org-builtin">:after</span> (<span class="org-keyword">lambda</span> (x) (run-hooks 'tab-bar-select-tab-hook)))
+</pre>
+</div>
+
+<p>
+As far as I can tell, <code>tab-bar-mode</code> doesn't expose any hooks for selecting tabs natively, so this advice does that for me.
+</p>
+
+<p>
+To save the working directory as a "tab-local variable", I'm just setting it as the tab bar group name (while keeping it somewhat readable):
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">theurgy-open-project</span> ()
+  <span class="org-doc">"Select a project and update neotree to use it as root."</span>
+  (<span class="org-keyword">interactive</span>)
+  (whaler <span class="org-builtin">:action</span> (<span class="org-keyword">lambda</span> (dir)
+                  (find-file (get-project-default-file dir))
+                  (tab-rename (file-name-nondirectory (string-remove-suffix <span class="org-string">"/"</span> dir)))
+                  (tab-bar-change-tab-group (concat <span class="org-string">"project: "</span> dir))
+                  (neotree-dir dir))))
+</pre>
+</div>
+
+<p>
+Finally I can use the previous hook to swap back to the right directory after tab change:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">theurgy-swap-to-tab-project</span> ()
+  <span class="org-doc">"Go to the project dir of the tab group."</span>
+  (<span class="org-keyword">let</span> ((tab-group-name (tab-bar-tab-group-default (tab-bar--current-tab))))
+    (<span class="org-keyword">when</span> (string-match-p <span class="org-string">"^project:"</span> tab-group-name)
+      (neotree-dir (string-remove-prefix <span class="org-string">"project: "</span> tab-group-name)))))
+
+(add-hook 'tab-bar-select-tab-hook #'theurgy-swap-to-tab-project)
+</pre>
+</div>

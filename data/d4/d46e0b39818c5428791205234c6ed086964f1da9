@@ -1,0 +1,254 @@
+<p><strong>Summary: </strong>
+Background on my #OrgMode export ecosystem and changes I made in #Emacs to export acronyms and their names to #LaTeX (and PDF) documents.  I also speak to some of the “why” of my personal glossary of acronyms.
+</p>
+        <h2 id="introduction">Introduction</h2>
+<p>In 
+<cite><a href="https://takeonrules.com/2022/10/09/denote-emacs-configuration/">Denote Emacs Configuration</a></cite> I wrote about adding <code>abbr</code> and <code>abbr-plural</code> link
+types.  In short, when I exported these link types the process would render an
+abbreviation and its title, based on my glossary entries.  At least that’s what
+they did for <abbr title="Hypertext Markup Language">HTML</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Hypertext Markup Language”" title="Other site-wide references of “Hypertext Markup Language”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-HTML">&#128214;</a></small>
+ and plain text.</p>
+<p>But until <time datetime="2025-04-10" title="2025-04-10">today</time>, I had deferred on handling the LaTeX export.  There was a
+rudimentary handling of it, but I figured I could do more.  So I did.</p>
+<h2 id="abbreviations-on-my-blog">Abbreviations on My Blog</h2>
+<p>First, I want to share how I handle this for my blog, as its different from
+other export backends.</p>
+<p>I write my blog posts in <span><a href="https://orgmode.org/">Org-Mode</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Org-Mode”" title="Other site-wide references of “Org-Mode”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-ORG-MODE">&#128214;</a></small>
+ and use <span><a href="https://ox-hugo.scripter.co">Ox-Hugo</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Ox-Hugo”" title="Other site-wide references of “Ox-Hugo”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-OX_HUGO">&#128214;</a></small>
+ to export into a Markdown
+format.</p>
+<p>When exporting for my blog, I pass all of the acronyms through a custom my
+glossary <span><a href="https://en.wikipedia.org/wiki/Hugo_(software)">Hugo</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Hugo”" title="Other site-wide references of “Hugo”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-HUGO">&#128214;</a></small>
+ short-code.<small class="side-container">
+  <span class="side-label"><span class="hidden">(</span>Sidenote<span class="hidden">:</span></span>
+  <span class="side" role="note"> See <a href="https://github.com/jeremyf/takeonrules-hugo-theme/blob/d909b121e8dcee22fba6acacb42867050fcb4fdd/layouts/shortcodes/glossary.html#L29">Github for my glossary short-code implementation</a>; warning this is a
+complicated short-code that I don’t want to touch.<span class="hidden">)</span></span>
+</small>
+ During the processing, the first time I
+encounter a glossary entry, I render the title/name and its abbreviation.  After
+that I use the <code>abbr</code> <abbr title="Hypertext Markup Language">HTML</abbr>
+ tag.</p>
+<h2 id="extending-latex-export">Extending LaTeX Export</h2>
+<p>For <span><a href="https://latex-project.org">LaTeX</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “LaTeX”" title="Other site-wide references of “LaTeX”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-LATEX">&#128214;</a></small>
+ exports and thus generating <abbr title="Portable Document Formats">PDFs</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Portable Document Formats”" title="Other site-wide references of “Portable Document Formats”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-PDF">&#128214;</a></small>
+ I would like similar behavior as my
+blog.</p>
+<p>I had found <a href="https://tex.stackexchange.com/questions/492175/how-to-generate-list-of-abbreviations-in-latex">How to generate list of abbreviations in LaTeX? (from the LaTeX
+Stack Exchange)</a>; which demonstrates using one of two <span>LaTeX</span>
+ packages:</p>
+<dl>
+<dt><code>acro</code></dt>
+<dd>declare the acronyms in the header and then reference throughout.</dd>
+<dt><code>acronym</code></dt>
+<dd>explicitly render the acronymes in their own section.</dd>
+</dl>
+<p>Due to my initial approach and understanding, I went with the <code>acronym</code> package.</p>
+<p>Let’s look at the code changes I made.<small class="side-container">
+  <span class="side-label"><span class="hidden">(</span>Sidenote<span class="hidden">:</span></span>
+  <span class="side" role="note"> Here’s the <a href="https://github.com/jeremyf/dotemacs/commit/c6231b5c4c27316193b1c240349056eb4f85c227">Github commit that shows the totality of changes</a>.<span class="hidden">)</span></span>
+</small>
+  There are four steps:</p>
+<ul>
+<li><a href="#register-an-encountered-abbreviation">Register an Encountered Abbreviation</a></li>
+<li><a href="#conditionally-render-an-acronym-section">Conditionally Render an Acronym Section</a></li>
+<li><a href="#conditionally-use-the-acronym-package">Conditionally Use the Acronym Package</a></li>
+<li><a href="#add-export-handling-functions">Add Export Handling Functions</a></li>
+</ul>
+<p>In summary, these described changes append a section named “List of Acronyms”
+that assist in untangling the acronyms I’ve used within the document.</p>
+<p>Let’s dive in.</p>
+<h3 id="register-an-encountered-abbreviation">Register an Encountered Abbreviation</h3>
+<p>I was already handling abbreviations in <span>LaTeX</span>
+; though they were somewhat broken
+in that I was rendering the associated name/title of the item.</p>
+<p>Based on my read through of the Stack exchange suggestions, I wanted to add to a
+list of abbreviations I’d encountered.<small class="side-container">
+  <span class="side-label"><span class="hidden">(</span>Sidenote<span class="hidden">:</span></span>
+  <span class="side" role="note"> I suppose I could’ve generated a full list of abbreviations for each <span>LaTeX</span><br />
+export, but I have 400+ abbreviations and that seemed rather gross and
+excessive.<br /><span class="hidden">)</span></span>
+</small>
+</p>
+<p>I added the <a href="https://github.com/jeremyf/dotemacs/blob/c6231b5c4c27316193b1c240349056eb4f85c227/emacs.d/init.el#L712-L719">following comments and code</a> to my
+<a href="https://github.com/jeremyf/dotemacs/blob/c6231b5c4c27316193b1c240349056eb4f85c227/emacs.d/init.el#L686-L733">jf/denote/link-ol-abbr-with-property function</a>.</p>
+<pre><code class="language-emacs-lisp">;; When we encounter an abbreviation, add that to the list.  We'll
+;; later use that list to build a localized abbreviation element.
+(let ((abbr-links
+        (plist-get info :abbr-links)))
+  (unless (alist-get keyword-value abbr-links nil nil #'string=)
+    (progn
+      (add-to-list 'abbr-links (cons keyword-value title))
+      (plist-put info :abbr-links abbr-links))))
+</code></pre>
+<p>With this, each time I encounter an abbreviation, I make not of it for later
+processing.  The note includes the abbreviation key and its title (e.g. “PDF”
+and “Portable Document Format”).</p>
+<p><strong>Note:</strong> Based on my debugging, there is a caching layer that minimizes calls to
+this function.  That is, we will only call the link generating function once for
+a given link (where the link identity is the key and description).</p>
+<h3 id="conditionally-render-an-acronym-section">Conditionally Render an Acronym Section</h3>
+<p>The <a href="https://github.com/jeremyf/dotemacs/blob/c6231b5c4c27316193b1c240349056eb4f85c227/emacs.d/init.el#L3818-L3840">jf/ox/filter-body/latex function</a> checks if we’ve encountered abbreviations.
+If so we append to the body of the document each encountered abbreviation
+(sorted alphabetically) along with its descriptive “title.”</p>
+<pre><code class="language-emacs-lisp">(defun jf/ox/filter-body/latex (body backend info)
+  &quot;Conditionally add a list of acronyms to the exported LaTeX document.
+
+To have a meaningful render, this requires using the acronym LaTeX
+package.  The `jf/ox/filter-final-output/latex' handles injecting that
+LaTeX package.&quot;
+  (if-let ((abbr-links (plist-get info :abbr-links)))
+    ;; We encountered some links, let's add a section.
+    (progn
+      (concat
+        body
+        &quot;\n\\section{List of Acronyms}\n&quot;
+        &quot;\\begin{acronym}\n&quot;
+        (mapconcat
+          (lambda (cell)
+            &quot;Create an acro for link.&quot;
+            (format &quot;\\acro{%s}{%s}&quot; (car cell) (cdr cell)))
+          ;; Sort the keys alphabetically.  Otherwise they are rendered
+          ;; in the reverse order in which they are encountered.
+          (sort abbr-links :key #'car)
+          &quot;\n&quot;)
+        &quot;\n\\end{acronym}\n&quot;))
+    body))
+</code></pre>
+<p>In this case the <code>body</code> parameter is the inner-content of the eventual <span>LaTeX</span>
+
+document.  It does not contain the header information nor the closing
+<code>\end{document}</code>.</p>
+<h3 id="conditionally-use-the-acronym-package">Conditionally Use the Acronym Package</h3>
+<p>The purpose of this step is to ensure that we have are using the <code>acronym</code> <span>LaTeX</span>
+
+package.  I could’ve updated all of my class declarations, but opted for this
+route.</p>
+<p>The <a href="https://github.com/jeremyf/dotemacs/blob/45b409e8ab40739f0b1f8242c10282c1be434c33/emacs.d/init.el#L3806-L3816">jf/ox/filter-final-output/latex function</a> injects the <code>acronym</code> package into
+the final <span>LaTeX</span>
+ document.</p>
+<pre><code class="language-emacs-lisp">(defun jf/ox/filter-final-output/latex (body backend info)
+  &quot;Conditionally add an acronym package to exported LaTeX document.&quot;
+  (if-let ((abbr-links (plist-get info :abbr-links)))
+    (replace-regexp-in-string
+      &quot;^\\\\documentclass\\(.*\\)&quot;
+      (lambda (md)
+        &quot;Acronym package to matching line.&quot;
+        (concat &quot;\\\\documentclass&quot; (match-string 1 md)
+          &quot;\n\\\\usepackage[printonlyused,withpage]{acronym}&quot;))
+      body)
+    body))
+</code></pre>
+<p>In this context, the <code>body</code> parameter is the totality of content we will write to
+the interstitial <code>tex</code> file.  That is it contains the <span>LaTeX</span>
+ header information as
+well as the begin and end blocks.</p>
+<p>I’m not enamored with using a regular expression, and might tinker with this a
+bit more.</p>
+<h3 id="add-export-handling-functions">Add Export Handling Functions</h3>
+<p>None of the above matters, until I append these filters to my <span>LaTeX</span>
+ export.</p>
+<p>The <a href="https://github.com/jeremyf/dotemacs/blob/c6231b5c4c27316193b1c240349056eb4f85c227/emacs.d/init.el#L3785-L3804">jf/org-export-change-options function</a> and adding to the
+<code>org-export-filter-options-functions</code> ensures that we call the functions that
+<a href="#conditionally-render-an-acronym-section">conditionally render an acronym section</a> and <a href="#conditionally-use-the-acronym-package">conditionally use the acronym
+package</a>.</p>
+<pre><code class="language-emacs-lisp">(defun jf/org-export-change-options (plist backend)
+  &quot;Conditinally add filter functions to our org-export.&quot;
+  (cond
+   ((equal backend 'latex)
+    (if-let ((filter-body
+              (plist-get plist :filter-body)))
+        (progn
+          (add-to-list 'filter-body jf/ox/filter-body/latex)
+          (plist-put plist :filter-body filter-body))
+      (plist-put plist :filter-body '(jf/ox/filter-body/latex)))
+    (if-let ((filter-final-output
+              (plist-get plist :filter-final-output)))
+        (progn
+          (add-to-list 'filter-final-output jf/ox/filter-final-output/latex)
+          (plist-put plist :filter-final-output filter-final-output))
+      (plist-put plist :filter-final-output '(jf/ox/filter-final-output/latex)))))
+  plist)
+
+(add-to-list 'org-export-filter-options-functions
+             'jf/org-export-change-options)
+</code></pre>
+<p>The code is a bit chatty, but I wanted to ensure that I did not clobber other
+filter functions; instead appending to the list of possible filters.</p>
+<h2 id="a-bit-of-how-i-got-there">A Bit of How I Got There</h2>
+<p>While working towards this solutions, I took a few different pathways.
+Ultimately, I leveraged the <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-EMACS">&#128214;</a></small>
+ debugger and inline documentation of the <code>ox</code>
+package: the <span>Org-Mode</span>
+ export “framework” package.</p>
+<p>I allude to the revelatory moment in the change of the
+<code>jf/denote/link-ol-abbr-with-property</code> parameter name and doc string; changing the
+parameter name from <code>protocol</code> to <code>info</code>.  I had carried <code>protocol</code> over from some
+other implementation; but a bit of debugging showed me that this was very much
+the information channel shared throughout the export.</p>
+<p>With that knowledge, I added to the <code>info</code> parameter and set about finding a
+meaningful place to check the content.</p>
+<p>It became a matter of reading through some source code to see how I might apply
+filters; something I knew existed based on previous reads of the <code>ox</code> package.</p>
+<h2 id="why-this-vanity-project">Why This “Vanity Project”?</h2>
+<p>Using a glossary of abbreviations is an endeavor that started with a two-fold
+goal:</p>
+<ul>
+<li><a href="#registering-as-back-links">Registering as Back-Links</a></li>
+<li><a href="#initial-descriptions-of-abbreviations">Initial Descriptions of Abbreviations</a></li>
+</ul>
+<p>And a third goal that has emerged over time: <a href="#untangling-the-acronyms-used-at-work">Untangling the Acronyms Used At
+Work</a>.</p>
+<h3 id="registering-as-back-links">Registering as Back-Links</h3>
+<p>When I was writing my posts in Markdown and directly into my <span>Hugo</span>
+ project, I
+established back-link capabilities for glossary items.  As I moved to <span>Org-Mode</span>
+
+for writing and first <span><a href="https://www.orgroam.com/">Org-Roam</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Org-Roam”" title="Other site-wide references of “Org-Roam”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-ORG-ROAM">&#128214;</a></small>
+ and then <span><a href="https://protesilaos.com/emacs/denote">Denote</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Denote”" title="Other site-wide references of “Denote”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-DENOTE">&#128214;</a></small>
+, I wanted to continue to have
+access to back-links.</p>
+<p>And since my <code>abbr</code> and <code>abbr-plural</code> conform to <span>Denote</span>
+’s linking schema; using an
+abbreviation link registers as a back-link.  Which means later on I can easily
+find written references to those glossary terms.</p>
+<h3 id="initial-descriptions-of-abbreviations">Initial Descriptions of Abbreviations</h3>
+<p>We live in a world of acronyms.  Consider the three letters `RPG`:</p>
+<ul>
+<li>Rocket Propelled Grenade</li>
+<li>Role-Playing Game</li>
+<li>Report Program Generator</li>
+</ul>
+<p>All of those are terms I’ve used when I’ve typed or spoken `RPG`.</p>
+<p>When blogging about role-playing games, I don’t want to keep writing
+“Role-Playing Game” over and over.  I want to use the abbreviation.  But the
+first time I introduce an abbreviation, I want to provide the full name.</p>
+<p>In using that strategy, I hope I’m improving the accessibility of my writing.
+Helping the reader acclimate to the terms I’m using, while also not maintaining
+a verbosity that might be off-putting for readers familiar with the domain.</p>
+<h3 id="untangling-the-acronyms-used-at-work">Untangling the Acronyms Used At Work</h3>
+<p>Since I started blogging, I have changed jobs four times.  I have joined:</p>
+<ul>
+<li>An academic library</li>
+<li>An early stage start-up</li>
+<li>A software consultancy</li>
+<li>A new-to-me tech domain of product development/engineering</li>
+</ul>
+<p>At each of these, management and other folks would use new-to-me terms.  Each
+time, I’d clarify then write down the acronym and its “title”.</p>
+<p>This helped me remember what we were chattering about.  And in some cases,
+depending on the documentation maturity of the organization, I’d contribute my
+glossary terms back to the organization’s glossary; or my team’s glossary.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>Given that I write via <span>Org-Mode</span>
+ documents for different audiences and that I
+have a glossary of abbreviated terms, I think it is useful to share at least a
+bit about that term.</p>
+<p>For the future, I did note that the <code>acronym</code> package allows for me to include a
+description as a third parameter to rendering the list.  My glossary also
+includes descriptions, so at some point, I’m certain I’ll be adding that to my
+<span>LaTeX</span>
+ output.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Extending%20Org-Mode%20Export%20to%20Include%20Acronyms%20Section">Reply by Email</a></p>
+
+      

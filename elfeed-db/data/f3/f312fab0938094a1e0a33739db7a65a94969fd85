@@ -1,0 +1,114 @@
+<p>
+Sometimes I want to get the URL from a string
+whether the string contains a bare URL
+(<code>https://example.com</code>) or an Org bracketed link
+(<code>[[https://example.com]]</code> or
+<code>[[https://example.com][Example]]</code>, ignoring any
+extra non-link text (<code>blah https://example.com
+blah blah</code>). <code>org-link-any-re</code> seemed like the
+right regular expression to use, but I started to
+get a little dizzy looking at all the parenthesis
+and I couldn't figure out which matching group to
+use. I tried using <code>re-builder</code>. That highlighted
+the groups in different colours, but I didn't know
+what the colours meant. All the matching
+information is in <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Entire-Match-Data.html">(match-data)</a>, but integer pairs
+can be a little hard to translate back to
+substrings. So I wrote an Emacs Lisp function to
+gave me the matching groups:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-match-groups</span> (<span class="org-type">&amp;optional</span> object)
+  <span class="org-doc">"Return the matching groups, good for debugging regexps."</span>
+  (seq-map-indexed (<span class="org-keyword">lambda</span> (entry i)
+                     (list i entry
+                           (<span class="org-keyword">and</span> (car entry)
+                                (<span class="org-keyword">if</span> object
+                                    (substring object (car entry) (cadr entry))
+                                  (buffer-substring (car entry) (cadr entry))))))
+                   (seq-partition
+                    (match-data t)
+                    2)))
+</pre>
+</div>
+
+
+<p>
+There's probably a standard way to do this, but I
+couldn't figure out how to find it.
+</p>
+
+<p>
+Anyway, if I give it a string with a bracketed
+link, I can tell that the URL ends up in group 2:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">let</span> ((text <span class="org-string">"blah [[https://example.com][example]] blah blah"</span>))
+  (<span class="org-keyword">when</span> (string-match org-link-any-re text)
+    (pp-to-string (my-match-groups text))))
+</pre>
+</div>
+
+
+<pre class="example" id="org6de0ae1">
+((0 (5 37) "[[https://example.com][example]]")
+ (1 (5 37) "[[https://example.com][example]]")
+ (2 (7 26) "https://example.com")
+ (3 (28 35) "example"))
+</pre>
+
+<p>
+When I use a string with a bare link, I can see
+that the URL ends up in group 7:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">let</span> ((text <span class="org-string">"blah https://example.com blah blah"</span>))
+  (<span class="org-keyword">when</span> (string-match org-link-any-re text)
+    (pp-to-string (my-match-groups text))))
+</pre>
+</div>
+
+
+<pre class="example" id="org139be00">
+((0 (5 24) "https://example.com")
+ (1 (nil nil) nil) (2 (nil nil) nil)
+ (3 (nil nil) nil) (4 (nil nil) nil)
+ (5 (nil nil) nil) (6 (nil nil) nil)
+ (7 (5 24) "https://example.com")
+ (8 (5 10) "https") (9 (11 24) "//example.com"))
+</pre>
+
+<p>
+This makes it so much easier to refer to the right
+capture group. So now I can use those groups to
+extract the URL from a string:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-link-url-from-string</span> (s)
+  <span class="org-doc">"Return the link URL from S."</span>
+  (<span class="org-keyword">when</span> (string-match org-link-any-re s)
+    (<span class="org-keyword">or</span>
+     (match-string 7 s)
+       (match-string 2 s))))
+</pre>
+</div>
+
+
+<p>
+This is handy when I <a href="https://sachachua.com/blog/2024/09/collecting-emacs-news-from-mastodon/">summarize Emacs News links
+from Mastodon</a> or from my inbox. Sometimes I add
+extra text after a link that I've captured from my
+phone, and I don't want that included in the URL.
+Sometimes I have a bracketed link that I've copied
+from org-capture note. Now I don't have to worry
+about the format. I can just grab the link I want.
+</p>
+<div><a href="https://sachachua.com/blog/2025/03/getting-an-org-link-url-from-a-string-debugging-regex-groups/index.org">View org source for this post</a></div>

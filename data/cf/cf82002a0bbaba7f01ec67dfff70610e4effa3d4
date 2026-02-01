@@ -1,0 +1,86 @@
+<p>Got a CD with my chest X-ray from the hospital. Was expecting a pdf or an image of sorts, but the CD content was rather different. For starters, it was targeted at Windows users (AUTORUN.INF, MediaViewerLauncher.EXE and a bunch of DLLs):</p>
+<pre><code class="language-text">$ find . -exec file --mime-type '{}' \;
+
+./AUTORUN.INF: text/plain
+./DICOMDIR: application/dicom
+./MediaViewerLauncher.EXE: application/octet-stream
+...
+./Libraries/BASEPRINTER.DLL: application/octet-stream
+./Libraries/CDDATABURNER.DLL: application/octet-stream
+./Libraries/COM.DLL: application/octet-stream
+...
+./Libraries/ACE.DLL: application/octet-stream
+./Libraries/ACE_SSL.DLL: application/octet-stream
+./Libraries/ATL90.DLL: application/octet-stream
+...
+./DICOM/PAT_0000: application/x-directory
+./DICOM/PAT_0000/STD_0000/SER_0000/OBJ_0001/IM_0001: application/dicom
+./DICOM/PAT_0000/STD_0000/SER_0001/OBJ_0001/ED_0001: application/dicom
+./DICOM/PAT_0000/STD_0000/SER_0002/OBJ_0001/ED_0001: application/dicom
+./Worklist/ClinicalInfo/067eccde-b299-e511-9114-005056ad3afe.mht: text/html
+./Worklist/Report/067eccde-b299-e511-9114-005056ad3afe.mht: text/html
+./Worklist/Worklist.wl: application/octet-stream
+</code></pre>
+<p>I'm on a Mac, so most of these files were not useful to me. The more interesting files were IM_0001 and ED_0001 with &quot;application/dicom&quot; MIME type. <a href="https://en.wikipedia.org/wiki/DICOM">DICOM</a> files stand for Digital Imaging and Communications in Medicine. How to view these on a Mac? <a href="http://www.osirix-viewer.com/Downloads.html">OsiriX viewer</a> is an option. OsiriX, though on the heavy side (100.7MB download), it rendered the X-ray successfully.</p>
+<p><img src="https://xenodium.github.io/images/view-dicom-files-from-your-x-ray/2015-12-03-osirix-x-ray-small.png" alt=""></p>
+<p>Unsurprisingly, ImageMagick's <a href="http://www.imagemagick.org/script/convert.php">convert</a> utility also handles DICOM files. Converting to PNG worked well.</p>
+<pre><code class="language-{.bash">$ convert ./DICOM/PAT_0000/STD_0000/SER_0001/OBJ_0001/ED_0001 ED_0001.png
+</code></pre>
+<p><img src="https://xenodium.github.io/images/view-dicom-files-from-your-x-ray/2015-12-03-imagemagick-x-ray-small.png" alt=""></p>
+<p>DICOM files also hold patient's metadata and optional reports. The file format is <a href="http://cabiatl.com/mricro/dicom/index.html">well known</a>. OsiriX gives you access to it, but a few lines of python can also extract it for you. First install the <a href="https://github.com/darcymason/pydicom">pydicom</a> package:</p>
+<pre><code class="language-{.bash">$ sudo pip install pydicom
+</code></pre>
+<p>Running the python interpreter is enough to peek at the metadata:</p>
+<pre><code class="language-python">&gt;&gt;&gt; import dicom
+&gt;&gt;&gt; ds = dicom.read_file(&quot;./DICOM/PAT_0000/STD_0000/SER_0000/OBJ_0001/IM_0001&quot;)
+&gt;&gt;&gt; ds
+</code></pre>
+<pre><code class="language-text">(0008, 0000) Group Length                        UL: 400
+(0008, 0005) Specific Character Set              CS: 'ISO_IR 100'
+(0008, 0016) SOP Class UID                       UI: Computed Radiography Image Storage
+(0008, 0020) Study Date                          DA: '20151203'
+(0008, 0021) Series Date                         DA: '20151203'
+(0008, 0023) Content Date                        DA: '20151203'
+(0008, 0030) Study Time                          TM: '120519.000000'
+(0008, 0031) Series Time                         TM: '120520.000000'
+(0008, 0033) Content Time                        TM: '120643.000000'
+(0008, 0060) Modality                            CS: 'CR'
+(0008, 0070) Manufacturer                        LO: 'Canon Inc.'
+...
+</code></pre>
+<p>There were other DICOM files with a report:</p>
+<pre><code class="language-python">&gt;&gt;&gt; import dicom
+&gt;&gt;&gt; ds = dicom.read_file(&quot;./DICOM/PAT_0000/STD_0000/SER_0001/OBJ_0001/ED_0001&quot;)
+&gt;&gt;&gt; ds
+</code></pre>
+<pre><code class="language-text">(0008, 0005) Specific Character Set              CS: 'ISO_IR 100'
+(0008, 0016) SOP Class UID                       UI: Encapsulated PDF Storage
+...
+(0042, 0012) MIME Type of Encapsulated Document  LO: 'application/pdf'
+</code></pre>
+<p><a href="http://dcmtk.org/dcmtk.php.en">DCMTK</a> is another alternative tool to extract DICOM metadata. The source is available and can be built:</p>
+<pre><code class="language-{.bash">$ tar xf dcmtk-3.6.0.tar.gz
+$ cd dcmtk-3.6.0
+$ cmake .
+$ make
+</code></pre>
+<p>Or installed via homebrew:</p>
+<pre><code class="language-{.bash">$ brew install dcmtk
+</code></pre>
+<p>DCMTK includes dcmdump. You can use it to dump DICOM files:</p>
+<pre><code class="language-{.bash">$ dcmdata/apps/dcmdump DICOM/PAT_0000/STD_0000/SER_0000/OBJ_0001/IM_0001
+</code></pre>
+<pre><code class="language-text"># Dicom-File-Format
+
+# Dicom-Meta-Information-Header
+# Used TransferSyntax: Little Endian Explicit
+(0002,0000) UL 192                                      #   4, 1 FileMetaInformationGroupLength
+(0002,0001) OB 01\00                                    #   2, 1 FileMetaInformationVersion
+(0002,0002) UI =ComputedRadiographyImageStorage         #  26, 1 MediaStorageSOPClassUID
+(0002,0003) UI [1.2.392.200046.100.2.1.1.42667.20151203120519.1.1.1] #  52, 1 MediaStorageSOPInstanceUID
+(0002,0010) UI =LittleEndianExplicit                    #  20, 1 TransferSyntaxUID
+(0002,0012) UI [1.3.46.670589.42.1.4.4.5]               #  24, 1 ImplementationClassUID
+(0002,0013) SH [PhilipsISPACS445]                       #  16, 1 ImplementationVersionName
+...
+</code></pre>
+<p>Of interest, David Clunie's <a href="http://www.dclunie.com/">Medical Image Format Site</a>.</p>

@@ -1,0 +1,67 @@
+
+         
+         <p>Raw link: <a href="https://www.youtube.com/watch?v=vbWxT8tht9A">https://www.youtube.com/watch?v=vbWxT8tht9A</a></p>
+         
+         <p>In this 15-minute video I show the custom code I have to run any Emacs
+command in a popup frame. The advantage of this is that I do not need
+to be in Emacs already. The examples I show cover <code class="language-plaintext highlighter-rouge">org-capture</code> and my
+<code class="language-plaintext highlighter-rouge">tmr</code> package.</p>
+
+<p>This is the code I used in the video. Remember to assign the
+<code class="language-plaintext highlighter-rouge">emacsclient</code> calls to a system-level key binding.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;;;; Run commands in a popup frame</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-window-delete-popup-frame</span> <span class="p">(</span><span class="k">&amp;rest</span> <span class="nv">_</span><span class="p">)</span>
+  <span class="s">"Kill selected selected frame if it has parameter `prot-window-popup-frame'.
+Use this function via a hook."</span>
+  <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nv">frame-parameter</span> <span class="no">nil</span> <span class="ss">'prot-window-popup-frame</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">delete-frame</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defmacro</span> <span class="nv">prot-window-define-with-popup-frame</span> <span class="p">(</span><span class="nv">command</span><span class="p">)</span>
+  <span class="s">"Define interactive function which calls COMMAND in a new frame.
+Make the new frame have the `prot-window-popup-frame' parameter."</span>
+  <span class="o">`</span><span class="p">(</span><span class="nb">defun</span> <span class="o">,</span><span class="p">(</span><span class="nb">intern</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"prot-window-popup-%s"</span> <span class="nv">command</span><span class="p">))</span> <span class="p">()</span>
+     <span class="o">,</span><span class="p">(</span><span class="nb">format</span> <span class="s">"Run `%s' in a popup frame with `prot-window-popup-frame' parameter.
+Also see `prot-window-delete-popup-frame'."</span> <span class="nv">command</span><span class="p">)</span>
+     <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+     <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">frame</span> <span class="p">(</span><span class="nv">make-frame</span> <span class="o">'</span><span class="p">((</span><span class="nv">prot-window-popup-frame</span> <span class="o">.</span> <span class="no">t</span><span class="p">)))))</span>
+       <span class="p">(</span><span class="nv">select-frame</span> <span class="nv">frame</span><span class="p">)</span>
+       <span class="p">(</span><span class="nv">switch-to-buffer</span> <span class="s">" prot-window-hidden-buffer-for-popup-frame"</span><span class="p">)</span>
+       <span class="p">(</span><span class="nv">condition-case</span> <span class="no">nil</span>
+           <span class="p">(</span><span class="nv">call-interactively</span> <span class="ss">',command</span><span class="p">)</span>
+         <span class="p">((</span><span class="nv">quit</span> <span class="nb">error</span> <span class="nv">user-error</span><span class="p">)</span>
+          <span class="p">(</span><span class="nv">delete-frame</span> <span class="nv">frame</span><span class="p">))))))</span>
+
+<span class="p">(</span><span class="nv">declare-function</span> <span class="nv">org-capture</span> <span class="s">"org-capture"</span> <span class="p">(</span><span class="k">&amp;optional</span> <span class="nv">goto</span> <span class="nv">keys</span><span class="p">))</span>
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">org-capture-after-finalize-hook</span><span class="p">)</span>
+
+<span class="c1">;;;###autoload (autoload 'prot-window-popup-org-capture "prot-window")</span>
+<span class="p">(</span><span class="nv">prot-window-define-with-popup-frame</span> <span class="nv">org-capture</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'org-capture-after-finalize-hook</span> <span class="nf">#'</span><span class="nv">prot-window-delete-popup-frame</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">declare-function</span> <span class="nv">tmr</span> <span class="s">"tmr"</span> <span class="p">(</span><span class="nb">time</span> <span class="k">&amp;optional</span> <span class="nv">description</span> <span class="nv">acknowledgep</span><span class="p">))</span>
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">tmr-timer-created-functions</span><span class="p">)</span>
+
+<span class="c1">;;;###autoload (autoload 'prot-window-popup-tmr "prot-window")</span>
+<span class="p">(</span><span class="nv">prot-window-define-with-popup-frame</span> <span class="nv">tmr</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'tmr-timer-created-functions</span> <span class="nf">#'</span><span class="nv">prot-window-delete-popup-frame</span><span class="p">)</span>
+
+<span class="c1">;;;; The emacsclient call depends on the daemon or `server-mode' (I use the latter)</span>
+
+<span class="p">(</span><span class="nb">use-package</span> <span class="nv">server</span>
+  <span class="ss">:ensure</span> <span class="no">nil</span>
+  <span class="ss">:defer</span> <span class="mi">1</span>
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">server-running-p</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">server-start</span><span class="p">)))</span>
+
+<span class="c1">;;;; The emacsclient calls that need ot be bound to system-wide keys</span>
+
+<span class="c1">;; emacsclient -e '(prot-window-popup-org-capture)'</span>
+<span class="c1">;; emacsclient -e '(prot-window-popup-tmr)'</span>
+</code></pre></div></div>
+        
+      

@@ -1,0 +1,163 @@
+<p><strong>Summary: </strong>
+In this post, I walk through using #Emacs #Lisp variable binding to reuse what might, in other languages, be hard-to-re-use code.
+</p>
+        <h2 id="introduction">Introduction</h2>
+<p>I’m provisionally using the <a href="https://github.com/mclear-tools/consult-notes">consult-notes package</a> to provide find and search
+functionality for the notes I write using <span><a href="https://protesilaos.com/emacs/denote">Denote</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Denote”" title="Other site-wide references of “Denote”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-DENOTE">&#128214;</a></small>
+.  I write provisionally as I
+want to explore its utility relative to other things (such as the <a href="https://protesilaos.com/emacs/consult-denote">consult-denote
+package</a>.</p>
+<p>But that is not why I’m writing this post, instead I’m writing to draw attention
+to an approach I took at re-using implementation details in <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-EMACS">&#128214;</a></small>
+ in a way that
+is different from other languages.  Namely scoped variable binding.</p>
+<p>I find this important as it is a conceptually different approach from every
+other programming languages I’ve used (e.g., Ruby, Python, Javascript, PHP,
+Basic, etc.)</p>
+<p>Let’s dig in.</p>
+<h2 id="consult-notes-denote-implementation">Consult Notes Denote Implementation</h2>
+<p>The <a href="https://github.com/mclear-tools/consult-notes/blob/6ece62337d6065e88a91b222fac5e252c00a8d53/consult-notes-denote.el#L84-L118">consult-notes-denote&ndash;source</a> is defined as follows.  Importantly, the <code>:items</code>
+property is a chunky lambda.<small class="side-container">
+  <span class="side-label"><span class="hidden">(</span>Sidenote<span class="hidden">:</span></span>
+  <span class="side" role="note"> By default, I’m hiding the following code, as it is a lot to read through.<span class="hidden">)</span></span>
+</small>
+</p>
+<details>
+<summary>Implementation of the <code>consult-notes-denote--source</code> constant.</summary>
+<div class="details">
+<pre><code class="language-emacs-lisp">(defconst consult-notes-denote--source
+  (list :name     (propertize &quot;Denote notes&quot; 'face 'consult-notes-sep)
+        :narrow   ?d
+        :category consult-notes-category
+        :annotate consult-notes-denote-annotate-function
+        :items    (lambda ()
+                    (let* ((max-width 0)
+                           (cands (mapcar (lambda (f)
+                                            (let* ((id (denote-retrieve-filename-identifier f))
+                                                   (title-1 (or (denote-retrieve-title-value f (denote-filetype-heuristics f)) (denote-retrieve-filename-title f)))
+                                                   (title (if consult-notes-denote-display-id
+                                                              (concat id &quot; &quot; title-1)
+                                                            title-1))
+                                                   (dir (file-relative-name (file-name-directory f) denote-directory))
+                                                   (keywords (denote-extract-keywords-from-path f)))
+                                              (let ((current-width (string-width title)))
+                                                (when (&gt; current-width max-width)
+                                                  (setq max-width (+ consult-notes-denote-title-margin current-width))))
+                                              (propertize title 'denote-path f 'denote-keywords keywords)))
+                                          (funcall consult-notes-denote-files-function))))
+                      (mapcar (lambda (c)
+                                (let* ((keywords (get-text-property 0 'denote-keywords c))
+                                       (path (get-text-property 0 'denote-path c))
+                                       (dirs (directory-file-name (file-relative-name (file-name-directory path) denote-directory))))
+                                  (concat c
+                                          ;; align keywords
+                                          (propertize &quot; &quot; 'display `(space :align-to (+ left ,(+ 2 max-width))))
+                                          (propertize (funcall consult-notes-denote-display-keywords-function keywords) 'face 'consult-notes-name)
+                                          (when consult-notes-denote-dir
+                                            (propertize (funcall consult-notes-denote-display-dir-function dirs) 'face 'consult-notes-name)))))
+                              cands)))
+        ;; Custom preview
+        :state  #'consult-notes-denote--state
+        ;; Create new note on match fail
+        :new     #'consult-notes-denote--new-note))
+</code></pre>
+</div>
+</details>
+<p>I wanted to re-use the implementation details of the <code>:items</code> property, but
+specify my own <code>consult-notes-denote-files-function</code>.  Namely one that would
+create a candidate list of all denote notes tagged with <code>blogPosts</code> but did not
+have an associated published URL; which in my case is a note lacking a <code>ROAM_REFS</code>
+property.</p>
+<h2 id="custom-candidate-function-for-draft-blog-posts">Custom Candidate Function for Draft Blog Posts</h2>
+<p>In a shell, I can query for draft blog posts as follows:</p>
+<pre><code class="language-text">fd &quot;_blogPosts.*\.org&quot; /path/to/denote/dir | xargs rg &quot;^#\+ROAM_REFS:&quot; \
+--ignore-case --files-without-match --sortr modified
+</code></pre>
+<p>Let&rsquo;s break that down:</p>
+<ul>
+<li>Use <cite><a href="https://github.com/sharkdp/fd">fd</a></cite> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “fd”" title="Other site-wide references of “fd”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-FD">&#128214;</a></small>
+ to find denote name conformant <span><a href="https://orgmode.org/">Org-Mode</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Org-Mode”" title="Other site-wide references of “Org-Mode”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-ORG-MODE">&#128214;</a></small>
+ files with the tag <code>blogPosts</code>.</li>
+<li>Pipe those files to <span><a href="https://github.com/BurntSushi/ripgrep">Ripgrep</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Ripgrep”" title="Other site-wide references of “Ripgrep”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-RIPGREP">&#128214;</a></small>
+ selecting from that file list files that do not
+have a line starting with <code>#+ROAM_REFS:</code>.</li>
+</ul>
+<h2 id="re-using-the-existing">Re-Using the Existing</h2>
+<p>My first implementation copied the logic of <code>consult-notes-denote--source</code>.
+However, that was a lot of duplicate logic.  I set about what it would take to
+re-use much of that logic.</p>
+<p>The following, with <a href="https://github.com/jeremyf/dotemacs/blob/d4535301c4c4779f99a1adada1a1dfeb22e7f157/emacs.d/init.el#L5360-L5392">code available on Github</a>, is what I settled:</p>
+<pre><code class="language-emacs-lisp">(use-package consult-notes
+  :config
+  (require 'consult-notes-denote)
+  ;; Add a draft blog post section to my consult notes.
+  (add-to-list 'consult-notes-all-sources
+    `(:name ,(propertize &quot;Draft Blog Posts&quot; 'face 'consult-notes-sep)
+       :narrow ?D
+       :cateogry consult-notes-category
+       :items jf/consult-notes/draft-blog-posts/items
+       :state  consult-notes-denote--state))
+  (defun jf/consult-notes/draft-blog-posts/items ()
+    &quot;Return a propertized list of draft blog posts.
+
+The `consult-notes-denote--source' :items value has most all of the
+logic I want (encoded as a `lambda').  However, I want to provide my own
+files used in generating the candidates; this is done by way of a
+contextual override of `consult-notes-denote-files-function'.
+
+By convention, a draft blog post is one that is tagged with blogPosts
+but does not yet have a ROAM_REFS property (meaning I have not
+associated the org-mode document with the corresponding published URL of
+the document).&quot;
+    (let ((consult-notes-denote-files-function
+            (lambda ()
+              (split-string-and-unquote
+                (shell-command-to-string
+                  ;; First narrow to files with tags
+                  (concat
+                    &quot;fd \&quot;_&quot; jf/denote/keywords/blogPosts &quot;.*\\.&quot;
+                    (symbol-name denote-file-type) &quot;\&quot; &quot;
+                    (denote-directory) &quot; | &quot;
+                    &quot;xargs rg \&quot;^#\\+ROAM_REFS:\&quot; -i --files-without-match --sortr modified&quot;))
+                &quot;\n&quot;))))
+      (funcall (plist-get consult-notes-denote--source :items)))))
+</code></pre>
+<p>First, instead of my <code>:items</code> having that chunky lambda, I specified a function
+(e.g. <code>jf/consult-notes/draft-blog-posts/items</code>).  For the context of that
+function&rsquo;s evaluation it overwrote the definition of
+<code>consult-notes-denote-files-function</code>.  Then within that context called the <code>:items</code>
+property function stored in <code>consult-notes-denote--source</code>.</p>
+<p>The docstring of <code>jf/consult-notes/draft-blog-posts/items</code> contains much of the
+relevant information.</p>
+<p><time datetime="2025-04-11" title="2025-04-11">Today</time>’s implementation might look “chunky” but much of it is defining the
+overriding function.  Below is a theoretical refactoring that might further
+clarify what is happening:</p>
+<pre><code class="language-emacs-lisp">(defun jf/consult-notes/draft-blog-posts/items ()
+  (let ((consult-notes-denote-files-function
+         #'jf/consult-notes/draft-blog-posts/files-function))
+    (funcall (plist-get consult-notes-denote--source :items))))
+</code></pre>
+<h2 id="alternatives">Alternatives?</h2>
+<p>I consider this somewhat magical coming from most other languages.  I <em>might</em> be
+able to accomplish this in <span><a href="https://en.wikipedia.org/wiki/Ruby_(programming_language)">Ruby</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Ruby”" title="Other site-wide references of “Ruby”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-RUBY">&#128214;</a></small>
+, but this would likely not be feasible in any
+other languages in which I’ve worked.</p>
+<p>Other languages might require that I pass the
+<code>consult-notes-denote-files-function</code> as a parameter (either directly or by way of
+a property on a scoping context).</p>
+<p>However the variable scoping meant that I:</p>
+<ul>
+<li>could re-use code</li>
+<li>didn’t need to submit a pull request</li>
+</ul>
+<h2 id="conclusion">Conclusion</h2>
+<p>I wanted to have a function to find my draft blog posts.  I also wanted to
+minimize duplicate effort.  I could&rsquo;ve used the underlying <code>completing-read</code> to do
+this lookup, but I also wanted to explore tying into a package I have been
+using.</p>
+<p>And in tying into that usage, I am encouraging myself to use the package and
+make sure it is something I want to keep; or jettison and favor something else.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Extending%20consult-notes%20Package%20to%20Add%20Draft%20Blog%20Post%20Candidates">Reply by Email</a></p>
+
+      

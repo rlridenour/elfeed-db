@@ -1,0 +1,220 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2025/10/ruby-progress-header-rb.7509.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+<p>I&rsquo;ve been playing around with progress bars in the terminal, and I think I&rsquo;ve
+created something genuinely useful.</p>
+
+<p>Yes, I know there are multiple options
+already available for this, this is mostly just an experiment for me. I wanted to build a Ruby library that
+could be used for command-line scripting, with CLI executables that made it easy
+to use when scripting in <em>any</em> language &mdash; not just Ruby, with a few
+options I didn&rsquo;t see elsewhere.</p>
+
+<p>The result is <code class="language-plaintext highlighter-rouge">ruby-progress</code>, a gem that provides four different animated
+progress indicators, each with its own visual style and use cases.</p>
+
+<blockquote class="tip">
+  <p>If you&rsquo;re scripting in Ruby, I do highly recommend the TTY tools from 
+<a href="https://brettterpstra.compiotrmurach">Piotr Murach</a>, such as 
+<a href="https://github.com/piotrmurach/tty-progressbar/">tty-progress</a>. Piotr&rsquo;s
+TTY tools have Ruby APIs. <code class="language-plaintext highlighter-rouge">ruby-progress</code> is designed more for use in 
+other shell scripts than it is for detailed Ruby scripting. 
+This tool owes a lot to Piotr&rsquo;s work.</p>
+</blockquote>
+
+<figure title="" class="animated_vid_frame" data-caption="&#9654; MP4 (8.6MB)" style="padding-bottom:17.44%" tabindex="0">
+              <video class="lazy" muted="" loop="" playsinline="" poster="https://cdn3.brettterpstra.com/uploads/2025/10/ruby-progress.jpg" style="background:center/contain no-repeat url('https://cdn3.brettterpstra.com/uploads/2025/10/ruby-progress.jpg')">
+                <source src="https://cdn3.brettterpstra.com/uploads/2025/10/ruby-progress.webm" type="video/webm" />
+                <source src="https://cdn3.brettterpstra.com/uploads/2025/10/ruby-progress.mp4" type="video/mp4" />
+              </video>
+            </figure>
+
+<h2 id="the-four-progress-indicators">The Four Progress Indicators</h2>
+
+<dl>
+  <dt>Ripple</dt>
+  <dd>Creates a wave-like effect across text, with the characters rippling
+through different visual states. It supports rainbow colors, inverse
+highlighting, and case transformations. Perfect for text-heavy operations where
+you want something more dynamic than a simple spinner.</dd>
+  <dt>Worm</dt>
+  <dd>Displays a moving dot pattern that crawls across the screen using
+Unicode characters. It includes multiple styles (circles, blocks, geometric
+shapes) and can move in any direction. Great for file operations, network
+transfers, or any continuous background task.</dd>
+  <dt>Twirl</dt>
+  <dd>Provides classic spinning indicators with over 35 different spinner
+styles &mdash; from simple dots to complex geometric patterns. It&rsquo;s the most
+traditional of the four, but with way more visual variety than typical spinners.</dd>
+  <dt>Fill</dt>
+  <dd>The only determinate indicator in the bunch &mdash; an actual progress bar
+that shows completion percentage. It can be controlled via command execution or
+updated programmatically through daemon control messages.</dd>
+</dl>
+
+<h2 id="installation-and-quick-start">Installation and Quick Start</h2>
+
+<p>Installation is straightforward:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>gem <span class="nb">install </span>ruby-progress</code></pre></div></div>
+
+<p>All four indicators are available through a unified <code class="language-plaintext highlighter-rouge">prg</code> command:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Basic usage</span>
+prg ripple <span class="s2">"Processing files..."</span>
+prg worm <span class="nt">--message</span> <span class="s2">"Loading..."</span> <span class="nt">--style</span> blocks
+prg twirl <span class="nt">--message</span> <span class="s2">"Working..."</span> <span class="nt">--style</span> dots <span class="nt">--speed</span> fast
+prg fill <span class="nt">--total</span> 100 <span class="nt">--report</span>
+
+<span class="c"># With command execution</span>
+prg ripple <span class="s2">"Building..."</span> <span class="nt">--command</span> <span class="s2">"make build"</span> <span class="nt">--success</span> <span class="s2">"Build complete!"</span> <span class="nt">--checkmark</span></code></pre></div></div>
+
+<p>You can also use the individual commands directly: <code class="language-plaintext highlighter-rouge">ripple</code>, <code class="language-plaintext highlighter-rouge">worm</code>, <code class="language-plaintext highlighter-rouge">twirl</code>, and <code class="language-plaintext highlighter-rouge">fill</code>.</p>
+
+<h2 id="the-killer-feature-daemon-mode">The Killer Feature: Daemon Mode</h2>
+
+<p>Here&rsquo;s where things get interesting. All four indicators support daemon mode,
+which lets you run a progress indicator in the background while your scripts
+execute other commands. This is useful for complex workflows.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Start a background spinner</span>
+prg worm <span class="nt">--daemon-as</span> deployment <span class="nt">--message</span> <span class="s2">"Deploying application..."</span>
+
+<span class="c"># Execute your actual deployment steps</span>
+git push production main
+kubectl apply <span class="nt">-f</span> manifests/
+./run-migrations.sh
+
+<span class="c"># Stop the spinner with a success message</span>
+prg job stop <span class="nt">--daemon-name</span> deployment <span class="nt">--message</span> <span class="s2">"Deployment complete!"</span> <span class="nt">--checkmark</span></code></pre></div></div>
+
+<p>The daemon mode uses <code class="language-plaintext highlighter-rouge">Process.fork</code> and <code class="language-plaintext highlighter-rouge">Process.detach</code>, so there are no shell
+job notifications cluttering your output. The progress indicator runs cleanly in
+the background, providing visual feedback without interfering with your script&rsquo;s
+execution.</p>
+
+<h3 id="keeping-output-clean">Keeping Output Clean</h3>
+
+<p>One of the challenges with daemon mode is preventing command output from
+disrupting the animation. By default, when you run a progress indicator in
+daemon mode, any STDOUT or STDERR output from commands executed in your script
+will appear on the terminal and potentially mess up the animation display.</p>
+
+<p>Ruby-progress handles this intelligently. When running in daemon mode, the
+animation continues on its dedicated line while your commands execute. However,
+if you want to see the output from those commands, you have options:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Run command with animation, show output after completion</span>
+prg ripple <span class="s2">"Building..."</span> <span class="nt">--command</span> <span class="s2">"make build"</span> <span class="nt">--stdout</span>
+
+<span class="c"># Stream output live while animation runs (reserves terminal rows)</span>
+prg worm <span class="s2">"Installing..."</span> <span class="nt">--command</span> <span class="s2">"npm install"</span> <span class="nt">--stdout-live</span> <span class="nt">--output-lines</span> 5
+
+<span class="c"># Run daemon and manually capture output from your script commands</span>
+prg worm <span class="nt">--daemon-as</span> build <span class="nt">--message</span> <span class="s2">"Building..."</span>
+make build <span class="o">&gt;</span> /tmp/build.log 2&gt;&amp;1
+prg job stop <span class="nt">--daemon-name</span> build <span class="nt">--message</span> <span class="s2">"Build complete!"</span> <span class="nt">--checkmark</span>
+<span class="nb">cat</span> /tmp/build.log</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">--stdout-live</code> flag is particularly useful &mdash; it reserves a section of the
+terminal to display live command output while the animation continues above or
+below it. You control how many lines to reserve with <code class="language-plaintext highlighter-rouge">--output-lines</code> and where
+they appear with <code class="language-plaintext highlighter-rouge">--output-position</code> (above or below the animation).</p>
+
+<h3 id="job-control-commands">Job Control Commands</h3>
+
+<p>The <code class="language-plaintext highlighter-rouge">prg job</code> command provides subcommands for controlling background indicators:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">prg job stop</code> &mdash; Stop a running daemon with an optional message</li>
+  <li><code class="language-plaintext highlighter-rouge">prg job status</code> &mdash; Check if a daemon is running and show its PID</li>
+  <li><code class="language-plaintext highlighter-rouge">prg job advance</code> &mdash; Update a fill progress bar by a specific amount</li>
+</ul>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Check if a daemon is running</span>
+prg job status <span class="nt">--daemon-name</span> mytask
+
+<span class="c"># Advance a progress bar remotely</span>
+prg fill <span class="nt">--daemon-as</span> progress <span class="nt">--total</span> 100
+prg job advance <span class="nt">--daemon-name</span> progress <span class="nt">--amount</span> 10
+
+<span class="c"># Stop with error state</span>
+prg job stop <span class="nt">--daemon-name</span> mytask <span class="nt">--message</span> <span class="s2">"Build failed!"</span> <span class="nt">--error</span></code></pre></div></div>
+
+<div id="paywall_73498ff3276385f0" class="paywall-container" data-paywall-id="paywall_73498ff3276385f0" data-content-id="73498ff3276385f0">
+  <div class="paywall-content-placeholder" style="display: none;"></div>
+  <div class="paywall-overlay">
+    <div class="paywall-message">
+      <div class="paywall-icon">🔒</div>
+      <h3>Premium Content</h3>
+      <p>Library and advanced usage</p>
+      <div class="paywall-actions">
+        <a href="https://brettterpstra.com//support/" class="paywall-subscribe-btn">Subscribe Now</a>
+        <button class="paywall-login-btn" onclick="paywallLogin()">I'm a Subscriber</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Set up global paywall config and registration queue
+  (function() {
+    if (!window.paywallConfig) {
+      window.paywallConfig = {
+        serviceUrl: 'https://paywall.brettterpstra.com',
+        cookieName: 'bt_member_token',
+        instances: []
+      };
+    }
+
+    // Register this instance (collected by bt.Paywall when it loads)
+    window.paywallConfig.instances.push({
+      id: 'paywall_73498ff3276385f0',
+      contentId: '73498ff3276385f0'
+    });
+  })();
+</script>
+
+<h2 id="real-world-use-cases">Real-World Use Cases</h2>
+
+<p><strong>Deployment Scripts</strong>: Show continuous progress during multi-step deployments
+without blocking command output.</p>
+
+<p><strong>Data Processing</strong>: Provide visual feedback during long-running data imports or
+transformations.</p>
+
+<p><strong>Build Systems</strong>: Integrate into Rake or Make tasks to show progress during compilation.</p>
+
+<p><strong>CI/CD Pipelines</strong>: Add visual indicators to pipeline scripts for better monitoring.</p>
+
+<p><strong>System Administration</strong>: Show progress during backups, database dumps, or file
+synchronization.</p>
+
+<h2 id="try-it-out">Try It Out</h2>
+
+<p>The easiest way to get started:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>gem <span class="nb">install </span>ruby-progress</code></pre></div></div>
+
+<div class="iterm-command"><a href="https://brettterpstra.comiterm2:/command?c=gem%20install%20ruby-progress" class="iterm-run-button">Run in iTerm</a></div>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>prg ripple <span class="s1">'Hello, World!'</span></code></pre></div></div>
+
+<div class="iterm-command"><a href="https://brettterpstra.comiterm2:/command?c=prg%20ripple%20%27Hello%2C%20World%21%27" class="iterm-run-button">Run in iTerm</a></div>
+
+<p>Or check out the <a href="https://github.com/ttscoff/ruby-progress">GitHub repository</a>
+for full documentation, examples, and the complete API reference. The README
+includes detailed guides for each indicator type and advanced usage patterns.</p>
+
+<p>The gem is also available on
+<a href="https://rubygems.org/gems/ruby-progress">RubyGems</a>, and the latest release
+includes significant improvements to daemon mode handling and job control
+commands.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115379044963980177">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Ruby+Progress+Indicators+for+Modern+CLI+Tools%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F15%2Fruby-progress-indicators-for-modern-cli-tools%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F15%2Fruby-progress-indicators-for-modern-cli-tools%2F&text=Ruby+Progress+Indicators+for+Modern+CLI+Tools&url=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F15%2Fruby-progress-indicators-for-modern-cli-tools%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17186345.gif" height="1" width="1"/>

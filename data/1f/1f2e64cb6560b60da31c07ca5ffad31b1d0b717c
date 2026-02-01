@@ -1,0 +1,303 @@
+
+<p class="wp-block-paragraph">At Tom&#8217;s IT Cafe we break down the hard stuff so you can secure your<br>systems without getting lost in jargon. Below is a straight-ahead look<br>at what &#8220;in transit&#8221; and &#8220;in rest&#8221; mean, why they matter, and how to<br>implement them with the most common algorithms.</p>
+
+
+
+<span id="more-8364"></span>
+
+
+
+<h3 class="wp-block-heading" id="org876c7c9">1. What Does Encryption Protect?</h3>
+
+
+
+<p class="wp-block-paragraph">Encryption hides data from anyone who shouldn&#8217;t see it.</p>
+
+
+
+<ul class="wp-block-list">
+<li><strong>In transit</strong>: While data moves over a network (e.g., HTTP requests,</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">VPN tunnels).</p>
+
+
+
+<ul class="wp-block-list">
+<li><strong>In rest</strong>: When data sits on disk, in backups, or in cloud storage.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Both are essential. A breach of either can expose passwords, credit<br>cards, or intellectual property.</p>
+
+
+
+<h3 class="wp-block-heading" id="org07dc760">2. Encryption In Transit</h3>
+
+
+
+<h4 class="wp-block-heading" id="org13bb07f">2.1 How It Works</h4>
+
+
+
+<p class="wp-block-paragraph">When a client talks to a server, they perform a&nbsp;<em>handshake</em>&nbsp;to agree on<br>encryption parameters:</p>
+
+
+
+<ol class="wp-block-list">
+<li><strong>Client Hello</strong>&nbsp;– Sends supported TLS version and cipher suites.</li>
+
+
+
+<li><strong>Server Hello</strong>&nbsp;– Chooses the best suite it supports.</li>
+
+
+
+<li><strong>Certificate exchange</strong>&nbsp;– Server presents its public-key<br>certificate.</li>
+
+
+
+<li><strong>Key agreement</strong>&nbsp;– Diffie–Hellman or ECDHE establishes a shared<br>secret.</li>
+
+
+
+<li><strong>Finished messages</strong>&nbsp;– Both sides confirm integrity.</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Once the handshake finishes, all data is encrypted with symmetric keys<br>derived from that shared secret.</p>
+
+
+
+<h4 class="wp-block-heading" id="orgd909b0c">2.2 Common Algorithms</h4>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Category</th><th>Algorithm</th><th>Why It&#8217;s Popular</th></tr></thead><tbody><tr><td>TLS 1.3 cipher suites</td><td><em>TLSAES128GCMSHA256</em>, <em>TLSAES256GCMSHA384</em></td><td>1-RTT handshake with optional 0-RTT for resumed sessions; forward secrecy (FS)</td></tr><tr><td>Key exchange</td><td>ECDHE-P-256, ECDHE-P-384</td><td>Fast and FS; curves chosen by NIST or curve25519 for better performance.</td></tr><tr><td>Hashing</td><td>SHA-256, SHA-384</td><td>Standardised, collision-resistant.</td></tr><tr><td>MAC (TLS 1.2)</td><td>HMAC-SHA-256</td><td>Still used where TLS 1.3 isn&#8217;t available.</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Tip:</strong>&nbsp;Disable older suites such as RC4, DES, or any with&nbsp;<em>NULL</em>&nbsp;cipher.</p>
+
+
+
+<h4 class="wp-block-heading" id="org070d33c">2.3 Practical Implementation</h4>
+
+
+
+<p class="wp-block-paragraph">Web Server (NGINX)</p>
+
+
+
+<pre id="org41cc82d" class="wp-block-code"><code>ssl_protocols TLSv1.3;
+ssl_prefer_server_ciphers off;   # let client decide in TLS 1.3
+
+# Modern cipher suites only
+ssl_ciphers 'TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256';
+
+# Enforce HSTS (HTTP Strict Transport Security)
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">VPN (OpenVPN)</p>
+
+
+
+<pre class="wp-block-code"><code>proto udp
+port 1194
+
+dev tun
+ca ca.crt
+cert server.crt
+key server.key
+dh none            # use ECDHE
+tls-version-min 1.2
+cipher AES-256-GCM
+auth SHA256
+</code></pre>
+
+
+
+<h4 class="wp-block-heading" id="org4d23662">2.4 Best Practices</h4>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Action</th><th>Why</th></tr></thead><tbody><tr><td>Use TLS 1.3 everywhere</td><td>Removes handshake complexity and supports FS by default.</td></tr><tr><td>Enable HSTS and HTTP/2</td><td>Forces secure connections and improves performance.</td></tr><tr><td>Rotate certificates regularly</td><td>Limits damage if a key is compromised.</td></tr><tr><td>Store private keys in HSM or TPM</td><td>Protects the most sensitive material.</td></tr></tbody></table></figure>
+
+
+
+<h3 class="wp-block-heading" id="org79c72f7">3. Encryption In Rest</h3>
+
+
+
+<h4 class="wp-block-heading" id="orge95f5e0">3.1 How It Works</h4>
+
+
+
+<p class="wp-block-paragraph">Data at rest encryption protects files, databases, or block devices by<br>converting plaintext into ciphertext using a symmetric key (e.g., AES).<br>The key must be stored separately from the encrypted data to avoid &#8220;key<br>in the same place as data&#8221; vulnerabilities.</p>
+
+
+
+<h4 class="wp-block-heading" id="orge6f347d">3.2 Common Algorithms</h4>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Layer</th><th>Algorithm</th><th>Typical Use</th></tr></thead><tbody><tr><td>Full-disk encryption</td><td>LUKS / dm-crypt with AES-256-GCM</td><td>Linux servers, laptops</td></tr><tr><td>File system encryption</td><td>eCryptfs, Btrfs subvolume encryption</td><td>User data on shared drives</td></tr><tr><td>Database column/row encryption</td><td>AES-256-GCM or 3DES (legacy)</td><td>Sensitive fields in MySQL/PostgreSQL</td></tr><tr><td>Cloud storage</td><td>SSE-S3, KMS-managed keys</td><td>AWS S3, Azure Blob</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Why AES-256-GCM?</strong>&nbsp;It provides confidentiality and integrity with<br>minimal overhead.</p>
+
+
+
+<h4 class="wp-block-heading" id="org6bfff17">3.3 Practical Implementation</h4>
+
+
+
+<p class="wp-block-paragraph">LUKS on Linux</p>
+
+
+
+<pre class="wp-block-code"><code># Create a partition (replace /dev/sdb1)
+cryptsetup luksFormat /dev/sdb1
+cryptsetup open /dev/sdb1 cryptroot
+mkfs.ext4 /dev/mapper/cryptroot
+mount /dev/mapper/cryptroot /mnt/data
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">PostgreSQL column encryption</p>
+
+
+
+<pre class="wp-block-code"><code>-- Enable pgcrypto extension
+<strong>CREATE</strong> EXTENSION IF <strong>NOT</strong> <strong>EXISTS</strong> pgcrypto;
+
+-- Create table with encrypted field
+<strong>CREATE</strong> <strong>TABLE</strong> users (
+    id serial <strong>PRIMARY</strong> <strong>KEY</strong>,
+    username text,
+    ssn bytea   -- stored encrypted
+);
+
+-- Insert data
+<strong>INSERT</strong> <strong>INTO</strong> users (username, ssn)
+<strong>VALUES</strong> ('alice', pgp_sym_encrypt('123-45-6789', 'secretkey'));
+
+-- Decrypt data
+<strong>SELECT</strong> pgp_sym_decrypt(ssn, 'secretkey') <strong>FROM</strong> users;
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">AWS S3 Server-Side Encryption</p>
+
+
+
+<pre class="wp-block-code"><code>aws s3 cp localfile.txt s3://mybucket/remote.txt --sse AES256
+# or use KMS keys
+aws s3 cp localfile.txt s3://mybucket/remote.txt --sse aws:kms --sse-kms-key-id alias/mykey
+</code></pre>
+
+
+
+<h4 class="wp-block-heading" id="orgb9574fd">3.4 Key Management</h4>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Option</th><th>Description</th></tr></thead><tbody><tr><td>Hardware Security Module (HSM)</td><td>Physical device that stores keys and performs crypto ops.</td></tr><tr><td>Cloud KMS</td><td>Managed key service with audit logs, rotation APIs.</td></tr><tr><td>Software Vault</td><td>HashiCorp Vault or similar; secure API for dynamic secrets.</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph"><strong>Key Rotation</strong>: Change keys every 90–180 days. Automate via scripts or<br>built-in cloud tooling.</p>
+
+
+
+<h4 class="wp-block-heading" id="orgcb090d8">3.5 Best Practices</h4>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Practice</th><th>Rationale</th></tr></thead><tbody><tr><td>Use strong, unique keys per device/service</td><td>Limits blast radius if a key leaks.</td></tr><tr><td>Separate key storage from data location</td><td>Prevents &#8220;key and ciphertext in the same breach&#8221;.</td></tr><tr><td>Enable audit logging for key access</td><td>Detect unauthorized reads/writes early.</td></tr><tr><td>Apply least-privilege to encryption services</td><td>Only necessary users or processes can decrypt.</td></tr></tbody></table></figure>
+
+
+
+<h3 class="wp-block-heading" id="orgee3d261">4. Common Pitfalls &amp; How to Avoid Them</h3>
+
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Mistake</th><th>Impact</th><th>Fix</th></tr></thead><tbody><tr><td>Leaving default TLS ciphers enabled</td><td>Vulnerable to downgrade attacks</td><td>Explicitly list modern suites; disable TLS 1.0/1.1</td></tr><tr><td>Using weak key sizes (e.g., 128-bit) for highly sensitive data</td><td>Future-proofing risk</td><td>Prefer 256-bit keys where performance permits</td></tr><tr><td>Storing encryption keys on the same server as encrypted data</td><td>Single point of compromise</td><td>Use HSM, TPM, or cloud KMS</td></tr><tr><td>Not rotating keys</td><td>Long exposure if a key leaks</td><td>Automate rotation; monitor for anomalies</td></tr></tbody></table></figure>
+
+
+
+<h3 class="wp-block-heading" id="org4055b2f">5. Quick Reference Checklist</h3>
+
+
+
+<ol class="wp-block-list">
+<li><strong>Transit</strong>
+<ul class="wp-block-list">
+<li>TLS 1.3 only? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>Strong cipher suites? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>HSTS enabled? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+</ul>
+</li>
+</ol>
+
+
+
+<ol class="wp-block-list">
+<li><strong>Rest</strong>
+<ul class="wp-block-list">
+<li>Full-disk encryption on all servers? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>Database field encryption for PII? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>Keys in HSM or cloud KMS? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+</ul>
+</li>
+
+
+
+<li><strong>Ops</strong>
+<ul class="wp-block-list">
+<li>Certificate rotation schedule defined? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>Key rotation policy automated? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+
+
+
+<li>Audit logs reviewed monthly? <img src="https://s0.wp.com/wp-content/mu-plugins/wpcom-smileys/twemoji/2/72x72/2714.png" alt="✔" class="wp-smiley" style="height: 1em; max-height: 1em;" /></li>
+</ul>
+</li>
+</ol>
+
+
+
+<h4 class="wp-block-heading" id="org15fae34">Final Thought</h4>
+
+
+
+<p class="wp-block-paragraph">Encryption is not a one-time checkbox; it&#8217;s an ongoing process that<br>blends technology, policy, and vigilance. By hardening both transit and<br>rest paths with proven algorithms and disciplined key management, you<br>protect data from the moment it leaves your application to when it sits<br>idle on disk.</p>
+
+
+
+<p class="wp-block-paragraph">That&#8217;s all for today! For deeper dives into specific tools or scripting<br>tips, keep an eye on Tom&#8217;s IT Cafe – we&#8217;ll be back soon with more<br>practical guides.</p>

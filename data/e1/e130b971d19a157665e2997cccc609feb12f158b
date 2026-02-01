@@ -1,0 +1,159 @@
+<p>
+Emacs users can quickly become overwhelmed by the large amount of buffers which accumulate.
+Many of these are ancillary buffers created by various packages which govern aspects of the package, such as logging or process management.
+Some of these can be killed, but usually it's a good idea (or even necessary) to keep them around.
+</p>
+
+<p>
+These ancillary buffers come in 2 flavors:
+</p>
+<ol class="org-ol">
+<li>The ones you never want to see</li>
+<li>The ones you occasionally want to see</li>
+</ol>
+<div id="outline-container-org048ae3c" class="outline-2">
+<h2 id="org048ae3c"><span class="section-number-2">1.</span> Buffers You Never Want to See</h2>
+<div class="outline-text-2" id="text-1">
+<p>
+In the first case, Emacs by default considers buffers with names starting with a space to be <i>hidden</i>.
+So renaming a buffer using <code>rename-buffer</code> (<code>C-x x r</code>) to something with a leading space will mark the buffer as hidden.
+This means that the buffer will not be completed/listed by commands such as <code>switch-to-buffer</code> and <code>ido-switch-buffer</code>.
+It also won't be selected by <code>previous-buffer</code> (<code>C-x &lt;left&gt;</code>) or <code>next-buffer</code> (<code>C-x &lt;right&gt;</code>).
+</p>
+
+<p>
+This is a fairly drastic measure, as the only real way to manually switch to a buffer hidden like this is by either typing its name precisely after calling something like <code>switch-to-buffer</code>, or using a package like <code>consult</code> and calling <code>consult-buffer SPC</code>.
+</p>
+</div>
+</div>
+<div id="outline-container-orga9010cd" class="outline-2">
+<h2 id="orga9010cd"><span class="section-number-2">2.</span> Buffers You Occasionally Want to See</h2>
+<div class="outline-text-2" id="text-2">
+</div>
+<div id="outline-container-org421f67b" class="outline-3">
+<h3 id="org421f67b"><span class="section-number-3">2.1.</span> Basics</h3>
+<div class="outline-text-3" id="text-2-1">
+<p>
+In the second case, for buffers which you don't want to get in your way when switching between buffers quickly but <b>do</b> occasionally want to pull up, we have the variable <code>switch-to-prev-buffer-skip</code> (and its regexp cousin).
+This variable determines whether or not <code>previous-buffer</code> and <code>next=buffer</code> (and their cousins) will switch to a given buffer when it's "next" on the list.
+It can take on a few specific values, but in the general case it points to a predicate function of the buffer being switched to.
+</p>
+
+<p>
+For example:
+</p>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">buffer-skip-p</span> (_window buffer _bury-or-kill)
+  (<span class="org-keyword">with-current-buffer</span> buffer
+    (eq major-mode 'rust-mode)))
+
+(<span class="org-keyword">setopt</span> switch-to-prev-buffer-skip 'buffer-skip-p)
+</pre>
+</div>
+
+<p>
+Here we define a function which takes in a <code>window</code>, <code>buffer</code>, and whether or not to <code>bury-or-kill</code> the buffer being switched to.
+It then evaluates to <code>t</code> whenever the major mode of the buffer is <code>rust-mode</code>.
+Finally, we set <code>switch-to-prev-buffer-skip</code> to our function's symbol.
+Now, whenever we call e.g. <code>next-buffer</code>, it will look up and call this function, and if it returns <code>t</code> because the mode of the buffer is <code>rust-mode</code>, it will not switch to it, but instead to whatever the next buffer on the list is which this function would return <code>nil</code> on (phew!).
+</p>
+
+<p>
+Not that this variable does <b>not</b> affect functions like  <code>switch-to-buffer</code> or <code>ido-switch-buffer</code>.
+</p>
+
+<p>
+Note also the function signature.
+It expects 3 parameters, so it can incorporate info from the <code>window</code> or the <code>bury-or-kill</code> status in order to determine whether or not the buffer should be skipped.
+The example above simply disregards that info.
+</p>
+</div>
+</div>
+<div id="outline-container-orgc7bce4d" class="outline-3">
+<h3 id="orgc7bce4d"><span class="section-number-3">2.2.</span> Polish</h3>
+<div class="outline-text-3" id="text-2-2">
+<p>
+This is all well and good, but there might not a be semantic rule that all buffers which you want to keep quasi-hidden obey.
+You may instead have a bespoke list of buffers specific to your packages and how you use them which you want to hide.
+But this is easy enough to do with <code>swtch-to-prev-buffer-skip</code>.
+</p>
+
+<p>
+Consider:
+</p>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">hidden-buffers</span> '(<span class="org-string">"blazing-webapp.rs"</span> <span class="org-string">"rocket-cli.rs"</span>))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">buffer-skip-p</span> (_window buffer _bury-or-kill)
+  (member (buffer-name buffer) hidden-buffers))
+</pre>
+</div>
+
+<p>
+Here we simply declare a list of "hidden" buffers by their names as strings, and have <code>buffer-skip-p</code> check if the given buffer's name is in the list.
+Now we can hide any buffers we want!
+</p>
+
+<p>
+A couple of QOL improvements would be a method for quickly adding buffers to this list, and a way to ensure that this list var persists across emacs sessions.
+</p>
+
+<p>
+Here is the final setup with these extra niceties<sup><a id="fnr.1" class="footref" href="#fn.1" role="doc-backlink">1</a></sup>:
+</p>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defvar</span> <span class="org-variable-name">hidden-buffers</span> '())
+
+(<span class="org-keyword">with-eval-after-load</span> 'savehist
+  (add-to-list 'savehist-additional-variables hidden-buffers))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">hidden-buffer-p</span> (_window buffer _bury-or-kill)
+  (member (buffer-name buffer) hidden-buffers))
+
+(<span class="org-keyword">setopt</span> switch-to-prev-buffer-skip 'hidden-buffer-p)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">hide-buffer</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">cl-pushnew</span> (buffer-name) hidden-buffers
+              <span class="org-builtin">:test</span> #'string=))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">unhide-buffer</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> hidden-buffers (remove (buffer-name) hidden-buffers)))
+
+(keymap-global-set <span class="org-string">"C-c b h"</span> 'hide-buffer)
+(keymap-global-set <span class="org-string">"C-c b u"</span> 'unhide-buffer)
+</pre>
+</div>
+
+<p>
+Now, whenever we find ourselves in a buffer we'd rather not deal with during our regular emacs-ing, we can simply call <code>C-c b h</code> to hide the buffer by name.
+If we decide that a buffer has been neglected for too long, we can switch to it with something like <code>switch-to-buffer</code>, and unhide it with <code>C-c b u</code>.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-org8852fe2" class="outline-2">
+<h2 id="org8852fe2"><span class="section-number-2">3.</span> Conclusion</h2>
+<div class="outline-text-2" id="text-3">
+<p>
+This totally changed how I do buffer management, from exclusively relying on <code>switch-to-buffer</code> + completion packages like <code>vertico</code> and <code>orderless</code>, to actually binding <code>next-buffer</code> and <code>previous-buffer</code> to nice keys and using them liberally to quickly jump around only the most relevant buffers.
+</p>
+
+<p>
+I hope you found this helpful!
+You can find <a href="https://wumpus.pizza/blog/../emacs-config.html">my entire emacs config here</a>
+</p>
+</div>
+</div>
+<div id="footnotes">
+<h2 class="footnotes">Footnotes: </h2>
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.1" class="footnum" href="#fnr.1" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+Thanks to <a href="https://www.reddit.com/user/7890yuiop/">u/789yuiop</a> for helping clean up this code.
+</p></div></div>
+
+
+</div>
+</div>

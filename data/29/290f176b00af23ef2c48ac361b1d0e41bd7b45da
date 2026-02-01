@@ -1,0 +1,183 @@
+<p>
+I usually summarize Mastodon links, move them to
+my Emacs News Org file, and then categorize them.
+Today I accidentically categorized the links while
+they were still in my Mastodon buffer, so I had
+two lists with categories. I wanted to write some
+Emacs Lisp to merge sublists based on the
+top-level items. I could sort the list
+alphabetically with <code>C-c ^</code> (org-sort) and then
+delete the redundant top-level item lines, but
+it's fun to tinker with Emacs Lisp.
+</p>
+
+<p>
+Example input:
+</p>
+
+<ul class="org-ul">
+<li>Topic A:
+<ul class="org-ul">
+<li>Item 1</li>
+<li>Item 2
+<ul class="org-ul">
+<li>Item 2.1</li>
+</ul></li>
+</ul></li>
+<li>Topic B:
+<ul class="org-ul">
+<li>Item 3</li>
+</ul></li>
+<li>Topic A:
+<ul class="org-ul">
+<li>Item 4
+<ul class="org-ul">
+<li>Item 4.1</li>
+</ul></li>
+</ul></li>
+</ul>
+
+<p>
+Example output:
+</p>
+
+<ul class="org-ul">
+<li>Topic B:
+<ul class="org-ul">
+<li>Item 3</li>
+</ul></li>
+<li>Topic A:
+<ul class="org-ul">
+<li>Item 1</li>
+<li>Item 2
+<ul class="org-ul">
+<li>Item 2.1</li>
+</ul></li>
+<li>Item 4
+<ul class="org-ul">
+<li>Item 4.1</li>
+</ul></li>
+</ul></li>
+</ul>
+
+<p>
+The sorting doesn't particularly matter to me, but I want the things under Topic A to be combined. Someday it might be nice to recursively merge other entries (ex: if there's another "Topic A: - Item 2" subitem like "Item 2.2"), but I don't need that yet.
+</p>
+
+<p>
+Anyway, we can parse the list with
+<code>org-list-to-lisp</code> (which can even delete the
+original list) and recreate it with
+<code>org-list-to-org</code>, so then it's a matter of
+transforming the data structure.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-merge-list-entries-at-point</span> ()
+  <span class="org-doc">"Merge entries in a nested Org Mode list at point that have the same top-level item text."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">save-excursion</span>
+    (<span class="org-keyword">let*</span> ((list-indentation (<span class="org-keyword">save-excursion</span>
+                               (goto-char (caar (org-list-struct)))
+                               (current-indentation)))
+           (list-struct (org-list-to-lisp t))
+           (merged-list (my-org-merge-list-entries list-struct)))
+      (insert (org-ascii&#45;&#45;indent-string (org-list-to-org merged-list) list-indentation)
+              <span class="org-string">"\n"</span>))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-merge-list-entries</span> (list-struct)
+  <span class="org-doc">"Merge an Org list based on its top-level headings"</span>
+  (cons (car list-struct)
+        (mapcar
+         (<span class="org-keyword">lambda</span> (g)
+           (list
+            (car g)
+            (<span class="org-keyword">let</span> ((list-type (car (car (cdr (car (cdr g))))))
+                  (entries (seq-mapcat <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">cdar</span> (mapcar <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">cdr</span> (cdr g)))))
+              (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">append</span> (list list-type) entries nil))))
+         (seq-group-by <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">car</span> (cdr list-struct)))))
+</pre>
+</div>
+
+
+<p>
+A couple of test cases:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">ert-deftest</span> <span class="org-function-name">my-org-merge-list-entries</span> ()
+  (<span class="org-keyword">should</span>
+   (equal
+    (my-org-merge-list-entries
+     <span class="org-highlight-quoted-quote">'</span>(unordered (<span class="org-string">"Topic B:"</span> (unordered (<span class="org-string">"Item 3"</span>)))))
+    <span class="org-highlight-quoted-quote">'</span>(unordered (<span class="org-string">"Topic B:"</span> (unordered (<span class="org-string">"Item 3"</span>))))))
+  (<span class="org-keyword">should</span>
+   (equal
+    (my-org-merge-list-entries
+     <span class="org-highlight-quoted-quote">'</span>(unordered (<span class="org-string">"Topic B:"</span> (unordered (<span class="org-string">"Item 3"</span>)))
+                 (<span class="org-string">"Topic A:"</span>
+                  (unordered (<span class="org-string">"Item 1"</span>)
+                             (<span class="org-string">"Item 2"</span>
+                              (unordered (<span class="org-string">"Item 2.1"</span>)))))
+                 (<span class="org-string">"Topic A:"</span>
+                  (unordered
+                   (<span class="org-string">"Item 4"</span> (unordered (<span class="org-string">"Item 4.1"</span>)))))))
+    <span class="org-highlight-quoted-quote">'</span>(unordered
+      (<span class="org-string">"Topic B:"</span> (unordered (<span class="org-string">"Item 3"</span>)))
+      (<span class="org-string">"Topic A:"</span>
+       (unordered (<span class="org-string">"Item 1"</span>)
+                  (<span class="org-string">"Item 2"</span> (unordered (<span class="org-string">"Item 2.1"</span>)))
+                  (<span class="org-string">"Item 4"</span> (unordered (<span class="org-string">"Item 4.1"</span>)))))))))
+</pre>
+</div>
+
+<div id="outline-container-org-mode-merge-top-level-items-in-an-item-list-updating-my-custom-links-to-also-export-to-org" class="outline-2">
+<h2 id="org-mode-merge-top-level-items-in-an-item-list-updating-my-custom-links-to-also-export-to-org">Updating my custom links to also export to Org</h2>
+<div class="outline-text-2" id="text-org-mode-merge-top-level-items-in-an-item-list-updating-my-custom-links-to-also-export-to-org">
+<p>
+Because <code>org-list-to-org</code> uses the Org conversion
+process, I need to make sure that my custom link
+functions also export to Org as a format. For
+example, in Emacs News, I use a <a href="https://sachachua.com/dotemacs#package-links">package:</a> link to
+make it easy to link to packages in both Emacs and
+in exported HTML. When I first ran my code, the
+links got replaced with their URLs, which isn't
+what I wanted. Turned out that I needed to add a
+case handling exporting to <code>org</code> format, like
+this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-package-export</span> (link description format <span class="org-type">&amp;optional</span> arg)
+  (<span class="org-keyword">let*</span> ((package-info (car (assoc-default (intern link) package-archive-contents)))
+         (package-source (<span class="org-keyword">and</span> package-info (package-desc-archive package-info)))
+         (path (format
+                (<span class="org-keyword">cond</span>
+                 ((null package-source) link)
+                 ((string= package-source <span class="org-string">"gnu"</span>) <span class="org-string">"https://elpa.gnu.org/packages/%s.html"</span>)
+                 ((string= package-source <span class="org-string">"melpa"</span>) <span class="org-string">"https://melpa.org/#/%s"</span>)
+                 ((string= package-source <span class="org-string">"nongnu"</span>) <span class="org-string">"https://elpa.nongnu.org/nongnu/%s.html"</span>)
+                 (t (<span class="org-warning">error</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">unknown-source</span>)))
+                link))
+         (desc (<span class="org-keyword">or</span> description link)))
+    (<span class="org-keyword">if</span> package-source
+        (<span class="org-keyword">cond</span>
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">11ty</span>) (format <span class="org-string">"&lt;a target=\"_blank\" href=\"%s\"&gt;%s&lt;/a&gt;"</span> path desc))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">html</span>) (format <span class="org-string">"&lt;a target=\"_blank\" href=\"%s\"&gt;%s&lt;/a&gt;"</span> path desc))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">wp</span>) (format <span class="org-string">"&lt;a target=\"_blank\" href=\"%s\"&gt;%s&lt;/a&gt;"</span> path desc))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">latex</span>) (format <span class="org-string">"\\href{%s}{%s}"</span> path desc))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">texinfo</span>) (format <span class="org-string">"@uref{%s,%s}"</span> path desc))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">ascii</span>) (format <span class="org-string">"%s &lt;%s&gt;"</span> desc path))
+         ((eq format <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org</span>) (org-link-make-string (concat <span class="org-string">"package:"</span> link) description)) <span class="org-comment-delimiter">;; </span><span class="org-comment">added this line</span>
+         (t path))
+      desc)))
+</pre>
+</div>
+
+</div>
+</div>
+<div><a href="https://sachachua.com/blog/2025/03/org-mode-merge-top-level-items-in-an-item-list/index.org">View org source for this post</a></div>
+<p>You can <a href="https://sachachua.com/blog/2025/03/org-mode-merge-top-level-items-in-an-item-list/#comment">comment with Disqus (JS required)</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Forg-mode-merge-top-level-items-in-an-item-list%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

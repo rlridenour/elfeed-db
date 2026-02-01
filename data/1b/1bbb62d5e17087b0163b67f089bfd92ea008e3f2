@@ -1,0 +1,104 @@
+<p>I wrote back in December about my ideas for a new <a href="https://en.wikipedia.org/wiki/Skip_list" target="_blank" rel="noopener">skiplist</a> based database format for the <a href="https://www.cyrusimap.org/" target="_blank" rel="noopener">Cyrus IMAP</a> server.</p><p>I spent a bunch of time over the next month writing just that. It’s called twom, “two” for the dual level0 pointers (the same as twoskip) and “m” for <a href="https://en.wikipedia.org/wiki/Mmap" target="_blank" rel="noopener">mmap</a> and <a href="https://en.wikipedia.org/wiki/Multiversion_concurrency_control" target="_blank" rel="noopener">mvcc</a>. I had planned to pronounce it “tomb” (for “it has tombstone records”) but have wound up usually saying “two em” for clarity. Maybe as this is posted on a Friday 13th we can call it “tomb” just for today.</p><p>All the code was in a <a href="https://github.com/cyrusimap/cyrus-imapd/pull/5157" target="_blank" rel="noopener">merged pull request</a>. The database itself is just a single standalone C language source file and associated header file. There’s also a cyrusdb interface wrapper, and a copy of <a href="https://github.com/Cyan4973/xxHash/" target="_blank" rel="noopener">xxHash</a> directly in our source tree as well:</p><pre><code>brong@elg:~/src/cyrus-imapd$ wc -l lib/*twom* lib/xxhash.h
+   421 lib/cyrusdb_twom.c
+  3298 lib/twom.c
+   157 lib/twom.h
+  7091 lib/xxhash.h
+ 10967 total
+</code></pre><p>Amusingly, xxhash.h takes more space than anything else (and the lion’s share of the CPU usage as well, despite being much faster than crc32 as used in twoskip).</p><h2 id="why-a-new-database-format" tabindex="-1">Why a new database format?</h2><p>As I wrote <a href="https://www.fastmail.com/blog/twoskip-and-more/" target="_blank" rel="noopener">during our advent series</a>, twoskip has served us well, but it had a couple of major performance issues - particularly with our current ZFS on NVMe architecture. Retro-fitting some improvements to twoskip would have been possible, but it couldn’t do the most important thing (MVCC reads) because the on-disk format didn’t have the right structure.</p><p>We wanted MVCC because you could then repack an entire database without holding a lock the whole time, and replay the log at the end. I discovered that I didn’t even need an exclusive lock at all to do a repack, it could all be done with short-lived readlocks.</p><p>Overall these changes made twom faster. We don’t have performance data to show how much faster because we changed too many things at the same time to isolate it, but one simple repack test of a giant file showed repacks that had been 35 minutes with the twoskip file taking just over a minute with twom. A rather massive improvement! And even better, you could write to the file during the repack without losing data, while twoskip would have held an exclusive lock the entire time.</p><p>These are the major changes:</p><h3 id="xx-hash" tabindex="-1">xxHash</h3><p>The performance of xxHash vs CRC32 over small amounts of data is much better.</p><p>Twoskip and twom formats both hash blocks of about 40 bytes for the tracking pointers, and our keys and values are quite short in a lot of Cyrus formats too.</p><p>A faster hash function for small amounts of data is a big win. We chose xxHash for its friendly license and great performance.</p><h3 id="mvcc-repacks" tabindex="-1">MVCC repacks</h3><p>This is massive. We have databases in the tens of gigabytes on the largest accounts, and when one of those chose to “checkpoint” - rewrite to remove stale data, it could lock an account for 30 minutes. This is obviously unacceptable.</p><p>The same repack taking one minute and allowing reads plus a thousand or so opportunities for writes during that repack is a completely different story; speaking of which…</p><h3 id="starvation-free-locking" tabindex="-1">Starvation-free locking</h3><p>I can’t believe I got all the way to testing this thing to discover how little I knew about fcntl locking.</p><p>TIL: <a href="https://stackoverflow.com/questions/27625597/how-to-implement-a-writer-preferring-read-write-lock-for-nix-processes" target="_blank" rel="noopener">fcntl isn’t fair</a>. Releasing the lock didn’t magically let a waiting writer proceed, the same process would often pick up the lock again without giving another process a chance. On busy files, writers could entirely starve.</p><p>We decided to use a two-offset locking strategy within the single database file, so writers can queue up waiting while all the readers are busy, and be ensured of their place in the line.</p><p>The git history will show I didn’t get this right the first time, and had to do a patch while testing across our fleet on just the statuscache file, an ephemeral database with high churn. The great thing about testing with statuscache is that users won’t notice if it breaks, since any error will just cause the status to be re-computed!</p><h3 id="mmap-for-reading-and-writing" tabindex="-1">MMAP for reading and writing</h3><p>Twoskip (and all the other Cyrus internal formats, like cache and index) uses <code>mmap</code> for read but <code>write</code> for writes. On most operating systems this is fine, they share a common cache, but it seemed simpler and nicer to use mmap for both reads and writes rather than creating in-memory structures to copy over.</p><p>And yes, we did read and watch <a href="https://www.youtube.com/watch?v=1BRGU_AS25c" target="_blank" rel="noopener">the arguments against it</a> (video)!</p><p>Of course we’re using msync to get reliable commits, and twom still has robust transactions with the same 3-syncs-per-commit pattern that made twoskip so solid.</p><p>MMAP also reduces syscalls. With twoskip we had to make multiple seek and write syscalls for each update, as we rewrote the backpointers (the average record has level 2, so needs to write 2 different backpointers plus the record itself).</p><p>This means that a single twoskip transaction writing to a single key/value pair makes an average of 19 syscalls (2 <code>fcntl</code>, 2 <code>fstat</code>, 6 <code>lseek</code>, 4 <code>write</code>, 2 <code>writev</code>, and 3 <code>fdatasync</code>).</p><p>Even with the more complex locking, the equivalent twom change makes half as many (4 <code>fcntl</code>, 2 <code>fstat</code>, and 3 <code>msync</code>).</p><p>But even better - a transaction which updates multiple key/value pairs adds an additional average of 6 syscalls on twoskip (3 <code>lseek</code>, 2 <code>write</code>, 1 <code>writev</code>) per record, while twom has no additional syscalls per transaction, no matter how many changes are made. This is particularly obvious during a repack, where the initial transaction on the new file contains every record in the database!</p><h3 id="pre-emptive-allocation" tabindex="-1">Pre-emptive allocation</h3><p>Every time twom needs to make the file bigger, it extends it by 25% and then fills in the empty space. This seems a good tradeoff between low numbers of truncate and mmap operations, while not making files insanely large. It doesn’t actually use that space on most filesystems, the file remains sparse until writes fill the space.</p><p>This was by far the biggest performance increase (and the one we tested) - we had noticed with twoskip that a large amount of CPU was going on <code>munmap</code> and <code>mmap</code> calls, as with every new record the file became longer than the mapped space, and had to be re-mapped before the next write.</p><p>Twom decouples the file size from the committed size, which can leave junk from aborted transactions on the tail of the file, but the header length never gets updated until the third msync, so nothing ever reads that junk, and it gets overwritten as new commits come in.</p><h3 id="just-straight-posix" tabindex="-1">Just straight POSIX</h3><p>The twom library is written to be standalone. It doesn’t use any of the supporting libraries from Cyrus, opting to do fcntl locking and mmap manipulation directly. This allows it to keep a list of active transactions with their own mmaps so pointers remain valid; and for many other optimisations. Many things from twoskip were tightened up and simplified by not relying on other libraries.</p><p>This makes twom easily portable, and since it’s written from whole cloth (and I’m the only author on twoskip as well) I was able to put it under the <a href="https://creativecommons.org/publicdomain/zero/1.0/" target="_blank" rel="noopener">CC0</a> public domain license; though obviously if you want to use xxHash you need to follow its <a href="https://github.com/Cyan4973/xxHash/blob/dev/LICENSE" target="_blank" rel="noopener">2-Clause BSD license</a> as well.</p><p>Twom databases are a single file, containing an ordered key-value list. It’s transactional, with single threaded exclusive writers and multiple parallel readers. Twom files can be accessed by multiple un-related programs concurrently, so long as they all obey the locking rules.</p><p>I plan to lift the code out into its own repository at some point, and test it against all the other usual suspects in the key-value database space. The <code>lib/cyrusdb_twom.c</code> file is just a lightweight wrapper around the twom functions to convert cyrusdb semantics to twom style, and to convert error codes on the way back.</p><h2 id="ok-what-does-it-look-like" tabindex="-1">OK what does it look like?</h2><p>Cyrus comes with a tool ‘cyr_dbtool’ which can be used to interact with any database formats, so here’s some interactions with a new DB, setting and deleting some records, and showing prefix iterators and dump output.</p><pre><code>brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom set a b
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom show
+a       b
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom dump
+UUID: uuid=fe720dec-4525-4e5d-a3c4-da665f3b0b40
+FNAME: fname=/tmp/test.db
+CHECKSUM ENGINE: XXH64
+HEADER: v=1 g=1 fl=10000000 num=(1/1) sz=(00000000/000001B0/00000170) ml=1
+00000060 DUMMY kl=0 dl=0 lvl=31 ()
+        00000170 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000
+00000170 ADD kl=1 dl=1 lvl=1 (a)
+        00000000 00000000
+00000198 COMMIT start=00000170
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom set xxa hello
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom set xxb world
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom show xx
+xxa     hello
+xxb     world
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom delete xxa
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom set xxa hi
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom dump
+UUID: uuid=fe720dec-4525-4e5d-a3c4-da665f3b0b40
+FNAME: fname=/tmp/test.db
+CHECKSUM ENGINE: XXH64
+HEADER: v=1 g=1 fl=10000000 num=(3/5) sz=(00000048/000002C8/00000170) ml=3
+00000060 DUMMY kl=0 dl=0 lvl=31 ()
+        00000170 00000000
+        000001F8 000001F8 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000
+00000170 ADD kl=1 dl=1 lvl=1 (a)
+        00000280 00000250
+00000198 COMMIT start=00000170
+000001B0 ADD kl=3 dl=5 lvl=1 (xxa)
+        000001F8 00000000
+000001E0 COMMIT start=000001B0
+000001F8 ADD kl=3 dl=5 lvl=3 (xxb)
+        00000000 00000000
+        00000000 00000000
+00000238 COMMIT start=000001F8
+00000250 DELETE ancestor=000001B0
+00000268 COMMIT start=00000250
+00000280 REPLACE kl=3 dl=2 lvl=1 (xxa)
+        00000250 &lt;-
+        00000000 000001F8
+000002B0 COMMIT start=00000280
+</code></pre><p>That’s a version 1 file, generation 1 (never been repacked), flags just means “using XXH64”, 3 commits, 5 records, some interesting sizes (last repack, current size, estimated repack size) - with the highest skiplevel of 3.</p><p>Let’s repack it:</p><pre><code>brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom repack
+brong@elg:~/src/cyrus-imapd$ /usr/cyrus/bin/cyr_dbtool -n /tmp/test.db twom dump
+UUID: uuid=fe720dec-4525-4e5d-a3c4-da665f3b0b40
+FNAME: fname=/tmp/test.db
+CHECKSUM ENGINE: XXH64
+HEADER: v=1 g=2 fl=10000000 num=(3/1) sz=(00000000/00000218/00000200) ml=2
+00000060 DUMMY kl=0 dl=0 lvl=31 ()
+        00000170 00000000
+        00000198 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+        00000000 00000000 00000000 00000000 00000000 00000000
+00000170 ADD kl=1 dl=1 lvl=1 (a)
+        00000198 00000000
+00000198 ADD kl=3 dl=2 lvl=2 (xxa)
+        000001C8 00000000
+        000001C8
+000001C8 ADD kl=3 dl=5 lvl=2 (xxb)
+        00000000 00000000
+        00000000
+00000200 COMMIT start=00000170
+</code></pre><p>All the tombstones removed, and the file is back in order. Any new writes will stitch themselves into the various linked lists by updating the back pointers. Finally, let’s look at the raw file:</p><pre><code>00000000  a1 02 8b 0d 74 77 6f 6d  66 69 6c 65 00 00 00 00  |....twomfile....|
+00000010  fe 72 0d ec 45 25 4e 5d  a3 c4 da 66 5f 3b 0b 40  |.r..E%N]...f_;.@|
+00000020  01 00 00 00 00 00 00 10  02 00 00 00 00 00 00 00  |................|
+00000030  03 00 00 00 00 00 00 00  01 00 00 00 00 00 00 00  |................|
+00000040  00 00 00 00 00 00 00 00  00 02 00 00 00 00 00 00  |................|
+00000050  18 02 00 00 00 00 00 00  02 00 00 00 8a 57 92 ee  |.............W..|
+00000060  01 1f 00 00 00 00 00 00  70 01 00 00 00 00 00 00  |........p.......|
+00000070  00 00 00 00 00 00 00 00  98 01 00 00 00 00 00 00  |................|
+00000080  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+*
+00000160  00 00 00 00 00 00 00 00  6c d0 f8 56 00 00 00 00  |........l..V....|
+00000170  02 01 01 00 01 00 00 00  98 01 00 00 00 00 00 00  |................|
+00000180  00 00 00 00 00 00 00 00  d8 de f5 3d 84 a4 92 c8  |...........=....|
+00000190  61 00 62 00 00 00 00 00  02 02 03 00 02 00 00 00  |a.b.............|
+000001a0  c8 01 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+000001b0  c8 01 00 00 00 00 00 00  05 8c 71 d7 70 cf ff c3  |..........q.p...|
+000001c0  78 78 61 00 68 69 00 00  02 02 03 00 05 00 00 00  |xxa.hi..........|
+000001d0  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+000001e0  00 00 00 00 00 00 00 00  19 cf b0 45 a7 69 06 9d  |...........E.i..|
+000001f0  78 78 62 00 77 6f 72 6c  64 00 00 00 00 00 00 00  |xxb.world.......|
+00000200  07 00 00 00 00 00 00 00  70 01 00 00 00 00 00 00  |........p.......|
+00000210  1d 44 bd 3d 00 00 00 00  00 00 00 00 00 00 00 00  |.D.=............|
+00000220  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
+*
+00004000
+</code></pre><p>There’s not much fat in there! There is probably 50 bytes of overhead per record once you factor in trailing nulls on key and value, 8 bytes of header, 8 bytes of checksums, an average of 3 64-bit pointers, and padding out to an 8 byte boundary.</p><h2 id="fastmail-is-running-twom" tabindex="-1">Fastmail is running twom</h2><p>Since February 12, 2025, all Fastmail email servers have been using the twom backend in all the places they used to use twoskip. The switch was done in three phases over two days.</p><p>I’m very happy to have removed one of the places in which Fastmail could fail to live up to its name! No more pauses for database repacks.</p><p>I’m hoping that in some future release of Cyrus, the twom backend will be the default - but mostly, once twom was finished I was just glad to take a break from reading hexdumps and do something else for a while!</p>

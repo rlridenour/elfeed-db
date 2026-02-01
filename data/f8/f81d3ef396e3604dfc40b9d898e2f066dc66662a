@@ -1,0 +1,408 @@
+
+<p class="wp-block-paragraph">Tired of corporate servers watching every chat?<br>Host your own Matrix on Tor, no public IP, zero tracking.<br>By running <strong>Matrix</strong> over <strong>Tor</strong>, you eliminate exposure to public servers and keep your chats private.</p>
+
+
+
+<p class="wp-block-paragraph">This isn&#8217;t just another guide &#8211; it&#8217;s a battle‑tested recipe for keeping your Matrix chats private on Tor.</p>
+
+
+
+<span id="more-8379"></span>
+
+
+
+<p class="wp-block-paragraph">This guide walks you through deploying a&nbsp;<strong>self-contained Matrix Synapse server</strong>&nbsp;accessible only via a&nbsp;<strong>Tor .onion address</strong>.</p>
+
+
+
+<p class="wp-block-paragraph">No public exposure. No certificates. Just encrypted chat through the hidden network.</p>
+
+
+
+<p class="wp-block-paragraph"><strong>What you’ll learn</strong></p>
+
+
+
+<ul class="wp-block-list">
+<li>Spin up Synapse in minutes with Python‑venv</li>
+
+
+
+<li>Expose it only via a .onion address</li>
+
+
+
+<li>Lock down registration to invite‑only users</li>
+
+
+
+<li>Run Element Web on the same hidden service</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph"><strong>What you&#8217;ll get</strong></p>
+
+
+
+<ul class="wp-block-list">
+<li>Encrypted text chat (end-to-end)</li>
+
+
+
+<li>Hidden service access via Tor</li>
+
+
+
+<li>PostgreSQL backend</li>
+
+
+
+<li>Invite-only registration</li>
+
+
+
+<li>Element Web client</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgffa426e">1. Install Synapse And Dependencies</h2>
+
+
+
+<p class="wp-block-paragraph"><strong>Dependencies</strong></p>
+
+
+
+<pre class="wp-block-code"><code>sudo apt install -y python3 python3-pip python3-venv tor postgresql-17 libpq5 libpq-dev
+</code></pre>
+
+
+
+<p class="wp-block-paragraph"><strong>Create Environment</strong></p>
+
+
+
+<pre class="wp-block-code"><code>mkdir -p ~/matrix-synapse
+cd ~/matrix-synapse
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install "matrix-synapse&#091;postgres]"
+</code></pre>
+
+
+
+<h2 class="wp-block-heading" id="org8c5822e">2. Tor Hidden Service</h2>
+
+
+
+<p class="wp-block-paragraph">Edit Tor&#8217;s config:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/tor/torrc
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Add:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+HiddenServiceDir /var/lib/tor/matrix/
+HiddenServicePort 80 127.0.0.1:8008
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">Restart Tor:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo systemctl restart tor
+sudo cat /var/lib/tor/matrix/hostname
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">The file contains your new .onion address &#8211; this will become your servername&nbsp;in Synapse.</p>
+
+
+
+<h2 class="wp-block-heading" id="org6db2819">3. Configure Synapse</h2>
+
+
+
+<p class="wp-block-paragraph">Generate a new configuration:</p>
+
+
+
+<pre class="wp-block-code"><code># Replace with your .onion address from /var/lib/tor/matrix/hostname
+python3 -m synapse.app.homeserver \
+    --server-name yourhiddenchat.onion \
+    --config-path homeserver.yaml \
+    --generate-config \
+    --report-stats=no
+</code></pre>
+
+
+
+<h2 class="wp-block-heading" id="org6ef26c4">4. Set Up PostgreSQL</h2>
+
+
+
+<pre class="wp-block-code"><code>sudo -u postgres bash
+createuser --pwprompt synapse_user
+createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse_user synapse
+<strong>exit</strong>
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Edit the database section in&nbsp;<code>homeserver.yaml</code>:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+database:
+  name: psycopg2
+  args:
+    user: synapse_user
+    password: "your_password"
+    dbname: synapse
+    host: localhost
+
+</pre></div>
+
+
+<h2 class="wp-block-heading" id="orga33a747">5. Synapse Configuration for Tor</h2>
+
+
+
+<p class="wp-block-paragraph">Minimal&nbsp;<code>homeserver.yaml</code>:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+server_name: "yourhiddenchat.onion"
+public_baseurl: "http://yourhiddenchat.onion"
+listeners:
+  - port: 8008
+    tls: false
+    type: http
+    x_forwarded: false
+    bind_addresses: &#91;'127.0.0.1']
+    resources:
+      - names: &#91;client]
+        compress: false
+
+report_stats: false
+registration_shared_secret: "long_random_secret"
+federation_domain_whitelist: &#91;]
+federation_ip_range_blacklist: &#91;"0.0.0.0/0"]
+enable_registration: false
+registration_requires_token: true
+
+</pre></div>
+
+
+<h2 class="wp-block-heading" id="org288341a">6. Start Synapse</h2>
+
+
+
+<pre class="wp-block-code"><code>synctl start
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Register the first user:</p>
+
+
+
+<pre class="wp-block-code"><code>register_new_matrix_user -c homeserver.yaml http://localhost:8008
+</code></pre>
+
+
+
+<h2 class="wp-block-heading" id="org4cd43c9">7. Install Element Web</h2>
+
+
+
+<p class="wp-block-paragraph">Element Web is a lightweight matrix client.</p>
+
+
+
+<p class="wp-block-paragraph">Limitations through the Tor browser:</p>
+
+
+
+<ul class="wp-block-list">
+<li>No WebRTC = no media service.</li>
+
+
+
+<li>No audio.</li>
+
+
+
+<li>No video.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">On the Onion Network, these are not real limitations.</p>
+
+
+
+<p class="wp-block-paragraph">On Tor Browser, avatars are not displayed, but text chat remains fully functional.<br>Brave can handle media fully, but only use it for your private .onion server to maintain privacy.<br>Element Web requires JavaScript &#8211; only load your own .onion instance to avoid exposure.</p>
+
+
+
+<p class="wp-block-paragraph">Check the current release on:</p>
+
+
+
+<p class="wp-block-paragraph"><a href="https://github.com/element-hq/element-web/releases">https://github.com/element-hq/element-web/releases</a></p>
+
+
+
+<p class="wp-block-paragraph">Install Nginx and download Element Web:</p>
+
+
+
+<pre class="wp-block-code"><code># on the same server as Synapse
+sudo apt install nginx
+cd /var/www/
+sudo wget https://github.com/vector-im/element-web/releases/download/v1.11.83/element-v1.11.83.tar.gz
+sudo tar xzf element-v1.11.83.tar.gz
+sudo mv element-v1.11.83 element
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Open the site configuration file:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/nginx/sites-available/element-web.conf
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Add the site config:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+server {
+    listen 127.0.0.1:8080;
+    server_name your-element.onion;
+
+    root /var/www/element;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">Enable the site:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo ln -s /etc/nginx/sites-available/element-web.conf /etc/nginx/sites-enabled/
+sudo systemctl reload nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Reload the Nginx configuration:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nginx -t &amp;&amp; sudo systemctl reload nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Set up the Element Web via&nbsp;<code>/var/www/element/config.json</code>:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "http://yourhiddenchatxxxxxxxx.onion",
+      "server_name": "yourhiddenchatxxxxxxxx.onion"
+    }
+  },
+  "disable_custom_urls": true,
+  "disable_guests": true,
+  "brand": "Private Matrix over Tor"
+}
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">Enable the Element Web site in the torrc:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+# Synapse onion
+HiddenServiceDir /var/lib/tor/matrix/
+HiddenServicePort 80 127.0.0.1:8008
+
+# Element onion
+HiddenServiceDir /var/lib/tor/element/
+HiddenServicePort 80 127.0.0.1:8080
+
+</pre></div>
+
+
+<h2 class="wp-block-heading" id="org44d7786">8. Possible Improvements</h2>
+
+
+
+<ol class="wp-block-list">
+<li>SystemD synapse service unit (enable / auto start the service)</li>
+
+
+
+<li>SystemD backup service unit (automated, quick backups)</li>
+
+
+
+<li>Systemd backup timer (schedule the backups)</li>
+
+
+
+<li>Admin maintenance scripts (e.g. removing idle users, rooms)</li>
+
+
+
+<li>Fail2ban or ufw minimal ruleset (limit external noise)</li>
+</ol>
+
+
+
+<h2 class="wp-block-heading" id="orga948972">9. Closing Thoughts</h2>
+
+
+
+<p class="wp-block-paragraph">Running chat over Tor isn&#8217;t about going dark &#8211; it&#8217;s about&nbsp;<strong>reducing exposure</strong>.<br>You control who can register, who can connect, and how data flows.</p>
+
+
+
+<p class="wp-block-paragraph">It&#8217;s a lab for privacy-centric network design, and a reminder:</p>
+
+
+
+<p class="wp-block-paragraph"><strong>Visibility is a choice.</strong></p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Privacy is not hiding.<br>It&#8217;s choosing when to be seen.</p>
+</blockquote>

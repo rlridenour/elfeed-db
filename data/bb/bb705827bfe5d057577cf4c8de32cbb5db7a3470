@@ -1,0 +1,649 @@
+<p>Lisp newcomers, I still care about you ;) A section on variables was missing on the Cookbook, here it is.</p>
+
+<p><em>As usual, this is <a href="https://lispcookbook.github.io/cl-cookbook/variables.html">best read on the Common Lisp Cookbook</a>. This is where it will get updates and fixes</em>.</p>
+
+<p>The Cookbook has many contributors. You can contribute too. I myself
+mostly contributed (out of frustration) as I was discovering Common
+Lisp, the language and the ecosystem. It&rsquo;s been years now, but I still take care of it
+because I like it, and thanks to your tips. As I don&rsquo;t have a salary
+nor a million-dollar company, I do appreciate them. I&rsquo;m on <a href="https://github.com/sponsors/vindarel/">github
+sponsors too</a>. Thank you!</p>
+
+<p>Also, I can now generate a good-quality PDF thanks to Typst and Pandoc. Stay tuned.</p>
+
+<hr />
+
+<p>So, you are writing your first Common Lisp program (again, welcome!) and
+you want to declare variables. What are your options?</p>
+
+<p>When in doubt, use <code>defparameter</code> for top-level parameters.</p>
+
+<p>Use <code>let</code> or <code>let*</code> for lexical scope:</p>
+
+<pre><code class="language-lisp">(let* ((a 2)
+       (square (* a a)))
+   (format t &quot;the square of ~a is ~a&quot; a square))
+</code></pre>
+
+<p>Use <code>setf</code> to change them.</p>
+
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
+
+<ul>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#defparameter-top-level-variables"><code>defparameter</code>: top-level variables</a>
+
+<ul>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#redefining-a-defparameter">redefining a defparameter</a></li>
+</ul></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#defvar-no-redefinition"><code>defvar</code>: no redefinition</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#the-earmuff-convention">The &ldquo;*earmuff*&rdquo; convention</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#global-variables-are-created-in-the-dynamic-scope">Global variables are created in the &ldquo;dynamic scope&rdquo;</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#setf-change-values"><code>setf</code>: change values</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#let-let-create-lexical-scopes"><code>let</code>, <code>let*</code>: create lexical scopes</a>
+
+<ul>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#let-vs-let"><code>let</code> vs <code>let*</code></a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#setf-inside-let">setf inside let</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#when-you-dont-use-defined-variables">When you don&rsquo;t use defined variables</a></li>
+</ul></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#unbound-variables">Unbound variables</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#global-variables-are-thread-safe">Global variables are thread safe</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#addendum-defconstant">Addendum: <code>defconstant</code></a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#guidelines-and-best-practices">Guidelines and best practices</a></li>
+</ul>
+
+<!-- markdown-toc end -->
+
+<h2 id="defparameter-top-level-variables"><code>defparameter</code>: top-level variables</h2>
+
+<p>Use <code>defparameter</code> to declare top-level variables, like this:</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;me&quot;)
+
+(defun hello (&amp;optional name)
+  &quot;Say hello.&quot;
+  (format t &quot;Hello ~a!&quot; (or name *name*)))
+</code></pre>
+
+<p><code>defparameter</code> accepts an optional third argument: the variable&rsquo;s docstring:</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;me&quot;
+   &quot;Default name to say hello to.&quot;)
+</code></pre>
+
+<p>The inline docstrings are an important part of the Common Lisp
+interactive experience. You will encounter them during your coding
+sessions (and we lispers usually keep our Lisp running for a long
+time). In Emacs and Slime, you can ask for a symbol&rsquo;s docstring with
+<code>C-c C-d d</code> (Alt-x <code>slime-describe-symbol</code>). You can also ask for a
+docstring programmatically:</p>
+
+<pre><code class="language-lisp">(documentation '*name* 'variable)
+</code></pre>
+
+<p>We ask the documentation of the <code>*name*</code> <em>symbol</em>, not what it holds,
+hence the quote in <code>'*name*</code> (which is short for <code>(quote
+*name*)</code>. Another &ldquo;doc-type&rdquo; is <code>'function</code>. See: in Common Lisp,
+variables and functions live in different &ldquo;namespaces&rdquo;, and it shows
+here.</p>
+
+<p>We&rsquo;ll mention the <code>defparameter</code> form with no value below.</p>
+
+<h3 id="redefining-a-defparameter">redefining a defparameter</h3>
+
+<p>A Common Lisp coding session is usually long-lasting and very
+interactive. We leave a Lisp running and we interact with it while we
+work. This is done with Emacs and Slime, Vim, Atom and SLIMA, VSCode
+and Alive, Lem... and more editors, or from the terminal.</p>
+
+<p>That means that you can do this:</p>
+
+<p>1- write a first defparameter</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;me&quot;)
+</code></pre>
+
+<p>either write this in the REPL, either write this in a .lisp file and
+compile+load it with a shortcut (<code>C-c C-c</code> (Alt-x <code>slime-compile-defun</code>) in
+Slime on this expression, or <code>C-c C-k</code> (Alt-x <code>slime-compile-and-load-file</code>)
+to compile and load everything you have in the current buffer). If you
+work from a simple terminal REPL, you can <code>(load ...)</code> a .lisp file.</p>
+
+<p>Now the <code>*name*</code> variable exists in the running image.</p>
+
+<p>2- edit the defparameter line:</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;you&quot;)
+</code></pre>
+
+<p>and load the changes the same way: either with the REPL, or with a
+<code>C-c C-c</code>. Now, the <code>*name*</code> variable has a new value, &ldquo;you&rdquo;.</p>
+
+<p>A <code>defvar</code> wouldn&rsquo;t be redefined.</p>
+
+<h2 id="defvar-no-redefinition"><code>defvar</code>: no redefinition</h2>
+
+<p><code>defvar</code> defines top-level <em>variables</em> and protects them from redefinition.</p>
+
+<p>When you re-load a <code>defvar</code>, it doesn&rsquo;t erase the current value, you
+must use <code>setf</code> for this.</p>
+
+<pre><code class="language-lisp">(defvar *names-cache* (list)
+  &quot;Store a list of names we said \&quot;hello\&quot; to.&quot;)
+
+(defun hello (&amp;optional (name *name*))
+   (pushnew name *names-cache* :test #'string-equal)
+   (format t &quot;hello ~a!&quot; name))
+</code></pre>
+
+<p>Let&rsquo;s see it in use:</p>
+
+<pre><code class="language-lisp">CL-USER&gt; (hello)
+hello you!
+NIL
+CL-USER&gt; *names-cache*
+(&quot;you&quot;)
+CL-USER&gt; (hello &quot;lisper&quot;)
+hello lisper!
+NIL
+CL-USER&gt; *names-cache*
+(&quot;lisper&quot; &quot;you&quot;)
+</code></pre>
+
+<p>What happens to <code>*names-cache*</code> if you redefine the <code>defvar</code> line
+(with <code>C-c C-c</code>, or <code>C-c C-k</code>, or on the REPL...)?</p>
+
+<p>It doesn&rsquo;t change and <em>that is a good thing</em>.</p>
+
+<p>Indeed, this variable isn&rsquo;t a user-visible parameter, it doesn&rsquo;t have
+an immediate use, but it is important for the program correctness, or
+strength, etc. Imagine it holds the cache of your webserver: you don&rsquo;t
+want to erase it when you load new code. During development, we hit a
+lot <code>C-c C-k</code> to reload the current file, we can as well reload our
+running app in production, but there are certain things we want
+untouched. If it is a database connection, you don&rsquo;t want to set it
+back to nil, and connect again, everytime you compile your code.</p>
+
+<p>You must use <code>setf</code> to change a defvar&rsquo;s variable value.</p>
+
+<h2 id="the-earmuff-convention">The &ldquo;*earmuff*&rdquo; convention</h2>
+
+<p>See how we wrote <code>*name*</code> in-between &ldquo;*earmuffs*&rdquo;. That is an
+important convention, that helps you not override top-level variables
+in lexical scopes.</p>
+
+<pre><code class="language-lisp">(defparameter name &quot;lisper&quot;)
+
+;; later...
+(let ((name &quot;something else&quot;))
+   ;;  ^^^ overrides the top-level name. This will cause bugs.
+   ...)
+</code></pre>
+
+<p>This becomes a feature only when using earmuffs:</p>
+
+<pre><code class="language-lisp">(defparameter *db-name* &quot;db.db&quot;)
+
+(defun connect (&amp;optional (db-name *db-name*))
+  (sqlite:connect db-name))
+
+(let ((*db-name* &quot;another.db&quot;))
+  (connect))
+  ;;^^^^  its db-name optional parameter, which defaults to *db-name*, now sees &quot;another.db&quot;.
+</code></pre>
+
+<p>By the way, for such a use-case, you will often find <code>with-...</code> macros
+that abstract the <code>let</code> binding.</p>
+
+<pre><code class="language-lisp">(with-db &quot;another.db&quot;
+  (connect))
+</code></pre>
+
+<p>By the way again, an
+<a href="https://www.wordreference.com/definition/earmuff">earmuff</a> is a thing
+that covers the ears (but only the ears) in winter. You might have
+seen it in movies more than in reality. The lasting word is: take care
+of yourself, stay warm and use earmuffs.</p>
+
+<h2 id="global-variables-are-created-in-the-dynamic-scope">Global variables are created in the &ldquo;dynamic scope&rdquo;</h2>
+
+<p>Our top-level parameters and variables are created in the so-called
+<em>dynamic scope</em>. They can be accessed from anywhere else: from
+function definitions (as we did), in <code>let</code> bindings, etc.</p>
+
+<p>In Lisp, we also say these are <a href="https://cl-community-spec.github.io/pages/Dynamic-Variables.html"><em>dynamic variables</em> or <em>special</em></a>.</p>
+
+<p>It could also be possible to create one from anywhere by <em>proclaiming</em>
+it &ldquo;special&rdquo;. It really isn&rsquo;t the thing you do everydays but, you
+know, in Lisp everything&rsquo;s possible ;)</p>
+
+<blockquote>
+<p>A dynamic variable can be referenced outside the dynamic extent of a form that binds it. Such a variable is sometimes called a &ldquo;global variable&rdquo; but is still in all respects just a dynamic variable whose binding happens to exist in the global environment rather than in some dynamic environment. [Hyper Spec]</p>
+</blockquote>
+
+<h2 id="setf-change-values"><code>setf</code>: change values</h2>
+
+<p>Any variable can be changed with <code>setf</code>:</p>
+
+<pre><code class="language-lisp">(setf *name* &quot;Alice&quot;)
+;; =&gt; &quot;Alice&quot;
+</code></pre>
+
+<p>It returns the new value.</p>
+
+<p>Actually, <code>setf</code> accepts <em>pairs</em> of value, variable:</p>
+
+<pre><code class="language-lisp">(setf *name* &quot;Bob&quot;
+      *db-name* &quot;app.db&quot;)
+;; =&gt; &quot;app.db&quot;
+</code></pre>
+
+<p>It returned the last value.</p>
+
+<p>What happens if you <code>setf</code> a variable that wasn&rsquo;t declared yet? It
+generally works but you have a warning:</p>
+
+<pre><code class="language-lisp">;; in SBCL 2.5.8
+CL-USER&gt; (setf *foo* &quot;foo&quot;)
+; in: SETF *FOO*
+;     (SETF CL-USER::*FOO* &quot;foo&quot;)
+;
+; caught WARNING:
+;   undefined variable: CL-USER::*FOO*
+;
+; compilation unit finished
+;   Undefined variable:
+;     *FOO*
+;   caught 1 WARNING condition
+&quot;foo&quot;
+</code></pre>
+
+<p>We see the returned &ldquo;foo&rdquo;, so it worked. Please declare variables with
+<code>defparameter</code> or <code>defvar</code> first.</p>
+
+<p>Let&rsquo;s read the full <code>setf</code> docstring because it&rsquo;s interesting:</p>
+
+<pre><code class="language-txt">Takes pairs of arguments like SETQ. The first is a place and the second
+is the value that is supposed to go into that place. Returns the last
+value. The place argument may be any of the access forms for which SETF
+knows a corresponding setting form.
+</code></pre>
+
+<p>Note that <code>setq</code> is another macro, but now seldom used, because <code>setf</code>
+works on more &ldquo;places&rdquo;. You can setf functions and many things.</p>
+
+<h2 id="let-let-create-lexical-scopes"><code>let</code>, <code>let*</code>: create lexical scopes</h2>
+
+<p><code>let</code> lets you define variables in a limited scope, or override top-level variables temporarily.</p>
+
+<p>Below, our two variables only exist in-between the parenthesis of the <code>let</code>:</p>
+
+<pre><code class="language-lisp">(let* ((a 2)
+       (square (* a a)))
+   (format t &quot;the square of ~a is ~a&quot; a square))
+   ;; so far so good
+
+(format t &quot;the value of a is: ~a&quot; a)
+;; =&gt; ERROR: the variable A is unbound
+</code></pre>
+
+<p>&ldquo;unbound&rdquo; means the variable is bound to nothing, not even to NIL. Its
+symbol may exist, but it isn&rsquo;t associated to anything.</p>
+
+<p>Just after the scope formed by the <code>let</code>, the variables <code>a</code> and <code>square</code> don&rsquo;t exist anymore.</p>
+
+<p>When the Lisp reader reads the <code>format</code> expression, it reads a <code>a</code>
+symbol, which now exists in the global environment, but it isn&rsquo;t bound.</p>
+
+<blockquote>
+<p>Food for thought: the fact to write a variable name and have the Lisp reader read it creates the symbol, but doesn&rsquo;t bind it to anything.</p>
+</blockquote>
+
+<p>Our two variables can be accessed by any form inside the <code>let</code> binding. If we
+create a second <code>let</code>, its <em>environment</em> inherits the previous one (we
+see variables declared above, fortunately!).</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;test&quot;)
+
+(defun log (square)
+  (format t &quot;name is ~s and square is ~a&quot; *name* square))
+
+(let* ((a 2)
+       (square (* a a)))
+  ;; inside first environment
+  (let ((*name* &quot;inside let&quot;))
+    ;; inside second environment,
+    ;; we access the dynamic scope.
+    (log square)))
+;;  =&gt; name is &quot;inside let&quot; and square is 4
+;;  =&gt; NIL
+
+(print *name*)
+;; =&gt; &quot;test&quot;
+;;    ^^^^ outside the let, back to the dynamic scope's value.
+</code></pre>
+
+<p>We could also define a function inside a let, so that this function
+definition &ldquo;sees&rdquo; a binding from a surrounding let at compile
+time. This is a closure and it&rsquo;s for the chapter on functions.</p>
+
+<p>A &ldquo;lexical scope&rdquo; is simply</p>
+
+<blockquote>
+<p>a scope that is limited to a spatial or textual region within the establishing form. &ldquo;The names of parameters to a function normally are lexically scoped.&rdquo; [Hyper Spec]</p>
+</blockquote>
+
+<p>In other words, the scope of a variable is determined by its position
+in the source code. It&rsquo;s today&rsquo;s best practice. It&rsquo;s the least
+surprising way of doing: you can <em>see</em> the scope by looking at the
+source code.</p>
+
+<h3 id="let-vs-let"><code>let</code> vs <code>let*</code></h3>
+
+<p>By the way, what is the syntax of <code>let</code> and what is the difference with <code>let*</code>?</p>
+
+<p><code>let*</code> lets you declare variables that depend on each other.</p>
+
+<p><code>let</code>&rsquo;s basic use is to declare a list of variables with no initial
+values. They are initialized to <code>nil</code>:</p>
+
+<pre><code class="language-lisp">(let (variable1 variable2 variable3) ;; variables are initialized to nil by default.
+  ;; use them here
+  ...)
+
+;; Example:
+(let (a b square)
+  (setf a 2)
+  (setf square (* a a))
+  (list a b square))
+;; =&gt; (2 NIL 4)
+
+;; exactly the same:
+(let (a
+      b
+      square)
+  ...)
+</code></pre>
+
+<p>You can give default values by using &ldquo;pairs&rdquo; of elements, as in <code>(a 2)</code>:</p>
+
+<pre><code class="language-lisp">(let ((a 2)     ;; &lt;-- initial value
+       square)  ;; &lt;-- no &quot;pair&quot; but still one element: defaults to NIL.
+  (setf square (* a a))
+  (list a square))
+</code></pre>
+
+<p>Yes, there are two <code>((</code> in a row! This is the syntax of Common
+Lisp. You don&rsquo;t need to count them. What appears after a <code>let</code> is
+variable definitions. Usually, one per line.</p>
+
+<p>The let&rsquo;s logic is in the body, with a meaningful indentation. You can
+read Lisp code based on indentation. If the project you are looking at
+doesn&rsquo;t respect that, it is a low quality project.</p>
+
+<p>Observe that we kept <code>square</code> to nil. We want it to be the square of
+<code>a</code>, so can we do this?</p>
+
+<pre><code class="language-lisp">(let ((a 2)
+      (square (* a a))) ;; WARN:
+  ...)
+</code></pre>
+
+<p>You can&rsquo;t do that here, this is the limitation of <code>let</code>. You need <code>let*</code>.</p>
+
+<p>You could write two <code>let</code>s:</p>
+
+<pre><code class="language-lisp">(let ((a 2))
+  (let ((square (* a a)))
+    (list a square)))
+;; =&gt; (2 4)
+</code></pre>
+
+<p>This is equivalent to <code>let*</code>:</p>
+
+<pre><code class="language-lisp">(let* ((a 2)
+       (square (* a a)))
+  ...)
+</code></pre>
+
+<p><code>let</code> is to declare variables that don&rsquo;t depend on each other, <code>let*</code>
+is to declare variables which are read one after the other and where
+one can depend on a <em>previous</em> one.</p>
+
+<p>This is <em>not</em> valid:</p>
+
+<pre><code class="language-lisp">(let* ((square (* a a))  ;; WARN!
+       (a 2))
+   (list a square))
+;; =&gt; debugger:
+;; The variable A is unbound.
+</code></pre>
+
+<p>The error message is clear. At the time of reading <code>(square (* a a))</code>, <code>a</code> is unknown.</p>
+
+<h3 id="setf-inside-let">setf inside let</h3>
+
+<p>Let&rsquo;s make it even clearer: you can <code>setf</code> any value that is
+<em>shadowed</em> in a <code>let</code> binding, once outside the let, the variables are
+back to the value of the current <em>environment</em>.</p>
+
+<p>We know this:</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;test&quot;)
+
+(let ((*name* &quot;inside let&quot;))
+  (format t &quot;*name* inside let: ~s&quot; *name*))
+;; =&gt; *name* inside let: &quot;inside let&quot;
+
+(format t &quot;*name* outside let: ~s&quot; *name*)
+;; =&gt; *name* outside let: &quot;test&quot;
+</code></pre>
+
+<p>we setf a dynamic parameter that was shadowed by a let binding:</p>
+
+<pre><code class="language-lisp">(defparameter *name* &quot;test&quot;)
+
+(defun change-name ()
+   ;; bad style though,
+   ;; try to not mutate variables inside your functions,
+   ;; but take arguments and return fresh data structures.
+   (setf *name* &quot;set!&quot;))
+   ;;    ^^^^^ from the dynamic environment, or from a let lexical scope.
+
+(let ((*name* &quot;inside let&quot;))
+  (change-name)
+  (format t &quot;*name* inside let: ~s&quot; *name*))
+;; =&gt; *name* inside let: &quot;set!&quot;
+
+(format t &quot;*name* outside let: ~s&quot; *name*)
+;; =&gt; *name* outside let: &quot;test&quot;
+</code></pre>
+
+<h3 id="when-you-don-t-use-defined-variables">When you don&rsquo;t use defined variables</h3>
+
+<p>Read your compiler&rsquo;s warnings :)</p>
+
+<p>Below, it tells us that <code>b</code> is defined but never used. SBCL is pretty
+good at giving us useful warnings at <em>compile time</em> (every time you
+hit <code>C-c C-c</code> (compile and load the expression at point), <code>C-c C-k</code>
+(the whole file) or use <code>load</code>).</p>
+
+<pre><code class="language-lisp">(let (a b square)
+  (list a square))
+;; =&gt;
+; caught STYLE-WARNING:
+;   The variable B is defined but never used.
+</code></pre>
+
+<p>This example works in the REPL because SBCL&rsquo;s REPL always compiles expressions.</p>
+
+<p>This may vary with your implementation.</p>
+
+<p>It&rsquo;s great to catch typos!</p>
+
+<pre><code class="language-lisp">(let* ((a 2)
+       (square (* a a)))
+  (list a squale))
+  ;;         ^^^ typo
+</code></pre>
+
+<p>If you compile this in a .lisp file (or in a <code>Alt-x slime-scratch</code> lisp buffer), you
+will have two warnings, and your editor will underline each in two
+different colors:</p>
+
+<p><img alt="" src="https://lispcookbook.github.io/cl-cookbook/assets/let-example-squale.png" title="A decent editor highlights compilation warnings." /></p>
+
+<ul>
+<li>first, &ldquo;square&rdquo; is defined but never used</li>
+<li>second, &ldquo;squale&rdquo; is an undefined variable.</li>
+</ul>
+
+<p>If you run the snippet in the REPL, you will get the two warnings but,
+because the snippet is run, you will see the interactive debugger
+with the error &ldquo;The variable SQUALE is unbound&rdquo;.</p>
+
+<h2 id="unbound-variables">Unbound variables</h2>
+
+<p>&ldquo;unbound&rdquo; variables were not bound to anything, not even nil. Their
+symbol might exist, but they have no associated value.</p>
+
+<p>You can create such variables like this:</p>
+
+<pre><code class="language-lisp">(defparameter *connection*)
+</code></pre>
+
+<p>This <code>defparameter</code> form is correct. You didn&rsquo;t give any default
+value: the parameter is unbound.</p>
+
+<p>You can check if a variable (or a function) is bound with <code>boundp</code> (or
+<code>fboundp</code>). The <code>p</code> is for &ldquo;predicate&rdquo;.</p>
+
+<p>You can make a variable (or function) unbound with <code>makunbound</code> (or <code>fmakunbound</code>).</p>
+
+<h2 id="global-variables-are-thread-safe">Global variables are thread safe</h2>
+
+<p>Don&rsquo;t be afraid of accessing and set-ing global bindings in
+threads. Each thread will have its own copy of the
+variable. Consequently, you can bind them to other values with <code>let</code>
+bindings, etc. That&rsquo;s good.</p>
+
+<p>It&rsquo;s only if you want one single source of truth that you&rsquo;ll have to
+share the variable between threads and where the danger lies. You can
+use a lock (very easy), but that&rsquo;s all another topic.</p>
+
+<h2 id="addendum-defconstant">Addendum: <code>defconstant</code></h2>
+
+<p><code>defconstant</code> is here to say something is a constant and is not
+supposed to change, but in practice <code>defconstant</code> is annoying. Use
+<code>defparameter</code>, and add a convention with a new style of earmuffs:</p>
+
+<pre><code class="language-lisp">(defparameter +pi+ pi
+  &quot;Just to show that pi exists but has no earmuffs. Now it does. You shouldn't change a variable with +-style earmuffs, it's a constant.&quot;)
+</code></pre>
+
+<p><code>defconstant</code> is annoying because, at least on SBCL, it can&rsquo;t be
+redefined without asking for validation through the interactive
+debugger, which we may often do during development, and its default
+test is <code>eql</code>, so give it a string and it will always think that the
+constant was redefined. Look (evaluate each line one by one in order):</p>
+
+<pre><code class="language-lisp">(defconstant +best-lisper+ :me)
+;; so far so good.
+
+(defconstant +best-lisper+ :me)
+;; so far so good: we didn't redefine anything.
+
+(defconstant +best-lisper+ :you)
+;; =&gt; the constant is being redefined, we get the interactive debugger (SBCL):
+
+The constant +BEST-LISPER+ is being redefined (from :ME to :YOU)
+   [Condition of type SB-EXT:DEFCONSTANT-UNEQL]
+See also:
+  Common Lisp Hyperspec, DEFCONSTANT [:macro]
+  SBCL Manual, Idiosyncrasies [:node]
+
+Restarts:
+ 0: [CONTINUE] Go ahead and change the value.
+ 1: [ABORT] Keep the old value.
+ 2: [RETRY] Retry SLIME REPL evaluation request.
+ 3: [*ABORT] Return to SLIME's top level.
+ 4: [ABORT] abort thread (#&lt;THREAD tid=573581 &quot;repl-thread&quot; RUNNING {120633D123}&gt;)
+
+;; =&gt; presse 0 (zero) or click on the &quot;Continue&quot; restart to accept changing the value.
+</code></pre>
+
+<p>With constants as strings:</p>
+
+<pre><code class="language-lisp">(defconstant +best-name+ &quot;me&quot;)
+;; so far so good, we create a new constant.
+
+(defconstant +best-name+ &quot;me&quot;)
+;; =&gt; interactive debugger!!
+
+The constant +BEST-NAME+ is being redefined (from &quot;me&quot; to &quot;me&quot;)
+...
+</code></pre>
+
+<p>As you will see in the equality chapter, two strings are not equal by
+<code>eql</code> that is a low-level equality operator (think pointers), they are
+<code>equal</code> (or <code>string-equal</code>).</p>
+
+<p>This is <code>defconstant</code> documentation:</p>
+
+<blockquote>
+<p>Define a global constant, saying that the value is constant and may be compiled into code. If the variable already has a value, and this is not EQL to the new value, the code is not portable (undefined behavior). The third argument is an optional documentation string for the variable.</p>
+</blockquote>
+
+<p>The <code>eql</code> thing is in the spec, what an implementation should do when
+redefining a constant is not defined, so it may vary with your
+implementation.</p>
+
+<p>We invite you to look at:</p>
+
+<ul>
+<li><a href="https://alexandria.common-lisp.dev/draft/alexandria.html#Data-and-Control-Flow">Alexandria&rsquo;s define-constant</a>, which has a <code>:test</code> keyword (but still errors out on redefinition).</li>
+<li><a href="https://github.com/ruricolist/serapeum/blob/master/REFERENCE.md#defconst-symbol-init-optional-docstring">Serapeum&rsquo;s <code>defconst</code></a></li>
+<li><code>cl:defparameter</code> ;)</li>
+</ul>
+
+<h2 id="guidelines-and-best-practices">Guidelines and best practices</h2>
+
+<p>A few style guidelines:</p>
+
+<ul>
+<li>create all your top-level parameters at the top of a file</li>
+<li>define first parameters then variables</li>
+<li>use docstrings</li>
+<li>read your compiler&rsquo;s warnings</li>
+<li>it&rsquo;s better for your functions to accept arguments, rather than to rely on top-level parameters</li>
+<li>your functions shouldn&rsquo;t mutate (modify) a top-level binding. You should create a new data structure instead, and use your function&rsquo;s return value as the parameter to another function, and have data flow from one function to another.</li>
+<li>parameters are best for: a webserver port, a default value... and other user-facing parameters.</li>
+<li>variables are best for long-living and internal variables: caches, DB connections...</li>
+<li>you can forget about defconstant</li>
+<li>when in doubt, use a <code>defparameter</code></li>
+<li>the pattern where a function parameter is by default a global variable is typical and idiomatic:</li>
+</ul>
+
+<pre><code class="language-lisp">;; from the STR library.
+(defvar *whitespaces* (list #\Backspace #\Tab #\Linefeed #\Newline #\Vt #\Page
+                            #\Return #\Space #\Rubout
+                            ;; edited for brevity
+                            ))
+
+(defun trim-left (s &amp;key (char-bag *whitespaces*))
+  &quot;Removes all characters in `char-bag` (default: whitespaces) at the beginning of `s`.&quot;
+  (when s
+   (string-left-trim char-bag s)))
+</code></pre>
+
+<p>the default value can also be a function call:</p>
+
+<pre><code class="language-lisp">;; from the Lem editor
+(defun buffer-modified-p (&amp;optional (buffer (current-buffer)))
+  &quot;Return T if 'buffer' has been modified, NIL otherwise.&quot;
+  (/= 0 (buffer-%modified-p buffer)))
+</code></pre>
+
+<ul>
+<li>these let bindings over global variables are idiomatic too: <code>(let ((*name* &quot;other&quot;)) ...)</code>.</li>
+</ul>

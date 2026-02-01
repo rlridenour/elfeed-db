@@ -1,0 +1,67 @@
+<p>I admit: I’ve been relying heavily on ChatGPT to get to grips with some PHP things. Asking for interpretation, alternatives, and PHP 8-specific stuff was a lot of help.</p>
+
+<p>I’ve been using this in a separate floating window (aka ‘frame’) in Emacs next to my editing context, and that was great.</p>
+
+<p>Until I accidentally closed the buffer and lost the history.</p>
+
+<p>Twice.</p>
+
+<p>Álvaro Ramírez, author of <a href="https://github.com/xenodium/chatgpt-shell"><code>chatgpt-shell</code></a>, <a href="https://indieweb.social/@xenodium/111733069067113062">kindly suggested</a> I could ask for confirmation before closing ChatGPT buffers. Haven’t thought of that, obviously, so I was very grateful.</p>
+
+<p><strong>Update 2024-01-16:</strong> All of this is now part of <a href="https://melpa.org/#/shell-maker"><code>shell-maker.el</code></a> which is used by <code>chatgpt-shell</code> (and other interactive shells, like kagi), so if you install the bleeding edge version from MELPA or source now, you get a confirmation dialog out of the box. I’m leaving this post for history.</p>
+
+<p>A web search later, I found out that <code>kill-buffer-query-functions</code> exists and is triggered as a sort of filter that intercepts buffer closing actions. The documentation says:</p>
+
+<blockquote>
+  <p>List of functions called with no args to query before killing a buffer.
+The buffer being killed will be current while the functions are running.
+See ‘kill-buffer’.</p>
+
+  <p>If any of them returns nil, the buffer is not killed.  Functions run by
+this hook are supposed to not change the current buffer.</p>
+</blockquote>
+
+<p>Confusingly, though, you can use <code>yes-or-no-p</code> to ask the user for confirmation, and confirming returns <code>t</code> for “yes” and <code>nil</code> for “no”, but the returned valued <em>just works</em> in a <code>kill-buffer-query-functions</code> function …?! Also, returning <code>t</code> actually skips the function and is the neutral element here.</p>
+
+<p>That doesn’t sound right <a href="https://stackoverflow.com/questions/86963/how-do-i-get-a-warning-before-killing-a-temporary-buffer-in-emacs">but StackOverflow agrees</a>, so I’m keeping it.</p>
+
+<p>I don’t know.</p>
+
+<figure><a href="https://christiantietze.de/posts/2024/01/chatgpt-shell-confirm-close-compose-buffer/2024-01-10_chatgpt-shell-compose.png"><img alt="" src="https://christiantietze.de/posts/2024/01/chatgpt-shell-confirm-close-compose-buffer/2024-01-10_chatgpt-shell-compose.png" /></a><figcaption>Screenshot of Emacs with a bottom split showing the compose window</figcaption></figure>
+
+<p>Anyway, here’s the config:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">chatgpt-shell</span>
+  <span class="ss">:commands</span> <span class="p">(</span><span class="nv">chatgpt-shell</span>
+             <span class="nv">chatgpt-shell-prompt-compose</span><span class="p">)</span>
+  <span class="ss">:bind</span> <span class="p">((</span><span class="s">"C-c C-e"</span> <span class="o">.</span> <span class="nv">chatgpt-shell-prompt-compose</span><span class="p">))</span>
+  <span class="ss">:config</span>
+
+  <span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/confirm-before-killing-chatgpt</span> <span class="p">()</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">buf</span> <span class="p">(</span><span class="nv">current-buffer</span><span class="p">)))</span>
+      <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nv">buffer-match-p</span> <span class="s">"^\\*chatgpt\\*"</span> <span class="nv">buf</span><span class="p">)</span>
+               <span class="p">(</span><span class="nb">not</span> <span class="p">(</span><span class="nv">buffer-match-p</span> <span class="s">" compose$"</span> <span class="nv">buf</span><span class="p">)))</span>
+          <span class="p">(</span><span class="nb">yes-or-no-p</span> <span class="s">"ChatGPT Buffer! Kill anyway? "</span><span class="p">)</span>
+        <span class="no">t</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'kill-buffer-query-functions</span> <span class="nf">#'</span><span class="nv">ct/confirm-before-killing-chatgpt</span><span class="p">)</span>
+
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'display-buffer-alist</span>
+               <span class="o">'</span><span class="p">(</span><span class="s">"\\*chatgpt\\*.*compose"</span>
+                 <span class="p">(</span><span class="nv">display-buffer-reuse-window</span>
+                  <span class="nv">display-buffer-in-side-window</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nv">reusable-frames</span>  <span class="o">.</span> <span class="nv">visible</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nv">side</span>             <span class="o">.</span> <span class="nv">bottom</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nv">window-height</span>    <span class="o">.</span> <span class="mf">0.3</span><span class="p">))))</span>
+
+<span class="c1">;; Later:</span>
+<span class="p">(</span><span class="nv">with-eval-after-load</span> <span class="ss">'chatgpt-shell</span>
+  <span class="p">(</span><span class="nv">with-eval-after-load</span> <span class="ss">'xah-fly-keys</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nv">xah-fly-leader-key-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"i k"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">chatgpt-shell-prompt-compose</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>I bound the composition window to <kbd>SPC i k</kbd>, the space key being the leader key in command-mode. That was free and is pretty convenient to pop up a composition buffer. I like the dedicated side window split for this.</p>
+
+<p>Since I’m using the composition function, the buffer closing interception checks for “starts with <code>*chatgpt*</code>” and “does not end with ` compose`” so that the pop-up composition buffers can come and go, only a real history buffer is protected.</p>
+
+<p>Maybe I should add autosaving of the transcript next, deleting transcripts that are 5 days old or older automatically.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

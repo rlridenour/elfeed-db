@@ -1,0 +1,381 @@
+<p>A few weeks ago, <a href="https://leancrew.com/all-this/2025/09/text-fragment-linking/">I mentioned in a footnote</a> that I have a script that takes a URL on the clipboard and makes a <a href="https://daringfireball.net/projects/markdown/syntax#link">Markdown reference-style link</a> in BBEdit. Actually, I have several link-making scripts for BBEdit. I’ve written about <a href="https://leancrew.com/all-this/2021/05/flowing-markdown-reference-links/">some of them</a> already (including <a href="https://leancrew.com/all-this/2012/08/markdown-reference-links-in-bbedit/">very long ago</a>), but never about all of them. Buckle up.</p>
+<h2>The BBEdit support folder and packages</h2>
+<p>My linking scripts are all accessible via the Blogging submenu of BBEdit’s Scripts menu.<sup id="fnref:scripts"><a href="#fn:scripts" rel="footnote">1</a></sup></p>
+<p><img alt="BBEdit Scripts menu and Blogging submenu" class="ss" src="https://leancrew.com/all-this/images2025/20251013-BBEdit%20Scripts%20menu%20and%20Blogging%20submenu.png" title="BBEdit Scripts menu and Blogging submenu" width="80%"/></p>
+<p>As you can see, I have several blogging scripts, but we’ll focus on just the linking scripts here.</p>
+<p>The submenu indicates that the scripts are in the Blogging package, or bundle, which I created to keep all my BBEdit blogging tools in one spot. Rather than trying to explain in words how packages are organized in the BBEdit support folder hierarchy, I’ll show you how I have things arranged:</p>
+<p><img alt="Support folder hierarchy" class="ss" src="https://leancrew.com/all-this/images2025/20251013-Support%20folder%20hierarchy.png" title="Support folder hierarchy" width="70%"/></p>
+<p>As you can see, I have them set up in iCloud Drive. They can also be in your Dropbox folder or, if you have no need to share configurations across two or more computers, in <code>~/Library/Application Support/BBEdit</code>. Full instructions on where and how to set up an application support folder can be found in the <a href="https://www.barebones.com/support/bbedit/manual.html">BBEdit User Manual</a>.</p>
+<p>The funny-looking icon labeled Blogging is the package of interest. For linking, there are two utility scripts in the Resources subfolder and five AppleScripts in the Scripts/Blogging subfolder.</p>
+<h2>Reference link background</h2>
+<p>As you can see in the <a href="https://daringfireball.net/projects/markdown/syntax#link">Markdown documentation</a>, there are two kinds of links: inline and reference. Inline links look like this:</p>
+<pre><code>the [Markdown documentation](https://daringfireball.net/projects/markdown/syntax#link)
+</code></pre>
+<p>where the text that will become the link is enclosed in brackets and the URL is enclosed in parentheses. Reference links look like this:</p>
+<pre><code>the [Markdown documentation][1]
+</code></pre>
+<p>where the link text in brackets is followed by a reference, also in brackets. Somewhere else in the file—I put them at the bottom—is the reference again, followed by a colon and the URL:</p>
+<pre><code>[1]: https://daringfireball.net/projects/markdown/syntax#link
+</code></pre>
+<p>I’m showing the references as numbers because that’s what I use, but the reference string can be anything.</p>
+<p>All of my scripts make reference links, incrementing the reference number as more are added.</p>
+<h2>Utility scripts</h2>
+<p>The Blogging package’s utility scripts are saved in its Resources subfolder. Two of them are used to make reference links: <code>nextreflink</code> and <code>getreflink</code>.</p>
+<p>Because I use numbers in my reference links, new links need to know what the last reference number was so they can increment it. The <code>nextreflink</code> script figures out what the highest existing reference number is and returns the next integer.</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import sys
+ 4:  import re
+ 5:  
+ 6:  text = sys.stdin.read()
+ 7:  reflinks = re.findall(r'^\[(\d+)\]: ', text, re.MULTILINE)
+ 8:  if len(reflinks) == 0:
+ 9:    print(1)
+10:  else:
+11:    print(max(int(x) for x in reflinks) + 1)
+</code></pre>
+<p>It assumes the Markdown source of the file I’m working on will be fed to it via standard input. It uses the regular expression on Line 7 to find all the reference links in the file and collects them in the list <code>reflinks</code>. Because the regex has just one capturing group, the <a href="https://docs.python.org/3.13/library/re.html#re.findall"><code>findall</code></a> function returns a list of just that group. If there are no reference links in the file yet, Line 9 returns 1; otherwise, Line 11 determines the maximum reference number and adds 1 to it.</p>
+<p>As we’ll see in the next section, <code>nextreflink</code> is used by all the link-making scripts that create new links. But one of the scripts, Old Link, doesn’t make a new link; it presents me with a list of all the links already in the file so I can choose one to use again. The utility script <code>getreflink</code> does that:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import sys
+ 4:  import re
+ 5:  import subprocess
+ 6:  
+ 7:  # Utility function for shortening text.
+ 8:  def shorten(str, n):
+ 9:    'Truncate str to no more than n chars'
+10:    return str if len(str) &lt;= n else str[:n-1] + '…'
+11:  
+12:  # Read in the buffer and collect all the reference links.
+13:  text = sys.stdin.read()
+14:  refRE = re.compile(r'^\[(\d+)\]: +([a-z]+://)?(.+)$', re.MULTILINE)
+15:  refs = refRE.findall(text)
+16:  
+17:  # Create an AppleScript to ask the user for the link
+18:  choices = [ shorten(x[2], 100) for x in refs ]
+19:  choiceString = tString = '{"' + '", "'.join(choices) + '"}'
+20:  firstChoice = f'{{"{choices[0]}"}}'
+21:  cmd = f'''
+22:  set theLinks to {choiceString}
+23:  tell application "System Events"
+24:    activate
+25:    choose from list theLinks with title "Choose Reference Link" default items {firstChoice}
+26:  end tell
+27:  get item 1 of result
+28:  '''
+29:  
+30:  # Run the AppleScript
+31:  osa = subprocess.run(['osascript', '-'], input=cmd, text=True, capture_output=True)
+32:  if osa.returncode == 0:
+33:    choice = osa.stdout.rstrip()
+34:  else:
+35:    sys.exit()
+36:  
+37:  # Get the reference number
+38:  idx = choices.index(choice)
+39:  print(refs[idx][0])
+</code></pre>
+<p>This one’s got a lot of pieces. The first step, as in <code>nextreflink</code>, is to go through standard input and collect all the reference links. That’s done in Lines 13–15. The <code>findall</code> here generates a list of tuples. Each tuple consists of the reference number, the URL scheme (typically <code>https://</code>), and then everything after that. The third item is what we’ll use to make the selection.</p>
+<p>Before we look at the rest of the code, here’s the prompt presented to the user. The URL is selected from the given list.</p>
+<p><img alt="Selection of existing link" class="ss" src="https://leancrew.com/all-this/images2025/20251013-Selection%20of%20existing%20link.png" title="Selection of existing link" width="80%"/></p>
+<p>The next section of code, Lines 18–28, builds an AppleScript that makes this <a href="https://developer.apple.com/library/archive/documentation/LanguagesUtilities/Conceptual/MacAutomationScriptingGuide/PromptforaChoicefromaList.html">“choose from list” prompt</a>. First, it makes a Python list of the third tuple item from each element of <code>refs</code>. Line 19 turns that list into a string, <code>choices</code>, with the format of an AppleScript list. The first item of the list is going to be the default item; its AppleScript string is built in Line 20. Finally, Lines 21–28 assemble the AppleScript that will put up the prompt window and collect the result.</p>
+<p>Lines 31–35 run the AppleScript via <a href="https://docs.python.org/3.13/library/subprocess.html#subprocess.run"><code>subprocess.run</code></a> and <a href="https://leancrew.com/all-this/man/man1/osascript.html"><code>osascript</code></a>. If the user makes a selection, the text of that selection is put into the <code>choice</code> variable. If the user cancels, the script ends with no output.</p>
+<p>The last chunk of code, Lines 38–39, uses <code>choice</code> to figure out the reference number of the selection and prints it to standard output.</p>
+<p>Before moving on to the AppleScripts that actually insert the reference links, I want to draw your attention to the shebang lines in the two utility scripts. These are exactly what I’d use if I were writing a script meant to be run from the command line. Scripts that aren’t run from the Terminal<sup id="fnref:terminal"><a href="#fn:terminal" rel="footnote">2</a></sup> often don’t get the same environment as those that are. But in one of its many thoughtful touches, BBEdit reads your command line environment directly—I guess by looking through your various bash or zsh configuration files—so you don’t have to pull any special tricks to get your scripts to run.</p>
+<h2>The link-making AppleScripts</h2>
+<p>BBEdit has a large AppleScript dictionary, and the scripts in this section take advantage of that to move the cursor around—essential when writing reference links—and to behave differently depending on whether text is selected or not. All the scripts are stored in the Blogging subfolder of the Blogging package’s Scripts folder.</p>
+<p>Most of the following AppleScripts call—via the <code>do shell script</code> syntax—one of the two Python utility scripts above. You may well ask why I needed two languages to get the work done. Two reasons:</p>
+<ol>
+<li>Regular expressions seemed to be the natural way to find the existing reference links, and AppleScript doesn’t have regular expressions. Now it’s true that Daniel Jalkut made an <a href="https://redsweater.com/blog/3822/fastscripts-3-1-streamlined-regular-expressions">AppleScript regex dictionary</a> available (for free!) through his FastScripts utility, but that leads to the second reason…</li>
+<li>Which is that when dealing with text and slicing and dicing lists, I feel much more comfortable working in Python than in AppleScript. I’m happy to work in AppleScript for the cursor control, but I would <em>hate</em> using it for the work done in <code>nextreflink</code> and <code>getreflink</code>. Even though <code>getreflink</code> itself calls out to AppleScript.</li>
+</ol>
+<p>Overall, I found the friction that came with using two languages preferable to the friction I’d run into using AppleScript alone.</p>
+<p>With that said, let’s explore the AppleScripts themselves.</p>
+<h3>Clipboard Link</h3>
+<p>I’m starting with this one because it’s the simplest and probably the most obvious. Lots of people have made AppleScripts, Shortcuts, and Keyboard Maestro macros for making Markdown inline links starting with a URL on the clipboard. This script is one level of complexity up from that.</p>
+<p>If text is selected, this turns that text into a reference link to the URL on the clipboard. If no text is selected, it creates an empty reference link where the cursor was. In both cases, the new reference link with an incremented number is put at the bottom of the text and the cursor is moved to a convenient location. Here’s the code:</p>
+<pre><code>applescript:
+ 1:  -- Get the path to the Resources directory in the package.
+ 2:  tell application "Finder"
+ 3:    set cPath to container of container of container of (path to me) as text
+ 4:  end tell
+ 5:  set rPath to (POSIX path of cPath) &amp; "Resources/"
+ 6:  
+ 7:  set myURL to the clipboard
+ 8:  
+ 9:  tell application "BBEdit"
+10:    set oldClipboard to the clipboard
+11:    set the clipboard to contents of front document as text
+12:    set myRef to do shell script "pbpaste | " &amp; quoted form of (rPath &amp; "nextreflink")
+13:    set the clipboard to oldClipboard
+14:    
+15:    if length of selection is 0 then
+16:      -- Add link with empty text and set the cursor between the brackets.
+17:      set curPt to characterOffset of selection
+18:      select insertion point before character curPt of front document
+19:      set selection to "[][" &amp; myRef &amp; "]"
+20:      select insertion point after character curPt of front document
+21:      
+22:    else
+23:      -- Turn selected text into link and put cursor after the reference.
+24:      add prefix and suffix of selection prefix "[" suffix "]" &amp; "[" &amp; myRef &amp; "]"
+25:      select insertion point after last character of selection
+26:    end if
+27:    
+28:    -- Add the reference at the bottom of the document and reset cursor.
+29:    set savePt to selection
+30:    select insertion point after last character of front document
+31:    set selection to "[" &amp; myRef &amp; "]: " &amp; myURL &amp; return
+32:    select savePt
+33:    activate
+34:  end tell
+</code></pre>
+<p>Lines 2–5, which we’ll use in most of the scripts in this section, get the path to the Resources directory by using AppleScript’s clever <code>path to me</code> construction. The unfortunately long <code>container to container to container</code> bit comes from the folder hierarchy shown above. Our AppleScripts are in the Blogging subdirectory of the Scripts directory of the Blogging package, so we have to go up three levels before going down a level into the Resources directory. There’s also a conversion in Line 5 from AppleScript’s native colon-separated path format to Unix’s slash-separated path format.</p>
+<p>Line 7 just puts the URL on the clipboard into the variable <code>myURL</code>. This wasn’t necessary, but it creates a parallelism between this AppleScript and the others.</p>
+<p>The rest of the script manipulates BBEdit to make a reference link. Lines 10–13 pass the text of the front BBEdit document to the <code>getnextref</code> utility script via the clipboard and the <a href="https://leancrew.com/all-this/man/man1/pbpaste.html"><code>pbpaste</code></a> command. The reference number returned is stored in the <code>myRef</code> variable. Lines 10 and 13 are a common AppleScript construct used to save and restore the original clipboard contents.</p>
+<p>If no text is selected, Lines 17–20 insert an empty set of brackets followed by the bracketed reference number, e.g., <code>[][1]</code>, at the cursor. The cursor is then moved between the empty brackets so I can type in the link text.</p>
+<p>If text is selected, it’s taken to be the link text. Lines 24–25 surround the selected text with brackets, put the bracketed reference number after it, and put the cursor after the last bracket.</p>
+<p>The last step is to add the reference to the bottom of the document. Lines 29–32 save the current cursor position in <code>savePt</code>, jump to the end of the text, insert the reference in the form</p>
+<pre><code>[1]: https://myurl.com
+</code></pre>
+<p>and then move back to <code>savePt</code>. Because cursor positions are counted from the beginning of the document, adding text to the end doesn’t change the position <code>savePt</code> refers to.</p>
+<h3>Safari Front Link</h3>
+<p>This is the one I use most often. It’s at the top of the Blogging submenu and has been assigned the simplest keyboard shortcut: ⌃L.</p>
+<p>It works the same way as Clipboard Link, except it gets the URL from the frontmost Safari tab instead of the clipboard. You might well ask why I bother with Safari Front Link when I have Clipboard Link. I could, after all, select the URL in Safari, put it on the clipboard, and then run Clipboard Link. My answer is that I don’t want to perform those two extra steps when I don’t have to.</p>
+<p>Here’s the code:</p>
+<pre><code>applescript:
+ 1:  -- Get the path to the Resources directory in the package.
+ 2:  tell application "Finder"
+ 3:    set cPath to container of container of container of (path to me) as text
+ 4:  end tell
+ 5:  set rPath to (POSIX path of cPath) &amp; "Resources/"
+ 6:  
+ 7:  tell application "System Events"
+ 8:    set pNames to name of every process
+ 9:    if "Safari" is in pNames then
+10:      try
+11:        tell application "Safari" to set myURL to the URL of the front document
+12:      on error
+13:        do shell script "afplay /System/Library/Sounds/Funk.aiff"
+14:        return
+15:      end try
+16:    else
+17:      do shell script "afplay /System/Library/Sounds/Funk.aiff"
+18:      return
+19:    end if
+20:  end tell
+21:  
+22:  tell application "BBEdit"
+23:    set oldClipboard to the clipboard
+24:    set the clipboard to contents of front document as text
+25:    set myRef to do shell script "pbpaste | " &amp; quoted form of (rPath &amp; "nextreflink")
+26:    set the clipboard to oldClipboard
+27:    
+28:    if length of selection is 0 then
+29:      -- Add link with empty text and set the cursor between the brackets.
+30:      set curPt to characterOffset of selection
+31:      select insertion point before character curPt of front document
+32:      set selection to "[][" &amp; myRef &amp; "]"
+33:      select insertion point after character curPt of front document
+34:      
+35:    else
+36:      -- Turn selected text into link and put cursor after the reference.
+37:      add prefix and suffix of selection prefix "[" suffix "]" &amp; "[" &amp; myRef &amp; "]"
+38:      select insertion point after last character of selection
+39:    end if
+40:    
+41:    -- Add the reference at the bottom of the document and reset cursor.
+42:    set savePt to selection
+43:    select insertion point after last character of front document
+44:    set selection to "[" &amp; myRef &amp; "]: " &amp; myURL &amp; return
+45:    select savePt
+46:    activate
+47:  end tell
+</code></pre>
+<p>The only difference between this and Clipboard Link is Lines 7–28, which get the URL of Safari’s frontmost tab and save it to the variable <code>myURL</code>. Specifically, this is done in Line 11. The rest of this chunk of code is all about error handling. If Safari isn’t running—or if it doesn’t have a window, or if that window’s frontmost tab is empty—the script will play an error sound and stop.</p>
+<h3>Safari Choose Link</h3>
+<p>Sticking with the subject of getting links from Safari, let’s consider the situation in which I know I have a Safari tab open to the page I want to link to, but it’s not in the front tab. The Safari Choose Link script presents a list of all the tabs in Safari’s front window for me to choose from (I very rarely have more than one Safari window open). It looks like this:</p>
+<p><img alt="Safari Choose Link window" class="ss" src="https://leancrew.com/all-this/images2025/20251014-Safari%20Choose%20Link%20window.png" title="Safari Choose Link window" width="70%"/></p>
+<p>The pages are presented according to their titles. Initially, none of them are selected, but as soon as I select one—which I can do with the up and down cursor keys—the OK button will activate. From this point, the script acts just like Safari Front Window.</p>
+<p>Here’s the code:</p>
+<pre><code>applescript:
+ 1:  -- Get the path to the Resources directory in the package.
+ 2:  tell application "Finder"
+ 3:    set cPath to container of container of container of (path to me) as text
+ 4:  end tell
+ 5:  set rPath to (POSIX path of cPath) &amp; "Resources/"
+ 6:  
+ 7:  on shortened(s)
+ 8:    if length of s &gt; 40 then
+ 9:      set s to (characters 1 thru 35 of s as text) &amp; "…"
+10:    end if
+11:    return s
+12:  end shortened
+13:  
+14:  tell application "System Events"
+15:    set pNames to name of every process
+16:    if "Safari" is in pNames then
+17:      try
+18:        tell application "Safari"
+19:          -- Initialize
+20:          set tabNames to {}
+21:          set tabURLs to {}
+22:          
+23:          -- Collect the tab names and URLs from the top Safari window
+24:          set topWindow to window 1
+25:          set topTabs to every tab of topWindow
+26:          repeat with t in topTabs
+27:            set end of tabNames to my shortened(name of t)
+28:            set end of tabURLs to URL of t
+29:          end repeat
+30:        end tell
+31:        
+32:        -- Display a list of names for the user to choose from
+33:        activate
+34:        choose from list tabNames with title "Safari Tabs"
+35:        set nameChoice to item 1 of result
+36:        repeat with tabNumber from 1 to the count of tabNames
+37:          if item tabNumber of tabNames is nameChoice then
+38:            set myURL to item tabNumber of tabURLs
+39:            exit repeat
+40:          end if
+41:        end repeat
+42:      on error
+43:        do shell script "afplay /System/Library/Sounds/Funk.aiff"
+44:        tell application "BBEdit" to activate
+45:        return
+46:      end try
+47:    else
+48:      do shell script "afplay /System/Library/Sounds/Funk.aiff"
+49:      return
+50:    end if
+51:  end tell
+52:  
+53:  tell application "BBEdit"
+54:    set oldClipboard to the clipboard
+55:    set the clipboard to contents of front document as text
+56:    set myRef to do shell script "pbpaste | " &amp; quoted form of (rPath &amp; "nextreflink")
+57:    set the clipboard to oldClipboard
+58:    
+59:    if length of selection is 0 then
+60:      -- Add link with empty text and set the cursor between the brackets.
+61:      set curPt to characterOffset of selection
+62:      select insertion point before character curPt of front document
+63:      set selection to "[][" &amp; myRef &amp; "]"
+64:      select insertion point after character curPt of front document
+65:      
+66:    else
+67:      -- Turn selected text into link and put cursor after the reference.
+68:      add prefix and suffix of selection prefix "[" suffix "]" &amp; "[" &amp; myRef &amp; "]"
+69:      select insertion point after last character of selection
+70:    end if
+71:    
+72:    -- Add the reference at the bottom of the document and reset cursor.
+73:    set savePt to selection
+74:    select insertion point after last character of front document
+75:    set selection to "[" &amp; myRef &amp; "]: " &amp; myURL &amp; return
+76:    select savePt
+77:    activate
+78:  end tell
+</code></pre>
+<p>The new parts of this script start with the <code>shortened</code> function on Lines 7–12. It clips the given string; we’ll use this later to keep page titles at a manageable length in the Safari Tabs window.</p>
+<p>Lines 18–29 get the titles of the Safari tabs, shorten them if appropriate, and put them in the list form needed by <code>choose from list</code>. In parallel, it makes a list of all the associated URLs. These lists are called <code>tabNames</code> and <code>tabURLs</code>, respectively.</p>
+<p>Lines 34–41 then ask the user to choose from the list of titles and figure out the URL that goes with the chosen title. That’s put into the variable <code>myURL</code>.</p>
+<p>The rest of Lines 14–51 are error handling, and Lines 53–78 are the same cursor-handling code used in Clipboard Link and Safari Front Link.</p>
+<h3>All Safari Tab Links</h3>
+<p>Another Safari script? Yes, but this one is really short.</p>
+<p>Sometimes I know that every tab in Safari is going to be linked to in the post I’m writing. In that situation, why not just add links to all the tabs to the bottom of the document right now? I’ll then make links to them in the body of the text using the Old Link script, which we’ll cover next.</p>
+<p>Here’s the AppleScript for All Safari Tab Links:</p>
+<pre><code>applescript:
+ 1:  set n to 1
+ 2:  set refs to ""
+ 3:  tell application "Safari"
+ 4:    repeat with thisTab in (every tab of front window)
+ 5:      set refs to refs &amp; "[" &amp; n &amp; "]: " &amp; (URL of thisTab) &amp; linefeed
+ 6:      set n to n + 1
+ 7:    end repeat
+ 8:  end tell
+ 9:  
+10:  tell application "BBEdit"
+11:    set savePoint to selection
+12:    select insertion point after last character of front document
+13:    set selection to refs
+14:    select savePoint
+15:  end tell
+</code></pre>
+<p>I told you it was going to be short. Lines 1–8 build the reference link text one line at a time by looping through the tabs. When the loop is done, the variable <code>refs</code> contains text like this:</p>
+<pre><code>[1]: https://daringfireball.net/projects/markdown/syntax#link
+[2]: https://leancrew.com/all-this/2021/05/flowing-markdown-reference-links/
+[3]: https://leancrew.com/all-this/2012/08/markdown-reference-links-in-bbedit/
+[4]: https://leancrew.com/all-this/man/man1/pbpaste.html
+[5]: https://redsweater.com/blog/3822/fastscripts-3-1-streamlined-regular-expressions
+</code></pre>
+<p>Lines 10–15 then save the cursor location, jump to the bottom of the document, insert <code>refs</code>, and jump back to the saved location. That’s it. Because this script is intended to be run before I start writing, it can start the reference numbering at 1, and there’s no need to call <code>nextreflink</code>.</p>
+<h3>Old Link</h3>
+<p>Finally, here’s the script I run when a link is already in the list at the bottom of the file. Now, there’s nothing wrong with repeating links. Having, for example, a list like this at the bottom of a Markdown file,</p>
+<pre><code>[1]: https://daringfireball.net/projects/markdown/syntax#link
+[2]: https://leancrew.com/all-this/2021/05/flowing-markdown-reference-links/
+[3]: https://daringfireball.net/projects/markdown/syntax#link
+[4]: https://leancrew.com/all-this/2012/08/markdown-reference-links-in-bbedit/
+[5]: https://leancrew.com/all-this/man/man1/pbpaste.html
+[6]: https://daringfireball.net/projects/markdown/syntax#link
+[7]: https://redsweater.com/blog/3822/fastscripts-3-1-streamlined-regular-expressions
+</code></pre>
+<p>with the Daring Fireball URL associated with a handful of reference numbers, will produce the same HTML as a list of unique URLs. But I can’t imagine anyone <em>wanting</em> a list like that. To me, the Markdown should look as nice as the resulting HTML. If I have several links to the same URL, they should have the same reference number in the body of the text. Hence the Old Link script.</p>
+<pre><code>applescript:
+ 1:  -- Get the path to the Resources directory in the package.
+ 2:  tell application "Finder"
+ 3:    set cPath to container of container of container of (path to me) as text
+ 4:  end tell
+ 5:  set rPath to (POSIX path of cPath) &amp; "Resources/"
+ 6:  
+ 7:  tell application "BBEdit"
+ 8:    set oldClipboard to the clipboard
+ 9:    set the clipboard to contents of front document as text
+10:    set myRef to do shell script "pbpaste | " &amp; quoted form of (rPath &amp; "getreflink")
+11:    set the clipboard to oldClipboard
+12:    
+13:    if myRef is not "" then
+14:      if length of selection is 0 then
+15:        -- Add link with empty text and set the cursor between the brackets.
+16:        set curPt to characterOffset of selection
+17:        select insertion point before character curPt of front document
+18:        set selection to "[][" &amp; myRef &amp; "]"
+19:        select insertion point after character curPt of front document
+20:        
+21:      else
+22:        -- Turn selected text into link and put cursor after the reference.
+23:        add prefix and suffix of selection prefix "[" suffix "]" &amp; "[" &amp; myRef &amp; "]"
+24:        select insertion point after last character of selection
+25:      end if
+26:    end if
+27:    activate
+28:    
+29:  end tell
+</code></pre>
+<p>Lines 2–5 are the same as most of the other scripts. Lines 8–11 are similar to the other scripts, but Line 10 calls <code>getreflink</code> instead of <code>nextreflink</code>. That lets me choose the value of <code>myRef</code> from the list of URLs already being used. The remainder of the script is the same as Clipboard Link, Safari Front Link, and Safari Choose Link.</p>
+<h2>Final thoughts</h2>
+<p>I’m not providing a download link to my Blogging package. It contains a lot of other stuff that’s specific to ANIAT and my publishing system. And if you’re really interested in using any of these scripts, a little copying and pasting won’t do you any harm.</p>
+<p>Normally, BBEdit puts the scripts in alphabetical order in the menu, but you can get around that by prefixing the name of your script with a number followed by a closing parenthesis. BBEdit will then arrange the menu in numerical order according to the prefixes but won’t include the prefixes in the menu items. So my Scripts folder in the Blogging package has files with the names</p>
+<pre><code>00)Safari Front Link.scpt
+01)Old Link.scpt
+02)Clipboard Link.scpt
+04)Safari Choose Link.scpt
+05)All Safari Tab Links.scpt
+</code></pre>
+<p>among others.</p>
+<p>The order of the scripts in the menu reflects my sense of how often I use them, even though All Safari Tab Links is the only one I call from the menu instead of via a keyboard shortcut. It’s by far the least used, and there’s no need for a quick way to run it. All the keyboard shortcuts use ⌃L; the added modifier keys were chosen either at random or through a process I have no memory of.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:scripts">
+<p>It’s called the Scripts menu in BBEdit’s documentation, but it has the scroll icon in the menu bar. That’s a reference to the icon of Apple’s Script Editor app. <a href="#fnref:scripts" rev="footnote">↩</a></p>
+</li>
+<li id="fn:terminal">
+<p>Or iTerm2 or whatever terminal emulator you use. <a href="#fnref:terminal" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

@@ -1,0 +1,334 @@
+<pre class="example">
+###   #     ###   ###
+ #    #     #  #  #  #
+ #    #     #  #  #  #
+ #    #     #  #  ###
+ #    #     #  #  # #
+ #    ####  ###   #  #
+</pre>
+
+<ol class="org-ol">
+<li>After you see list of loading kernel modules by the <code>loader</code>, press
+any letter key to go to the <code>loader</code>'s console.</li>
+<li>List ZFS Boot Environments with <code>lszfs zroot/ROOT</code>.</li>
+<li>Reboot</li>
+<li>Right after the BIOS is finished loading, press any letter key to
+go to the <code>boot2</code> loader console.</li>
+<li><p>
+Enter the command
+</p>
+<pre class="example">
+set_bootenv zfs:zroot/ROOT/name-of-selected-be-from-item-2:/boot/zfsloader
+</pre></li>
+<li>Done! Your system should successfully load to the selected BE with
+corresponding Stage3 bootloader and the kernel.</li>
+<li><p>
+Mount the boot environment with broken system (if necessary):
+</p>
+<pre class="example">
+doas zfs set mountpoint=/mnt zroot/ROOT/default
+doas zfs mount zroot/ROOT/default
+</pre></li>
+<li>Make necessary changes.</li>
+<li><p>
+Umount BE:
+</p>
+<pre class="example">
+doas zfs umount zroot/ROOT/default
+doas zfs set mountpoint=/ zroot/ROOT/default
+</pre></li>
+</ol>
+
+<hr />
+
+<p>
+Yesterday I tried to update my FreeBSD 14.2 to 14.3. Almost all worked
+as intented. Except one thing — bootloader.
+</p>
+
+<p>
+My laptop has a sophisticated hardware and software inside it. First,
+there is no "default" display — it was disconnected and the 2K panel
+was connected to the AGAN X230 2K extension board, soldered to the
+motherboard.
+</p>
+
+<p>
+Second, there is no BIOS — I use a Libreboot instead of it (default
+BIOS can't use 2K display connected via extension board to the
+system). One specific version of Libreboot — with libgfxinit and with
+SeaBIOS as a main payload.
+</p>
+
+<p>
+So, I use the "old school" MBR bootloader which should be loaded in
+the graphics mode. Without graphics mode I can't see any output on the
+display while <code>drm-kmod</code> is not loaded:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/freebsd_n_corebootfb.jpg" alt="Thin blue line instead of FreeBSD installer" align="center" width="90%" />
+</p>
+<p class="fignum"><i>Unsuccessfull attempt to load FreeBSD installer not from graphics mode</i></p>
+</div>
+
+<p>
+After 14.2-RELEASE, Netflix pushed one <i>small</i> change to the
+bootloader's code — it removed support of graphics mode from
+bootloader and adds back support of gzip and bzip2:
+</p>
+<ul class="org-ul">
+<li><a href="https://www.freebsd.org/releases/14.2R/relnotes/#:~:text=removed%20support%20for%20graphics%20mode">Release note about boot loader changes</a></li>
+<li><a href="https://cgit.freebsd.org/src/commit/?id=4d3b05a8530e">Commit 4d3b05a8530e42f7494dd3fbab8d017adb433b14</a></li>
+</ul>
+
+<p>
+Results? I can't see lines issued by kernel during boot. After
+<code>drm-kmod</code> is loaded it performs mode switch and lines issued by <code>init</code>
+and starting daemons become visible.
+</p>
+
+<hr />
+
+<p>
+After update from 14.1 to 14.2 I manually recompiled bootloader
+without mentioned commit and used it in graphics mode without any
+problems.
+</p>
+
+<p>
+But after update from 14.2 things started to be very bad. Because new
+<code>drm-kmod</code> for the new kernel lies in the separate <code>FreeBSD-kmods</code>
+repository and wasn't updated right after the first <code>doas
+freebsd-update install</code> — the system can't load old, not updated
+<code>drm-kmod</code> with the new kernel. So it will load in the text mode.
+</p>
+
+<p>
+Because of previously described issues with Libreboot, 2K display and
+bootloader — the result is terrible. The bootloader loads in the <i>text
+mode</i> so I can't see kernel messages during the boot. The console stays
+in the <i>text mode</i>, so I can't see any messages from <code>init</code> and daemon and
+login prompt in the console. The X server won't load because there are
+not proper drivers.
+</p>
+
+<p>
+So, after running:
+</p>
+
+<pre class="example">
+doas freebsd-update -r 14.3-RELEASE upgrade
+doas freebsd-update install
+doas reboot
+</pre>
+
+<p>
+I receive a completely unusable system — I can't login neither through
+graphical interface, nor through console login prompt. Sadly, I forgot
+to enable SSH daemon, so my system became completely locked and
+unusable.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-loaded-system-in-text-mode.jpg" alt="The black screen with white lines from FreeBSD loader output. There are white glitched dots on the top of the screen." align="center" width="90%" />
+</p>
+<p class="fignum"><i>This is how completely loaded system looks like</i></p>
+</div>
+
+<p>
+See the white glitches on the top of the screen? There are boot
+messages and login prompt in text mode.
+</p>
+
+<hr />
+
+<p>
+Thankfully, I hear something about <a href="https://vermaden.wordpress.com/2022/03/14/zfs-boot-environments-revolutions/">ZFS Boot Environments</a> from
+<a href="https://mastodon.bsd.cafe/@vermaden">vermaden</a>!
+</p>
+
+<p>
+I know that before each update the FreeBSD creates new boot
+environment for existing system in case if something will broke (like
+in my case, lol).
+</p>
+
+<p>
+In the mentioned post the <code>beadm</code> and <code>bectl</code> utilities were mentioned.
+But I can't even login to the system, so I can't use these utilities.
+All that I can use — <code>boot2</code> bootloader<sup><a id="fnr.boot2" class="footref" href="#fn.boot2" role="doc-backlink">1</a></sup> console and the stage
+three <code>loader</code><sup><a id="fnr.loader" class="footref" href="#fn.loader" role="doc-backlink">2</a></sup> console.
+</p>
+
+<p>
+I started to ditch in the <code>loader</code> commands to understand what I can do.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-loader-console.jpg" alt="Loader console. There are lines with list of loaded kernel modules on the top." align="center" width="90%" />
+</p>
+</div>
+
+<p>
+Fast enough, I found that I can see the list of my hard drives with
+the <code>lsdev</code> command:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-loader-lsdev.jpg" alt="Output of lsdev command. There are three disks and the ZFS device &quot;zfs:zroot&quot;" align="center" width="90%" />
+</p>
+</div>
+
+<p>
+Also, there was a "ZFS device". I tried to use <code>lszfs</code> command to see,
+are there any ZFS Boot Environments which I can access and use. After
+some tinkering with this command I received this output:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-loader-lszfs.jpg" alt="Output of lszfs command." align="center" width="90%" />
+</p>
+</div>
+
+<p>
+So, looks like I have these Boot Environments:
+</p>
+
+<pre class="example">
+default
+14.2-RELEASE-p2_2025-04-12_042735
+14.2-RELEASE-p3_2025-07-06_010308
+14.2-RELEASE-p4_2025-07-06_013541
+</pre>
+
+<p>
+Next, I issued the <code>show</code> command and saw next lines:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-loader-show1.jpg" alt="List of variables issued by command show" align="center" width="90%" />
+</p>
+<p class="fignum"><i>Lines to use ZFS Boot Environments from the loader's menu</i></p>
+</div>
+
+<p>
+Looks like I can enter the <code>set_bootenv</code> command and load to the "old"
+system with working bootloader and with proper <code>drm-kmod</code>. I immediately
+tried this command. And failed.
+</p>
+
+<p>
+Maybe, this command should be entered in the <code>boot2</code><sup><a id="fnr.boot2.1" class="footref" href="#fn.boot2" role="doc-backlink">1</a></sup> console? I
+rebooted, press any letter key right after the decrypting of my disks
+and fall into the desired console:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-boot2.jpg" alt="boot2 console" width="90%" />
+</p>
+<p class="fignum"><i>boot2 console</i></p>
+</div>
+
+<p>
+Fast enough I realized that <code>set_bootenv</code> command exists in Stage2
+loader, not in Stage3 loader. And after some time, the right command
+were found:
+</p>
+
+<pre class="example">
+set_bootenv zfs:zroot/ROOT/14.2-RELEASE-p3_2025-07-06_010308:/boot/zfsloader
+</pre>
+
+<p>
+I successfully loaded into working system with the proper bootloader,
+kernel and <code>drm-kmod</code> module. But, this is not an updated 14.3 system
+and the root FS doesn't belongs to the my main system with
+non-completed 14.2⇒14.3 update.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-zfs-list.png" alt="List of saved boot environments" align="center" width="90%" />
+</p>
+</div>
+
+<p>
+The <code>zroot/ROOT/14.2-RELEASE-p3_2025-07-06_010308</code> was mounted to the <code>/</code>,
+not the <code>zroot/ROOT/default</code>. I need to mount the <code>default</code> somewhere,
+enable <code>sshd</code> in <code>/etc/rc.conf</code> and reboot with <code>zroot/ROOT/default</code> to
+complete my update process.
+</p>
+
+<p>
+To mount <code>default</code> BE to the <code>/mnt</code> the next commands are necessary:
+</p>
+
+<pre class="example">
+doas zfs set mountpoint=/mnt zroot/ROOT/default
+doas zfs mount zroot/ROOT/default
+</pre>
+
+<p>
+After, I simply edit <code>/mnt/etc/rc.conf</code> and umount dataset with the next
+commands:
+</p>
+
+<pre class="example">
+doas zfs umount zroot/ROOT/default
+doas zfs set mountpoint=/ zroot/ROOT/default
+</pre>
+
+<p>
+Then reboot. There is still no proper graphical output on the display.
+But now I can connect to my laptop via ssh and continue the FreeBSD
+update process:
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/2025-07-06-ssh-to-freebsd.jpg" alt="EAT console in the Emacs, with the SSH session to the my laptop" align="center" width="90%" />
+</p>
+<p class="fignum"><i>Connection to the laptop through the ssh</i></p>
+</div>
+
+<p>
+After update is successfully completed, I simply enable <code>FreeBSD-kmods</code>
+repository and install the proper <code>drm-kmod</code> from it. For now, I'm able
+to see output during <code>init</code> and daemon initialization and the GUI is
+working again.
+</p>
+
+<p>
+There are still no any visible output during kernel load but I'll fix
+it in future…
+</p>
+
+<hr />
+<div class="outline-2">
+<h2>Notes</h2>
+<div class="outline-text-2">
+</div>
+</div>
+<div id="footnotes">
+
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.boot2" class="footnum" href="#fnr.boot2" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://docs.freebsd.org/en/books/handbook/boot/#boot-boot1">https://docs.freebsd.org/en/books/handbook/boot/#boot-boot1</a>
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.loader" class="footnum" href="#fnr.loader" role="doc-backlink">2</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://docs.freebsd.org/en/books/handbook/boot/#boot-loader">https://docs.freebsd.org/en/books/handbook/boot/#boot-loader</a>
+</p></div></div>
+
+
+</div>
+</div>

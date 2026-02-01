@@ -1,0 +1,334 @@
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743686653403.png" alt="Video Processor."><p class="image-caption">Video Processor.</p></div>
+<p id="p2">I&rsquo;ve been experimenting with different automations and command line utilities to handle audio and video transcripts lately. In particular, I&rsquo;ve been working with <a href="https://github.com/simonw/llm" rel="noopener noreferrer">Simon Willison&rsquo;s LLM command line utility</a> as a way to interact with cloud-based large language models (primarily Claude and Gemini) directly from the macOS terminal.</p>
+<p id="p3">For those unfamiliar, Willison&rsquo;s LLM CLI tool is a command line utility that lets you communicate with services like ChatGPT, Gemini, and Claude using shell commands and dedicated <a href="https://llm.datasette.io/en/stable/plugins/directory.html" rel="noopener noreferrer">plugins</a>. The <code>llm</code> command is extremely flexible when it comes to input and output; it supports multiple modalities like audio and video attachments for certain models, and it offers custom <a href="https://llm.datasette.io/en/stable/schemas.html" rel="noopener noreferrer">schemas</a> to return structured output from an API. Even for someone like me &ndash; not exactly a Terminal power user &ndash; the different <code>llm</code> commands and options are easy to understand and tweak.</p>
+<p id="p4">Today, I want to share a shortcut I created on my Mac that takes long transcripts of YouTube videos and:</p>
+<ol id="ol5"><li>reformats them for clarity with proper paragraphs and punctuation, without altering the original text,</li>
+<li>extracts key points and highlights from the transcript, and</li>
+<li>organizes highlights by theme or idea.</li>
+</ol><p id="p6">I created this shortcut because I wanted a better system for linking to YouTube videos, along with interesting passages from them, on MacStories. Initially, I thought I could use an app I recently mentioned on AppStories and Connected to handle this sort of task: <a href="https://apps.apple.com/us/app/ai-actions-for-shortcuts/id6465250302" rel="noopener noreferrer">AI Actions</a> by Sindre Sorhus. However, when I started experimenting with long transcripts (such as this one with 8,000 words <a href="https://www.youtube.com/watch?v=WdmfFmwsGDo" rel="noopener noreferrer">from Theo about Electron</a>), I immediately ran into limitations with native Shortcuts actions. Those actions were running out of memory and randomly stopping the shortcut.</p>
+<p id="p7">I figured that invoking a shell script using macOS&rsquo; built-in &lsquo;Run Shell Script&rsquo; action would be more reliable. Typically, Apple&rsquo;s built-in system actions (especially on macOS) aren&rsquo;t bound to the same memory constraints as third-party ones. My early tests indicated that I was right, which is why I decided to build the shortcut around Willison&rsquo;s <code>llm</code> tool.</p>
+<p id="p8"><!--more--></p>
+<aside class="aside aligncenter aside-wide" id="aside9"><h3 class="pre-title" id="exclusive-membership">Exclusive Membership</h3>
+<h2 id="elevate-your-apple-experience-with-club-macstories">Elevate Your Apple Experience with Club MacStories</h2>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/tuesday-25-feb-2025-18-03-14-1740502999590.png" alt=""></div>
+<p>Since 2015, thousands of iPhone, iPad, and Mac users have joined <a href="https://club.macstories.net/plans" rel="noopener noreferrer noopener noreferrer">our membership program</a> to get more from MacStories &ndash; and more from their devices. Go beyond our free content with exclusive stories, powerful automations, and in-depth coverage you won&rsquo;t find anywhere else.</p>
+<p><strong>Choose the tier that&rsquo;s right for you:</strong></p>
+<ul><li><strong>Club MacStories</strong>&nbsp;(<a href="https://macstories.memberful.com/checkout?plan=7189" rel="noopener noreferrer noopener noreferrer">$5/month</a> or <a href="https://macstories.memberful.com/checkout?plan=7878" rel="noopener noreferrer noopener noreferrer">$50/year</a>) &mdash; Weekly newsletters packed with app recommendations, shortcuts, tips, and members-only content you won&rsquo;t find in our free articles</li>
+<li><strong>Club MacStories+</strong>&nbsp;(<a href="https://macstories.memberful.com/checkout?plan=67249" rel="noopener noreferrer noopener noreferrer">$10/month</a> or <a href="https://macstories.memberful.com/checkout?plan=67250" rel="noopener noreferrer noopener noreferrer">$100/year</a>) &mdash; Everything in Club MacStories plus Federico&rsquo;s Automation Academy, John&rsquo;s Mac Hacks, Discord community access, and our searchable content archive</li>
+<li><strong>Club Premier</strong>&nbsp;(<a href="https://macstories.memberful.com/checkout?plan=67251" rel="noopener noreferrer noopener noreferrer">$12/month</a> or <a href="https://macstories.memberful.com/checkout?plan=67252" rel="noopener noreferrer noopener noreferrer">$120/year</a>) &mdash; Our most complete experience with all Club MacStories+ benefits plus ad-free, early access to the AppStories+ podcast</li>
+</ul><p>Join the thousands of members who rely on Club MacStories to discover the best apps, master powerful shortcuts, and get more from their Apple devices on a weekly basis.</p>
+
+<p></p><center><strong><em><a href="https://club.macstories.net/plans" rel="noopener noreferrer noopener noreferrer">Learn More About Our Plans</a></em></strong></center><br></aside><h2 id="setting-up-the-llm-command-line-tool">Setting Up the LLM Command Line Tool</h2>
+<p id="p10">If you&rsquo;re using macOS and want to use the LLM command line tool, you first need to install it. There are several ways to do this (detailed in the utility&rsquo;s <a href="https://llm.datasette.io/en/stable/" rel="noopener noreferrer">extensive documentation</a>), but the easiest approach for me was using <a href="https://brew.sh/" rel="noopener noreferrer">Homebrew</a>. I&rsquo;ll spare you the details of getting Homebrew up and running on your Mac, but there are plenty of <a href="https://mac.install.guide/homebrew/3" rel="noopener noreferrer">guides</a> available if you need guidance and tips.</p>
+<p id="p11">Once you have LLM set up, you need to install some of Willison&rsquo;s plugins that enable the tool to communicate with popular cloud-hosted large language models. I wanted to experiment with both Anthropic&rsquo;s Claude and Google Gemini. Here&rsquo;s how I did it:</p>
+<ol id="ol12"><li>First, I installed the <code>llm-anthropic</code> <a href="https://github.com/simonw/llm-anthropic" rel="noopener noreferrer">plugin</a>.</li>
+<li>After installing it, I ran the command to provide my own <a href="https://docs.anthropic.com/en/api/getting-started" rel="noopener noreferrer">Anthropic API key</a>: <code>llm keys set anthropic</code>.</li>
+<li>Then, I installed the <code>llm-gemini</code> <a href="https://github.com/simonw/llm-gemini" rel="noopener noreferrer">plugin</a>.</li>
+<li>I set my <a href="https://ai.google.dev/gemini-api/docs/api-key" rel="noopener noreferrer">API key for Gemini</a> using a similar command: <code>llm keys set gemini</code>.</li>
+</ol><p id="p13">At this point, I had everything I needed to process large chunks of text &ndash; specifically, long transcripts of YouTube videos. Those transcripts were generated by another shortcut I created, which I will share in Issue 460 of MacStories Weekly <a href="https://club.macstories.net/plans" rel="noopener noreferrer">later this week</a>.</p>
+<h2 id="creating-the-video-processor-shortcut">Creating the Video Processor Shortcut</h2>
+<p id="p14">With this automation, I primarily wanted to make YouTube transcripts look nicer. The system I have returns them as giant text files with no formatting applied, and that&rsquo;s no way to live.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743697888929.png" alt="The raw transcript."><p class="image-caption">The raw transcript.</p></div>
+<p id="p16">Second, I wanted the ability to identify core themes of a video and extract interesting passages of text about them. Usually, when I want to link to a video on MacStories, I already know which specific quotes I want to pull out and embed on the site, but if I can have an automated system that intelligently pulls out a few more in a structured fashion, that&rsquo;s even better.</p>
+<p id="p17">This felt like the sort of task that would let me take advantage of LLMs&rsquo; text parsing and summarization abilities. The shortcut I created, called <strong>Video Processor</strong>, begins by taking the text of the entire transcript shared by another shortcut as input. After saving this input to a variable, the shortcut executes an advanced prompt I put together to instruct the LLM to:</p>
+<ul id="ul18"><li>never modify the original transcript text, except for removing verbal tics;</li>
+<li>reformat it for punctuation, clarity, and better flow with multiple paragraphs;</li>
+<li>identify key themes in the video; and</li>
+<li>extract interesting quotes.</li>
+</ul><p id="p19">The most important part of my prompt contains explicit instructions for the LLM to never touch the original words, never make modifications to the content, and never rephrase the transcript in a way the model thinks makes more sense. LLMs have a tendency to reword text, and I didn&rsquo;t want any of that; I just wanted the original text with better formatting and no &ldquo;uhms&rdquo; or other common verbal ticks.</p>
+<p id="p20">Here&rsquo;s the prompt I&rsquo;ve been using:</p>
+<pre id="pre21"><code><span class="code-line"># Video Transcript Processing
+</span><span class="code-line">
+</span><span class="code-line">You are an expert at processing raw video transcripts. Your job is to format transcripts properly and extract key quotes while preserving the original wording exactly. You will output your results in Markdown format.
+</span><span class="code-line">
+</span><span class="code-line">## Context
+</span><span class="code-line">
+</span><span class="code-line">I'll provide you with an unformatted transcript from a video (likely from automatic speech recognition). This transcript will not have proper punctuation or paragraph breaks.
+</span><span class="code-line">
+</span><span class="code-line">## Critical Rules
+</span><span class="code-line">
+</span><span class="code-line">- **NEVER include any introduction, preamble or explanation** before your output. Start directly with the formatted transcript.
+</span><span class="code-line">- **NEVER change, rephrase, or alter the meaningful words from the original transcript**. The substantive wording must be preserved.
+</span><span class="code-line">- You may (and should) remove filler sounds and verbal tics like "um", "uh", "uhm", "huh", "like", "you know", etc.
+</span><span class="code-line">- You may add punctuation, paragraph breaks, and basic formatting.
+</span><span class="code-line">- For unclear phrases, preserve them exactly as they appear in the original.
+</span><span class="code-line">- Any hesitations should be indicated with ellipses (...) rather than transcribed literally.
+</span><span class="code-line">- Preserve all original slang, informal language, and profanity.
+</span><span class="code-line">
+</span><span class="code-line">## Task 1: Format the Transcript
+</span><span class="code-line">
+</span><span class="code-line">Create a formatted version of the transcript with:
+</span><span class="code-line">- Proper sentence capitalization and punctuation (periods, commas, question marks, etc.)
+</span><span class="code-line">- Paragraph breaks where the speaker changes topics
+</span><span class="code-line">- Basic formatting like section headers if clearly indicated
+</span><span class="code-line">- Remove verbal tics and filler sounds
+</span><span class="code-line">
+</span><span class="code-line">**DO NOT:**
+</span><span class="code-line">- Add, remove, or change any substantive words that aren't fillers
+</span><span class="code-line">- "Clean up" or correct grammar
+</span><span class="code-line">- Summarize or condense content
+</span><span class="code-line">- Add interpretations or explanations
+</span><span class="code-line">- Add any kind of introductory text or explanation before the formatted transcript
+</span><span class="code-line">
+</span><span class="code-line">## Task 2: Extract Key Quotes
+</span><span class="code-line">
+</span><span class="code-line">Extract 15-25 significant quotes that represent:
+</span><span class="code-line">- Main arguments or points
+</span><span class="code-line">- Memorable phrasing or statements
+</span><span class="code-line">- Important examples or evidence
+</span><span class="code-line">- Controversial or noteworthy claims
+</span><span class="code-line">
+</span><span class="code-line">Organize these quotes into 5-8 thematic categories based on the content. Each quote must be:
+</span><span class="code-line">- Verbatim from the transcript (except for removed verbal tics)
+</span><span class="code-line">- Include enough context to stand alone
+</span><span class="code-line">- Direct and impactful
+</span><span class="code-line">
+</span><span class="code-line">## Output Format
+</span><span class="code-line">
+</span><span class="code-line">Structure your response in Markdown format as follows, starting DIRECTLY with the ## heading, with NO introduction:
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">[Insert the full formatted transcript here]
+</span><span class="code-line">
+</span><span class="code-line">## Key Quotes from         
+</span><span class="code-line">            
+</span><span class="code-line">        
+</span><span class="code-line">
+</span><span class="code-line">### [Theme 1]
+</span><span class="code-line">&gt; "Quote 1 text here..."
+</span><span class="code-line">&gt; 
+</span><span class="code-line">&gt; "Quote 2 text here..."
+</span><span class="code-line">
+</span><span class="code-line">### [Theme 2]
+</span><span class="code-line">&gt; "Quote 3 text here..."
+</span><span class="code-line">&gt; 
+</span><span class="code-line">&gt; "Quote 4 text here..."
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">## Examples
+</span><span class="code-line">
+</span><span class="code-line">### Correct Example (DO THIS)
+</span><span class="code-line">If given: "so today um im going to talk about uh climate change its a really big problem that we need to uhm address quickly because the earth is warming"
+</span><span class="code-line">
+</span><span class="code-line">**Correctly Formatted Output (starts directly with heading):**
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">So today I'm going to talk about climate change. It's a really big problem that we need to address quickly because the Earth is warming.
+</span><span class="code-line">
+</span><span class="code-line">## Key Quotes from Climate Discussion
+</span><span class="code-line">
+</span><span class="code-line">### Urgency
+</span><span class="code-line">&gt; "It's a really big problem that we need to address quickly because the Earth is warming."
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">### Incorrect Example (NEVER DO THIS)
+</span><span class="code-line">**WRONG - Adding an introduction:**
+</span><span class="code-line">
+</span><span class="code-line">Okay, here is the processed transcript and key quotes based on your instructions.
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">So today I'm going to talk about climate change. It's a really big problem that we need to address quickly because the Earth is warming.
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">**WRONG - Changing meaningful words:**
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">Today I will discuss climate change. This significant issue requires immediate attention due to global warming concerns.
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">## Final Reminder
+</span><span class="code-line">
+</span><span class="code-line">1. Start DIRECTLY with the "## Formatted Transcript" heading - no introduction text
+</span><span class="code-line">2. Make the transcript readable by adding punctuation and removing verbal tics
+</span><span class="code-line">3. Never change the substantive meaning or content of what was said
+</span><span class="code-line">4. Extract quotes exactly as they were spoken (minus the verbal tics)
+</span></code></pre>
+<p id="p22">And here&rsquo;s a version of the same prompt, optimized for <a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags" rel="noopener noreferrer">Claude&rsquo;s understanding of XML tags</a> in long, structured prompts:</p>
+<pre id="pre23"><code><span class="code-line">&lt;role&gt;
+</span><span class="code-line">You are an expert at processing raw video transcripts. Your job is to format transcripts properly and extract key quotes while preserving the original wording exactly. You will output your results in Markdown format.
+</span><span class="code-line">&lt;/role&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;context&gt;
+</span><span class="code-line">I'll provide you with an unformatted transcript from a video (likely from automatic speech recognition). This transcript will not have proper punctuation or paragraph breaks.
+</span><span class="code-line">&lt;/context&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;critical_rules&gt;
+</span><span class="code-line">- **NEVER include any introduction, preamble or explanation** before your output. Start directly with the formatted transcript.
+</span><span class="code-line">- **NEVER change, rephrase, or alter the meaningful words from the original transcript**. The substantive wording must be preserved.
+</span><span class="code-line">- You may (and should) remove filler sounds and verbal tics like "um", "uh", "uhm", "huh", "like", "you know", etc.
+</span><span class="code-line">- You may add punctuation, paragraph breaks, and basic formatting.
+</span><span class="code-line">- For unclear phrases, preserve them exactly as they appear in the original.
+</span><span class="code-line">- Any hesitations should be indicated with ellipses (...) rather than transcribed literally.
+</span><span class="code-line">- Preserve all original slang, informal language, and profanity.
+</span><span class="code-line">&lt;/critical_rules&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;task_1&gt;
+</span><span class="code-line">&lt;instructions&gt;
+</span><span class="code-line">Create a formatted version of the transcript with:
+</span><span class="code-line">- Proper sentence capitalization and punctuation (periods, commas, question marks, etc.)
+</span><span class="code-line">- Paragraph breaks where the speaker changes topics
+</span><span class="code-line">- Basic formatting like section headers if clearly indicated
+</span><span class="code-line">- Remove verbal tics and filler sounds
+</span><span class="code-line">
+</span><span class="code-line">**DO NOT:**
+</span><span class="code-line">- Add, remove, or change any substantive words that aren't fillers
+</span><span class="code-line">- "Clean up" or correct grammar
+</span><span class="code-line">- Summarize or condense content
+</span><span class="code-line">- Add interpretations or explanations
+</span><span class="code-line">- Add any kind of introductory text or explanation before the formatted transcript
+</span><span class="code-line">&lt;/instructions&gt;
+</span><span class="code-line">&lt;/task_1&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;task_2&gt;
+</span><span class="code-line">&lt;instructions&gt;
+</span><span class="code-line">Extract 15-25 significant quotes that represent:
+</span><span class="code-line">- Main arguments or points
+</span><span class="code-line">- Memorable phrasing or statements
+</span><span class="code-line">- Important examples or evidence
+</span><span class="code-line">- Controversial or noteworthy claims
+</span><span class="code-line">
+</span><span class="code-line">Organize these quotes into 5-8 thematic categories based on the content. Each quote must be:
+</span><span class="code-line">- Verbatim from the transcript (except for removed verbal tics)
+</span><span class="code-line">- Include enough context to stand alone
+</span><span class="code-line">- Direct and impactful
+</span><span class="code-line">&lt;/instructions&gt;
+</span><span class="code-line">&lt;/task_2&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;output_format&gt;
+</span><span class="code-line">Structure your response in Markdown format as follows, starting DIRECTLY with the ## heading, with NO introduction:
+</span><span class="code-line">
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">[Insert the full formatted transcript here]
+</span><span class="code-line">
+</span><span class="code-line">## Key Quotes from         
+</span><span class="code-line">            
+</span><span class="code-line">        
+</span><span class="code-line">
+</span><span class="code-line">### [Theme 1]
+</span><span class="code-line">&gt; "Quote 1 text here..."
+</span><span class="code-line">&gt; 
+</span><span class="code-line">&gt; "Quote 2 text here..."
+</span><span class="code-line">
+</span><span class="code-line">### [Theme 2]
+</span><span class="code-line">&gt; "Quote 3 text here..."
+</span><span class="code-line">&gt; 
+</span><span class="code-line">&gt; "Quote 4 text here..."
+</span><span class="code-line">
+</span><span class="code-line">&lt;/output_format&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;examples&gt;
+</span><span class="code-line">&lt;correct_example&gt;
+</span><span class="code-line">If given: "so today um im going to talk about uh climate change its a really big problem that we need to uhm address quickly because the earth is warming"
+</span><span class="code-line">
+</span><span class="code-line">**Correctly Formatted Output (starts directly with heading):**
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">So today I'm going to talk about climate change. It's a really big problem that we need to address quickly because the Earth is warming.
+</span><span class="code-line">
+</span><span class="code-line">## Key Quotes from Climate Discussion
+</span><span class="code-line">
+</span><span class="code-line">### Urgency
+</span><span class="code-line">&gt; "It's a really big problem that we need to address quickly because the Earth is warming."
+</span><span class="code-line">
+</span><span class="code-line">&lt;/correct_example&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;incorrect_example&gt;
+</span><span class="code-line">**WRONG - Adding an introduction:**
+</span><span class="code-line">
+</span><span class="code-line">Okay, here is the processed transcript and key quotes based on your instructions.
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">So today I'm going to talk about climate change. It's a really big problem that we need to address quickly because the Earth is warming.
+</span><span class="code-line">
+</span><span class="code-line">**WRONG - Changing meaningful words:**
+</span><span class="code-line">
+</span><span class="code-line">## Formatted Transcript
+</span><span class="code-line">
+</span><span class="code-line">Today I will discuss climate change. This significant issue requires immediate attention due to global warming concerns.
+</span><span class="code-line">
+</span><span class="code-line">&lt;/incorrect_example&gt;
+</span><span class="code-line">&lt;/examples&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;reminder&gt;
+</span><span class="code-line">1. Start DIRECTLY with the "## Formatted Transcript" heading - no introduction text
+</span><span class="code-line">2. Make the transcript readable by adding punctuation and removing verbal tics
+</span><span class="code-line">3. Never change the substantive meaning or content of what was said
+</span><span class="code-line">4. Extract quotes exactly as they were spoken (minus the verbal tics)
+</span><span class="code-line">&lt;/reminder&gt;
+</span></code></pre>
+<p id="p24">I&rsquo;ve been using the first prompt<sup id="fnref-78216-metaPrompt"><a href="#fn-78216-metaPrompt" class="jetpack-footnote" rel="noopener noreferrer">1</a></sup> with <a href="https://blog.google/technology/google-deepmind/gemini-model-thinking-updates-march-2025/" rel="noopener noreferrer">Gemini 2.5 Pro</a> and the second one with <a href="https://www.anthropic.com/news/visible-extended-thinking" rel="noopener noreferrer">Claude 3.7 Sonnet with extended thinking</a>. (More on this below.) In my experience, Claude has been the best at following detailed instructions without deviating from directions. However, the <a href="https://artificialanalysis.ai/models/claude-3-7-sonnet/providers#pricing" rel="noopener noreferrer">costs</a> of the Anthropic API can be prohibitive, and the fact that Gemini 2.5 Pro can be used for free while in its experimental phase is a <em>huge</em> advantage for Google&rsquo;s model right now.</p>
+<h2 id="combining-the-prompt-with-the-transcript">Combining the Prompt with the Transcript</h2>
+<p id="p25">Once I had my giant prompt, I needed to combine it with the actual YouTube video transcript. In Shortcuts, I created separate &lsquo;Text&rsquo; actions &ndash; one for the full transcript, one for the prompt &ndash; and combined both into another &lsquo;Text&rsquo; action, producing a new variable.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743698142924.png" alt="The combined instructions in Shortcuts."><p class="image-caption">The combined instructions in Shortcuts.</p></div>
+<p id="p27">After that, it was time to invoke the <code>llm</code> command line tool from Shortcuts. The first challenge was figuring out how to invoke the LLM command line tool installed via Homebrew from Shortcuts. After running into several errors, I realized I had to manually find the full path to the LLM command by opening Terminal and typing <code>which llm</code>. This gave me the complete path that I could paste into the &lsquo;Run Shell Script&rsquo; action, which for me was <code>/opt/homebrew/bin/llm</code>.</p>
+<p id="p28">Next, I specified the model I wanted to use by adding <code>-m</code> followed by the model name. In my case, using Google Gemini 2.5 Pro and Claude 3.7 Sonnet, the model names were:</p>
+<ul id="ul29"><li><code>gemini-2.5-pro-exp-03-25</code></li>
+<li><code>claude-3.7-sonnet</code></li>
+</ul><p id="p30"><a href="https://bsky.app/profile/viticci.macstories.net/post/3llpbedpvcc2b" rel="noopener noreferrer">As I posted on Bluesky</a>, the key advantage for Google here is the incredibly large context window supported by Gemini 2.5 Pro. For instance, I was able to give 2.5 Pro my <em>entire</em> <a href="https://www.macstories.net/tag/ios-reviews/" rel="noopener noreferrer">archive of iOS reviews</a>, and the LLM allowed me to ask questions about specific features of different iOS versions while staying within its context window. That archive of iOS reviews is almost <strong>one million tokens</strong> in size. I knew that Gemini 2.5 Pro would work well with large blocks of text, so I decided to primarily use it for this YouTube transcript experiment.</p>
+<h2 id="passing-input-to-the-shell-script">Passing Input to the Shell Script</h2>
+<p id="p31">The next issue was figuring out how to pass the input variable (containing my prompt and the video transcript) to the &lsquo;Run Shell Script&rsquo; action. After some back and forth, I realized I could use the <code>cat</code> command to pipe the input of the previous action to the command itself.</p>
+<p id="p32">After some more trial and error, I got the command working. The shell action reads an input variable from <code>stdin</code>, and it prints a <code>result</code> variable as text output for the next action. When I ran the shortcut, not only did the Shortcuts app never time out or give me an error (confirming my assumption that the &lsquo;Run Shell Script&rsquo; action wouldn&rsquo;t run out of memory), but it also successfully returned the properly formatted transcript and interesting quotes in a Markdown document.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743699099607.png" alt="Passing a video transcript file to Video Processor with Quick Actions on macOS."><p class="image-caption">Passing a video transcript file to Video Processor with Quick Actions on macOS.</p></div>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743700356227.png" alt="If you want, you can also manually paste the entire transcript of a video inside the first 'Text' action."><p class="image-caption">If you want, you can also manually paste the entire transcript of a video inside the first &lsquo;Text&rsquo; action.</p></div>
+<h2 id="issues-with-the-gemini-2-5-pro-api">Issues with the Gemini 2.5 Pro API</h2>
+<p id="p35">While the Gemini version of the script was successful, the experimental nature of the model meant that I frequently ran into API rate limits or errors stating, &ldquo;<em>The model is overloaded. Please try again later.</em>&rdquo; Furthermore, the variance in model performance was very high. Sometimes, processing the same transcript took three minutes compared to Claude&rsquo;s five minutes; other times, it took one minute longer than Claude, or the process stopped halfway through.</p>
+<p id="p36">In an ideal scenario &ndash; despite Claude&rsquo;s superior stylistic performance for capitalizing certain names &ndash; I would use Gemini 2.5 Pro given its large context window, but it hasn&rsquo;t exactly been stable over the past few days. I hope Google will announce general availability and pricing for Gemini 2.5 Pro soon, which will hopefully result in better uptime and stability for these kinds of long-running tasks.</p>
+<h2 id="extending-beyond-claudes-limits">Extending Beyond Claude&rsquo;s Limits</h2>
+<p id="p37">I also tried running the <code>llm</code> tool with Claude, but ran into some limitations. By default, the Claude 3.7 Sonnet model has <a href="https://docs.anthropic.com/en/docs/about-claude/models/all-models" rel="noopener noreferrer">a maximum output cap</a> of 8,192 tokens, which isn&rsquo;t enough for long videos like the one from Theo that I wanted to link on MacStories (that video alone was ~7,700 tokens).</p>
+<p id="p38">Anthropic does offer a version of 3.7 Sonnet with extended thinking that supports up to 64,000 output tokens. Given my issues with Gemini 2.5 Pro over the API, I figured that it wouldn&rsquo;t hurt to try Claude&rsquo;s reasoning flavor as well. When using 3.7 Sonnet via the LLM command line tool, you can enable the Thinking mode using the <code>--o</code> (options) flag with <code>thinking 1</code> and <code>thinking_budget</code> set to a number indicating how many tokens you&rsquo;re allocating for Claude&rsquo;s internal reasoning. Here&rsquo;s what my Claude command looks like:</p>
+<p id="p39"><code>/opt/homebrew/bin/llm -m claude-3.7-sonnet -o thinking 1 -o thinking_budget 2000 -o max_tokens 64000 'Reformat and extract highlights from this transcript.'</code></p>
+<p id="p40">This approach worked, and Claude 3.7 with extended thinking can reliably format an 8,000-word transcript and extract highlights from it in five minutes.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743698320326.png" alt="The formatted transcript and quotes extracted by Claude."><p class="image-caption">The formatted transcript and quotes extracted by Claude.</p></div>
+<p id="p42">While I was testing this version of the shortcut, I also remembered that Apple&rsquo;s implementation of the &lsquo;Run Shell Script&rsquo; shortcut action doesn&rsquo;t support live output for command line utilities that stream their responses in real time. In a normal Terminal window, the <code>llm</code> responses tend to appear in real time as they&rsquo;re received from the API. This works great in the Terminal app, but in Shortcuts, there&rsquo;s no terminal UI because it&rsquo;s running a shell instance in the background.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743698792465.png" alt='A response being "streamed" from the Gemini API.'><p class="image-caption">A response being &ldquo;streamed&rdquo; from the Gemini API.</p></div>
+<p id="p44">I&rsquo;ve done some Google searches that suggest the &lsquo;Run Shell Script&rsquo; action on macOS has never supported streaming responses live (since there&rsquo;s no UI to show them), but I&rsquo;d love to hear from anyone who has more information on this. In the case of Video Processor, since the <code>llm</code> command is executed as part of a <code>result</code> variable, the output isn&rsquo;t finalized until the command has finished running, so the lack of streamed responses isn&rsquo;t an issue.<sup id="fnref-78216-noStream"><a href="#fn-78216-noStream" class="jetpack-footnote" rel="noopener noreferrer">2</a></sup></p>
+<p id="p45">At the end of the shortcut, the output from <code>llm</code> is saved to a Markdown file on the Desktop.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1743699004597.png" alt="By default, the shortcut creates a Markdown file on your Mac desktop, but you can tweak this."><p class="image-caption">By default, the shortcut creates a Markdown file on your Mac desktop, but you can tweak this.</p></div>
+<p id="p47">You can change this to any directory you want, or modify the shortcut to output the resulting Markdown text somewhere else entirely. Personally, I think I&rsquo;ll come up with a system to archive these documents in <a href="https://obsidian.md/" rel="noopener noreferrer">Obsidian</a>, saving them alongside articles I&rsquo;m working on.</p>
+<h2 id="wrap-up">Wrap-Up</h2>
+<p id="p48">This experiment gave me a newfound appreciation for Simon Willison&rsquo;s excellent <code>llm</code> command line tool and showed me how Shortcuts integration with traditional automation tools like the command line, AppleScript, and Terminal can create workflows that are, quite simply, unimaginable on an iPad Pro.</p>
+<p id="p49">At the same time, <a href="https://club.macstories.net/posts/the-automation-gap-apple-is-running-out-of-time-to-build-a-shortcuts-bridge-to-the-future" rel="noopener noreferrer">as John recently wrote</a> in MacStories Weekly for Club members, while these integrations allow you to build automations that blend traditional scripting with visual automation, they also highlight the fact that Apple released these features years ago and hasn&rsquo;t significantly improved them since. Don&rsquo;t get me wrong; I&rsquo;m glad that this kind of &ldquo;hybrid automation&rdquo; is even possible in the first place. It just makes me a little sad that Apple hasn&rsquo;t meaningfully improved Shortcuts for Mac in four years.</p>
+<p id="p50">You can check out <a href="https://github.com/simonw/llm" rel="noopener noreferrer">Simon Willison&rsquo;s LLM command line tool on GitHub</a> and download my Video Processor shortcut below or from the <a href="https://www.macstories.net/shortcuts/" rel="noopener noreferrer">MacStories Shortcuts Archive</a>. The shortcut is available in two versions &ndash; one for Gemini 2.5 Pro and one for Claude 3.7 with extended thinking &ndash; and requires you to install <code>llm</code> and provide your own Google/Anthropic API keys.</p>
+<p id="p51">I will share a shortcut to generate full transcripts of YouTube videos in tomorrow&rsquo;s issue of <a href="https://club.macstories.net/plans" rel="noopener noreferrer">MacStories Weekly</a>.</p>
+<div class="media-element media-element-styled shortcuts-box" id="div52">
+    <div class="media-element-content">
+        <img class="media-element-image" alt="" src="https://cdn.macstories.net/icon-1743699954350.png"><div class="media-element-description">
+            <h3 class="title" id="video-processor-claude">Video Processor (Claude)</h3><p>Given the raw transcript of a YouTube video, this shortcut uses Simon Willison&rsquo;s <code>llm</code> CLI to pass it to Claude 3.7 Sonnet with extended thinking, which reformats the transcript and extracts key quotes from it. This shortcut can only be used on a Mac.</p>
+<p><a href="https://www.icloud.com/shortcuts/335c8e956259424985a8ce5e06c01c90" rel="noopener noreferrer noopener noreferrer">Get the shortcut here.</a></p>
+
+        </div>
+    </div>
+</div>
+<div class="media-element media-element-styled shortcuts-box" id="div53">
+    <div class="media-element-content">
+        <img class="media-element-image" alt="" src="https://cdn.macstories.net/icon-1743700707365.png"><div class="media-element-description">
+            <h3 class="title" id="video-processor-gemini">Video Processor (Gemini)</h3><p>Given the raw transcript of a YouTube video, this shortcut uses Simon Willison&rsquo;s <code>llm</code> CLI to pass it to Gemini 2.5 Pro, which reformats the transcript and extracts key quotes from it. This shortcut can only be used on a Mac.</p>
+<p><a href="https://www.icloud.com/shortcuts/c5a0d50ec46b45258fc4c6874cb191c2" rel="noopener noreferrer noopener noreferrer">Get the shortcut here.</a></p>
+
+        </div>
+    </div>
+</div>
+<div class="footnotes" id="div54">
+<hr><ol><li id="fn-78216-metaPrompt">
+Fun fact: I created this prompt via a standalone project in Claude that I specifically built to create better prompts using Anthropic&rsquo;s syntax. It&rsquo;s a bit <em>meta</em> &ndash; a prompt about creating better prompts &ndash; and I&rsquo;ll share it in a future story.&nbsp;<a href="#fnref-78216-metaPrompt" rel="noopener noreferrer">&#8617;&#65038;</a>
+</li>
+<li id="fn-78216-noStream">
+I also discovered that Willison&rsquo;s <code>llm</code> tool supports a <code>--no-stream</code> flag that allows you to perform a regular HTTP request where the API returns the entire response when it&rsquo;s done rather than streaming it. However, when I added this flag to 3.7 Thinking, I got an error from the Anthropic API indicating that long requests (more likely to time out) don&rsquo;t support non-streaming responses.&nbsp;<a href="#fnref-78216-noStream" rel="noopener noreferrer">&#8617;&#65038;</a>
+</li>
+</ol></div>
+<hr /><h3>Access Extra Content and Perks</h3><p><p>Founded in 2015, <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">Club MacStories</a> has delivered exclusive content every week for nearly a decade.</p>
+<p>What started with weekly and monthly email newsletters has blossomed into <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">a family of memberships</a> designed every MacStories fan.</p>
+<p><strong><a href="https://club.macstories.net/plans/club" rel="noopener noreferrer">Club MacStories</a></strong>: Weekly and monthly newsletters via email and the web that are brimming with apps, tips, automation workflows, longform writing, early access to the <a href="https://www.macstories.net/unwind/" rel="noopener noreferrer">MacStories Unwind podcast</a>, periodic giveaways, and more;</p>
+<p><strong><a href="https://club.macstories.net/plans/plus" rel="noopener noreferrer">Club MacStories+</a></strong>: Everything that Club MacStories offers, plus an active Discord community, advanced search and custom RSS features for exploring the Club&rsquo;s entire back catalog, bonus columns, and dozens of app discounts;</p>
+<p><strong><a href="https://club.macstories.net/plans/premier" rel="noopener noreferrer">Club Premier</a></strong>: All of the above <em>and</em> AppStories+, an extended version of our flagship podcast that&rsquo;s delivered early, ad-free, and in high-bitrate audio.</p>
+<p>Learn more <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">here</a> and from our <a href="https://club.macstories.net/faq" rel="noopener noreferrer">Club FAQs</a>.</p>
+</p><a href='https://club.macstories.net/?utm_source=ms&#038;utm_medium=rss'>Join Now</a>

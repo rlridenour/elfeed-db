@@ -1,0 +1,58 @@
+<p>For inserting SF Symbols in SwiftUI, I typically rely on Apple's <a href="https://developer.apple.com/sf-symbols/">SF Symbols app</a> to browse the symbols's catalog. Once I find a symbol I'm happy with, I copy its name and paste it into my Swift source. This works fairly well.</p>
+<p>With Christian Tietze recently posting <a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/">how he rendered SF Symbols in Emacs</a>, I figured there may be a way to shift the above workflow to rely on Emacs completion instead. While I initially went down a rabbit hole to programmatically extract SF symbols (via something like <a href="https://github.com/SFSafeSymbols/SFSafeSymbols">SFSafeSymbols</a>), I took a step back to rethink the strategy.</p>
+<p>From the <a href="https://developer.apple.com/sf-symbols/">SF Symbols app</a>, one can select multiple symbols and copy/paste either the symbols themselves or their respective names. The catch is you can only copy disjointed data. That is, you can copy the symbols or their names, but not both in one go. Let's take a look at what the disjointed data looks like. I've pasted both under separate sections in an Emacs buffer.</p>
+<p><img src="https://xenodium.github.io/images/emacs-macro-me-some-sf-symbols/disjointed.png" alt=""></p>
+<p>If I could rejoin these two sets, I would have a lookup table I could easily invoke from Emacs.</p>
+<p>There are roughly 4500 symbols, so copying, pasting, along with text manipulation isn't manually feasible. Lucky for us, an Emacs <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Keyboard-Macros.html">keyboard macro</a> is the perfect hammer for this nail. You can see the macro in action below.</p>
+<p><img src="https://xenodium.github.io/images/emacs-macro-me-some-sf-symbols/mini-macro_x1.6.webp" alt=""></p>
+<p>This looks fairly magical (and it is), but when you break it down into its building blocks, it's nothing more than recording your keystrokes and replaying them. Starting with the cursor at the beginning of <code>square.and.arrow.up</code>, these are the keystrokes we'd need to record:</p>
+<p>C-s
+:   <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">iseach-forward</a> to search for a character and jump to it</p>
+<p>=
+:   insert <code>=</code> so we jump to == Symbols ==</p>
+<p>&lt;return&gt;
+:   runs <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">isearch-exit</a> since we're done jumping.</p>
+<p>C-n
+:   <code>next-line</code>.</p>
+<p>C-a
+:   <code>beginning-of-line</code>.</p>
+<p>C-SPC
+:   <code>set-mark-command</code> to activate the region.</p>
+<p>C-f
+:   <code>forward-char</code> to select symbol.</p>
+<p>C-w
+:   <code>kill-ring-save</code> to cut/kill the symbol.</p>
+<p>C-u C-&lt;space&gt;
+:   <code>set-mark-command</code> (with prefix) to jump back to where we started before searching.</p>
+<p>C-y
+:   <code>yank</code> to yank/paste the symbol.</p>
+<p>C-&lt;space&gt;
+:   <code>set-mark-command</code> to activate the region.</p>
+<p>C-e
+:   <code>end-of-line</code> to select the entire line.</p>
+<p>&quot;
+:   As a <a href="https://github.com/Fuco1/smartparens">smartparens</a> user, inserting quote with region places quotes around selection.</p>
+<p>C-n
+:   <code>next-line</code>.</p>
+<p>C-a
+:   <code>beginning-of-line</code>. We are now at a strategic location where we can replay the above commands.</p>
+<p>To start/end recording and executing keyboard macros, use:</p>
+<p>C-x (
+:   <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Keyboard-Macro.html">kmacro-start-macro</a></p>
+<p>C-x )
+:   <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Keyboard-Macro.html">kmacro-end-macro</a></p>
+<p>C-x e
+:   <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Keyboard-Macro.html">kmacro-end-and-call-macro</a> runs your macro. Press <code>e</code> immediately after to execute again.</p>
+<p>C-u 0 C-x e
+:   <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Keyboard-Macro.html">kmacro-end-and-call-macro</a> (with zero prefix) repeat until there is an error.</p>
+<p>Our previous example ran on a handful of SF symbols. Let's bring out the big guns and run on the entire dataset. This time, we'll run the entire flow, including macro creation and executing until there is an error (i.e. process the whole lot).</p>
+<p><img src="https://xenodium.github.io/images/emacs-macro-me-some-sf-symbols/sf-symbol-no-mouse-short_x1.4.webp" alt=""></p>
+<p>Now that we have our data joined, we can feed it to the humble <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Completion.html">completing-read</a>.</p>
+<p><img src="https://xenodium.github.io/images/emacs-macro-me-some-sf-symbols/sf-symbols-insert-name.png" alt=""></p>
+<p>It's worth highlighting that to render SF Symbols in Emacs, we must <a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/">propertize our text with one of the macOS SF fonts</a>, for example &quot;SF Pro&quot;.</p>
+<p>With all the pieces in place, let's use our new function to insert SF symbol names in a SwiftUI snippet. Since we're using <code>completing-read</code> we can fuzzy search our lookups with our favorite completion frameworks (in my case via <a href="https://github.com/abo-abo/swiper">ivy</a>).</p>
+<p><img src="https://xenodium.github.io/images/emacs-macro-me-some-sf-symbols/sf-search_x1.2.webp" alt=""></p>
+<p>While this post is macOS-specific, it gives a taste of how powerful Emacs <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Keyboard-Macros.html">keyboard macros</a> can be. Be sure to check out <a href="https://emacsrocks.com/e05.html">Emacs Rocks! Episode 05: Macros in style</a> and <a href="https://www.masteringemacs.org/article/keyboard-macros-are-misunderstood">Keyboard Macros are Misunderstood - Mastering Emacs</a>. For those that dabble in elisp, you can appreciate how handy <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Completion.html">completing-read</a> is with very little code.</p>
+<p>The full source to <a href="https://github.com/xenodium/dotsies/blob/main/emacs/ar/sf.el">sf-symbol-insert-name</a> is available in my <a href="https://github.com/xenodium/dotsies/">Emacs config repo</a>. The function is fairly bare bones and has had fairly little testing. Patches totally welcome.</p>
+<h2>Update</h2>
+<p>There is some redundancy in the snippet I had forgotten to remove. Either way, latest version at <a href="https://github.com/xenodium/dotsies/blob/main/emacs/ar/sf.el">sf.el</a>.</p>

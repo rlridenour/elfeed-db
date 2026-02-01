@@ -1,0 +1,239 @@
+
+	
+<p>
+One of the essential parts of Search Engine Optimisation (SEO) is a logical site structure. Site structure relates to how the pages of a website link to each other. A well-designed structure of internal links improves the user&#39;s experience. It also helps web crawlers to find their way through the website. This article shows how to use the igraph software to analyse site structure.</p>
+<p>
+The Lucid Manager website has been around for ten years now, and the content has grown organically over time, which is a reflection of my changing interests and evolving career. Although I use categories and tags to organise the articles, internal linking between posts is a bit haphazard. This post shows how I extracted the relevant data from the Wordpress database and visualised the internal links with the iGraph package. This analysis shows that my website needs a bit of rework to improve its jungle of internal links to provide you and search engines a better experience.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Site Structure
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>A website needs to have a <a href="https://yoast.com/site-structure-the-ultimate-guide/">logical structure</a> to prevent it from being a loose collecting of articles. Internal links on a website organise the available information through taxonomy, and these links provide context to the text by referring to related pages. The taxonomy consists of menus, breadcrumbs, categories, tags and other structural elements. The body of the text of each article contains the contextual which provide additional or related information to the reader.</p>
+<p>
+Wordpress automatically adds links to categories and tags and the creates an ordered structure. Body text links are created organically and can therefore quickly turn into a chaotic jungle of relationships. Wordpress has plugins that help with site structure, but not of these tools provide a complete overview of the structure in the internal links.</p>
+<p>
+The taxonomy provides an automated structure of the website by categorising articles. The internal linking structure is organic and needs some further consideration. This analysis focuses on the organic links within the body of the text by visualising and analysing the internal linking structure.</p>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Extracting Wordpress Data
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The Lucid Manager used to be created with Wordpress. This system stores the body text of all articles in the <code class="verbatim">wp_posts</code> table in the database. To analyse site structure, we need the following fields:</p>
+<ul>
+<li><code class="verbatim">post_name</code> (slug)</li>
+<li><code class="verbatim">post_content</code> (full text)</li>
+<li><code class="verbatim">post_type</code> (page, post or other types)</li>
+<li><code class="verbatim">post_status</code> (use only published posts)</li>
+</ul>
+<p>The post type is in most instances either a page or a post, but can also be attachments and so on. The post name (slug) links posts together, and the post content contains the full text of the article in HTML.</p>
+<p>
+Several methods are available to extract the required data from the Wordpress database. The easiest way is to use a plugin such as <a href="https://www.wpallimport.com/export/">WP All Export</a>. You can drag-and-drop the required fields or run a SQL query. The second method is to log in to the phpMyAdmin on your cPanel and run the relevant queries.</p>
+<p>
+The third method involves using the <a href="https://cran.r-project.org/web/packages/RMySQL/index.html">RMySQL</a> package in R to directly download data from the site. You will need to create a new user with limited access rights and open the database to your IP address.</p>
+<p>
+The first step reads the data from the database and selects all published posts. The credentials are read from the <code class="verbatim">dbconnect.R</code> file, so I don&#39;t publish sensitive data on this website. The table names will be different if you use a Wordpress network. Thanks to &#39;phaskat&#39; on the <a href="https://wordpress.stackexchange.com/questions/333163/i-would-like-some-help-wth-an-sql-query-to-link-posts-with-categories/333189#333189">Wordpress StackExchange</a> for helping with the queries. Please note that when using a Wordpress network, you will need to replace the wp prefix in the table name with the relevant string.</p>
+<p>
+<a href = "https://github.com/pprevos/digital-humanities/" target="_blank"
+   title="Download digital-humanities from GitHub"
+   alt="Download digital-humanities from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">digital-humanities</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span><span style="color:#888">## Load data (CSV exported from wp_posts table in MySQL database)</span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(tidytext)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(igraph)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(RMySQL)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">library</span>(RColorBrewer)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#888">## Download data using RmySQL</span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">source</span>(<span style="background-color:#fff0f0">&#34;dbconnect.R&#34;</span>)
+</span></span><span style="display:flex;"><span><span style="color:#888">## lucidmanager &lt;- dbConnect(MySQL(),</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">##                          user = &#34;username&#34;,</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">##                          password = &#34;Password1&#34;,</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">##                          dbname = &#34;databe name&#34;,</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">##                          host = &#34;URL&#34;)</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>posts.query <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;SELECT p.post_name, p.post_content, t.name
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                FROM wp_posts p
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                JOIN wp_term_relationships tr ON (tr.object_id = p.ID)
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                JOIN wp_term_taxonomy tt ON (tt.term_taxonomy_id = tr.term_taxonomy_id )
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                JOIN wp_terms t ON (t.term_id = tt.term_id)
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                WHERE p.post_type=&#39;post&#39; AND p.post_status=&#39;publish&#39; 
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                      AND tt.taxonomy = &#39;category&#39;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>pages.query <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;SELECT post_name, post_content
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                FROM wp_posts
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">                WHERE post_type=&#39;page&#39; AND post_status=&#39;publish&#39;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>posts.data <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">dbSendQuery</span>(lucidmanager, posts.query)
+</span></span><span style="display:flex;"><span>posts <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">fetch</span>(posts.data, n <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">-1</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>pages.data <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">dbSendQuery</span>(lucidmanager, pages.query)
+</span></span><span style="display:flex;"><span>pages <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">fetch</span>(pages.data, n <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">-1</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">dbDisconnect</span>(lucidmanager)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>pages<span style="color:#333">$</span>name <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Page&#34;</span>
+</span></span><span style="display:flex;"><span>content <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rbind</span>(posts, pages)
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">as_tibble</span>(content)</span></span></code></pre></div>
+</div>
+<p>
+  The result of this code is a data frame with all posts and pages:</p>
+<ul>
+<li><code class="verbatim">post_name</code>: The slug of the post or page.</li>
+<li><code class="verbatim">post_content</code>: Content of the page (HTML file without headers).</li>
+<li><code class="verbatim">name</code>: Post category.</li>
+</ul>
+<p>I currently no longer use Wordpress but have moved everything to the <a href="https://lucidmanager.org/data-science/export-wordpress-to-hugo/">Hugo static website generator</a>, using <a href="https://lucidmanager.org/productivity/create-websites-with-org-mode-and-hugo/">Emacs Org Mode to write content</a>.</p>
+</div>
+</div>
+<div id="outline-container-headline-3" class="outline-2">
+<h2 id="headline-3">
+Converting the data to a network
+</h2>
+<div id="outline-text-headline-3" class="outline-text-2">
+<p>The second step uses the <a href="https://www.tidytextmining.com/">tidytext package</a> to convert the texts of the articles into tokens. In this case, a token is any set of characters between spaces. In the default setting, the tokenisation function also splits words at dashes, which is not helpful because we want to preserve the hyperlinks as one token.</p>
+<p>
+The code uses regular expressions to filter all internal links (detect <code class="verbatim">lucidmanager.org</code>) and retain the slug. The slug is the text after the website name. The <code class="verbatim">post_name</code> field in the database contains the slug for the post itself. We thus identify a link from one internal page to another.</p>
+<p>
+These steps result in a table that shows how all slugs link to each other. In network analysis, this is an <a href="https://en.wikipedia.org/wiki/Adjacency_list">adjacency list</a> as each line represents a relationship in the network. The category variable identifies the post category, which is helpful to colour the resulting graph. Note that any post without outgoing links will not appear in this list.</p>
+<p>
+This code also works with any data frame that contains the slug and content of the web pages as fields. The category variable is optional. Replace <code class="verbatim">lucidmanager.org</code> with the URL of the website you are analysing.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  links <span style="color:#333">&lt;-</span> content <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">unnest_tokens</span>(word, post_content,
+</span></span><span style="display:flex;"><span>                  token <span style="color:#333">=</span> stringr<span style="color:#333">::</span>str_split, pattern <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34; &#34;</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(<span style="color:#06b;font-weight:bold">grepl</span>(<span style="background-color:#fff0f0">&#34;.+lucidmanager.org/&#34;</span>, word)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(link <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">gsub</span>(<span style="background-color:#fff0f0">&#34;.+lucidmanager.org/&#34;</span>, <span style="background-color:#fff0f0">&#34;&#34;</span>, word),
+</span></span><span style="display:flex;"><span>           link <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">gsub</span>(<span style="background-color:#fff0f0">&#34;/.+&#34;</span>, <span style="background-color:#fff0f0">&#34;&#34;</span>, link)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(link <span style="color:#333">!=</span> <span style="background-color:#fff0f0">&#34;tag&#34;</span> <span style="color:#333">&amp;</span> link <span style="color:#333">!=</span>  <span style="background-color:#fff0f0">&#34;wp-content&#34;</span> <span style="color:#333">&amp;</span> link <span style="color:#333">!=</span> <span style="background-color:#fff0f0">&#34;author&#34;</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(category <span style="color:#333">=</span> name, post_name, link)</span></span></code></pre></div>
+</div>
+<p>
+The resulting adjacency list will look something like this:</p>
+<figure>
+<table>
+<thead>
+<tr>
+<th>category</th>
+<th>post_name</th>
+<th>link</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RStats</td>
+<td>analyse-site-structure</td>
+<td>export-wordpress-to-hugo</td>
+</tr>
+<tr>
+<td>RStats</td>
+<td>export-wordpress-to-hugo</td>
+<td>analyse-site-structure</td>
+</tr>
+</tbody>
+</table>
+<figcaption>
+Extract from adjacency list with two pages referring each other.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-4" class="outline-2">
+<h2 id="headline-4">
+Analyse Site Structure with iGraph
+</h2>
+<div id="outline-text-headline-4" class="outline-text-2">
+<p>Network analysis is the perfect tool to analyse site structure because each post on the website is a node and a link between two articles is a graph edge (arrow). </p>
+<p>
+The Lucid Manager currently discusses strategic and fun data analysis, but in the past, I wrote articles about water utility marketing and critical perspectives on management theories. The questions I like to answer with this analysis are:</p>
+<ul>
+<li>Are all pages connected to each other in one or more steps?</li>
+<li>What is the most linked page?</li>
+<li>Which pages link to themselves?</li>
+<li>Are there duplicated links within one post?</li>
+</ul>
+<p>The iGraph software transforms the link table to a network. Any posts and pages without any links (solitary pages) are added separately. Each post is also given a colour related to its category, and pages are a separate colour.</p>
+<p>
+This analysis shows that the internal link structure contains several sub networks, which are groups of pages that are only linked to each other. This graph will help in to identify more linking opportunities to dissolve sub networks.</p>
+<p>
+The <a href="https://igraph.org/r/doc/degree.html">degree function</a> in iGraph determines the number of adjacent edges of each graph. The degree function can specify incoming and outgoing links. My article about service quality in water utilities is the most linked post on this site.
+In network analysis, this is the node with the highest degree of linking.</p>
+<p>
+The loops in the diagram indicate self-referencing articles. The <a href="https://igraph.org/r/doc/which_multiple.html">which_loop</a> function identifies which arrows have the same start and end. The <code class="verbatim">E</code> function shows the list of edges, which shows that four pages on my website refer to themselves.</p>
+<p>
+Lastly, the <a href="https://igraph.org/r/doc/which_multiple.html">which_multiple</a> function identifies any duplicated edges in the graph. Within this context, these are pages that contain the same link more than once. The Lucid Manager website had seventeen instances of duplicated links when I first analysed its structure.</p>
+<p>
+This first phase gives me plenty of homework to improve the internal linking structure of this website.</p>
+<p>
+<figure><a href="https://lucidmanager.org/images/digital-humanities/lucidmanager_links.png"><img src="https://lucidmanager.org/images/digital-humanities/lucidmanager_links.png"
+    alt="Visualising website structure."></a><figcaption>
+      <p>Visualising website structure. (click to enlarge)</p>
+    </figcaption>
+</figure>
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  solitary <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(posts<span style="color:#333">$</span>post_name, pages<span style="color:#333">$</span>post_name)[<span style="color:#333">!</span>(<span style="color:#06b;font-weight:bold">c</span>(posts<span style="color:#333">$</span>post_name, pages<span style="color:#333">$</span>post_name) <span style="color:#333">%in%</span>
+</span></span><span style="display:flex;"><span>                                                    <span style="color:#06b;font-weight:bold">unique</span>(<span style="color:#06b;font-weight:bold">c</span>(links<span style="color:#333">$</span>post_name, links<span style="color:#333">$</span>link)))]
+</span></span><span style="display:flex;"><span>  network <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">select</span>(links, post_name, link) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">graph_from_data_frame</span>(directed <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">vertices</span>(solitary)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  colour <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(post_name <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">V</span>(network)<span style="color:#333">$</span>name) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">left_join</span>(content) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(name <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">factor</span>(name),
+</span></span><span style="display:flex;"><span>           colour <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">brewer.pal</span>(<span style="color:#06b;font-weight:bold">length</span>(<span style="color:#06b;font-weight:bold">unique</span>(content<span style="color:#333">$</span>name)), <span style="background-color:#fff0f0">&#34;Set2&#34;</span>)[name]) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(<span style="color:#333">-</span>post_content)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">V</span>(network)<span style="color:#333">$</span>color <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as.vector</span>(colour<span style="color:#333">$</span>colour)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">par</span>(mar <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">4</span>))
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">plot</span>(network,
+</span></span><span style="display:flex;"><span>       layout <span style="color:#333">=</span> layout.fruchterman.reingold,
+</span></span><span style="display:flex;"><span>       vertex.label.cex <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.7</span>,
+</span></span><span style="display:flex;"><span>       vertex.size <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">degree</span>(network),
+</span></span><span style="display:flex;"><span>       vertex.label.color <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;black&#34;</span>,
+</span></span><span style="display:flex;"><span>       vertex.frame.color <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>,
+</span></span><span style="display:flex;"><span>       edge.arrow.size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.2</span>,
+</span></span><span style="display:flex;"><span>       edge.color <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;darkgray&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Diagnose network</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">which.max</span>(<span style="color:#06b;font-weight:bold">degree</span>(network, mode <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;in&#34;</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">E</span>(network)<span style="color:#06b;font-weight:bold">[which_loop</span>(network)]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">E</span>(network)<span style="color:#06b;font-weight:bold">[which_multiple</span>(network)]</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-5" class="outline-2">
+<h2 id="headline-5">
+Future improvements
+</h2>
+<div id="outline-text-headline-5" class="outline-text-2">
+<p>This analysis is a great step to start systematically analysing organic website structure. Several other techniques help to understand the structure of a website further. Community detection and the inclusion of tags and categories in the data can provide additional context. SEO experts might find this concept useful. Perhaps somebody else can develop a Wordpress plugin to provide this visualisation.</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

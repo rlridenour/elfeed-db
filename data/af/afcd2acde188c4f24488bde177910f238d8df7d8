@@ -1,0 +1,40 @@
+<p>Howard Abrams's <a href="https://www.youtube.com/watch?v=RhYNu6i_uY4">Introduction to eshell video</a> prompted me to poke at eshell some more. This time, I got eshell context aware completion by glueing the excellent <a href="https://company-mode.github.io">company</a> and <a href="https://masteringemacs.org/article/pcomplete-context-sensitive-completion-emacs">pcomplete</a> packages.</p>
+<p><img src="https://xenodium.github.io/images/eshell-pcomplete-company-completion/company-pcomplete.png" alt=""></p>
+<pre><code class="language-{.commonlisp">(require 'cl-lib)
+(require 'company)
+(require 'dash)
+(require 'pcomplete)
+(require 's)
+
+(defun company-pcomplete--overlap-tail (a b)
+  &quot;When A is \&quot;SomeDev\&quot; and B is \&quot;Developer\&quot;, return \&quot;eloper\&quot;.&quot;
+  (let ((prefix a)
+        (remaining nil))
+    (while (and (not remaining) (&gt; (length prefix) 0))
+      (when (s-starts-with? prefix b)
+        (setq remaining (substring b (length prefix))))
+      (setq prefix (substring prefix 1)))
+    remaining))
+
+(defun company-pcomplete--candidates (prefix)
+  &quot;Get candidates for PREFIX company completion using `pcomplete'.&quot;
+  ;; When prefix is: &quot;~/Down&quot; and completion is &quot;Downloads&quot;, need
+  ;; to find common string and join into &quot;~/Downloads/&quot;.
+  (-map (lambda (item)
+          (if (s-starts-with? prefix item)
+              item
+            (concat prefix (company-pcomplete--overlap-tail prefix item))))
+        (all-completions prefix (pcomplete-completions))))
+
+(defun company-pcomplete (command &amp;optional arg &amp;rest ignored)
+  &quot;Complete using pcomplete. See `company''s COMMAND ARG and IGNORED for details.&quot;
+  (interactive (list 'interactive))
+  (case command
+    (interactive (company-begin-backend 'company-pcomplete))
+    (prefix (company-grab-symbol))
+    (candidates
+     (company-pcomplete--candidates arg))))
+</code></pre>
+<p>Don't forget to add <em>company-pcomplete</em> to <em>company-backends,</em> and if you want an explicit binding, use something like:</p>
+<pre><code class="language-{.commonlisp">(bind-key &quot;&lt;backtab&gt;&quot; #'company-complete eshell-mode-map)
+</code></pre>

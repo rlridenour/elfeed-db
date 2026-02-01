@@ -1,0 +1,110 @@
+<p>[Equations in this post may not look right (or appear at all) in your RSS reader. Go to <a href="https://leancrew.com/all-this/2025/09/sparking-joy/">the original article</a> to see them rendered properly.]</p>
+  <hr />
+  <p>I watched this <a href="https://www.youtube.com/@numberphile">Numberphile</a> video a few days ago and learned not only about <a href="https://mathworld.wolfram.com/HarshadNumber.html">Harshad numbers</a>, which I’d never heard of before, but also some new things about defining functions in Mathematica.</p>
+<iframe allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen="" frameborder="0" height="315" referrerpolicy="strict-origin-when-cross-origin" src="https://www.youtube.com/embed/dgwevhEykWQ?si=zlbsw71QWMhhFcCt" title="YouTube video player" width="560"></iframe>
+<p>Harshad numbers<sup id="fnref:name"><a href="#fn:name" rel="footnote">1</a></sup> are defined as integers that are divisible by the sum of their digits. For example,</p>
+<math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><mn>42</mn><mo>=</mo><mfrac><mn>42</mn><mrow><mn>4</mn><mo>+</mo><mn>2</mn></mrow></mfrac><mo>=</mo><mfrac><mn>42</mn><mn>6</mn></mfrac><mo>=</mo><mn>7</mn></math>
+<p>so 42 is a Harshad number. On the other hand,</p>
+<math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><mn>76</mn><mo>=</mo><mfrac><mn>76</mn><mrow><mn>7</mn><mo>+</mo><mn>6</mn></mrow></mfrac><mo>=</mo><mfrac><mn>76</mn><mn>13</mn></mfrac></math>
+<p>so 76 is not. You can use any base to determine whether a number is Harshad or not, but I’m going to stick to base 10 here.</p>
+<p>After watching the video, I started playing around with Harshad numbers in Mathematica. Because Mathematica has both a <a href="http://reference.wolfram.com/language/ref/DigitSum.html"><code>DigitSum</code></a> function and a <a href="http://reference.wolfram.com/language/ref/Divisible.html"><code>Divisible</code></a> function, it’s fairly easy to define a Boolean function that determines whether a number is Harshad or not:</p>
+<pre><code>myHarshadQ[n_] := Divisible[n, DigitSum[n]]
+</code></pre>
+<p>Mathematica functions that return Boolean values often end with Q (<code>Divisible</code> being an obvious exception), so that’s why I put a Q at the end of <code>myHarshadQ</code>. A couple of things to note:</p>
+<ul>
+<li>Both <code>Divisible</code> and <code>DigitSum</code> accept and return lists. Therefore, we can give <code>myHarshadQ</code> a list of numbers and it will return a list of Boolean values.</li>
+<li>Because <code>DigitSum</code> accepts only integer arguments, <code>myHarshadQ</code> throws an error if you feed it noninteger arguments.</li>
+</ul>
+<p>To get all the Harshad numbers up through 100, we can use the <a href="http://reference.wolfram.com/language/ref/Select.html"><code>Select</code></a> and <a href="http://reference.wolfram.com/language/ref/Range.html"><code>Range</code></a> functions like this:</p>
+<pre><code>Select[Range[100], myHarshadQ]
+</code></pre>
+<p>which returns the list</p>
+<pre><code>{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12,
+ 18, 20, 21, 24, 27, 30, 36, 40, 42, 45, 48,
+ 50, 54, 60, 63, 70, 72, 80, 81, 84, 90, 100}
+</code></pre>
+<p>You can check this against <a href="https://oeis.org/A005349">Sequence A005349</a> in the On-Line Encyclopedia of Integer Sequences.</p>
+<p>There are a couple of ways to count how many Harshad numbers are in a given range. Either</p>
+<pre><code>Length[Select[Range[100], myHarshadQ]]
+</code></pre>
+<p>which is a straightforward extension of what we did above, or the less obvious</p>
+<pre><code>Count[myHarshadQ[Range[100]], True]
+</code></pre>
+<p>which works by making a list of 100 Boolean values and counting how many are <code>True</code>. The <a href="http://reference.wolfram.com/language/ref/Count.html"><code>Count</code></a> function is like <a href="http://reference.wolfram.com/language/ref/Length.html"><code>Length</code></a>, but it returns only the number of elements in a list that match a pattern. Both methods return the correct answer of 33, and they take about the same amount of time (as determined through the <a href="http://reference.wolfram.com/language/ref/Timing.html"><code>Timing</code></a> function) to run.</p>
+<p>While Mathematica doesn’t have a built-in function for determining whether a number is Harshad, it does have an external function, <a href="https://resources.wolframcloud.com/FunctionRepository/resources/HarshadNumberQ"><code>HarshadNumberQ</code></a>, that does. This can be used in conjunction with <a href="http://reference.wolfram.com/language/ref/ResourceFunction.html"><code>ResourceFunction</code></a>. The call</p>
+<pre><code>ResourceFunction["HarshadNumberQ"][42]
+</code></pre>
+<p>returns <code>True</code>. Similarly,</p>
+<pre><code>Select[Range[100], ResourceFunction["HarshadNumberQ"]]
+</code></pre>
+<p>returns the list of 33 numbers given above.</p>
+<p>The resource function is considerably faster than mine. Running</p>
+<pre><code>Timing[Count[ResourceFunction["HarshadNumberQ"][Range[10000]], True]]
+</code></pre>
+<p>returns <code>{0.027855, 1538}</code>, while running</p>
+<pre><code>Timing[Count[myHarshadQ[Range[10000]], True]]
+</code></pre>
+<p>returns <code>{0.06739, 1538}</code>. The runtime, which is the first item in the list, changes slightly from one trial to the next, but <code>myHarshadQ</code> always takes nearly three times as long.</p>
+<p>To figure out why, I downloaded the <a href="https://www.wolframcloud.com/download/fca05123-ad3b-4fa9-aaa2-7a7106662cb9?extension=always&amp;filename=HarshadNumberQ-1-1-0-definition">source notebook</a> for <code>HarshadNumberQ</code> and took a look. Here’s the source code for the function:</p>
+<pre><code>SetAttributes[HarshadNumberQ, Listable];
+iHarshadNumberQ[n_, b_] := Divisible[n, Total[IntegerDigits[n, Abs[b]]]]
+HarshadNumberQ[n_Integer, b_Integer] := 
+  With[{res = iHarshadNumberQ[Abs[n], b]}, res /; BooleanQ[res]]
+HarshadNumberQ[n_Integer] := HarshadNumberQ[n, 10];
+HarshadNumberQ[_, Repeated[_, {0, 1}]] := False
+</code></pre>
+<p>I won’t pretend to understand everything that’s going on here, but I have figured out a few things:</p>
+<p>First,  <code>HarshadNumberQ</code> is obviously defined to handle any number base, not just base-10. And it can handle a list of bases, too, so if you want to check on how many bases in which a number is Harshad, this is the function you want.</p>
+<p>Second, <code>HarshadNumberQ</code> uses an argument pattern I’ve never seen before: <code>n_Integer</code>. This restricts it to accepting only integer inputs. It returns <code>False</code> when given noninteger arguments; it doesn’t just throw an error the way <code>myHarshadQ</code> does.</p>
+<p>Third, <code>HarshadNumberQ</code> uses <code>Total[IntegerDigits[n]]</code> instead of <code>DigitSum[n]</code>. This, I believe, is at least part of the reason it runs faster than <code>myHarshadQ</code>. For example,</p>
+<pre><code>Timing[Total[IntegerDigits[99999^10]]]
+</code></pre>
+<p>returns <code>{0.000084, 216}</code>, while</p>
+<pre><code>Timing[DigitSum[99999^10]]
+</code></pre>
+<p>returns <code>{0.000146, 216}</code>.</p>
+<p>Finally, the <a href="http://reference.wolfram.com/language/ref/SetAttributes.html"><code>SetAttributes</code></a> function is needed because <code>Total</code> would otherwise have trouble handling the output of <code>IntegerDigits</code> when the first argument is a list. Let’s look at some examples:</p>
+<pre><code>IntegerDigits[123456]
+</code></pre>
+<p>returns <code>{1, 2, 3, 4, 5, 6}</code>, a simple list that <code>Total</code> knows how to sum to 21. But</p>
+<pre><code>IntegerDigits[{12, 345, 6789}]
+</code></pre>
+<p>returns a lists of lists, <code>{{1, 2}, {3, 4, 5}, {6, 7, 8, 9}}</code>, which <code>Total</code> has trouble with. Calling</p>
+<pre><code>Total[IntegerDigits[{12, 345, 6789}]]
+</code></pre>
+<p>returns an error, saying that lists of unequal length cannot be added. We can get around this error by giving <code>Total</code> a second argument. Calling it as</p>
+<pre><code>Total[IntegerDigits[{12, 345, 6789}], {2}]
+</code></pre>
+<p>tells <code>Total</code> to add the second-level lists, returning <code>{3, 12, 30}</code>, which is just what we want. The problem is that this second argument to leads to an error when the first argument is a scalar instead of a list.</p>
+<p>This, as best I can tell, is where the</p>
+<pre><code>SetAttributes[HarshadNumberQ, Listable];
+</code></pre>
+<p>line comes in. By telling Mathematica that <code>HarshadNumberQ</code> is <a href="file:///Users/mark/git/blog-preview/post-preview.html"><code>Listable</code></a>, we can define the function as if <code>Total</code> were always being used on scalars, and the system will thread over lists just like we want.</p>
+<p>Since I’m just writing <code>myHarshadQ</code> for my own entertainment and not for others to use, I can take some of what I learned above and rewrite it to run faster. Like this:</p>
+<pre><code>SetAttributes[myHarshadQ, Listable]; 
+myHarshadQ[n_] := Divisible[n, Total[IntegerDigits[n]]]
+</code></pre>
+<p>With this new definition, <code>myHarshadQ</code> runs considerably faster. Calling</p>
+<pre><code>Timing[Count[myHarshadQ[Range[10000]], True]]
+</code></pre>
+<p>returns <code>{0.013527, 1538}</code>. This is roughly twice as fast as <code>HarshadNumberQ</code>, probably because the definition doesn’t deal with other bases or handle errors gracefully.</p>
+<p>Now I can look at Harshad numbers over a broad range without having to wait long for results. To see how they’re distributed over the first million numbers, I ran</p>
+<pre><code>Histogram[Select[Range[999999], HarshadNumberQ], {25000}, ImageSize -&gt; Large]
+</code></pre>
+<p>and got this histogram (with a bin width of 25,000):</p>
+<p><img alt="Harshad distribution histogram" class="ss" src="https://leancrew.com/all-this/images2025/20250928-Harshad%20distribution%20histogram.png" title="Harshad distribution histogram" width="100%"/></p>
+<p>The stepdown pattern repeats every 100,000 numbers, moving down each time. Let’s stretch out the range to three million and see what happens.</p>
+<pre><code>Histogram[Select[Range[2999999], HarshadNumberQ], {25000}, ImageSize -&gt; Large]
+</code></pre>
+<p><img alt="Harshad distribution histogram over 3 million" class="ss" src="https://leancrew.com/all-this/images2025/20250928-Harshad%20distribution%20histogram%20over%203%20million.png" title="Harshad distribution histogram over 3 million" width="100%"/></p>
+<p>The pattern repeats at the larger scale, too.</p>
+<p>If you want to learn some other Harshad facts, you should watch <a href="https://www.youtube.com/watch?v=iGEC1FH5yBU">this extra footage at Numberphile</a>. There doesn’t seem to be anything directly practical you can do with Harshad numbers, but you can use them to exercise your mathematical muscles. Or learn new things about the Wolfram Language.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:name">
+<p>You might think Harshad numbers are named after their discoverer or, in accordance with <a href="https://en.wikipedia.org/wiki/Stigler%27s_law_of_eponymy">Stigler’s Law</a>, their popularizer, but no. See either the video or the <a href="https://en.wikipedia.org/wiki/Harshad_number">Wikipedia article</a> for the origin of the name. <a href="#fnref:name" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>
+  

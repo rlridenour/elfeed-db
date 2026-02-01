@@ -1,0 +1,104 @@
+<p>Adding hooks and setting variables is core to customizing Emacs. Take a major mode like <code>emacs-lisp-mode</code> as an example. To customize its behaviour, one may add a hook function to <code>emacs-lisp-mode-hook</code>, or if you're a little lazy while experimenting, you may even use a lambda.</p>
+<pre><code class="language-{.commonlisp">(add-hook 'emacs-lisp-mode-hook
+          #'my/emacs-lisp-mode-config)
+
+(add-hook 'emacs-lisp-mode-hook
+          (lambda ()
+            (message &quot;I woz ere&quot;)))
+</code></pre>
+<p><code>emacs-lisp-mode-hook</code>'s content would subsequently look as follows:</p>
+<pre><code class="language-{.commonlisp">'(my/emacs-lisp-mode-config
+  (lambda nil
+    (message &quot;I woz ere&quot;))
+  ert--activate-font-lock-keywords
+  easy-escape-minor-mode
+  lisp-extra-font-lock-global-mode)
+</code></pre>
+<p>Maybe <code>my/emacs-lisp-mode-config</code> didn't work out for us and we'd like to remove it. We can use <code>remove-hook</code> for that and evaluate something like:</p>
+<pre><code class="language-{.commonlisp">(remove-hook 'emacs-lisp-mode-hook #'my/emacs-lisp-mode-config)
+</code></pre>
+<p>The lambda can be removed too, but you ought to be careful in using the same lambda body.</p>
+<pre><code class="language-{.commonlisp">(remove-hook 'emacs-lisp-mode-hook
+             (lambda ()
+               (message &quot;I woz tere&quot;)))
+</code></pre>
+<p>There are other ways to remove the lambdas, but we're digressing here… We typically have to write these throwaway snippets to undo our experiments. What if we just had a handy helper always available to remove items from sequences <em>(edit: we do, <code>remove-hook</code> is already interactive, see Update 2 below)</em>? After all, hooks are just lists (sequences).</p>
+<p><img src="https://xenodium.github.io/images/deleting-from-emacs-sequence-vars/removed-lambda.gif" alt=""></p>
+<p>While the interactive command can likely be simplified further, I tried to optimize for ergonomic usage. For example, <code>completing-read</code> gives us a way narrow down whichever variable we'd like to modify as well as the item we'd like to remove. <code>seqp</code> is also handy, as we filter out noise by automatically removing any variable that's not a sequence.</p>
+<pre><code class="language-{.commonlisp">(defun ar/remove-from-list-variable ()
+  (interactive)
+  (let* ((var (intern
+               (completing-read &quot;From variable: &quot;
+                                (let (symbols)
+                                  (mapatoms
+                                   (lambda (sym)
+                                     (when (and (boundp sym)
+                                                (seqp (symbol-value sym)))
+                                       (push sym symbols))))
+                                  symbols) nil t)))
+         (values (mapcar (lambda (item)
+                           (setq item (prin1-to-string item))
+                           (concat (truncate-string-to-width
+                                    (nth 0 (split-string item &quot;\n&quot;))
+                                    (window-body-width))
+                                   (propertize item 'invisible t)))
+                         (symbol-value var)))
+         (index (progn
+                  (when (seq-empty-p values) (error &quot;Already empty&quot;))
+                  (seq-position values (completing-read &quot;Delete: &quot; values nil t)))))
+    (unless index (error &quot;Eeek. Something's up.&quot;))
+    (set var (append (seq-take (symbol-value var) index)
+                     (seq-drop (symbol-value var) (1+ index))))
+    (message &quot;Deleted: %s&quot; (truncate-string-to-width
+                            (seq-elt values index)
+                            (- (window-body-width) 9)))))
+</code></pre>
+<p>Hooks are just an example of lists we can delete from. I recently used the same command on <code>display-buffer-alist</code>.</p>
+<p><img src="https://xenodium.github.io/images/deleting-from-emacs-sequence-vars/alist.gif" alt=""></p>
+<p>While this has been a fun exercise, I can't help but think that I'm likely re-inventing the wheel here. Is there something already built-in that I'm missing?</p>
+<h2>Update 1</h2>
+<p><a href="https://www.reddit.com/user/github-alphapapa/">alphapapa</a> suggested some generalizations that would provide <a href="https://www.reddit.com/r/emacs/comments/13rvehx/comment/jlni3fc/?utm_source=share&amp;utm_medium=web2x&amp;context=3">an editing buffer of sorts</a>. This is a neat idea, using familiar key bindigs <code>C-c C-c</code> to save and <code>C-c C-k</code> to bail.</p>
+<p><img src="https://xenodium.github.io/images/deleting-from-emacs-sequence-vars/edit.gif" alt=""></p>
+<p>Beware, I haven't tested the code with a diverse set of list items, so there's a chance of corrupting the variable content. Improvements to the code are totally welcome.</p>
+<pre><code class="language-{.commonlisp">;;; -*- lexical-binding: t; -*-
+
+(defun ar/edit-list-variable ()
+  (interactive)
+  (let* ((var (intern
+               (completing-read &quot;From variable: &quot;
+                                (let (symbols)
+                                  (mapatoms
+                                   (lambda (sym)
+                                     (when (and (boundp sym)
+                                                (seqp (symbol-value sym)))
+                                       (push sym symbols))))
+                                  symbols) nil t)))
+         (values (string-join
+                  (mapcar #'prin1-to-string (symbol-value var))
+                  &quot;\n&quot;)))
+    (with-current-buffer (get-buffer-create &quot;*eval elisp*&quot;)
+      (emacs-lisp-mode)
+      (local-set-key (kbd &quot;C-c C-c&quot;)
+                     (lambda ()
+                       (interactive)
+                       (eval-buffer)
+                       (kill-this-buffer)
+                       (message &quot;Saved: %s&quot; var)))
+      (local-set-key (kbd &quot;C-c C-k&quot;) 'kill-this-buffer)
+      (erase-buffer)
+      (insert (format &quot;(setq %s\n `(%s))&quot; var values))
+      (mark-whole-buffer)
+      (indent-region (point-min) (point-max))
+      (deactivate-mark)
+      (switch-to-buffer (current-buffer)))))
+</code></pre>
+<h2>Update 2</h2>
+<p>So hunch was right…</p>
+<blockquote>
+<p>&quot;While this has been a fun exercise, I can't help but think that I'm likely re-inventing the wheel here. Is there something already built-in that I'm missing?&quot;</p>
+</blockquote>
+<p><a href="https://www.reddit.com/user/juicecelery/">juicecelery</a>'s Reddit commit <a href="https://www.reddit.com/r/emacs/comments/13rvehx/comment/jlo8mhf/?utm_source=share&amp;utm_medium=web2x&amp;context=3">confirmed it</a>. Thank you! <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Hooks.html">remove-hook</a> is already interactive 🤦‍♂️. <a href="https://knowyourmeme.com/memes/today-i-learned-til">TIL</a> 😁</p>
+<p>juicecelery was kind enough to point out an improvement in the custom function:</p>
+<blockquote>
+<p>&quot;but I see your improvements, for instance that non list items are removed from the selection.&quot;</p>
+</blockquote>

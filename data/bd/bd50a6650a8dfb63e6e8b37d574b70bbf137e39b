@@ -1,0 +1,175 @@
+
+        <p>Related Links :: <span class="label">Tags:</span> <span role="list" aria-label="Tags for “Serializing Somewhat Large Emacs Alists”">
+<span role="listitem" aria-label="&ldquo;emacs&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/16/mythic-bastionland-map-play-aid-emacs-package/" aria-label="Previous post tagged with &ldquo;emacs&rdquo; is &ldquo;Mythic Bastionland Map Play Aid Emacs Package&rdquo;" title="Older post tagged with &ldquo;emacs&rdquo; is &ldquo;Mythic Bastionland Map Play Aid Emacs Package&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/emacs/" class="p-category" aria-label="All posts tagged with &ldquo;emacs&rdquo;" title="All posts tagged with &ldquo;emacs&rdquo;">emacs</a> <small aria-hidden="true">&gt;</small>
+</span><span aria-hidden=true> &middot; </span>
+<span role="listitem" aria-label="&ldquo;programming&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/10/extending-core-emacs-bookmark-package/" aria-label="Previous post tagged with &ldquo;programming&rdquo; is &ldquo;Extending Core Emacs Bookmark Package&rdquo;" title="Older post tagged with &ldquo;programming&rdquo; is &ldquo;Extending Core Emacs Bookmark Package&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/programming/" class="p-category" aria-label="All posts tagged with &ldquo;programming&rdquo;" title="All posts tagged with &ldquo;programming&rdquo;">programming</a> <small aria-hidden="true">&gt;</small>
+</span></span>
+
+</p/><p><strong>Summary: </strong>
+Creating a bespoke process to dump and load data in manageable chunks.
+</p>
+        <p>In <a href="https://git.sr.ht/~jeremyf/mythic-bastionland.el">my Mythic Bastionland Emacs package</a> I’ve been populating an <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-EMACS">&#128214;</a></small>
+ <code>alist</code> with
+information related to the state of the map for my Forged from the Worst
+campaign.</p>
+<p>I have 14 top-level keys in that <code>alist</code>: <code>barriers</code>, <code>curses</code>, <code>dwellings, escalations</code>, <code>hazards</code>, <code>holdings</code>, <code>known-hexes</code>, <code>locations</code>, <code>monuments</code>, <code>myth, omens-revealed</code>, <code>rivers</code>, <code>ruins</code>, and <code>sanctums</code>.  Most of those entries have 3 to 6
+associated elements, with <code>rivers</code>, <code>locations</code>, and <code>barriers</code> having more.</p>
+<p>Along the way, I found that when I went to persist the <code>alist</code> to a file, I was
+getting trailing <code>...</code> characters in a few places.  The process was truncating my
+data.  Which meant data loss when I went to load the persisted <code>alist</code>.</p>
+<p>No worries, due to the nature of the package, I could rebuild the map data and
+it would be true to the state of play (though the non-revealed information would
+be different).  However, I wanted to solve this persistence issue.</p>
+<p>I spent an evening searching and exploring the use of <code>prin1</code> and <code>(setopt eval-expression-print-level nil)</code> but Emacs seemed to insist that when I went to
+print the full variable out, it would truncate.</p>
+<p>So I set about writing out chunks of the data.  Then reassembling those chunks.</p>
+<h2 id="writing-the-data-out-in-chunks">Writing the Data Out in Chunks</h2>
+<p>Below is my <a href="https://git.sr.ht/~jeremyf/mythic-bastionland.el/tree/6e9688a0ab8782a005e70c47fe64eb3627c91033/mythic-bastionland.el#L463-509">mythic-bastionland-map-write function available at Sourcehut</a>.  What
+the code does is:</p>
+<ul>
+<li>Create a feature called <code>mythic-bastionland-map</code>, which we’ll write as a
+loadable package.</li>
+<li>For each association in the map:
+<ul>
+<li>Chunk that data into groups of 8 and write each sub-group into a variable
+with name based on the association’s <code>car</code> and incremental suffix.</li>
+<li>Store those incremental variable names in another variable.</li>
+</ul>
+</li>
+<li>Store the name of each association’s <code>car</code> rendered in yet another variable.</li>
+</ul>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland-map-write (&amp;optional map)
+  &quot;Write the MAP into a re-loadable format.
+
+Emacs is truncating things so I need to jump through some hoops.&quot;
+  (setq mythic-bastionland-map (or map (mythic-bastionland-map)))
+  (with-temp-buffer
+    (let ((features nil))
+      (insert &quot;;;; mbm ---  -*- lexical-binding: t -*-\n&quot;)
+      (cl-loop for (feature . values) in mythic-bastionland-map do
+               (let (;; In my experience somewhere around 10 elements
+                     ;; and we start seeing truncation.  So let's be
+                     ;; under that.
+                     (size 8)
+                     ;; This will be a list of the variable names that,
+                     ;; when reassembled, will be the values.
+                     (segment-names nil))
+                 (cl-pushnew feature features)
+                 (dotimes (i (+ 1 (/ (length values) size)))
+                   (let (;; Name of variable that will hold a segment
+                         ;; of the values.
+                         (segment-name
+                          (format &quot;mbm--data-%s-%d&quot; feature i)))
+                     ;; Track this segment's variable name.
+                     (push (intern segment-name) segment-names)
+                     ;; Grab a subset of values for this segment and
+                     ;; store it in the variable with name that is the
+                     ;; value of the segment.
+                     (insert (format &quot;(defvar %s '&quot; segment-name))
+                     ;; Yes yes, this is likely less effecient as I'm
+                     ;; always reading the list.  But it was quick
+                     (prin1 (seq-take
+                             (nthcdr (* i size) values) size)
+                            (current-buffer))
+                     (insert &quot;)\n&quot;)))
+                 ;; Now track all of the segment names associated with
+                 ;; this feature.
+                 (insert (format &quot;(defvar mbm--data-%s-list '&quot; feature))
+                 (prin1 segment-names (current-buffer))
+                 (insert &quot;)\n&quot;)))
+      ;; Last track all feature names so we may reassemble them.
+      (insert (format
+               &quot;(defvar mbm--features \&quot;%s\&quot;)\n&quot;
+               (mapconcat (lambda (e) (format &quot;%s&quot; e))
+                          features &quot; &quot;))))
+    (insert &quot;(provide 'mbm)\n&quot;
+            &quot;;;; mythic-bastionland-map.el ends here\n&quot;)
+    (write-file mythic-bastionland-map-state-file)))
+</code></pre>
+<h2 id="reading-the-data-back-in">Reading the Data Back In</h2>
+<p>I use the <a href="https://git.sr.ht/~jeremyf/mythic-bastionland.el/tree/6e9688a0ab8782a005e70c47fe64eb3627c91033/mythic-bastionland.el#L519-545">mythic-bastionland-map-read</a> to reassemble that segmented data.  When
+done I call <code>(unload-feature 'mbm)</code> to remove the fragmented variables, leaving
+only the <code>mythic-bastionland-map</code> variable.</p>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland-map-read ()
+  &quot;Load the unduly complicated encoding of the map.&quot;
+  (unless (f-file-p mythic-bastionland-map-state-file)
+    (user-error &quot;No file found at %s&quot;
+                mythic-bastionland-map-state-file))
+  (require 'mbm mythic-bastionland-map-state-file)
+  (let ((map nil))
+    ;; Our serialized map has a variable mbm--map-features; we use that
+    ;; to start our loading of data.
+    (dolist (map-feature (s-split &quot; &quot; mbm--features))
+      (let* ((values nil)
+             ;; The name of each of the variables that houses a segment
+             ;; of the feature's data.
+             (segment-names
+              (symbol-value
+               (intern (format &quot;mbm--data-%s-list&quot; map-feature)))))
+        (dolist (segment-name segment-names)
+          (dolist (value (symbol-value segment-name))
+            (cl-pushnew value values)))
+        ;; Now that we've reassembled (in reverse order) the values for
+        ;; this feature, add them to the underlying map.
+        (cl-pushnew (cons (intern map-feature) values) map)))
+    ;; With all features and their values loaded, we assign the map to
+    ;; something more durable.
+    (setq mythic-bastionland-map map))
+  ;; And last clean up all those variables we used for reassembly.
+  (unload-feature 'mbm))
+</code></pre>
+<h2 id="perhaps-another-way">Perhaps Another Way?</h2>
+<p>It seems a bit odd that this is how I could reliably read and write the data.
+And I’m open for other approaches.  However, I felt it worth sharing this
+bespoke method as it might help others.</p>
+<p>If you know of another way, <a href="https://takeonrules.com/contact-me/">please contact me</a>.</p>
+<h2 id="structured-data-and-iterating">Structured Data and Iterating</h2>
+<p>While working on <a href="https://git.sr.ht/~jeremyf/mythic-bastionland.el">my Mythic Bastionland Emacs package</a>, I have been very pleased
+with the malleability of the <code>alist</code>, and their ease of testing; in part because
+of the <span><a href="https://en.wikipedia.org/wiki/Read%E2%80%93eval%E2%80%93print_loop">Read-eval-print loop</a></span> (<abbr title="Read-eval-print loop">REPL</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Read-eval-print loop”" title="Other site-wide references of “Read-eval-print loop”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-REPL">&#128214;</a></small>)
+ but also because of the nature of Lisp.</p>
+<p>I can easily grab a portion of the syntax tree and reliably mash on that in the
+<abbr title="Read-eval-print loop">REPL</abbr>
+.  Think about other programming languages, if you want to use a portion of
+the inner logic of a function, what steps do you need to take to use it?</p>
+<p>Due to the primacy of the <code>alist</code> there are fantastic functions for working
+with them.</p>
+<p>Segmenting the data was a bit odd, I was hoping to simply dump the <code>alist</code> to a
+file.  However, with the problems I encountered, I started exploring other
+options.  Maybe write to JSON and load from JSON.  But then I would’ve needed to
+establish a mechanism for describing that transformation.</p>
+<ins aria-labelledby="section-update-2025-12-23" class="update" datetime="2025-12-23"><h2 id="section-update-2025-12-23"><time datetime="2025-12-23">Dec 23, 2025</time> update</h2> <p>
+Reader’s rallied and submitted some options.  The following refactor works in
+place of the previous implementations.
+</p>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland-map-write (&amp;optional map)
+  &quot;Write the MAP into a re-loadable format.&quot;
+  (setq mythic-bastionland-map (or map (mythic-bastionland-map)))
+  (with-temp-buffer
+    (let ((print-level nil)
+          (print-length nil))
+      (prin1 mythic-bastionland-map (current-buffer)))
+    (write-file mythic-bastionland-map-state-file)))
+
+(defun mythic-bastionland-map-read ()
+  &quot;Load the persisted map.&quot;
+  (if-let ((file mythic-bastionland-map-state-file))
+      (if (f-file-p file)
+          (progn
+            (setq mythic-bastionland-map
+                  (read (with-temp-buffer
+                          (insert-file-contents file)
+                          (buffer-string))))
+            (message &quot;Loaded mythic-bastionland-map from %s&quot; file))
+        (user-error &quot;No file found at %s&quot;
+                    mythic-bastionland-map-state-file))
+    (user-error &quot;'mythic-bastionland-state-file is nil&quot;)))
+</code></pre>
+</ins>
+
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Serializing%20Somewhat%20Large%20Emacs%20Alists">Reply by Email</a></p>
+
+      

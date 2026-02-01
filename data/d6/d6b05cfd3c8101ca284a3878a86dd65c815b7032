@@ -1,0 +1,797 @@
+<p><a href="https://adventofcode.com/">Advent Of Code 2025</a> starts in a few
+hours. Time to practice your Lisp-fu to solve it with the greatest
+language of all times this year!</p>
+
+<p>Most of the times, puzzles start with a string input we have to parse
+to a meaningful data structure, after which we can start working on
+the algorithm. For example, parse this:</p>
+
+<pre><code class="language-lisp">(defparameter *input* &quot;3   4
+4   3
+2   5
+1   3
+3   9
+3   3&quot;)
+</code></pre>
+
+<p>into a list of list of integers, or this:</p>
+
+<pre><code class="language-lisp">(defparameter *input* &quot;....#.....
+.........#
+..........
+..#.......
+.......#..
+..........
+.#..^.....
+........#.
+#.........
+......#...&quot;)
+</code></pre>
+
+<p>into a grid, a map. But how do you represent it, how to do it
+efficiently, what are the traps to avoid, are there some nice tricks
+to know? We&rsquo;ll try together.</p>
+
+<p>You&rsquo;ll find those 3 exercises of increasing order also in the <a href="https://github.com/vindarel/common-lisp-course-in-videos/tree/master/exercises/chapter%20-%20data%20structures">GitHub
+repository</a>
+of my course (see my <a href="https://lisp-journey.gitlab.io/blog/learn-lisp-data-structures-9-videos-90-minutes/">previous post on the new data structures
+chapter</a>).</p>
+
+<p>I give you fully-annotated puzzles and code layout. You&rsquo;ll have to
+carefully read the instructions, think about how you would solve it
+yourself, read my proposals, and fill-in the blanks -or do it all by
+yourself. Then, you&rsquo;ll have to check your solution with your own
+puzzle input you have to grab from AOC&rsquo;s website!</p>
+
+<!-- markdown-toc start - Don't edit this section. Run M-x markdown-toc-refresh-toc -->
+
+<p><strong>Table of Contents</strong></p>
+
+<ul>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#prerequisites">Prerequisites</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#exercise-1---lists-of-lists">Exercise 1 - lists of lists</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#exercise-2---prepare-to-parse-a-grid-as-a-hash-table">Exercise 2 - prepare to parse a grid as a hash-table</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#harder-puzzle---hash-tables-grid-coordinates">Harder puzzle - hash-tables, grid, coordinates</a></li>
+<li><a href="https://lisp-journey.gitlab.io/index.xml#closing-words">Closing words</a></li>
+</ul>
+
+<!-- markdown-toc end -->
+
+<h2 id="prerequisites">Prerequisites</h2>
+
+<p>You must know the basics, but not so much. And if you are an
+experienced Lisp developer, you can still find new constraints for
+this year: solve it with <code>loop</code>, without <code>loop</code>, with a
+purely-functional data structure library such as FSet, use Coalton, create
+animations, use the object system, etc.</p>
+
+<p>If you are starting out, you must know at least:</p>
+
+<ul>
+<li>the basic data structures (lists and their limitations, arrays and vectors, hash-tables, sets...)</li>
+<li>iteration (iterating over a list, arrays and hash-table keys)</li>
+<li>functions</li>
+</ul>
+
+<p>no need of macros, CLOS or thorough error handling (it&rsquo;s not about production-grade puzzles :p ).</p>
+
+<h2 id="exercise-1-lists-of-lists">Exercise 1 - lists of lists</h2>
+
+<p>This exercise comes from Advent Of Code 2024, day 01: <a href="https://adventofcode.com/2024/day/1">https://adventofcode.com/2024/day/1</a></p>
+
+<p>Read the puzzle there! Try with your own input data!</p>
+
+<p>Here are the shortened instructions.</p>
+
+<pre><code>;;;
+;;; ********************************************************************
+;;; WARN: this exercise migth be hard if you don't know about functions.
+;;; ********************************************************************
+;;;
+;;; you can come back to it later.
+;;; But, you can have a look, explore and get something out of it.
+</code></pre>
+
+<p>In this exercise, we use:</p>
+
+<pre><code>;;; SORT
+;;; ABS
+;;; FIRST, SECOND
+;;; EQUAL
+;;; LOOP, MAPCAR, REDUCE to iterate and act on lists.
+;;; REMOVE-IF
+;;; PARSE-INTEGER
+;;; UIOP (built-in) and a couple string-related functions
+;;;
+;;; and also:
+;;; feature flags
+;;; ERROR
+;;;
+;;; we don't rely on https://github.com/vindarel/cl-str/
+;;; (nor on cl-ppcre https://common-lisp-libraries.readthedocs.io/cl-ppcre/)
+;;; but it would make our life easier.
+;;;
+</code></pre>
+
+<p>OK, so this is your puzzle input, a string representing two colums of integers.</p>
+
+<pre><code class="language-lisp">(defparameter *input* &quot;3   4
+4   3
+2   5
+1   3
+3   9
+3   3&quot;)
+</code></pre>
+
+<p>We&rsquo;ll need to parse this string into two lists of integers.</p>
+
+<p>If you want to do it yourself, take the time you need! If you&rsquo;re new to Lisp iteration and data structures, I give you a possible solution.</p>
+
+<pre><code>;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;; [hiding in case you want to do it...]
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+;;;
+
+(defun split-lines (s)
+  &quot;Split the string S by newlines.
+  Return: a list of strings.&quot;
+  ;; If you already quickloaded the STR library, see:
+  ;; (str:lines s)
+  ;;
+  ;; UIOP comes with ASDF which comes with your implementation.
+  ;; https://asdf.common-lisp.dev/uiop.html
+  ;;
+  ;; #\ is a built-in reader-macro to write a character by name.
+  (uiop:split-string s :separator '(#\Newline)))
+</code></pre>
+
+<p>Compile the function and try it on the REPL, or with a quick test expression below a &ldquo;feature flag&rdquo;.</p>
+
+<p>We get a result like <code>'(&quot;3   4&quot; &quot;4   3&quot; &quot;2   5&quot; &quot;1   3&quot; &quot;3   9&quot; &quot;3   3&quot;)</code>, that is a list of strings with numbers inside.</p>
+
+<pre><code class="language-lisp">#+lets-try-it-out
+;; This is a feature-flag that looks into this keyword in the top-level *features* list.
+;; The expression below should be highlihgted in grey
+;; because :lets-try-it-out doesn't exist in your *features* list.
+;;
+;; You can compile this with C-c C-c
+;; Nothing should happen.
+(assert (equal '(&quot;3   4&quot; &quot;4   3&quot; &quot;2   5&quot; &quot;1   3&quot; &quot;3   9&quot; &quot;3   3&quot;)
+               (split-lines *input*)))
+;;                                   ^^ you can put the cursor here and eval the expression with C-x C-e, or send it to the REPL with C-c C-j.
+</code></pre>
+
+<p>We now have to extract the integers inside each string.</p>
+
+<p>To do this I&rsquo;ll use a utility function.</p>
+
+<pre><code class="language-lisp">;; We could inline it.
+;; But, measure before trying any speed improvement.
+(defun blank-string-p (s)
+  &quot;S is a blank string (no content).&quot;
+  ;; the -p is for &quot;predicate&quot; (returns nil or t (or a truthy value)), it's a convention.
+  ;;
+  ;; We already have str:blankp in STR,
+  ;; and we wouldn't need this function if we used str:words.
+  (equal &quot;&quot; s))  ;; better: pair with string-trim.
+
+#+(or)
+(blank-string-p nil)
+#++
+(blank-string-p 42)
+#+(or)
+(blank-string-p &quot;&quot;)
+</code></pre>
+
+<p>And another one, to split by spaces:</p>
+
+<pre><code class="language-lisp">(defun split-words (s)
+  &quot;Split the string S by spaces and only return non-blank results.
+
+  Example:
+
+    (split-words \&quot;3    4\&quot;)
+    =&gt; (\&quot;3\&quot; \&quot;4\&quot;)
+  &quot;
+  ;; If you quickloaded the STR library, see:
+  ;; (str:words s)
+  ;; which actually uses cl-ppcre under the hood to split by the \\s+ regexp,
+  ;; and ignore consecutive whitespaces like this.
+  ;;
+  (let ((strings (uiop:split-string s :separator '(#\Space))))
+    (remove-if #'blank-string-p strings)))
+
+#+lets-try-it-out
+;; test this however you like.
+(split-words &quot;3       4&quot;)
+</code></pre>
+
+<p>I said we wouldn&rsquo;t use a third-party library for this first puzzle. But using <code>cl-ppcre</code> would be so much easier:</p>
+
+<pre><code class="language-lisp">(ppcre:all-matches-as-strings &quot;\\d+&quot; &quot;3  6&quot;)
+;; =&gt; (&quot;3&quot; &quot;6&quot;)
+</code></pre>
+
+<p>With our building blocks, this is how I would parse our input string
+into a list of list of integers.</p>
+
+<p>We <code>loop</code> on input lines and use the built-in function <code>parse-integer</code>.</p>
+
+<pre><code class="language-lisp">(defun parse-input (input)
+  &quot;Parse the multi-line INPUT into a list of two lists of integers.&quot;
+  ;; loop! I like loop.
+  ;; We see everything about loop in the iteration chapter.
+  ;;
+  ;; Here, we see one way to iterate over lists:
+  ;; loop for ... in ...
+  ;;
+  ;; Oh, you can rewrite it in a more functional style if you want.
+  (loop :for line :in (split-lines input)
+        :for words := (split-words line)
+        :collect (parse-integer (first words)) :into col1
+        :collect (parse-integer (second words)) :into col2
+        :finally (return (list col1 col2))))
+
+#+lets-try-it-out
+(parse-input *input*)
+;; ((3 4 2 1 3 3) (4 3 5 3 9 3))
+</code></pre>
+
+<p><em>The puzzle continues</em>.</p>
+
+<p>&ldquo;Maybe the lists are only off by a small amount! To find
+out, pair up the numbers and measure how far apart they are. Pair
+up the smallest number in the left list with the smallest number
+in the right list, then the second-smallest left number with the
+second-smallest right number, and so on.&rdquo;</p>
+
+<p>=&gt; we need to SORT the columns by ascending order.;;;</p>
+
+<p>&ldquo;Within each pair, figure out how far apart the two numbers are;&rdquo;</p>
+
+<p>=&gt; we need to compute their relative, absolute distance.</p>
+
+<p>&ldquo;you&rsquo;ll need to add up all of those distances.&rdquo;</p>
+
+<p>=&gt; we need to sum each relative distance.</p>
+
+<p>&ldquo;For example, if you pair up a 3 from the left list with a 7 from
+the right list, the distance apart is 4; if you pair up a 9 with a
+3, the distance apart is 6.&rdquo;</p>
+
+<p>Our input data&rsquo;s sum of the distances is 11.</p>
+
+<p>We must sort our lists of numbers. Here&rsquo;s a <em>placeholder</em> function:</p>
+
+<pre><code class="language-lisp">(defun sort-columns (list-of-lists)
+  &quot;Accept a list of two lists.
+  Sort each list in ascending order.
+  Return a list of two lists, each sorted.&quot;
+  ;; no mystery, use the SORT function.
+  (error &quot;not implemented&quot;))
+
+;; Use this to check your SORT-COLUMNS function.
+;; You can write this in a proper test function if you want.
+#+lets-try-it-out
+(assert (equal (sort-columns (parse-input *input*))
+               '((1 2 3 3 3 4) (3 3 3 4 5 9))))
+</code></pre>
+
+<p>Compute the absolute distance.</p>
+
+<pre><code class="language-lisp">;; utility function.
+(defun distance (a b)
+  &quot;The distance between a and b.
+  Doesn't matter if a &lt; b or b &lt; a.&quot;
+  ;;
+  ;; hint: (abs -1) is 1
+  ;;
+  (error &quot;not implemented&quot;)
+  )
+
+(defun distances (list-of-lists)
+  &quot;From a list of two lists, compute the absolute distance between each point.
+  Return a list of integers.&quot;
+  (error &quot;not implemented&quot;)
+  ;; hint:
+  ;; (mapcar #'TODO (first list-of-lists) (second list-of-lists))
+  ;;
+  ;; mapcar is a functional-y way to iterate over lists.
+  )
+
+
+(defun sum-distances (list-of-integers)
+  &quot;Add the numbers in this list together.&quot;
+  (error &quot;not implemented&quot;)
+  ;; Hint:
+  ;; try apply, funcall, mapcar, reduce.
+  ;; (TODO #'+ list-of-integers)
+  ;; or loop ... sum !
+  )
+</code></pre>
+
+<p>Verify.</p>
+
+<pre><code class="language-lisp">(defun solve (&amp;optional (input *input*))
+  ;; let it flow:
+  (sum-distances (distances (sort-columns (parse-input input)))))
+
+#+lets-try-it-out
+(assert (equal 11 (solve)))
+</code></pre>
+
+<p>All good? There&rsquo;s more if you want.</p>
+
+<pre><code class="language-lisp">;;;
+;;; Next:
+;;; - do it with your own input data!
+;;; - do the same with the STR library and/or CL-PPCRE.
+;;; - write a top-level instructions that calls our &quot;main&quot; function so that you can call this file as a script from the command line, with sbcl --load AOC-2024-day01.lisp
+;;;
+</code></pre>
+
+<h2 id="exercise-2-prepare-to-parse-a-grid-as-a-hash-table">Exercise 2 - prepare to parse a grid as a hash-table</h2>
+
+<p>This exercise is a short and easy, to prepare you for a harder puzzle. This is not an AOC puzzle itself.</p>
+
+<p>Follow the instructions. We are only warming up.</p>
+
+<pre><code class="language-lisp">;; Do this with only CL built-ins,
+;; or with the dict notation from Serapeum,
+;; or with something else,
+;; or all three one after the other.
+</code></pre>
+
+<p>We will build up a grid stored in a hash-table to represent a map like this:</p>
+
+<pre><code>&quot;....#...##....#&quot;
+</code></pre>
+
+<p>where the <code>#</code> character represents an obstacle.</p>
+
+<p>In our case the grid is in 1D, it is often rather 2D.</p>
+
+<p>This grid/map is the base of many AOC puzzles.</p>
+
+<p>Take a second: shall we represent a 2D grid as a list of lists, or something else,
+(it depends on the input size)
+and how would you do in both cases?</p>
+
+<p><em>Your turn</em>:</p>
+
+<pre><code class="language-lisp">;;
+;; 1. Define a function MAKE-GRID that returns an empty grid (hash-table).
+;;
+(defun make-grid ()
+  ;; todo
+  )
+
+
+;;
+;; Define a top-level parameter to represent a grid that defaults to an empty grid.
+;;
+
+;; def... *grid* ...
+
+;;
+;; 2. Create a function named CELL that returns a hash-table with those keys:
+;; :char -&gt; holds the character of the grid at this coordinate.
+;; :visited or :visited-p or even :visited? -&gt; stores a boolean,
+;;  to tell us if this cell was already visited (by a person walking in the map). It defaults
+;;  to NIL, we don't use this yet.
+;;
+
+(defun cell (char &amp;key visited)
+  ;; todo
+  )
+
+;;
+;; 3. Write a function to tell us if a cell is an obstacle,
+;;    denoted by the #\# character
+;;
+(defun is-block (cell)
+  &quot;This cell is a block, an obstacle. Return: boolean.&quot;
+  ;; todo
+  ;; get the :char key,
+  ;; check it equals the #\# char.
+  ;; Accept a cell as NIL.
+  )
+</code></pre>
+
+<p>We built utility functions we&rsquo;ll likely re-use on a more complex puzzle.</p>
+
+<p>Let&rsquo;s continue with parsing the input to represent a grid.</p>
+
+<p>If you are a Lisp beginner or only saw the data structures chapter in
+my course, I give you the layout of the <code>parse-input</code> function with a
+<code>loop</code> and you only have to fill-in one blank.</p>
+
+<p>In any case, try yourself. Refer to the <a href="https://lispcookbook.github.io/cl-cookbook/iteration.html">Cookbook</a> for <code>loop</code>
+examples.</p>
+
+<pre><code class="language-lisp">;;
+;; 4. Fill the grid (with devel data).
+;;
+;; Iterate on a given string (the puzzle input),
+;; create the grid,
+;; keep track of the X coordinate,
+;; for each character in the input create a cell,
+;; associate the coordinate to this cell in the grid.
+;;
+
+(defparameter *input* &quot;.....#..#.##...#........##...&quot;)
+
+(defun parse-grid (input)
+  &quot;Parse a string of input, fill a new grid with a coordinate number -&gt; a cell (hash-table).
+  Return: our new grid.&quot;
+  (loop :for char :across input
+        :with grid := (make-grid)
+        :for x :from 0
+        :for cell := (cell char)
+        :do
+           ;; associate our grid at the X coordinate
+           ;; with our new cell.
+           ;; (setf ... )
+        :finally (return grid)))
+
+;; try it:
+#++
+(parse-grid *input*)
+</code></pre>
+
+<p>That&rsquo;s only a simple example of the map mechanism that comes regurlarly in AOC.</p>
+
+<p>Here&rsquo;s the 3rd exercise that uses all of this.</p>
+
+<h2 id="harder-puzzle-hash-tables-grid-coordinates">Harder puzzle - hash-tables, grid, coordinates</h2>
+
+<p>This exercise comes from Advent Of Code 2024, day 06.
+<a href="https://adventofcode.com/2024/day/6">https://adventofcode.com/2024/day/6</a>
+It&rsquo;s an opportunity to use hash-tables.</p>
+
+<p>Read the puzzle there!
+Try with your own input data!</p>
+
+<p>Here are the shortened instructions.</p>
+
+<p>The solutions are in another file, on my GitHub repository.</p>
+
+<pre><code>;;;
+;;; ********************************************************************
+;;; WARN: this exercise migth be hard if you don't know about functions.
+;;; ********************************************************************
+;;;
+;;; you can come back to it later.
+;;; But, you can have a look, explore and get something out of it.
+</code></pre>
+
+<p>In this exercise, we use:</p>
+
+<pre><code class="language-lisp">;;;
+;;; parameters
+;;; functions
+;;; recursivity
+;;; &amp;aux in a lambda list
+;;; CASE
+;;; return-from
+;;; &amp;key arguments
+;;; complex numbers
+;;; hash-tables
+;;; the DICT notation (though optional)
+;;; LOOPing on a list and on strings
+;;; equality for characters
+</code></pre>
+
+<p>For this puzzle, we make our life easier and we&rsquo; use the DICT notation.</p>
+
+<pre><code class="language-lisp">(import 'serapeum:dict)
+</code></pre>
+
+<p>If you know how to create a package, go for it.</p>
+
+<p>Please, quickload the STR library for this puzzle.</p>
+
+<pre><code class="language-lisp">#++
+(ql:quickload &quot;str&quot;)
+;; Otherwise, see this as another exercise to rewrite the functions we use.
+</code></pre>
+
+<p>This is your puzzle input:</p>
+
+<pre><code class="language-lisp">;;; a string representing a grid, a map.
+(defparameter *input* &quot;....#.....
+.........#
+..........
+..#.......
+.......#..
+..........
+.#..^.....
+........#.
+#.........
+......#...&quot;)
+
+;; the # represents an obstacle,
+;; the ^ represents a guard that walks to the top of the grid.
+</code></pre>
+
+<p>When the guard encounters an obstacle, it turns 90 degrees right, and keeps walking.</p>
+
+<p>Our task is to count the number of distinct positions the guard will visit on the grid
+before eventually leaving the area.</p>
+
+<p>We will have to:
+- parse the grid into a data structure
+  - preferably, an efficient data structures to hold coordinates. Indeed, AOC <em>real</em> inputs are large.
+- for each cell, note if it&rsquo;s an obstacle, if that&rsquo;s where the guard is, if the cell was already visited,
+- count the number of visited cells.</p>
+
+<pre><code class="language-lisp">;; We'll represent a cell &quot;object&quot; by a hash-table.
+;; With Serapeum's dict:
+(defun cell (char &amp;key guard visited)
+  (dict :char char
+        :guard guard
+        :visited visited))
+
+;; Our grid is a dict too.
+;; We create a top-level variable, mainly for devel purposes.
+(defvar *grid* (dict)
+  &quot;A hash-table to represent our grid. Associates a coordinate (complex number which represents the X and Y axis in the same number) to a cell (another hash-table).&quot;)
+;; You could use a DEFPARAMETER, like I did initially. But then, a C-c C-k (recompile current file) will erase its current value, and you might want or not want this.
+</code></pre>
+
+<p>For each coordinate, we associate a cell.</p>
+
+<p>What is a coordinate? We use a trick we saw in other people&rsquo;s AOC solution,
+to use a complex number.
+Indeed, with its real and imaginary parts, it can represent both the X axis and the Y axis
+<em>at the same time in the same number</em>.</p>
+
+<pre><code class="language-lisp">#|
+;; Practice complex numbers:
+
+(complex 1)
+;; =&gt; 1
+(complex 1 1)
+;; =&gt; represented #C(1 1)
+
+;; Get the imaginary part (let's say, the Y axis):
+(imagpart #C(1 1))
+
+;; the real part (X axis):
+(realpart #C(1 1))
+
+|#
+</code></pre>
+
+<p>Look, we are tempted to go full object-oriented
+and represent a &ldquo;coordinate&rdquo; object, a &ldquo;cell&rdquo; object and whatnot,
+but it&rsquo;s OK we can solve the puzzle with usual data structures.</p>
+
+<pre><code class="language-lisp">;; Let's remember where our guard is.
+(defvar *guard* nil
+  &quot;The guard coordinate. Mainly for devel purposes (IIRC).&quot;)
+</code></pre>
+
+<p><em>Task 1: parse the grid string</em>.</p>
+
+<p>We must parse the string to a hash-table of coordinates -&gt; cells.</p>
+
+<p>I&rsquo;ll write the main loop for you.
+If you feel ready, take a go at it.</p>
+
+<pre><code class="language-lisp">(defun parse-grid (input)
+  &quot;Parse INPUT (string) to a hash-table of coordinates -&gt; cells.&quot;
+  ;; We start by iterating on each line.
+  (loop :for line :in (str:lines input)
+        ;; start another variable that tracks our loop iteration.
+        ;; It it incremented by 1 at each loop by default.
+        :for y :from 0  ;; up and down on the map, imagpart of our coordinate number.
+        ;; The loop syntax with ... = ... creates a variable at the first iteration,
+        ;; not at every iteration.
+        :with grid = (dict)
+
+        ;; Now iterate on each line's character.
+        ;; A string is an array of characters,
+        ;; so we use ACROSS to iterate on it. We use IN to iterate on lists.
+        ;;
+        ;; The Iterate library has the generic :in-sequence clause if that's your thing (with a speed penalty).
+        :do (loop :for char :across line
+                 :for x :from 0   ;; left to right on the map, realpart of our coordinate.
+                 :for key := (complex x y)
+                  ;; Create a new cell at each character.
+                  :for cell := (cell char)
+                  ;; Is this cell the guard at the start position?
+                 :when (equal char #\^)
+                   :do (progn
+                         ;; Here, use SETF on GETHASH
+                         ;; to set the :guard keyword of the cell to True.
+
+                         (print &quot;we saw the guard&quot;)
+                         ;; (setf (gethash ... ...) ...)
+
+                         ;; For devel purposes, we will also keep track of
+                         ;; where our guard is with a top-level parameter.
+                         (setf *guard* key)
+                         )
+                  :do
+                     ;; Normal case:
+                     ;; use SETF on GETHAH
+                     ;; to associate this KEY to this CELL in our GRID.
+                     (format t &quot;todo: save the cell ~S in the grid&quot; cell)
+                  )
+        :finally (return grid))
+  )
+
+;; devel: test and bind a top-level param for ease of debugging/instropection/poking around.
+#++
+(setf *grid* (parse-grid *input*))
+</code></pre>
+
+<p><em>Task 2: walk our guard, record visited cells.</em></p>
+
+<p>We have to move our guard on the grid, until it exits it.</p>
+
+<p>I&rsquo;ll give you a couple utility functions.</p>
+
+<pre><code class="language-lisp">(defun is-block (cell)
+  &quot;Is this cell an obstacle?&quot;
+  ;; accept a NIL, we'll stop the walk in the next iteration.
+  (when cell
+    (equal TODO #\#)))
+
+;; We choose the write the 4 possible directions as :up :down :right :left.
+;; See also:
+;; exhaustiveness checking at compile-time:
+;; https://dev.to/vindarel/compile-time-exhaustiveness-checking-in-common-lisp-with-serapeum-5c5i
+
+(defun next-x (position direction)
+  &quot;From a position (complex number) and a direction, compute the next X.&quot;
+  (case direction
+    (:up (realpart position))
+    (:down (realpart position))
+    (:right (1+ (realpart position)))
+    (:left (1- (realpart position)))))
+
+(defun next-y (position direction)
+  &quot;From a position (complex number) and a direction, compute the next Y.&quot;
+  (case direction
+    (:up (1- (imagpart position)))
+    (:down (1+ (imagpart position)))
+    (:right (imagpart position))
+    (:left (imagpart position))))
+</code></pre>
+
+<p>This is the &ldquo;big&rdquo; function that moves the guard,
+records were it went,
+makes it rotate if it is against a block,
+and iterates, until the guard goes out of the map.</p>
+
+<p>Read the puzzle instructions carefuly and write the &ldquo;TODO&rdquo; placeholders.</p>
+
+<pre><code class="language-lisp">(defun walk (&amp;key (grid *grid*) (input *input*)
+               (position *guard*)
+               (cell (gethash *guard* *grid*))  ;; todo: *grid* is used here. Fix it so we don't use a top-level variable, but only the grid given as a key argument.
+               (direction :up)
+               (count 0)
+               ;; &amp;aux notation: it saves a nested of LET bindings.
+               ;; It's old style.
+               ;; Those are not arguments to the function we pass around,
+               ;; they are bindings inside the function body.
+             &amp;aux next-cell
+               next-position
+               obstacle-coming)
+  &quot;Recursively move the guard and annotate cells of our grid,
+  count the number of visited cells.&quot;
+
+  ;; At each iteration, we study a new cell we take on our grid.
+  ;; If we move the guard to a coordinate that doesn't exist in our grid,
+  ;; we stop here.
+  (unless cell
+    (return-from walk count))
+
+  ;; Look in the same direction first and see what we have.
+  (setf next-position
+        (complex (next-x position direction) (next-y position direction)))
+
+  (setf next-cell (gethash next-position grid))
+
+  ;; obstacle?
+  (setf obstacle-coming (is-block next-cell))
+
+  ;; then change direction.
+  (when obstacle-coming
+    (setf direction
+          (case direction
+            (:up :right)
+            (:down :left)
+            (:right :down)
+            (:left :up))))
+
+  ;; Count unique visited cells.
+  ;; TODO
+  (unless (print &quot;if this CELL is visited...&quot;)
+      (incf count)
+      ;; TODO set this cell as visited.
+      (print &quot;set this CELL to visited&quot;)
+    )
+
+  ;; get our next position now.
+  (setf next-position
+        (complex (next-x position direction) (next-y position direction)))
+
+  ;; This next cell may or may not be in our grid (NIL).
+  (setf next-cell (gethash next-position grid))
+
+  (walk :grid grid :input input
+        :cell next-cell
+        :position next-position
+        :direction direction
+        :count count))
+</code></pre>
+
+<p>and that&rsquo;s how we solve the puzzle:</p>
+
+<pre><code class="language-lisp">(defun part-1 (input)
+  (walk :grid (parse-grid input)))
+
+#++
+(part-1 *input*)
+;; 41
+;; The right answer for this input.
+;; In AOC, you have a bigger, custom puzzle input. This can lead to surprises.
+</code></pre>
+
+<h2 id="closing-words">Closing words</h2>
+
+<p>Look at other people&rsquo;s solutions too. For example, <a href="https://github.com/ak-coram/advent/blob/main/2024/06.lisp">ak-coram&rsquo;s for our last exercise</a> (using FSet). See how Screamer is used for day 06 by bo-tato (<a href="https://www.reddit.com/r/Common_Lisp/comments/1h94tfe/advent_of_code_2024_day_7_with_screamer_non/">reddit</a>). atgreen (ocicl, cl-tuition, cffi...) <a href="https://www.reddit.com/r/adventofcode/comments/1h689qf/2024_day_4_solutions/m0ejih1/">solution</a> with a grid as a hash-table with complex numbers. lispm&rsquo;s <a href="https://www.reddit.com/r/Common_Lisp/comments/1h7ib2v/advent_of_code_2024_day_4_in_common_lisp_lispworks/">day 04</a> solution. Can you read all solutions?</p>
+
+<p>On other days, I used:</p>
+
+<ul>
+<li>alexandria&rsquo;s <code>map-permutations</code> for day 08 when you want... permutations. It doesn&rsquo;t &ldquo;cons&rdquo; (what does that mean you ask? You didn&rsquo;t follow my course ;) ). Read here: <a href="https://dev.to/vindarel/advent-of-code-alexandrias-map-permutations-was-perfect-for-day-08-common-lisp-tip-16il">https://dev.to/vindarel/advent-of-code-alexandrias-map-permutations-was-perfect-for-day-08-common-lisp-tip-16il</a>.</li>
+<li>the library fare-memoization, to help in a recursive solution.</li>
+<li>to write math, use cmu-infix. When you spot 2 equations with 2 unknows, think &ldquo;Cramer system&rdquo;. This came up last year, so maybe not this year.</li>
+<li>with very large numbers: use double floats, as in <code>1.24d0</code></li>
+<li>least common multiple? <code>lcm</code> is a built-in.</li>
+<li><a href="https://github.com/vindarel/cl-str/?tab=readme-ov-file#match-experimental--new-in-feb-2024">str:match</a> can be a thing to parse strings.</li>
+<li>if you got <a href="https://github.com/ciel-lang/CIEL/">CIEL</a> (CIEL Is an Extended Lisp), you have Alexandria, cl-str, Serapeum:dict and more libraries baked-in. It&rsquo;s also an easy way to run Lisp scripts (with these dependencies) from the shell.</li>
+</ul>
+
+<p>See you and happy lisping!</p>
+
+<p>Your best resources:</p>
+
+<ul>
+<li><a href="https://lispcookbook.github.io/cl-cookbook/">the Common Lisp Cookbook</a></li>
+<li><a href="https://www.udemy.com/course/common-lisp-programming/?referralCode=2F3D698BBC4326F94358">my course in videos</a></li>
+</ul>

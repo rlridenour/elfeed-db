@@ -1,0 +1,68 @@
+<p>… but won’t if one has a custom theme loaded, as far as I can tell.</p>
+<p>I don’t particularly like dark mode. Its use seems more preference than science, so for those who like it, cheers! However, from time to time dark mode would be good. In the evening when I’m simply reading my RSS feeds in elfeed, for example.</p>
+<p>I wanted something that would make the switch without adding much weight. Here’s the journey:</p>
+<ol class="org-ol">
+<li>Looked at what Prot uses/recommends <a href="https://protesilaos.com/emacs/modus-themes">Modus Themes | Protesilaos Stavrou</a></li>
+<li>Led me to <a href="https://github.com/guidoschmidt/circadian.el">GitHub &#8211; guidoschmidt/circadian.el: Theme-switching for Emacs based on daytime</a></li>
+<li>That wasn’t gonna work for me. I realized I wanted this to happen in <code>early-init.el</code> so a package-based option wasn’t right.</li>
+<li>Light DDG-ing later and I found <a href="https://errickson.net/blog/emacs-dark-mode.html">Emacs and Dark Mode</a></li>
+<li>That code would work but only on <code>emacs-plus</code>. But the system signals other apps when to switch, so <code>emacs-mac</code> must have something too …</li>
+<li>Dug around in the docs for <code>emacs-mac</code> and found some breadcrumbs.</li>
+<li>Which led me to <a href="https://macowners.club/posts/custom-functions-4-ui/">Custom Emacs functions No. 4 &#8211; UI | macOS &amp; (open-source) Software</a></li>
+<li>Yes! Nearly there. Timu’s code is good but is customized to his use case. I want something more utilitarian.</li>
+<li>Stripped out the bits that work for <code>emacs-mac</code> and maybe <code>emacs-plus</code> and rebuilt it into this with a little help from the robot:</li>
+</ol>
+<div class="org-src-container"><label class="org-src-name"></label></p>
+<pre id="nil" class="src src-emacs-lisp">(<span style="color: #79a8ff; font-weight: bold;">defvar</span> <span style="color: #4ae2f0;">my/light-theme</span> 'modus-operandi-tinted
+  <span style="color: #9ac8e0; font-style: italic;">"Theme to use when system appearance is light."</span>)
+
+(<span style="color: #79a8ff; font-weight: bold;">defvar</span> <span style="color: #4ae2f0;">my/dark-theme</span> 'modus-vivendi-tinted
+  <span style="color: #9ac8e0; font-style: italic;">"Theme to use when system appearance is dark."</span>)
+
+(<span style="color: #79a8ff; font-weight: bold;">defun</span> <span style="color: #f78fe7;">my/apply-theme-based-on-appearance</span> (<span style="color: #11c777; font-weight: bold;">&amp;optional</span> appearance)
+  <span style="color: #9ac8e0; font-style: italic;">"Switch between `my/light-theme` and `my/dark-theme` based on APPEARANCE.</span>
+
+<span style="color: #9ac8e0; font-style: italic;">Handles both Emacs Plus (ns, using `appearance`) and Emacs Mac Port (mac, via `mac-application-state`)."</span>
+  (<span style="color: #79a8ff; font-weight: bold;">let</span> ((mode
+         (<span style="color: #79a8ff; font-weight: bold;">cond</span>
+          <span style="color: #ef8386; font-style: italic;">;; </span><span style="color: #ef8386; font-style: italic;">Emacs Plus: appearance is passed as symbol</span>
+          ((boundp 'ns-system-appearance-change-functions) appearance)
+
+          <span style="color: #ef8386; font-style: italic;">;; </span><span style="color: #ef8386; font-style: italic;">Emacs Mac Port: detect from system plist</span>
+          ((plist-get (mac-application-state) <span style="color: #feacd0; font-weight: bold;">:appearance</span>)))))
+
+    (<span style="color: #79a8ff; font-weight: bold;">pcase</span> mode
+      ((<span style="color: #79a8ff; font-weight: bold;">or</span> 'light <span style="color: #2fafff;">"NSAppearanceNameAqua"</span>)
+       (mapc #'disable-theme custom-enabled-themes)
+       (load-theme my/light-theme t))
+
+      ((<span style="color: #79a8ff; font-weight: bold;">or</span> 'dark <span style="color: #2fafff;">"NSAppearanceNameDarkAqua"</span>)
+       (mapc #'disable-theme custom-enabled-themes)
+       (load-theme my/dark-theme t)))))
+
+(<span style="color: #79a8ff; font-weight: bold;">defun</span> <span style="color: #f78fe7;">my/setup-theme-switching</span> ()
+  <span style="color: #9ac8e0; font-style: italic;">"Set up automatic theme switching on macOS appearance change."</span>
+  (<span style="color: #79a8ff; font-weight: bold;">if</span> (boundp 'ns-system-appearance-change-functions)
+      <span style="color: #ef8386; font-style: italic;">;; </span><span style="color: #ef8386; font-style: italic;">Emacs Plus</span>
+      (add-to-list 'ns-system-appearance-change-functions #'my/apply-theme-based-on-appearance)
+    <span style="color: #ef8386; font-style: italic;">;; </span><span style="color: #ef8386; font-style: italic;">Emacs Mac Port</span>
+    (<span style="color: #79a8ff; font-weight: bold;">progn</span>
+      (add-hook 'mac-effective-appearance-change-hook #'my/apply-theme-based-on-appearance)
+      (add-hook 'after-init-hook #'my/apply-theme-based-on-appearance))))
+
+(my/setup-theme-switching)
+</pre>
+</div>
+<p>This seems to check all the boxes:</p>
+<ul class="org-ul">
+<li>appropriate for <code>early-init.el</code></li>
+<li>doesn’t call external scripts or tools</li>
+<li>relies on the OS and <code>emacs-mac</code> and <code>emacs-plus</code> built-in capabilities</li>
+<li>it works, for me at least</li>
+</ul>
+<p>Some notes:</p>
+<ul class="org-ul">
+<li>Because this runs in <code>early-init.el</code>, needs setting up with built-in themes that are available before the package system loads. Thankfully, Prot’s <code>modus-themes</code> are built-in now.</li>
+<li>Any other GUI setup stuff like <code>initial-frame-alist</code>, <code>default-frame-alist</code> and <code>set-face-attribute</code> needs configuring before this (I think; maybe not?).</li>
+</ul>
+<p>As always, YMMV. Please play around with this and let me know how it works for you. I’m working on my LISP coding skills, so buyer beware.</p>

@@ -1,0 +1,219 @@
+<div class="update" id="org67c38da">
+<p>
+<span class="timestamp-wrapper"><time class="timestamp" datetime="2025-09-18">[2025-09-18 Thu]</time></span>: Got it to include the dates in the TOC as well
+</p>
+
+</div>
+
+<p>
+I've been volunteering to help with the <a href="https://www.bikebrigade.ca/">Bike Brigade</a> newsletter. I like that there are people who are out there helping improve food security by delivering food bank hampers to recipients. Collecting information for the newsletter also helps me feel more appreciation for the lively Toronto biking scene, even though I still can't make it out to most events. The general workflow is:
+</p>
+<ol class="org-ol">
+<li>collect info</li>
+<li>draft the newsletter somewhere other volunteers can give feedback on</li>
+<li>convert the newsletter to Mailchimp</li>
+<li>send a test message</li>
+<li>make any edits requested</li>
+<li>schedule the email campaign</li>
+</ol>
+
+<p>
+We have the <a href="https://mailchimp.com/">Mailchimp</a> Essentials plan, so I can't just export HTML for the whole newsletter. Someday I should experiment with services that might let me generate the whole newsletter from Emacs. That would be neat. Anyway, with Mailchimp's block-based editor, at least I can paste in HTML code for the text/buttons. That way, I don't have to change colours or define links by hand.
+</p>
+
+<p>
+The logistics volunteers coordinate via <a href="https://slack.com">Slack</a>, so a Slack Canvas seemed like a good way to draft the newsletter. I've previously written about my workflow for <a href="https://sachachua.com/blog/2025/06/transforming-html-clipboard-contents-with-emacs-to-smooth-out-mailchimp-annoyances-dates-images-comments-colours/">copying blocks from a Slack Canvas and then using Emacs to transform the rich text</a>, including recolouring the links in the section with light text on a dark background. However, copying rich text from a Slack Canvas turned out to be unreliable. Sometimes it would copy what I wanted, and sometimes nothing would get copied. There was no way to export HTML from the Slack Canvas, either.
+</p>
+
+<p>
+I switched to using <a href="https://docs.google.com">Google Docs</a> for the drafts. It was a little less convenient to add items from Slack messages and I couldn't easily right-click to download the images that I pasted in. It was more reliable in terms of copying, but only if I used <a href="https://github.com/astrand/xclip">xclip</a> to save the clipboard into a file instead of trying to do the whole thing in memory.
+</p>
+
+<p>
+I finally got to spend a little time automating a new workflow. This time I exported the Google Doc as a zip that had the HTML file and all the images in a subdirectory. The HTML source is not very pleasant to work with. It has lots of extra markup I don't need. Here's what an entry looks like:
+</p>
+
+
+<figure id="orge563feb">
+<img src="https://sachachua.com/blog/2025/09/getting-a-google-docs-draft-ready-for-mailchimp-via-emacs/2025-09-17_09-22-35.png" alt="2025-09-17_09-22-35.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>Exported HTML for an entry</figcaption>
+</figure>
+
+<p>
+Things I wanted to do with the HTML:
+</p>
+
+<ul class="org-ul">
+<li>Remove the google.com/url redirection for the links. Mailchimp will add its own redirection for click-tracking, but at least the links can look simpler when I paste them in.</li>
+<li>Remove all the extra classes and styles.</li>
+<li>Turn [ call to action ] into fancier Mailchimp buttons.</li>
+</ul>
+
+<p>
+Also, instead of transforming one block at a time, I decided to make an Org Mode document with all the different blocks I needed. That way, I could copy and paste things in quick succession.
+</p>
+
+<p>
+Here's what the result looks like. It makes a table of contents, adds the sign-up block, and adds the different links and blocks I need to paste into Mailchimp.
+</p>
+
+
+<figure id="orge33f152">
+<img src="https://sachachua.com/blog/2025/09/getting-a-google-docs-draft-ready-for-mailchimp-via-emacs/2025-09-17_10-03-27.png" alt="2025-09-17_10-03-27.png">
+
+<figcaption><span class="figure-number">Figure 2: </span>Screenshot of newsletter Org file with blocks for easy copying</figcaption>
+</figure>
+
+<p>
+I need to copy and paste the image filenames into the upload dialog on Mailchimp, so I use my <a href="https://sachachua.com/blog/2024/01/org-mode-custom-link-copy-to-clipboard/">custom Org Mode link type for copying to the clipboard</a>. For the HTML code, I use <code>#+begin_src html ... #+end_src</code> instead of <code>#+begin_export html ... #+end_export</code> so that I can use <a href="https://github.com/oantolin/embark">Embark</a> and <a href="https://github.com/oantolin/embark/blob/master/embark-org.el">embark-org</a> to quickly copy the contents of the source block. (That doesn't work for export blocks yet.) I have <code>C-.</code> bound to <code>embark-act</code>, the source block is detected by the functions that <code>embark-org.el</code> added to <code>embark-target-finders</code>, and the <code>c</code> binding in <code>embark-org-src-block-map</code> calls <code>embark-org-copy-block-contents</code>. So all I need to do is <code>C-. c</code> in a block to copy its contents.
+</p>
+
+<details><summary>Here's the code to process the newsletter draft</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-process-latest-newsletter-draft</span> (date)
+  <span class="org-doc">"Create an Org file with the HTML for different blocks."</span>
+  (<span class="org-keyword">interactive</span> (list (<span class="org-keyword">if</span> current-prefix-arg (org-read-date nil t nil <span class="org-string">"Date: "</span>)
+                       (org-read-date nil t <span class="org-string">"+Sun"</span>))))
+  (<span class="org-keyword">when</span> (stringp date) (<span class="org-keyword">setq</span> date (date-to-time date)))
+  (<span class="org-keyword">let</span> ((default-directory <span class="org-string">"~/Downloads/newsletter"</span>)
+        file
+        dom
+        sections)
+    (call-process <span class="org-string">"unzip"</span> nil nil nil <span class="org-string">"-o"</span> (my-latest-file <span class="org-string">"~/Downloads"</span> <span class="org-string">"\\.zip$"</span>))
+    (<span class="org-keyword">setq</span> file (my-latest-file default-directory))
+    (<span class="org-keyword">with-temp-buffer</span>
+      (insert-file-contents-literally file)
+      (goto-char (point-min))
+      (<span class="org-keyword">setq</span> dom (my-brigade-simplify-html (libxml-parse-html-region (point-min) (point-max))))
+      (my-brigade-save-newsletter-images dom)
+      (<span class="org-keyword">setq</span> sections
+            (my-html-group-by-tag
+             <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">h1</span>
+             (dom-children
+              (dom-by-tag
+               dom <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">body</span>)))))
+    (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*newsletter*"</span>)
+      (erase-buffer)
+      (org-mode)
+      (insert
+       (format-time-string <span class="org-string">"%B %-e, %Y"</span> date) <span class="org-string">"\n"</span>
+       <span class="org-string">"* In this e-mail\n#+begin_src html\n"</span>
+       <span class="org-string">"&lt;p&gt;Hi Bike Brigaders! Here&#8217;s what's happening this week, with quick signup links. In this e-mail:&lt;/p&gt;"</span>
+       (replace-regexp-in-string
+        <span class="org-string">"&lt;li&gt;"</span> <span class="org-string">"\n&lt;li&gt;"</span>
+        (<span class="org-keyword">with-temp-buffer</span>
+          (svg-print
+           (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">dom-node</span>
+                  <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">ul</span> nil
+                  (append
+                   (my-brigade-toc-items (assoc-default <span class="org-string">"Bike Brigade"</span> sections <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>))
+                   (my-brigade-toc-items (assoc-default <span class="org-string">"In our community"</span> sections <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>)))))
+          (buffer-string)))
+       <span class="org-string">"\n&lt;br /&gt;\n"</span>
+       (my-brigade-copy-signup-block date)
+       <span class="org-string">"\n#+end_src\n\n"</span>)
+      (<span class="org-keyword">dolist</span> (sec <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"Bike Brigade"</span> <span class="org-string">"In our community"</span>))
+        (insert <span class="org-string">"* "</span> sec <span class="org-string">"\n"</span>
+                (mapconcat
+                 (<span class="org-keyword">lambda</span> (group)
+                   (<span class="org-keyword">let*</span> ((item (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">dom-node</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">div</span> nil
+                                       (append
+                                        (list (dom-node <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">h2</span> nil (car group)))
+                                        (cdr group))))
+                          (image (my-brigade-image (car group))))
+                     (format <span class="org-string">"** %s\n\n%s\n%s\n\n#+begin_src html\n%s\n#+end_src\n\n"</span>
+                             (car group)
+                             (<span class="org-keyword">if</span> image (org-link-make-string (concat <span class="org-string">"copy:"</span> image)) <span class="org-string">""</span>)
+                             (<span class="org-keyword">or</span> (my-html-last-link-href item) <span class="org-string">""</span>)
+                             (my-transform-html
+                              (delq nil
+                                    (list
+                                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-transform-html-remove-images</span>
+                                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-transform-html-remove-italics</span>
+                                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-brigade-simplify-html</span>
+                                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-brigade-format-buttons</span>
+                                     (<span class="org-keyword">when</span> (string= sec <span class="org-string">"In our community"</span>)
+                                       <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-brigade-recolor-recursively</span>)))
+                              item))))
+                 (my-html-group-by-tag <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">h2</span> (cdr (assoc sec sections <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>)))
+                 <span class="org-string">""</span>)))
+      (insert <span class="org-string">"* Other updates\n"</span>
+              (format <span class="org-string">"#+begin_src html\n&lt;h2&gt;Other updates&lt;/h2&gt;%s\n#+end_src\n\n"</span>
+                      (my-transform-html
+                       <span class="org-highlight-quoted-quote">'</span>(my-transform-html-remove-images
+                         my-transform-html-remove-italics
+                         my-brigade-simplify-html)
+                       (car (cdr (assoc <span class="org-string">"Other updates"</span> sections <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>))))))
+      (goto-char (point-min))
+      (display-buffer (current-buffer)))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-toc-items</span> (section-children)
+  <span class="org-doc">"Return a list of &lt;li /&gt; nodes."</span>
+  (mapcar
+   (<span class="org-keyword">lambda</span> (group)
+     (<span class="org-keyword">let*</span> ((text (dom-texts (cadr group)))
+            (regexp (format <span class="org-string">"^%s </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[A-Za-z]+ [0-9]+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span>
+                            (regexp-opt <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"Mon"</span> <span class="org-string">"Tue"</span> <span class="org-string">"Wed"</span> <span class="org-string">"Thu"</span> <span class="org-string">"Fri"</span> <span class="org-string">"Sat"</span> <span class="org-string">"Sun"</span>))))
+            (match (<span class="org-keyword">when</span> (string-match regexp text) (match-string 1 text))))
+       (dom-node <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">li</span> nil
+                 (<span class="org-keyword">if</span> match
+                     (format <span class="org-string">"%s: %s"</span> match (car group))
+                   (car group)))))
+   (my-html-group-by-tag <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">h2</span> section-children)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-html-group-by-tag</span> (tag dom-list)
+  <span class="org-doc">"Use TAG to divide DOM-LIST into sections. Return an alist of (section . children)."</span>
+  (<span class="org-keyword">let</span> (section-name current-section results)
+    (<span class="org-keyword">dolist</span> (node dom-list)
+      (<span class="org-keyword">if</span> (<span class="org-keyword">and</span> (eq (dom-tag node) tag)
+               (not (string= (string-trim (dom-texts node)) <span class="org-string">""</span>)))
+          (<span class="org-keyword">progn</span>
+            (<span class="org-keyword">when</span> current-section
+              (<span class="org-keyword">push</span> (cons section-name (nreverse current-section))  results)
+              (<span class="org-keyword">setq</span> current-section nil))
+            (<span class="org-keyword">setq</span> section-name (string-trim (dom-texts node))))
+        (<span class="org-keyword">when</span> section-name
+          (<span class="org-keyword">push</span> node current-section))))
+    (<span class="org-keyword">when</span> current-section
+      (<span class="org-keyword">push</span> (cons section-name (reverse current-section))  results)
+      (<span class="org-keyword">setq</span> current-section nil))
+    (nreverse results)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-html-last-link-href</span> (node)
+  <span class="org-doc">"Return the last link HREF in NODE."</span>
+  (<span class="org-keyword">dom-attr</span> (car (last (dom-by-tag node <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">a</span>))) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span>))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-brigade-image</span> (heading)
+  <span class="org-doc">"Find the latest image related to HEADING."</span>
+  (car
+   (nreverse
+    (directory-files my-brigade-newsletter-images-directory
+                        t (regexp-quote (my-brigade-newsletter-heading-to-image-file-name heading))))))
+
+</code></pre>
+</div>
+
+</details>
+
+<p>
+Some of the functions it uses are in my config, particularly the section on <a href="https://sachachua.com/dotemacs#areas-transforming-html-clipboard-contents-with-emacs-to-smooth-out-mailchimp-annoyances-dates-images-comments-colours">Transforming HTML clipboard contents with Emacs to smooth out Mailchimp annoyances: dates, images, comments, colours</a>.
+</p>
+
+<p>
+Along the way, I learned that <code>svg-print</code> is a good way to <a href="https://sachachua.com/blog/2025/09/emacs-and-dom-el-quick-notes-on-parsing-html-and-turning-doms-back-into-html/">turn document object models back into HTML</a>.
+</p>
+
+<p>
+When I saw two more events and one additional link that I wanted to include, I was glad I already had this code sorted out. It made it easy to paste the images and details into the Google Doc, reformat it slightly, and get the info through the process so that it ended up in the newsletter with a usefully-named image and correctly-coloured links.
+</p>
+
+<p>
+I think this is a good combination of Google Docs for getting other people's feedback and letting them edit, and Org Mode for keeping myself sane as I turn it into whatever Mailchimp wants.
+</p>
+
+<p>
+My next step for improving this workflow might be to check out other e-mail providers in case I can get Emacs to make the whole template. That way, I don't have to keep switching between applications and using the mouse to duplicate blocks and edit the code.</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#collaboration-bike-brigade-extract-information-from-google-docs-export-as-zipped-html">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2025/09/getting-a-google-docs-draft-ready-for-mailchimp-via-emacs/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K5C0MFBEMCMVK59ACGSM7KP2" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F09%2Fgetting-a-google-docs-draft-ready-for-mailchimp-via-emacs%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

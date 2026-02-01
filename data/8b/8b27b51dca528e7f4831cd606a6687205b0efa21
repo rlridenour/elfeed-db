@@ -1,0 +1,228 @@
+
+	
+<p>
+I am currently working on developing analytics for a digital water metering project. Over the next five years, we are enabling 70,000 customer water meters with digital readers and transmitters. The data is yet to be available, but we want to build reporting systems before the data is live. The R language comes to the rescue as it has magnificent capabilities to simulate data. Simulating data is a valuable technique to progress a project when data is being collected. Simulated data also helps because the analysis outcomes are known, which allows for validating the results.</p>
+<p>
+The raw data that we will eventually receive from the digital customer meters has the following basic structure:</p>
+<ul>
+<li><code class="verbatim">device_id</code>: Unique device identifier.</li>
+<li><code class="verbatim">timestamp</code>: Date and time in (UTC) of the transmission.</li>
+<li><code class="verbatim">count</code>: The number of revolutions the water meter makes. Each revolution is a pulse which equates to five litres of water in a regular customer water meter.</li>
+</ul>
+<p>Every device will send an hourly data burst which contains the cumulative meter read in pulse counts. The transmitters are set at a random offset from the whole hour to minimise the risk of congestion at the receivers. The timestamp for each read is set in the <a href="https://en.wikipedia.org/wiki/Coordinated_Universal_Time">Coordinated Universal Time</a> (UTC). Using this time zone prevents issues with daylight savings. All analysis will be undertaken in the Australian Eastern (Daylight) Time zone.</p>
+<p>
+This article explains how we simulated test data to assist with developing reporting and analysis. The analysis of digital metering data follows in a future post.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Simulating water consumption
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>For simplicity, this simulation assumes a standard domestic diurnal curve (average daily usage pattern) for indoor water use. Diurnal curves are an essential piece of information in water management. The curve shows water consumption over a day, averaged over a fixed period. The example below is sourced from a journal article. This generic diurnal curve consists of 24 data points based on measured indoor water consumption, shown in the graph below.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/diurnal-curve.jpg" alt="Diurnal curve" title="/images/hydroinformatics/diurnal-curve.jpg" titel="Diurnal curve"/>
+<figcaption>
+Source: Gurung et al. (2014) Smart meters for enhanced water supply network modelling and infrastructure planning. Resources, Conservation and Recycling (90), 34-50.
+</figcaption>
+</figure>
+<p>
+This diurnal curve only includes indoor water consumption and is assumed independent of seasonal variation. This assumption is unrealistic, but the purpose of this simulation is not to accurately model water consumption but to provide a data set to validate the reporting and analyses.</p>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Simulating water consumption in R
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The first code snippet sets the parameters used in this simulation. The unique device identifiers (DevEUI) are simulated as six-digit random numbers. The timestamps vector consists of hourly date-time variables in UTC. For each transmitter, this timestamp is offset by a random time. Each transmitter is also associated with the number of people living in each house. This number is based on a Poisson distribution.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Simulate water consumption</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">rm</span>(list <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">ls</span>())
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Boundary conditions</span>
+</span></span><span style="display:flex;"><span>  n <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">100</span> <span style="color:#888"># Number of simulated meters</span>
+</span></span><span style="display:flex;"><span>  d <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">100</span> <span style="color:#888"># Number of days to simulate</span>
+</span></span><span style="display:flex;"><span>  s <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="background-color:#fff0f0">&#34;2050-01-01&#34;</span>, tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>) <span style="color:#888"># Start of simulation</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">set.seed</span>(<span style="color:#60e;font-weight:bold">1969</span>) <span style="color:#888"># Seed random number generator for reproducibility</span>
+</span></span><span style="display:flex;"><span>  rtu <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">1E6</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">2E6</span>, n, replace <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">FALSE</span>) <span style="color:#888"># 6-digit id</span>
+</span></span><span style="display:flex;"><span>  offset <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">0</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">3599</span>, n, replace <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>) <span style="color:#888"># Unique Random offset for each RTU</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Number of occupants per connection</span>
+</span></span><span style="display:flex;"><span>  occupants <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rpois</span>(n, <span style="color:#60e;font-weight:bold">1.5</span>) <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Visualise</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">as_tibble</span>(occupants) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(occupants)) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_bar</span>(fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;dodgerblue2&#34;</span>, alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.5</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">xlab</span>(<span style="background-color:#fff0f0">&#34;Occupants&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ylab</span>(<span style="background-color:#fff0f0">&#34;Connections&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">+</span>   
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Occupants per connection&#34;</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/simulated-occupants.png" alt="Simulated number of occupants per connection" title="Simulated number of occupants per connection"/>
+<figcaption>
+Simulated number of occupants per connection.
+</figcaption>
+</figure>
+<p>
+The diurnal curve is based on actual data, including leaks, as the nighttime use shows a consistent flow of about one litre per hour. Therefore, the figures are rounded and reduced by one litre per hour to show a zero flow when people are usually asleep. The curve is also shifted by eleven hours because the raw data is stored in UTC.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Diurnal Curve</span>
+</span></span><span style="display:flex;"><span>  diurnal_au <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">round</span>(<span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">1.36</span>, <span style="color:#60e;font-weight:bold">1.085</span>, <span style="color:#60e;font-weight:bold">0.98</span>, <span style="color:#60e;font-weight:bold">1.05</span>, <span style="color:#60e;font-weight:bold">1.58</span>, <span style="color:#60e;font-weight:bold">3.87</span>, <span style="color:#60e;font-weight:bold">9.37</span>, <span style="color:#60e;font-weight:bold">13.3</span>, <span style="color:#60e;font-weight:bold">12.1</span>, <span style="color:#60e;font-weight:bold">10.3</span>, <span style="color:#60e;font-weight:bold">8.44</span>, <span style="color:#60e;font-weight:bold">7.04</span>, <span style="color:#60e;font-weight:bold">6.11</span>, <span style="color:#60e;font-weight:bold">5.68</span>, <span style="color:#60e;font-weight:bold">5.58</span>, <span style="color:#60e;font-weight:bold">6.67</span>, <span style="color:#60e;font-weight:bold">8.32</span>, <span style="color:#60e;font-weight:bold">10.0</span>, <span style="color:#60e;font-weight:bold">9.37</span>, <span style="color:#60e;font-weight:bold">7.73</span>, <span style="color:#60e;font-weight:bold">6.59</span>, <span style="color:#60e;font-weight:bold">5.18</span>, <span style="color:#60e;font-weight:bold">3.55</span>, <span style="color:#60e;font-weight:bold">2.11</span>)) <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  tdiff <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">11</span>
+</span></span><span style="display:flex;"><span>  diurnal_utc <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(diurnal_au<span style="color:#06b;font-weight:bold">[</span>(tdiff <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>)<span style="color:#333">:</span> <span style="color:#60e;font-weight:bold">24</span>], diurnal_au[1<span style="color:#333">:</span>tdiff])</span></span></code></pre></div>
+</div>
+<p>
+This simulation only aims to simulate a realistic data set and not to present an accurate depiction of reality. This simulation could be enhanced by using different diurnal curves for various customer segments, including outdoor watering, temperature dependencies and so on.</p>
+</div>
+</div>
+<div id="outline-container-headline-3" class="outline-2">
+<h2 id="headline-3">
+Simulating Water Consumption
+</h2>
+<div id="outline-text-headline-3" class="outline-text-2">
+<p>A leak is defined by a constant flow through the meter and the idealised diurnal curve. A weighted binomial distribution (θ = 0.1) models approximately one in ten properties with a leak. The size of the leak is derived from a random number between 10 and 50 litres per hour.</p>
+<p>
+The data is stored in a matrix through a loop that cycles through each connection. The DevEUI is repeated over the simulated period (24 times the number of days). The second variable is the timestamp plus the predetermined offset for each RTU. </p>
+<p>
+The meter count is defined by the cumulative sum of the diurnal flow multiplied by the number of occupants. Each point in the diurnal deviates from the model curve by ±10%. Any predetermined leakage is added to each meter read over the whole period of 100 days. The hourly volumes are summed cumulatively to simulate meter reads. The flow is divided by five as each meter revolution indicates five litres.</p>
+<p>
+The following code snippet simulates the digital metering data using the above assumptions and parameters.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Leaking properties</span>
+</span></span><span style="display:flex;"><span>  leaks <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rbinom</span>(n, <span style="color:#60e;font-weight:bold">1</span>, prob <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>) <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">50</span>, n, replace <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">TRUE</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">data.frame</span>(device_id <span style="color:#333">=</span> rtu, leak <span style="color:#333">=</span> leaks) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">subset</span>(leak <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">0</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Digital metering data simulation</span>
+</span></span><span style="display:flex;"><span>  meter_reads <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">matrix</span>(ncol <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>, nrow <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> n <span style="color:#333">*</span> d)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">colnames</span>(meter_reads) <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;device_id&#34;</span>, <span style="background-color:#fff0f0">&#34;timestamp&#34;</span> , <span style="background-color:#fff0f0">&#34;count&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">for</span> (i <span style="color:#080;font-weight:bold">in</span> <span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>n) {
+</span></span><span style="display:flex;"><span>    r <span style="color:#333">&lt;-</span> ((i <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> d <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>)<span style="color:#333">:</span>(i <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> d)
+</span></span><span style="display:flex;"><span>    meter_reads[r, <span style="color:#60e;font-weight:bold">1</span>] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rep</span>(rtu[i], each <span style="color:#333">=</span> (<span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> d))
+</span></span><span style="display:flex;"><span>    meter_reads[r, <span style="color:#60e;font-weight:bold">2</span>] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">seq.POSIXt</span>(s, by <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;hour&#34;</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> d) <span style="color:#333">+</span> offset[i]
+</span></span><span style="display:flex;"><span>    meter_reads[r, <span style="color:#60e;font-weight:bold">3</span>] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">round</span>(<span style="color:#06b;font-weight:bold">cumsum</span>((<span style="color:#06b;font-weight:bold">rep</span>(diurnal_utc <span style="color:#333">*</span> occupants[i], d) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>                                       leaks[i]) <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">runif</span>(<span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> d, <span style="color:#60e;font-weight:bold">0.9</span>, <span style="color:#60e;font-weight:bold">1.1</span>)) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">5</span>)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  meter_reads <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as_tibble</span>(meter_reads) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(timestamp <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(timestamp, origin <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;1970-01-01&#34;</span>, tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;UTC&#34;</span>))</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-4" class="outline-2">
+<h2 id="headline-4">
+Missing Data Points
+</h2>
+<div id="outline-text-headline-4" class="outline-text-2">
+<p>The data transmission process is not 100% reliable, and the base station will not receive some reads. This simulation identifies reads to be removed from the data through the temporary variable removal. This simulation includes two types of failures:</p>
+<ul>
+<li>Faulty RTUs (2% of RTUs with missing 95% of data)</li>
+<li>
+<p>Randomly missing data points (1% of data)</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Set missing indicator</span>
+</span></span><span style="display:flex;"><span>  meter_reads <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">mutate</span>(meter_reads, remove <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Define faulty RTUs (2% of the fleet)</span>
+</span></span><span style="display:flex;"><span>  faulty <span style="color:#333">&lt;-</span> rtu<span style="color:#06b;font-weight:bold">[rbinom</span>(n, <span style="color:#60e;font-weight:bold">1</span>, prob <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.02</span>) <span style="color:#333">==</span> <span style="color:#60e;font-weight:bold">1</span>]
+</span></span><span style="display:flex;"><span>  meter_reads<span style="color:#333">$</span>remove[meter_reads<span style="color:#333">$</span>device_id <span style="color:#333">%in%</span> faulty] <span style="color:#333">&lt;-</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">rbinom</span>(<span style="color:#06b;font-weight:bold">sum</span>(meter_reads<span style="color:#333">$</span>device_id <span style="color:#333">%in%</span> faulty), <span style="color:#60e;font-weight:bold">1</span>, prob <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.5</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Data loss</span>
+</span></span><span style="display:flex;"><span>  missing <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>(<span style="color:#06b;font-weight:bold">nrow</span>(meter_reads) <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">5</span>), <span style="color:#60e;font-weight:bold">0.005</span> <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">nrow</span>(meter_reads))
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">for</span> (m <span style="color:#080;font-weight:bold">in</span> missing){
+</span></span><span style="display:flex;"><span>    meter_reads[m<span style="color:#333">:</span>(m <span style="color:#333">+</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">5</span>, <span style="color:#60e;font-weight:bold">1</span>)), <span style="background-color:#fff0f0">&#34;remove&#34;</span>] <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Remove missing reads</span>
+</span></span><span style="display:flex;"><span>  meter_reads <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">filter</span>(meter_reads, remove <span style="color:#333">==</span> <span style="color:#60e;font-weight:bold">0</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(<span style="color:#333">-</span>remove)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Write to disk</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">write_csv</span>(meter_reads, <span style="background-color:#fff0f0">&#34;data/meter_reads.csv&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">##Visualise</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">filter</span>(meter_reads, device_id <span style="color:#333">%in%</span> <span style="color:#06b;font-weight:bold">sample</span>(faulty, <span style="color:#60e;font-weight:bold">1</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(timestamp <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="color:#06b;font-weight:bold">format</span>(timestamp,
+</span></span><span style="display:flex;"><span>                                         tz <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Australia/Melbourne&#34;</span>))) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(timestamp <span style="color:#333">&gt;=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="background-color:#fff0f0">&#34;2050-02-06&#34;</span>) <span style="color:#333">&amp;</span>
+</span></span><span style="display:flex;"><span>           timestamp <span style="color:#333">&lt;=</span> <span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="background-color:#fff0f0">&#34;2050-02-08&#34;</span>)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">arrange</span>(device_id, timestamp) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggplot</span>(<span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> timestamp, y <span style="color:#333">=</span> count, colour <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">factor</span>(device_id))) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_line</span>() <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>()</span></span></code></pre></div>
+</div>
+</li>
+</ul>
+<p>The graph shows an example of the cumulative reads and some missing data points.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/simulated-missing.png" alt="Simulated water consumption" title="Simulated water consumption"/>
+<figcaption>
+Simulated water consumption with missing reads.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-5" class="outline-2">
+<h2 id="headline-5">
+Analysing Digital Metering Data
+</h2>
+<div id="outline-text-headline-5" class="outline-text-2">
+<p>Data simulation is a good way to develop your analysis algorithms before you have real data. I have also used this technique while waiting for survey results during my dissertation. When the data finally arrived, I plugged it into the code and finetuned it. R has great capabilities to simulate reality to help you understand the data. The ggplot package provides excellent functionality to <a href="https://lucidmanager.org/data-science/geographic-bubble-chart/">visualise water consumption</a>.</p>
+<p>
+In <a href="https://lucidmanager.org/data-science/analyse-digital-water-meter-data/">next week&#39;s article</a>, I will outline how I used R and the Tidyverse package to develop libraries to analyse digital metering data.</p>
+<p>
+This data was used as a case study in the book <em>Data Science for Water Utilities</em>.</p>
+<p>
+
+  <div class="box">
+    <div class="media">
+      <figure class="media-left">
+        <p class="image is-128x128">
+          <img src="https://lucidmanager.org/images/books/2023_ds4wu.jpg" alt = "Data Science for Water Utilities" title = "Data Science for Water Utilities">
+        </p>
+      </figure>
+      <div class="media-content">
+        <div class="content">
+          <p class="is-size-5 has-text-weight-bold">Data Science for Water Utilities</p>
+          <p class="mb-2">Data Science for Water Utilities published by CRC Press is an applied, practical guide that shows water professionals how to use data science to solve urban water management problems using the R language for statistical computing.</p>
+          <div class="buttons">
+            <a class="button is-info" href="https://routledge.com/9781032354545" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Routledge</span>
+            </a>
+            <a class="button is-info" href="https://www.amazon.com/Data-Science-Water-Utilities-Chapman/dp/1032354550" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Amazon</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

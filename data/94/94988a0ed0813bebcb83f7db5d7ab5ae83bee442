@@ -1,0 +1,66 @@
+<figure><img data-recalc-dims="1" height="778" width="1360" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2025/06/glenn-shaferbrown.png?resize=1360%2C778&#038;ssl=1" alt="Glenn Fleishman, art by Shafer Brown" data-image-w="" data-image-h="" class=" jetpack-broken-image"></figure>
+<p>Like our vestigial appendix, which can sometimes burst and cause us trouble, the origins of “modern” networking date back so far that weird shapes and forms still guide us under the surface as we conduct our cyberspace 3D adventures. Reader Rick wrote in with a question about networking that relates to this:</p>
+<blockquote><p>
+  I have disconnected my MacBook Pro from all external connections (Ethernet cable unplugged, Wi-Fi and Bluetooth off). But if I look in Activity Monitor &gt; Network, there are lots of packets in and packets out. How is this possible?
+</p></blockquote>
+<p>Let us shrink ourselves down, <em><a href="https://callsheetapp.com/movie/2161">Fantastic Voyage</a></em>-like (or <em><a href="https://callsheetapp.com/movie/2614">Innerspace</a></em>, if that’s more your speed), to look at what’s happening at the network interface level and unpick this seemingly unwanted activity.</p>
+<h2>Tales from the loop</h2>
+<p>Operating systems derived in some fashion from Unix all have a “loopback” interface as part of their array of network interfaces. This term originated before the Internet, in the context of testing circuits. A loop test literally ensured that a signal would go to the far end of the circuit and return as expected. A failure meant something was wrong.</p>
+<p>With the introduction of modems sending signals across phone lines, various loopback tests allowed checking local signals, the line over which data traversed, and the remote modem. As Internet pioneer <a href="https://www.theregister.com/2022/03/01/the_internet_is_so_hard/">Jack Haverty</a> <a href="https://elists.isoc.org/pipermail/internet-history/2017-October/004318.html">wrote in a 2017 post</a> on an Internet Society technical mailing list:</p>
+<blockquote><p>
+  By “looping a line” the NOC [network operations center] operator could determine what was likely to have failed – the modem at either end, the line itself (backhoe attack), or the interface card in the IMPs at either end of the line.<sup id="fnref-36349-backhoe"><a href="https://sixcolors.com#fn-36349-backhoe" class="jetpack-footnote" title="Read footnote.">1</a></sup>
+</p></blockquote>
+<p>For networking, a loopback interface lets a device talk to itself. The Unix loopback lets any part of the system, from the lowest level to applications or scripts, communicate via standard Internet networking. Applications may talk to each other this way, for instance, as it’s easier than setting up other kinds of inter-process or inter-application communications.</p>
+<p>As with many things, like the digital world starting on January 1, 1970, at 00:00:00 UTC, the loopback interface remains a vestige.<sup id="fnref-36349-epoch"><a href="https://sixcolors.com#fn-36349-epoch" class="jetpack-footnote" title="Read footnote.">2</a></sup></p>
+<p>Because your devices talk to themselves constantly, disabling network interfaces will still make it seem as if your hardware is chatting. But you can drill down to make sure that it’s only being solipsistic.</p>
+<h2>Decoding network traffic</h2>
+<p>Using DEVONtechnologies’s free <a href="https://www.devontechnologies.com/blog/20240711-network-utility-10">Neo Network Utility</a><sup id="fnref-36349-neo"><a href="https://sixcolors.com#fn-36349-neo" class="jetpack-footnote" title="Read footnote.">3</a></sup> or from the command line, you can see a list of all current connections:</p>
+<ul>
+<li>Launch Neo Network Utility, click the Netstat button, select “Display the state of all current socket connections,” check Hostname resolution, and click Netstat.</li>
+<li>From the command line, enter <code>netstat -a -p tcp</code>.</li>
+</ul>
+<p>Both methods will take a moment because of the time required to look up all the IP addresses and find their corresponding hostnames (the first part of the name that’s local and the domain name).</p>
+<figure><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2025/08/netstat-network-utility1380-bordered.png?ssl=1" alt="Screenshot of Network Utility showing netstat program displaying a list of active networking connections in text form" data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>Network Utility provide a slightly friendly front end to a list of active network connections.</figcaption></figure>
+<p>You will see way too many results! But it’s good to have a sense of what normal looks like. Among the connections out to the rest of the world, you will see entries like this:</p>
+<p><code>tcp4       0      0  localhost.49330        localhost.64862        ESTABLISHED</code></p>
+<p>That <code>localhost</code> is what you’re looking for. The loopback interface has the IPv4 address of <code>127.0.0.1</code> and IPv6 address of <code>0:0:0:0:0:0:0:1</code>, which shortens to just <code>::1</code>.<sup id="fnref-36349-short"><a href="https://sixcolors.com#fn-36349-short" class="jetpack-footnote" title="Read footnote.">4</a></sup> These are mapped to the local hostname of, literally, <code>localhost</code>. When you see that name, it’s a connection from your Mac back to itself, whether by IPv4 or IPv6.</p>
+<p>Now, if you disconnect all your network interfaces, you should only see localhost entries. To turn off your connections, the best way is through these steps:</p>
+<ol>
+<li>Go to System Settings &gt; Network.</li>
+<li>Control-click/right-click each interface marked Connected in turn.</li>
+<li>Choose Make Service Inactive. There’s no prompt—it just happens.</li>
+</ol>
+<figure class="pull-right"><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2025/08/network-settings-make-inactive690-bordered.png?ssl=1" alt="Screen of Network system pane in macOS Sequoia with a contextual menu over the network interfaces showing choices including Make Service Inactive" data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>Disable network interfaces to stop traffic from entering or leaving your Mac</figcaption></figure>
+<p>At this point, your network traffic should be shut down. If you re-run <code>netstat</code> above, you would see only <code>localhost</code> or similar loopback address connections.</p>
+<p>However, there’s a complicated command-line invocation you can use that’s a bit simpler when you parse the output:</p>
+<p><code>ifconfig | awk '/^[a-z].*: / { iface = $1 } /inet / &amp;&amp; iface { print iface, $2 } /^[a-z]/ { iface = $1 }'</code></p>
+<p>Paste the above in and press return, and you get a list of your active network interfaces and the assigned IP addresses. With my setup, including an active VPN via Tailscale, I see:</p>
+<p><code>lo0: 127.0.0.1<br>
+en0: 10.0.0.42<br>
+en1: 10.0.0.22<br>
+utun8: 100.68.251.103</code></p>
+<p>To decipher those, <code>lo0</code> is the IPv4 loopback address; <code>en0</code> is “Ethernet 0,” which is actually Ethernet; <code>en1</code> is the Wi-Fi connection (Wi-Fi pretends to be Ethernet, which is a long story); and <code>utun8</code> is the tunneling TailScale connection.</p>
+<p>After disabling interfaces as described above, you should see just this:</p>
+<p><code>lo0: 127.0.0.1</code></p>
+<p>Your computer is safely murmuring to itself. To enable network interfaces, return to the three steps above and choose Make Service Active.</p>
+<h2>For further reading</h2>
+<p>You might be interested in one or more Take Control Books that includes advice on networking, though none is quite as deep a dive as the above: <a href="https://www.takecontrolbooks.com/securing-apple-devices/?PT=6cLoopback"><em>Take Control of Securing Your Apple Devices</em></a> or <a href="https://www.takecontrolbooks.com/wi-fi/?PT=6cLoopback"><em>Take Control of Wi-Fi Networking and Security</em></a>. (<i>Securing</i> will be updated soon for the new Apple operating systems, and if you purchase the book today, you will receive the new version at no cost.)</p>
+<p>If you want to use command-line tools with great facility, consult Joe Kissell’s <a href="https://www.takecontrolbooks.com/command-line/?PT=6cLoopback"><em>Take Control of the Mac Command Line with Terminal</em></a>.</p>
+<p>[<em>Got a question for the column? You can email glenn@sixcolors.com or use</em> <code>/glenn</code> <em>in our <a href="https://sixcolors.com/subscribe/">subscriber-only</a> Discord community.</em>]</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-36349-backhoe">
+A backhoe attack is when someone is digging and severs phone wiring—local or potentially carrying thousands of calls—back in the days of the primacy of wireline telephone networks. Backhoes remain the enemy of fiber-optic and other cables. <a href="https://sixcolors.com#fnref-36349-backhoe" title="Return to main content.">↩</a>
+</li>
+<li id="fn-36349-epoch">
+Unix officially <a href="https://en.wikipedia.org/wiki/Unix_time">started its clock</a> at that time. That is known as the “epoch.” Typically in a 32-bit signed integer, the epoch will end on 03:14:07 UTC on 19 January 2038. This <a href="https://en.wikipedia.org/wiki/Year_2038_problem">Y2K38 or “year 2038 problem”</a> needs to be solved. <a href="https://sixcolors.com#fnref-36349-epoch" title="Return to main content.">↩</a>
+</li>
+<li id="fn-36349-neo">
+A drop-in replacement for Apple’s venerable Network Utility, which was removed from macOS a few years ago. <a href="https://sixcolors.com#fnref-36349-neo" title="Return to main content.">↩</a>
+</li>
+<li id="fn-36349-short">
+How does this shortening work? In IPv6, which uses eight separated 8-bit numbers (each 0 to 255), any entry between colons that’s zero can be omitted. Multiple sets of leading zeros can be omitted (or “<a href="https://www.catchpoint.com/benefits-of-ipv6/ipv6-compression-rules">compressed</a>“) as well, leading to just an unambiguous <code>::1</code>. <a href="https://sixcolors.com#fnref-36349-short" title="Return to main content.">↩</a>
+</li>
+</ol>
+</div>

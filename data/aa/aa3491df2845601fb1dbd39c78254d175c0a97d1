@@ -1,0 +1,275 @@
+
+<p class="wp-block-paragraph">Linux power management was tricky in the early days.<br>Adding LUKS and LVM to the mix was a suicide combo.</p>
+
+
+
+<p class="wp-block-paragraph">Today it&#8217;s not just a possibility &#8211; it&#8217;s a baseline requirement for secure Linux setups.</p>
+
+
+
+<span id="more-8585"></span>
+
+
+
+<h3 class="wp-block-heading" id="org1c98b3b">The Problem</h3>
+
+
+
+<p class="wp-block-paragraph">On today&#8217;s Linux computers, Suspend Then Hibernate is the best of both worlds.</p>
+
+
+
+<ul class="wp-block-list">
+<li>Short breaks: <em>fast suspend</em></li>
+
+
+
+<li>Long inactivity: <em>safe hibernate</em></li>
+
+
+
+<li>Battery protected</li>
+
+
+
+<li>Sessions preserved</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Common symptoms:</p>
+
+
+
+<ul class="wp-block-list">
+<li>System suspends but never hibernates</li>
+
+
+
+<li>Resume fails after hibernation</li>
+
+
+
+<li>Black screen on wake</li>
+
+
+
+<li>Swap not detected</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Systemd claims everything is fine (it is not).</p>
+
+
+
+<h3 class="wp-block-heading" id="orgcd2a12c">What Suspend Then Hibernate Actually Does</h3>
+
+
+
+<p class="wp-block-paragraph">Important detail first.</p>
+
+
+
+<p class="wp-block-paragraph">Suspend-then-hibernate is not magic.</p>
+
+
+
+<p class="wp-block-paragraph">It works like this:</p>
+
+
+
+<ul class="wp-block-list">
+<li>System <strong>suspends</strong> to RAM</li>
+
+
+
+<li>A timer is started</li>
+
+
+
+<li>If the timer expires:
+<ul class="wp-block-list">
+<li>System wakes up</li>
+
+
+
+<li>Immediately <strong>hibernates</strong> to disk</li>
+</ul>
+</li>
+
+
+
+<li>On next power-on:
+<ul class="wp-block-list">
+<li>System resumes from swap</li>
+</ul>
+</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">This means hibernate must already work perfectly.<br>If hibernate is broken, suspend then hibernate will also fail.</p>
+
+
+
+<h3 class="wp-block-heading" id="org1d93fd1">Set Up The Basics</h3>
+
+
+
+<h4 class="wp-block-heading" id="orge49ffa9">LVM is needed in the initramfs</h4>
+
+
+
+<p class="wp-block-paragraph">If the swap is on LUKS encrypted storage:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo apt install --reinstall cryptsetup-initramfs lvm2
+sudo update-initramfs -u -k all</code></pre>
+
+
+
+<h4 class="wp-block-heading" id="orgf968e5e">Configure Resume From Hibernate</h4>
+
+
+
+<p class="wp-block-paragraph">Using UUID is recommended for encrypted setups to avoid mapper name changes.</p>
+
+
+
+<p class="wp-block-paragraph">Find the swap UUID:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo blkid | grep swap</code></pre>
+
+
+
+<p class="wp-block-paragraph">Edit GRUB:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/default/grub
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Example:</p>
+
+
+
+<pre id="orge73591f" class="wp-block-preformatted">GRUB_CMDLINE_LINUX_DEFAULT="quiet splash resume=UUID=&lt;swap-uuid&gt;"</pre>
+
+
+
+<p class="wp-block-paragraph">Apply:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo update-grub</code></pre>
+
+
+
+<p class="wp-block-paragraph">If the swap is on LUKS:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+echo RESUME=UUID=&lt;swap-uuid&gt; | sudo tee /etc/initramfs-tools/conf.d/resume
+sudo update-initramfs -u
+sudo reboot
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="org10551be">Verify The Prerequisites</h3>
+
+
+
+<h4 class="wp-block-heading" id="org53a7d9f">Check the swap size</h4>
+
+
+
+<p class="wp-block-paragraph">Swap must be at least equal to RAM.</p>
+
+
+
+<pre class="wp-block-code"><code>free -h
+sudo swapon --show</code></pre>
+
+
+
+<p class="wp-block-paragraph">If swap &lt; RAM → hibernate will fail.</p>
+
+
+
+<h4 class="wp-block-heading" id="org76be444">Test plain hibernate</h4>
+
+
+
+<p class="wp-block-paragraph">Do not continue if this fails.</p>
+
+
+
+<pre class="wp-block-code"><code>sudo systemctl hibernate</code></pre>
+
+
+
+<p class="wp-block-paragraph">The system must power off and resume correctly.</p>
+
+
+
+<h3 class="wp-block-heading" id="org31098f6">Enable Suspend-Then-Hibernate</h3>
+
+
+
+<p class="wp-block-paragraph">Edit systemd sleep configuration:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/systemd/sleep.conf</code></pre>
+
+
+
+<p class="wp-block-paragraph">Minimal, correct configuration:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+&#91;Sleep]
+AllowSuspend=yes
+AllowHibernation=yes
+AllowSuspendThenHibernate=yes
+HibernateDelaySec=30min
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="org4933f01">Manual Test</h3>
+
+
+
+<pre class="wp-block-preformatted">sudo systemctl suspend-then-hibernate</pre>
+
+
+
+<p class="wp-block-paragraph">Expected behavior:</p>
+
+
+
+<ul class="wp-block-list">
+<li>System suspends</li>
+
+
+
+<li>After delay → hibernates</li>
+
+
+
+<li>Power button resumes system</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">In case of any issue, the debug can start here:</p>
+
+
+
+<pre class="wp-block-code"><code>journalctl -b -1 | grep -i hibernate</code></pre>

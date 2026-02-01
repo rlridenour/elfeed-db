@@ -1,0 +1,175 @@
+<h2 id="the-why">The why</h2>
+<p>I have been looking to setup my personal knowledge management with <a href="https://protesilaos.com/emacs/denote">Denote</a> for a while. So far I have been using <a href="https://www.orgroam.com">Org-roam</a>, which I was quite happy with. However I have been seeing much more development and buzz around Denote. Not just with the core package but with more package from the community in the ecosystem.</p>
+<p>This week I finally managed to migrate from Org-roam to Denote. Well, not really migrate but rather use both in tandem. I am finding myself needing some functionalities in each system that I do not want to loose. Who knows, maybe I ll be done with the move at some point.</p>
+<p>I like the lack of a need for an SQLite db by Denote most appealing.</p>
+<p>Now to the topic at hand. I like a quick capture of content from my browser – in my case Safari – into a note very much. As a matter of fact I depend on it for work and for my private stuff.</p>
+<p>So far I have been capturing the content into a long long notes file as a subtree and then refiling it into separate org files in my roam directory. With the setup of denote I took the opportunity to reduced the steps for creating a knowledge &ldquo;node&rdquo;.</p>
+<p>Now I only have to hit a keybinding (works system wide on my mac) and the file gets created.</p>
+<h2 id="how-did-i-do-it">How did I do it?</h2>
+<h3 id="tl-dr">TL;DR</h3>
+<p>You will find the entry point in my denote config module <a href="https://gitlab.com/aimebertrand/dotemacs/-/blob/main/libraries/timu-denote.el">timu-denote.el</a>.</p>
+<h3 id="some-details">Some details</h3>
+<p>I need to confess something first. I heavily borrowed code from the package <a href="https://melpa.org/#/org-mac-link">org-mac-link</a>, which I took over as maintainer a while ago and from some code by <a href="https://www.howardism.org/Technical/Emacs/capturing-content.html">Howard Abrams</a>.</p>
+<p>This also builds on the work documented in my previous post <a href="https://macowners.club/posts/org-capture-from-everywhere-macos/">Org capture from everywhere in macOS</a>.</p>
+<p><strong>Step 1 - Get desired content into the macOS clipboard.</strong></p>
+<p>I use a macOS Service created with the <code>Automator.app</code> for that. This copies the selected content in Safari into the clipboard.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-applescript" data-lang="applescript"><span class="line"><span class="cl"><span class="k">on</span> <span class="nb">run</span> <span class="p">{</span><span class="nv">input</span><span class="p">,</span> <span class="nv">parameters</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">tell</span> <span class="nb">application</span> <span class="s2">&#34;System Events&#34;</span> <span class="k">to</span> <span class="nv">keystroke</span> <span class="s2">&#34;c&#34;</span> <span class="nv">using</span> <span class="nv">command</span> <span class="nv">down</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="k">end</span> <span class="nb">run</span>
+</span></span></code></pre></div><p><strong>Step 2 - Return the clipboard content in html format.</strong></p>
+<p>Then clipboard content capture by Apple Script needs to be returned in html format. This is necessary for it to be converted in org mode format later.</p>
+<p>These functions are part of the <a href="https://gitlab.com/aimebertrand/dotemacs/-/blob/main/libraries/timu-org.el">timu-org.el</a> module in my config.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-org-cmd-with-exit-code</span> <span class="p">(</span><span class="nv">program</span> <span class="kp">&amp;rest</span> <span class="nv">args</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Run PROGRAM with ARGS and return the exit code and output in a list.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">with-temp-buffer</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nf">list</span> <span class="p">(</span><span class="nf">apply</span> <span class="nf">#&#39;call-process</span> <span class="nv">program</span> <span class="no">nil</span> <span class="p">(</span><span class="nf">current-buffer</span><span class="p">)</span> <span class="no">nil</span> <span class="nv">args</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nf">buffer-string</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-org-convert-applescript-to-html</span> <span class="p">(</span><span class="nv">contents</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Return the Applescript&#39;s clipboard CONTENTS in a packed array.
+</span></span></span><span class="line"><span class="cl"><span class="s">Convert and return this encoding into a UTF-8 string.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">cl-flet</span> <span class="p">((</span><span class="nv">hex-pack-bytes</span> <span class="p">(</span><span class="nv">tuple</span><span class="p">)</span> <span class="p">(</span><span class="nf">string-to-number</span> <span class="p">(</span><span class="nf">apply</span> <span class="nf">#&#39;string</span> <span class="nv">tuple</span><span class="p">)</span> <span class="mi">16</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">let*</span> <span class="p">((</span><span class="nv">data</span> <span class="p">(</span><span class="nv">-&gt;</span> <span class="nv">contents</span>
+</span></span><span class="line"><span class="cl">                     <span class="p">(</span><span class="nf">substring</span> <span class="mi">10</span> <span class="mi">-2</span><span class="p">)</span> <span class="c1">; strips off the =«data RTF= and =»\= bits</span>
+</span></span><span class="line"><span class="cl">                     <span class="p">(</span><span class="nv">string-to-list</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nv">byte-seq</span> <span class="p">(</span><span class="nv">-&gt;&gt;</span> <span class="nv">data</span>
+</span></span><span class="line"><span class="cl">                          <span class="p">(</span><span class="nv">-partition</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1">; group each two hex characters into tuple</span>
+</span></span><span class="line"><span class="cl">                          <span class="p">(</span><span class="nf">mapcar</span> <span class="nf">#&#39;</span><span class="nv">hex-pack-bytes</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">decode-coding-string</span>
+</span></span><span class="line"><span class="cl">       <span class="p">(</span><span class="nf">mapconcat</span> <span class="nf">#&#39;byte-to-string</span> <span class="nv">byte-seq</span> <span class="s">&#34;&#34;</span><span class="p">)</span> <span class="ss">&#39;utf-8</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-org-get-mac-clipboard</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Return the clipbaard for a macOS system.
+</span></span></span><span class="line"><span class="cl"><span class="s">See </span><span class="ss">`timu-org-get-os-clipboard&#39;</span><span class="s">.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">cl-destructuring-bind</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">exit-code</span> <span class="nv">contents</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">timu-org-cmd-with-exit-code</span>
+</span></span><span class="line"><span class="cl">       <span class="s">&#34;/usr/bin/osascript&#34;</span> <span class="s">&#34;-e&#34;</span> <span class="s">&#34;the clipboard as \&#34;HTML\&#34;&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nf">=</span> <span class="mi">0</span> <span class="nv">exit-code</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nf">list</span> <span class="nb">:html</span> <span class="p">(</span><span class="nv">timu-org-convert-applescript-to-html</span> <span class="nv">contents</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">list</span> <span class="nb">:text</span> <span class="p">(</span><span class="nv">shell-command-to-string</span>
+</span></span><span class="line"><span class="cl">                   <span class="s">&#34;/usr/bin/osascript -e &#39;the clipboard&#39;&#34;</span><span class="p">)))))</span>
+</span></span></code></pre></div><p><strong>Step 3 - Put the html clipboard content into org mode format.</strong></p>
+<p>The function <code>timu-org-clipboard</code>, returns the macOS clipboard content in org-mode format. Notice that there is the external dependency <a href="https://pandoc.org">Pandoc</a>. This needs to be installed on your Mac.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="c1">;; This one is just for the whole thing to work both on linux and macos</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-org-get-os-clipboard</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Return a list where the first entry is the either :html or :text.
+</span></span></span><span class="line"><span class="cl"><span class="s">The second is the clipboard contents.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nf">eq</span> <span class="nv">system-type</span> <span class="ss">&#39;darwin</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nv">timu-org-get-mac-clipboard</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">timu-org-get-linux-clipboard</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-org-clipboard</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Return the contents of the clipboard in </span><span class="ss">`org-mode&#39;</span><span class="s"> format.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">cl-destructuring-bind</span> <span class="p">(</span><span class="nv">type</span> <span class="nv">contents</span><span class="p">)</span> <span class="p">(</span><span class="nv">timu-org-get-os-clipboard</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">with-temp-buffer</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">insert</span> <span class="nv">contents</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">if</span> <span class="p">(</span><span class="nf">eq</span> <span class="nb">:html</span> <span class="nv">type</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nv">shell-command-on-region</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">point-min</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">point-max</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">           <span class="p">(</span><span class="nf">concat</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;pandoc&#34;</span><span class="p">)</span> <span class="s">&#34; -f html -t org --wrap=none&#34;</span><span class="p">)</span> <span class="no">t</span> <span class="no">t</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nv">shell-command-on-region</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nf">point-min</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nf">point-max</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nf">concat</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;pandoc&#34;</span><span class="p">)</span> <span class="s">&#34; -f markdown -t org --wrap=none&#34;</span><span class="p">)</span> <span class="no">t</span> <span class="no">t</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nf">buffer-substring-no-properties</span> <span class="p">(</span><span class="nf">point-min</span><span class="p">)</span> <span class="p">(</span><span class="nf">point-max</span><span class="p">)))))</span>
+</span></span></code></pre></div><p><strong>Step 4: Get the URL from Safari</strong></p>
+<p>Like I mentioned above, I want to keep both Org-roam and Denote. So I need the URL for the property <code>ROAM_REFS</code>.</p>
+<p>For this I use this slightly adjusted code lifted from the package org-mac-link:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-denote-do-applescript</span> <span class="p">(</span><span class="nv">script</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Function to run AppleScript pragmatically.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let</span> <span class="p">(</span><span class="nv">start</span> <span class="nv">cmd</span> <span class="nb">return</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">while</span> <span class="p">(</span><span class="nf">string-match</span> <span class="s">&#34;\n&#34;</span> <span class="nv">script</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">setq</span> <span class="nv">script</span> <span class="p">(</span><span class="nf">replace-match</span> <span class="s">&#34;\r&#34;</span> <span class="no">t</span> <span class="no">t</span> <span class="nv">script</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">while</span> <span class="p">(</span><span class="nf">string-match</span> <span class="s">&#34;&#39;&#34;</span> <span class="nv">script</span> <span class="nv">start</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="p">(</span><span class="nb">setq</span> <span class="nv">start</span> <span class="p">(</span><span class="nf">+</span> <span class="mi">2</span> <span class="p">(</span><span class="nf">match-beginning</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">            <span class="nv">script</span> <span class="p">(</span><span class="nf">replace-match</span> <span class="s">&#34;\\&#39;&#34;</span> <span class="no">t</span> <span class="no">t</span> <span class="nv">script</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">setq</span> <span class="nv">cmd</span> <span class="p">(</span><span class="nf">concat</span> <span class="s">&#34;osascript -e &#39;&#34;</span> <span class="nv">script</span> <span class="s">&#34;&#39;&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">setq</span> <span class="nb">return</span> <span class="p">(</span><span class="nv">shell-command-to-string</span> <span class="nv">cmd</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">org-trim</span> <span class="nb">return</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-denote-safari-get-frontmost-url</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;AppleScript to get the link to the frontmost window of Safari.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">timu-denote-do-applescript</span>
+</span></span><span class="line"><span class="cl">   <span class="p">(</span><span class="nf">concat</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;tell application \&#34;Safari\&#34;\n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;	set theUrl to URL of document 1\n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;	return theUrl \n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;end tell\n&#34;</span><span class="p">)))</span>
+</span></span></code></pre></div><p><strong>Step 5: Get the title from Safari</strong></p>
+<p>Most of the time I want to use the site title as the title for the Denote note.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-denote-safari-get-frontmost-title</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;AppleScript to get the title to the frontmost window of Safari.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nv">timu-denote-do-applescript</span>
+</span></span><span class="line"><span class="cl">   <span class="p">(</span><span class="nf">concat</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;tell application \&#34;Safari\&#34;\n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;	set theTitle to the name of the document 1\n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;	return theTitle \n&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;end tell\n&#34;</span><span class="p">)))</span>
+</span></span></code></pre></div><h3 id="let-s-stick-the-landing">Let&rsquo;s stick the landing</h3>
+<p><strong>Step 1: Function and Org capture template to put everything together.</strong></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-denote-safari-org-capture</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Capture selected content and url of the current Safari window.
+</span></span></span><span class="line"><span class="cl"><span class="s">Create a denote note with the capture items.
+</span></span></span><span class="line"><span class="cl"><span class="s">Add properties for org-roam compatibility.
+</span></span></span><span class="line"><span class="cl"><span class="s">Triggered by a custom macOS Quick Action with keybinding.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let</span> <span class="p">((</span><span class="nv">denote-org-capture-specifiers</span> <span class="s">&#34;\n%?\n\n%i\n&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nv">denote-use-title</span> <span class="p">(</span><span class="nv">timu-denote-safari-get-frontmost-title</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">        <span class="p">(</span><span class="nv">denote-org-front-matter</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nf">concat</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;:PROPERTIES:\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;:ID: &#34;</span> <span class="p">(</span><span class="nv">org-id-new</span><span class="p">)</span> <span class="s">&#34;\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;:ROAM_REFS: &#34;</span> <span class="p">(</span><span class="nv">timu-denote-safari-get-frontmost-url</span><span class="p">)</span> <span class="s">&#34;\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;:END:\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+TITLE: %s\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+AUTHOR: Aimé Bertrand\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+DATE: %s\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+FILETAGS: %s\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+IDENTIFIER: %s\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+SIGNATURE: %s\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+OPTIONS: d:t tex:verbatim ^:nil broken-links:t num:nil\n&#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;#+STARTUP: indent showall&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">org-capture-string</span> <span class="p">(</span><span class="nv">timu-org-clipboard</span><span class="p">)</span> <span class="s">&#34;n&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nb">ignore-errors</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">org-capture-finalize</span><span class="p">)))</span>
+</span></span></code></pre></div><p>Notice how <code>denote-org-capture-specifiers</code>, <code>denote-use-title</code> and <code>denote-org-front-matter</code> need to be adjusted here. Also I pragmatically add an Org ID for the Org-Roam SQLite DB.</p>
+<p>The function also calls the capture template for Denote, which is called by the key &ldquo;n&rdquo;.</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">&#39;org-capture-templates</span>
+</span></span><span class="line"><span class="cl">             <span class="o">&#39;</span><span class="p">(</span><span class="s">&#34;n&#34;</span> <span class="s">&#34;macOS Safari clipboard capture to denote&#34;</span> <span class="nv">plain</span>
+</span></span><span class="line"><span class="cl">               <span class="p">(</span><span class="nv">file</span> <span class="nv">denote-last-path</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">               <span class="nf">#&#39;</span><span class="nv">denote-org-capture</span>
+</span></span><span class="line"><span class="cl">               <span class="nb">:no-save</span> <span class="no">t</span>
+</span></span><span class="line"><span class="cl">               <span class="nb">:immediate-finish</span> <span class="no">nil</span>
+</span></span><span class="line"><span class="cl">               <span class="nb">:kill-buffer</span> <span class="no">t</span>
+</span></span><span class="line"><span class="cl">               <span class="nb">:jump-to-captured</span> <span class="no">t</span><span class="p">))</span>
+</span></span></code></pre></div><p><strong>NOTE:</strong> I still got a bit of adjustments to do. Like changing the <code>#+AUTHOR:</code> while capturing. For now I am gonna leave my name as a placeholder. Also I still need to select <code>#+FILETAGS:</code> while capturing.</p>
+<p><strong>Step 2: Complete the macOS Service</strong></p>
+<p>Besides copying the Safari content the macOS Service focuses Emacs and calls the Function <code>timu-denote-safari-org-capture</code> to capture the note. The complete Apple Script is then:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-applescript" data-lang="applescript"><span class="line"><span class="cl"><span class="k">on</span> <span class="nb">run</span> <span class="p">{</span><span class="nv">input</span><span class="p">,</span> <span class="nv">parameters</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">tell</span> <span class="nb">application</span> <span class="s2">&#34;System Events&#34;</span> <span class="k">to</span> <span class="nv">keystroke</span> <span class="s2">&#34;c&#34;</span> <span class="nv">using</span> <span class="nv">command</span> <span class="nv">down</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nb">application</span> <span class="s2">&#34;Emacs&#34;</span> <span class="ow">is</span> <span class="nv">running</span> <span class="k">then</span>
+</span></span><span class="line"><span class="cl">        <span class="k">tell</span> <span class="nb">application</span> <span class="s2">&#34;Emacs&#34;</span>
+</span></span><span class="line"><span class="cl">            <span class="nb">activate</span>
+</span></span><span class="line"><span class="cl">        <span class="k">end</span> <span class="k">tell</span>
+</span></span><span class="line"><span class="cl">    <span class="k">end</span> <span class="k">if</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nb">do shell script</span> <span class="s2">&#34;emacsclient -n -e &#39;(timu-denote-safari-org-capture)&#39;&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="no">return</span> <span class="nv">input</span>
+</span></span><span class="line"><span class="cl"><span class="k">end</span> <span class="nb">run</span>
+</span></span></code></pre></div><h3 id="the-steps-to-capture">The steps to capture</h3>
+<ol>
+<li>Select the content you want to copy into the note.</li>
+<li>Hit a Keybinding to call the macOS Service.</li>
+<li>Emacs gets focused with a prompt for tags and the directory to save the note.</li>
+<li>Finalize the capture note with a keybinding.</li>
+</ol>
+<h2 id="bottom-line">Bottom line</h2>
+<p>I have cobbled all of this together this week, which is probably way to&hellip; well <strong>cobbled together</strong>. It does work wonderfully for me though and I am hoping that it might help others on their Mac.</p>
+<p>Feel free to give me some pointers, though!</p>
+<p>Also I would like to make it work on my Linux machine soon, however I seam not to get it out of the drawer a lot lately.</p>

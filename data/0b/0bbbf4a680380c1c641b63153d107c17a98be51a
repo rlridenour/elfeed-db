@@ -1,0 +1,1265 @@
+<p>
+Nudged by <a href="http://scripting.com/2025/03/15.html#a135901">Dave Winer's post about old-school
+bloggers</a> and my now-nicely-synchronizing setup of
+<a href="https://netnewswire.com/">NetNewsWire (iOS)</a> and <a href="https://freshrss.org/index.html">FreshRSS (web)</a>, I gave
+Claude AI <a href="https://daveverse.wordpress.com/2025/03/15/finding-old-school-bloggers-who-are-still-at-it/">this prompt to list bloggers</a> (with the
+addition of "Please include URLs and short bios.")
+and had fun going through the list it produced. A
+number of people were no longer blogging
+(unreachable sites or inactive blogs), but I found
+a few that I wanted to add to my feed reader.
+</p>
+
+<p>
+Here is my <a href="https://sachachua.com/blog/2025/03/reading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file/people.opml">people.opml</a> at the moment (slightly
+redacted, as I read my husband's blog as well).
+This list has some non-old-school bloggers as well
+and some sketchnoters, but that's fine. It's a
+very tiny slice of the awesomeness of the Internet
+out there, definitely not exhaustive, just a
+start. I've been adding more by trawling through
+<a href="https://indieblog.page/all">indieblog.page</a> and the occasional interesting post
+on <a href="https://news.ycombinator.com">news.ycombinator.com</a>.
+</p>
+
+<p>
+It makes sense to make an HTML version to make it
+easier for people to explore, like those
+old-fashioned blog rolls. Ooh, maybe some kind of
+table like <a href="https://indieblog.page">indieblog.page</a>, listing a recent item
+from each blog. (I am totally not surprised about
+my tendency to self-<a href="https://en.wiktionary.org/wiki/nerd-snipe">nerd-snipe</a> with some kind of
+Emacs thing.) This uses <a href="https://sachachua.com/dotemacs#web-parsing-rss-and-atom-feeds">my-opml-table and
+my-rss-get-entries</a>, which I have just added to my
+Emacs configuration.
+</p>
+
+<p>
+</p><details><summary>my-opml-table</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-opml-table</span> (xml)
+  (sort
+   (mapcar
+    (<span class="org-keyword">lambda</span> (o)
+      (<span class="org-keyword">let</span> ((latest (car (<span class="org-keyword">condition-case</span> nil (my-rss-get-entries (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">xmlUrl</span>))
+                           (<span class="org-warning">error</span> nil)))))
+        (list
+         (<span class="org-keyword">if</span> latest
+             (format-time-string <span class="org-string">"%Y-%m-%d"</span> (plist-get latest <span class="org-builtin">:date</span>))
+           <span class="org-string">""</span>)
+         (org-link-make-string
+          (<span class="org-keyword">or</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">htmlUrl</span>)
+              (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">xmlUrl</span>))
+          (replace-regexp-in-string <span class="org-string">" *|"</span> <span class="org-string">""</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span>)))
+         (<span class="org-keyword">if</span> latest
+             (org-link-make-string
+              (plist-get latest <span class="org-builtin">:url</span>)
+              (<span class="org-keyword">or</span> (plist-get latest <span class="org-builtin">:title</span>) <span class="org-string">"(untitled)"</span>))
+           <span class="org-string">""</span>))))
+    (dom-search
+     xml
+     (<span class="org-keyword">lambda</span> (o)
+       (<span class="org-keyword">and</span>
+        (eq (dom-tag o) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">outline</span>)
+        (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">xmlUrl</span>)
+        (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span>)))))
+   <span class="org-builtin">:key</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">car</span>
+   <span class="org-builtin">:reverse</span> t))
+
+</pre></div></details>
+<p></p>
+
+<p>
+</p><details><summary>my-rss-get-entries: Return a list of the form ((:title &#x2026; :url &#x2026; :date &#x2026;) &#x2026;).</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">my-rss-get-entries</span> (url)
+  <span class="org-doc">"Return a list of the form ((:title ... :url ... :date ...) ...)."</span>
+  (<span class="org-keyword">with-current-buffer</span> (url-retrieve-synchronously url)
+    (set-buffer-multibyte t)
+    (goto-char (point-min))
+    (<span class="org-keyword">when</span> (re-search-forward <span class="org-string">"&lt;\\?xml</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">&lt;rss"</span> nil t)
+      (goto-char (match-beginning 0))
+      (sort
+       (<span class="org-keyword">let*</span> ((feed (xml-parse-region (point) (point-max)))
+              (is-rss (&gt; (length (xml-get-children (car feed) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">entry</span>)) 0)))
+         (<span class="org-keyword">if</span> is-rss
+             (mapcar
+              (<span class="org-keyword">lambda</span> (entry)
+                (list
+                 <span class="org-builtin">:url</span>
+                 (<span class="org-keyword">or</span>
+                  (xml-get-attribute
+                   (car
+                    (<span class="org-keyword">or</span>
+                     (seq-filter (<span class="org-keyword">lambda</span> (x) (string= (xml-get-attribute x <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">rel</span>) <span class="org-string">"alternate"</span>))
+                                 (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">link</span>))
+                     (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">link</span>)))
+                   <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span>)
+                  (dom-text (dom-by-tag entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">guid</span>)))
+                 <span class="org-builtin">:title</span>
+                 (elt (car (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span>)) 2)
+                 <span class="org-builtin">:date</span>
+                 (date-to-time (elt (car (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">updated</span>)) 2))))
+              (xml-get-children (car feed) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">entry</span>))
+           (mapcar (<span class="org-keyword">lambda</span> (entry)
+                     (list
+                      <span class="org-builtin">:url</span>
+                      (<span class="org-keyword">or</span> (caddr (car (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">link</span>)))
+                          (dom-text (dom-by-tag entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">guid</span>)))
+                      <span class="org-builtin">:title</span>
+                      (caddr (car (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span>)))
+                      <span class="org-builtin">:date</span>
+                      (date-to-time (elt (car (xml-get-children entry <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">pubDate</span>)) 2))))
+                   (xml-get-children (car (xml-get-children (car feed) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">channel</span>)) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">item</span>))))
+       <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (o) (plist-get o <span class="org-builtin">:date</span>))
+       <span class="org-builtin">:lessp</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">time-less-p</span>
+       <span class="org-builtin">:reverse</span> t))))
+
+</pre></div></details>
+<p></p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(my-opml-table (xml-parse-file <span class="org-string">"~/Downloads/people.opml"</span>))
+</pre>
+</div>
+
+
+<table>
+
+
+<colgroup>
+<col class="org-right">
+
+<col class="org-left">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://www.flutterby.com/feed.xml">Flutterby!</a></td>
+<td class="org-left"><a href="https://www.flutterby.com/archives/comments/33476.html">Bug replicators</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://kottke.org/">kottke.org</a></td>
+<td class="org-left"><a href="https://kottke.org/25/03/a-history-professor-answers-questions-about-dictators">A History Professor Answers Questions About Dictators</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://dancullum.com/">Dan's Daily</a></td>
+<td class="org-left"><a href="https://dancullum.com/2025/03/posting-ahead/">Posting ahead</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="http://scripting.com/">Dave Winer</a></td>
+<td class="org-left"><a href="http://scripting.com/2025/03/19.html#a171447">(untitled)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://doc.searls.com/">Doc Searls</a></td>
+<td class="org-left"><a href="https://doc.searls.com/2025/03/19/come-from-everywhere/">Come from Everywhere</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://baty.net/">Jack Baty</a></td>
+<td class="org-left"><a href="https://baty.net/posts/2025/03/fixing-the-terrible-scrolling-behavior-with-logitech-mx-master-on-macos">Fixing the terrible scrolling behavior with Logitech MX Master on macOS</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://takeonrules.com/">Jeremy Friesen</a></td>
+<td class="org-left"><a href="https://takeonrules.com/2025/03/19/crocus/">Crocus</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://www.spudart.org/">Matt Maldre</a></td>
+<td class="org-left"><a href="https://www.spudart.org/blog/fascinating-facet/">Does the word ‘fascinating’ come from ‘facet’?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://interconnected.org/home">Matt Webb</a></td>
+<td class="org-left"><a href="https://interconnected.org/home/2025/03/19/useless">An appreciation for the Useless Machine</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://wilwheaton.net/">Wil Wheaton</a></td>
+<td class="org-left"><a href="https://wilwheaton.net/2025/03/i-made-a-thing/">I made a thing!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://sketchyideas.substack.com/">Sketchy Ideas</a></td>
+<td class="org-left"><a href="https://sketchyideas.substack.com/p/10-lessons-from-the-psychology-of">10 Lessons from The Psychology of Money in Visuals</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://blog.avas.space/">Ava</a></td>
+<td class="org-left"><a href="https://blog.avas.space/cool-links8-new/">cool links VIII: open access and AI, oppression, euro cloud</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://www.jayeless.net/posts/">Jessica Smith</a></td>
+<td class="org-left"><a href="https://www.jayeless.net/2025/03/big-ideas-for-little-philosophers.html">Big Ideas for Little Philosophers</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://www.themarginalian.org/">Maria Popova</a></td>
+<td class="org-left"><a href="https://www.themarginalian.org/2025/03/18/berryman-advice/">How to Get Out of Your Own Way: John Berryman on Defeating the Three Demons of Creative Work</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://om.co/">Om Malik</a></td>
+<td class="org-left"><a href="https://om.co/2025/03/18/goodbye-torque-hello-teraflops/">Goodbye Torque. Hello TeraFLOPS!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://www.tbray.org/ongoing/">Tim Bray</a></td>
+<td class="org-left"><a href="https://www.tbray.org/ongoing/When/202x/2025/03/17/Long-Links">Long Links</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://warrenellis.ltd/">Warren Ellis</a></td>
+<td class="org-left"><a href="https://warrenellis.ltd/status/status-week-of-18mar25/">status, week of 18mar25</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://www.sketchnotelab.com/">Sketchnote Lab</a></td>
+<td class="org-left"><a href="https://www.sketchnotelab.com/p/real-world-sketching-workshop">Real-World Sketching Workshop with Mike Rohde, coming Saturday, April 26, 2025!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://a.wholelottanothing.org/">Matthew Haughey</a></td>
+<td class="org-left"><a href="https://a.wholelottanothing.org/a-marathon-trip/">A marathon trip</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://randsinrepose.com/">Michael Lopp</a></td>
+<td class="org-left"><a href="https://randsinrepose.com/archives/the-product-engineer/">The Product Engineer</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://rasterweb.net/raster">Pete Prodoehl</a></td>
+<td class="org-left"><a href="https://rasterweb.net/raster/2025/03/17/editing-a-bear-theme/">Editing a Bear Theme</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://protesilaos.com/">Protesilaos Stavrou</a></td>
+<td class="org-left"><a href="https://protesilaos.com/books/2025-03-18-stoic-harmony-nature/">On the Stoic harmony with nature</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://abhijitbhaduri.substack.com/">Abhijit's Sketchnotes</a></td>
+<td class="org-left"><a href="https://abhijitbhaduri.substack.com/p/second-jobs-pay-cuts-glass-bottles">Second jobs, pay cuts, glass bottles and Oscars</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://illustratedlife.substack.com/">Illustrated Life</a></td>
+<td class="org-left"><a href="https://illustratedlife.substack.com/p/loving-a-bent-nib">Loving a Bent Nib</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://qaspire.com/">QAspire Consulting - Tanmay Vora</a></td>
+<td class="org-left"><a href="https://qaspire.com/thriving-in-the-age-of-ai-head-hands-and-heart/">Thriving in the Age of AI: Head, Hands, and Heart</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://ludtoussaint.substack.com/">The Visual Drawer</a></td>
+<td class="org-left"><a href="https://ludtoussaint.substack.com/p/motivation-isnt-magic-its-structure">Motivation Isn't Magic: It's Structure!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://genehack.blog/">genehack.blog</a></td>
+<td class="org-left"><a href="https://genehack.blog/2025/03/weeknote-25-20250309-20250315/">Weeknote #25 (20250309-20250315)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://zeldman.com/">Jeffrey Zeldman</a></td>
+<td class="org-left"><a href="https://zeldman.com/2025/03/15/your-opt-innie-wants-to-talk-to-your-opt-outtie/">Your opt-innie wants to talk to your opt-outtie.</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://oylenshpeegul.gitlab.io/blog/">oylenshpeegul</a></td>
+<td class="org-left"><a href="https://oylenshpeegul.gitlab.io/blog/posts/20250316/">Ruth</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://buttondown.com/monteiro">Mike Monteiro</a></td>
+<td class="org-left"><a href="https://buttondown.com/monteiro/archive/how-to-hide-a-painting/">How to hide a painting</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-14</td>
+<td class="org-left"><a href="https://www.henrikkarlsson.xyz/">Henrik Karlsson</a></td>
+<td class="org-left"><a href="https://www.henrikkarlsson.xyz/p/king-of-the-sea-snakes">King of the sea snakes</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-14</td>
+<td class="org-left"><a href="https://kk.org/thetechnium">Kevin Kelly</a></td>
+<td class="org-left"><a href="https://kk.org/thetechnium/best-thing-since-sliced-bread/">Best Thing Since Sliced Bread?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-14</td>
+<td class="org-left"><a href="https://andymcnally.substack.com/">Andy Draws</a></td>
+<td class="org-left"><a href="https://andymcnally.substack.com/p/planting-seeds-of-kindness">Planting Seeds of Kindness</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="https://chrishannah.me/">Chris Hannah</a></td>
+<td class="org-left"><a href="https://chrishannah.me/mcu-tracker-with-cursor/">I Challenged Myself to Build a Website Using Cursor</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="https://themkat.net/">Marie K. Ekeberg</a></td>
+<td class="org-left"><a href="https://themkat.net/2025/03/14/pi_day_2025.html">Pi Day 2025 - Let’s have fun with numbers!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="https://davidrickert.substack.com/">David’s Substack</a></td>
+<td class="org-left"><a href="https://davidrickert.substack.com/p/sources-for-graphic-nonfiction-online">Sources For Graphic Nonfiction Online</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-11</td>
+<td class="org-left"><a href="https://manueluberti.eu/">Manuel Uberti</a></td>
+<td class="org-left"><a href="https://manueluberti.eu/posts/2025-03-12-belonging/">A sense of belonging</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-10</td>
+<td class="org-left"><a href="https://www.newcartographies.com/">Nicholas Carr</a></td>
+<td class="org-left"><a href="https://www.newcartographies.com/p/strong-men-and-strong-machines">Strong Men and Strong Machines</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-09</td>
+<td class="org-left"><a href="https://kupajo.com/">kupajo</a></td>
+<td class="org-left"><a href="https://kupajo.com/start-with-the-end-in-mind/">Start With the End in Mind</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-09</td>
+<td class="org-left"><a href="https://blog.penelopetrunk.com/">Penelope Trunk</a></td>
+<td class="org-left"><a href="https://blog.penelopetrunk.com/2025/03/09/i-hate-having-to-earn-money-but-i-like-knowing-what-makes-me-valuable/">I hate having to earn money, but I like knowing what makes me valuable</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-06</td>
+<td class="org-left"><a href="https://claritycanvas.substack.com/">Clarity Canvas Weekly by Tanmay Vora</a></td>
+<td class="org-left"><a href="https://claritycanvas.substack.com/p/thriving-in-the-age-of-ai-head-hands">Thriving in the Age of AI: Head, Hands, and Heart</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-04</td>
+<td class="org-left"><a href="https://letsketchin.substack.com/">LetSketchin’s Newsletter</a></td>
+<td class="org-left"><a href="https://letsketchin.substack.com/p/84-whats-your-motivation-to-join">#84 - What's your motivation to join this newsletter</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-03</td>
+<td class="org-left"><a href="https://maurotoselli.substack.com/">Keep the Creative Juices Flowing</a></td>
+<td class="org-left"><a href="https://maurotoselli.substack.com/p/have-you-ever-had-an-un-idea">Have you ever had an UN-IDEA?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-02</td>
+<td class="org-left"><a href="https://www.rousette.org.uk/">but she's a girl&#x2026;</a></td>
+<td class="org-left"><a href="https://www.rousette.org.uk/archives/zsa-voyager/">ZSA Voyager</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-25</td>
+<td class="org-left"><a href="https://rhyslindmark.substack.com/">Rhys Lindmark</a></td>
+<td class="org-left"><a href="https://rhyslindmark.substack.com/p/2025-update">2025 Update</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-24</td>
+<td class="org-left"><a href="https://sive.rs/en.atom">Derek Sivers</a></td>
+<td class="org-left"><a href="https://sive.rs/nz0">Why did I move to New Zealand?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-23</td>
+<td class="org-left"><a href="https://www.scottmccloud.com/">Scott McCloud</a></td>
+<td class="org-left"><a href="https://www.scottmccloud.com/2025/02/23/new-for-spring-the-cartoonists-club/">New for Spring: The Cartoonists Club!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-07</td>
+<td class="org-left"><a href="https://jamesendreshowell.com/">James Endres Howell</a></td>
+<td class="org-left"><a href="https://jamesendreshowell.com/2025-02-07-what-can-one-person-do.html">What can one person do?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-03</td>
+<td class="org-left"><a href="https://anildash.com/">Anil Dash</a></td>
+<td class="org-left"><a href="https://anildash.com/2025/01/04/DOGE-procurement-capture/">Understanding DOGE as Procurement Capture</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-21</td>
+<td class="org-left"><a href="https://arne.me/">Arne Bahlo</a></td>
+<td class="org-left"><a href="https://arne.me/blog/favorites-2024">My favorite things of 2024</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-11</td>
+<td class="org-left"><a href="https://thesketchyanthropologist.substack.com/">The Sketchy Anthropologist</a></td>
+<td class="org-left"><a href="https://thesketchyanthropologist.substack.com/p/getting-started-with-sketchnotes-4a0">Getting Started with Sketchnotes [2]: Eva Lotta-Lamm - Domestika Sketchnoting Course</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-21</td>
+<td class="org-left"><a href="https://avdi.codes/">Avdi Grimm</a></td>
+<td class="org-left"><a href="https://avdi.codes/youre-not-selling-a-solution/?utm_source=rss&amp;utm_medium=rss&amp;utm_campaign=youre-not-selling-a-solution">You’re not selling a solution</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-08</td>
+<td class="org-left"><a href="https://joi.ito.com/weblog/">Joi Ito</a></td>
+<td class="org-left"><a href="https://joi.ito.com/weblog/2024/11/09/morning-thick-t.html">Morning Thick Tea and Yuen</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-15</td>
+<td class="org-left"><a href="https://mooerslab.github.io/">Blaine Mooers</a></td>
+<td class="org-left"><a href="https://mooerslab.github.io/posts/2024/01/15/writingProgress2024-2025">Track daily writing progress by project in 2024 and 2025</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2022-11-13</td>
+<td class="org-left"><a href="https://rheingold.com/">Howard Rheingold</a></td>
+<td class="org-left"><a href="https://rheingold.com/2022/compendium-of-podcasts-featuring-howard/">Compendium of Podcasts Featuring Howard</a></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+I'm rebuilding my feed list from scratch. I want
+to read more. I read the aggregated feeds at
+<a href="https://planet.emacslife.com">planet.emacslife.com</a> every week as part of
+preparing <a href="https://sachachua.com/blog/category/emacs-news">Emacs News</a>. Maybe I'll go over the list
+of blogs I aggregate there, widen it to include
+all posts instead of just Emacs-specific ones, and
+see what resonates. Emacs people tend to be
+interesting. Here is an incomplete list based on
+people who've posted in the past two years or so,
+based on this work-in-progress
+<a href="https://sachachua.com/blog/2025/03/reading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file/planetemacslife-expanded.opml">planetemacslife-expanded.opml</a>. (I haven't tweaked
+all the URLs yet. I stopped at around 2023 and
+made the rest of the elements <code>xoutline</code> instead
+of <code>outline</code> so that my code would skip them.)
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(my-opml-table (xml-parse-file <span class="org-string">"~/Downloads/planetemacslife-expanded.opml"</span>))
+</pre>
+</div>
+
+
+<table>
+
+
+<colgroup>
+<col class="org-right">
+
+<col class="org-left">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://irreal.org/blog">Irreal</a></td>
+<td class="org-left"><a href="https://irreal.org/blog/?p=12856">The Power Of Isearch</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://emacs.dyerdwelling.family/">James Dyer</a></td>
+<td class="org-left"><a href="https://emacs.dyerdwelling.family/emacs/20250319145359-emacs&#45;&#45;ollama-buddy-0-9-8-transient-menu-model-managing-gguf-import-fabric-prompts/">Ollama-Buddy 0.9.8: Transient Menu, Model Managing, GGUF Import, fabric Prompts and History Editing</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://emacsredux.com/">Emacs Redux</a></td>
+<td class="org-left"><a href="https://emacsredux.com/blog/2025/03/19/relative-line-numbers/">Relative Line Numbers</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://takeonrules.com/">Jeremy Friesen</a></td>
+<td class="org-left"><a href="https://takeonrules.com/2025/03/19/crocus/">Crocus</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-19</td>
+<td class="org-left"><a href="https://crys.site/">Michal Sapka</a></td>
+<td class="org-left"><a href="https://crys.site/blog/2025/no-alt-text/">I stopped writing alt-text to most images here</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://lars.ingebrigtsen.no">Lars Ingebrigtsen</a></td>
+<td class="org-left"><a href="https://lars.ingebrigtsen.no/2025/03/18/wordpress-rewrites-my-posts/">WoRdPrEsS ReWrItEs My PoStS</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://www.miskatonic.org">William Denton</a></td>
+<td class="org-left"><a href="https://www.miskatonic.org/2025/03/18/art/">Art is the imposition of form on experience</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-18</td>
+<td class="org-left"><a href="https://willschenk.com/tags/emacs/">Will Schenk</a></td>
+<td class="org-left"><a href="https://willschenk.com/fragments/2025/knowledge_navigator/">Knowledge Navigator</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://flandrew.srht.site/listful">Listful Andrew</a></td>
+<td class="org-left"><a href="https://flandrew.srht.site/listful/hash-tables-look-better-in-emacs-30.html">Hash tables look better in Emacs 30</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://sachachua.com/blog/">Sacha Chua</a></td>
+<td class="org-left"><a href="https://sachachua.com/blog/2025/03/org-mode-merge-top-level-items-in-an-item-list/">Org Mode: Merge top-level items in an item list</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://protesilaos.com/">Protesilaos Stavrou</a></td>
+<td class="org-left"><a href="https://protesilaos.com/books/2025-03-18-stoic-harmony-nature/">On the Stoic harmony with nature</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://mbork.pl/Homepage">Marcin Borkowski</a></td>
+<td class="org-left"><a href="https://mbork.pl/2025-03-17_Bash_script_and_passwords">Bash script and passwords</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://christiantietze.de/">Christian Tietze</a></td>
+<td class="org-left"><a href="https://christiantietze.de/posts/2025/03/nspopover-in-nstextview-with-links-broken/">NSPopover in NSTextView With Links Is Broken: Accessibility Hierarchy Slowdown</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://taonaw.com/">TAONAW Mode</a></td>
+<td class="org-left"><a href="https://taonaw.com/2025/03/17/094010.html">(untitled)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-left"><a href="https://www.johndcook.com/blog">John D. Cook</a></td>
+<td class="org-left"><a href="https://www.johndcook.com/blog/2025/03/17/lessons-learned-with-the-z3-sat-smt-solver/">Lessons Learned With the Z3 SAT/SMT Solver</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://www.wisdomandwonder.com">Grant Rettke</a></td>
+<td class="org-left"><a href="https://www.wisdomandwonder.com/emacs/14207/interesting-new-gptel-v0-9-8-features-and-commits-since-v0-9-7">Interesting new gptel v0.9.8 features and commits since v0.9.7</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://magnus.therning.org/">Magnus</a></td>
+<td class="org-left"><a href="https://magnus.therning.org/2025-03-16-using-lens-aeson-to-implement-fromjson.html">Using lens-aeson to implement FromJSON</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://200ok.ch/atom.xml">200ok</a></td>
+<td class="org-left"><a href="https://200ok.ch/posts/2025-03-17_atomize_a_simple_cli_tool_for_managing_atom_feeds.html">Atomize: A Simple CLI Tool for Managing Atom Feeds</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-16</td>
+<td class="org-left"><a href="https://macowners.club/">Aimé Bertrand</a></td>
+<td class="org-left"><a href="https://macowners.club/posts/raycast-activate-entra-role-pim-graph/">Raycast - Activate Entra Role via PIM with Graph</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://oylenshpeegul.gitlab.io/blog/">Tim Heaney</a></td>
+<td class="org-left"><a href="https://oylenshpeegul.gitlab.io/blog/posts/20250316/">Ruth</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-15</td>
+<td class="org-left"><a href="https://susam.net">Susam Pal</a></td>
+<td class="org-left"><a href="https://susam.net/code/news/mathb/1.3.0.html">MathB 1.3.0</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-14</td>
+<td class="org-left"><a href="https://batsov.com/">Bozhidar Batsov</a></td>
+<td class="org-left"><a href="https://batsov.com/articles/2025/03/14/updating-my-toolbox-ghostty-and-fish/">Updating my toolbox: Ghostty and Fish</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-14</td>
+<td class="org-left"><a href="https://www.teachmaths.org/">Matt Maguire</a></td>
+<td class="org-left"><a href="https://www.teachmaths.org/20250315-denshijisho_xd-g9850/">Japanese Electronic Dictionary (Casio XD-G9850)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="https://lmno.lol/alvaro">Alvaro Ramirez</a></td>
+<td class="org-left"><a href="https://lmno.lol/alvaro/journelly-open-for-beta">Journelly open for beta</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="http://yummymelon.com/devnull/">Charles Choi</a></td>
+<td class="org-left"><a href="http://yummymelon.com/devnull/announcing-casual-make.html">Announcing Casual Make</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-13</td>
+<td class="org-left"><a href="https://themkat.net/">Marie K. Ekeberg</a></td>
+<td class="org-left"><a href="https://themkat.net/2025/03/14/pi_day_2025.html">Pi Day 2025 - Let’s have fun with numbers!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-11</td>
+<td class="org-left"><a href="https://macadie.info">Eric MacAdie</a></td>
+<td class="org-left"><a href="https://macadie.info/2025/03/11/2025-03-austin-emacs-meetup/">2025-03 Austin Emacs Meetup</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-11</td>
+<td class="org-left"><a href="https://manueluberti.eu/">Manuel Uberti</a></td>
+<td class="org-left"><a href="https://manueluberti.eu/posts/2025-03-12-belonging/">A sense of belonging</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-10</td>
+<td class="org-left"><a href="https://so.nwalsh.com/">Norm</a></td>
+<td class="org-left"><a href="https://so.nwalsh.com/2025/03/10-xmlresolver">XML Resolver updates</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-09</td>
+<td class="org-left"><a href="https://andreyor.st/">Andrey Listopadov</a></td>
+<td class="org-left"><a href="https://andreyor.st/posts/2025-03-10-dynamic-font-lock-for-fennel/">Dynamic font-lock for Fennel</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-08</td>
+<td class="org-left"><a href="https://speechcode.com/">Arthur A. Gleckler</a></td>
+<td class="org-left"><a href="https://speechcode.com/blog/backup-sampling">Backup Sampling</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-08</td>
+<td class="org-left"><a href="https://alpo.gitlab.io/jots/">Alex Popescu</a></td>
+<td class="org-left"><a href="https://alpo.gitlab.io/jots/links/2025/03/til-succinct-data-structures/">TIL Succinct Data Structures</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-07</td>
+<td class="org-left"><a href="https://kisaragi-hiu.com/">Kisaragi Hiu</a></td>
+<td class="org-left"><a href="https://kisaragi-hiu.com/blog/2025-03-07-pinentry-kde-wallet/">Plasma: Avoiding having to type the login password again when first using Git / GPG</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-07</td>
+<td class="org-left"><a href="https://olddeuteronomy.github.io/">The Emacs Cat</a></td>
+<td class="org-left"><a href="https://olddeuteronomy.github.io/post/orgmode-for-reproducibility-testing/">Using Emacs Org Mode for Reproducibility Testing</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-06</td>
+<td class="org-left"><a href="https://www.masteringemacs.org/">Mickey Petersen</a></td>
+<td class="org-left"><a href="https://www.masteringemacs.org/article/replacing-tmux-gnu-screen-emacs?utm_source=newsletter&amp;utm_medium=rss">Replacing tmux and GNU screen with Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-05</td>
+<td class="org-left"><a href="https://amitp.blogspot.com/">Amit Patel</a></td>
+<td class="org-left"><a href="https://amitp.blogspot.com/2025/03/emacs-tree-sitter-custom-highlighting-3.html">Emacs Tree-sitter custom highlighting, part 3</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-05</td>
+<td class="org-left"><a href="https://www.kriscarta.com/">Kris Carta</a></td>
+<td class="org-left"><a href="https://www.kriscarta.com/posts/my-delivery-sheet">My Delivery Sheet</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-05</td>
+<td class="org-left"><a href="https://www.blogbyben.com/">Ben Simon</a></td>
+<td class="org-left"><a href="https://www.blogbyben.com/2025/03/gs-baltimore-adventure-uss-torsk.html">G's Baltimore Adventure - The USS Torsk</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-02</td>
+<td class="org-left"><a href="https://thanosapollo.org/">Thanos Apollo</a></td>
+<td class="org-left"><a href="https://thanosapollo.org/posts/org-gnosis-overview/">Emacs Note Taking &amp; Journaling using org-gnosis [Video]​</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-02</td>
+<td class="org-left"><a href="https://www.rousette.org.uk/">But She's a Girl</a></td>
+<td class="org-left"><a href="https://www.rousette.org.uk/archives/zsa-voyager/">ZSA Voyager</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-28</td>
+<td class="org-left"><a href="https://janusworx.com/">Mario Jason Braganza</a></td>
+<td class="org-left"><a href="https://janusworx.com/reading/2025/">2025</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-28</td>
+<td class="org-left"><a href="https://hillenius.net">Gijs Hillenius</a></td>
+<td class="org-left"><a href="http://localhost:1313/post/bathwater/">The bathwater of our 21st century</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-25</td>
+<td class="org-left"><a href="https://www.jamescherti.com">James Cherti</a></td>
+<td class="org-left"><a href="https://www.jamescherti.com/emacs-symbol-highlighting-built-in-functions/">Toggling symbol highlighting in Emacs with unique colors for each symbol using built-in functions</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-24</td>
+<td class="org-left"><a href="https://freerangebits.com/">Peter J. Jones</a></td>
+<td class="org-left"><a href="https://freerangebits.com/posts/2025/02/emacs-light-dark/">Automatic Theme Switching in Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-24</td>
+<td class="org-left"><a href="https://babbagefiles.xyz/">Benjamin Slade</a></td>
+<td class="org-left"><a href="https://babbagefiles.xyz/c-conjecturing-and-practical-considerations-of-recursion-in-emacs/">C-c-c-conjecturing, and dealing with recursion in Emacs (more excursus)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-23</td>
+<td class="org-left"><a href="https://codelearn.me/">Ruslan Bekenev</a></td>
+<td class="org-left"><a href="https://codelearn.me/2025/02/24/emacs-glasses-mode.html">Emacs: glasses-mode</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-23</td>
+<td class="org-left"><a href="https://onlisp.co.uk/atom.xml">J.e.r.e.m.y B.r.y.a.n.t</a></td>
+<td class="org-left"><a href="https://onlisp.co.uk/Emacs-30_002e1-released-including-which_002dkey.html">Emacs 30.1 released including which-key</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-23</td>
+<td class="org-left"><a href="https://www.naiquev.in/">Vineet Naik</a></td>
+<td class="org-left"><a href="https://www.naiquev.in/premature-automation.html">Premature automation</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-22</td>
+<td class="org-left"><a href="https://rahuljuliato.com">Rahul Juliato</a></td>
+<td class="org-left"><a href="https://rahuljuliato.com/posts/compiling_emacs_30_1">Compiling Emacs 30.1 from the source on Debian</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-22</td>
+<td class="org-left"><a href="https://blog.fixermark.com/">Mark Tomczak</a></td>
+<td class="org-left"><a href="https://blog.fixermark.com/posts/2025/running-sandstorm-from-a-raid-1/">Running Sandstorm From a Raid 1 Drive Array</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-22</td>
+<td class="org-left"><a href="https://whatacold.io/">whatacold</a></td>
+<td class="org-left"><a href="https://whatacold.io/blog/2025-02-22-flask-clojure-rewrite/">Rewrite of a Flask Web App in Clojure</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-22</td>
+<td class="org-left"><a href="https://localauthor.github.io/">localauthor</a></td>
+<td class="org-left"><a href="https://sachachua.com/blog/2025/03/reading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file/">Ežerų Dugne</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-18</td>
+<td class="org-left"><a href="https://spepo.github.io/">Peter Povinec</a></td>
+<td class="org-left"><a href="https://spepo.github.io/2025-02-18-speed-dial-your-favorite-files.html">Speed Dialing Your Favorite Files</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-18</td>
+<td class="org-left"><a href="https://rodrigo.morales.pe">Rodrigo Morales</a></td>
+<td class="org-left"><a href="https://rodrigo.morales.pe/2025/02/18/compile-zathura-0-5-11-in-ubuntu-24-04-lts/">Compile zathura 0.5.11 in Ubuntu 24.04 LTS</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-17</td>
+<td class="org-left"><a href="https://willghatch.net/blog/feeds/all.rss.xml">William Gallard Hatch</a></td>
+<td class="org-left"><a href="http://www.willghatch.net/blog/text-editing/dont-ossify-defaults/?utm_source=all&amp;utm_medium=RSS">Don't Ossify Defaults</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-13</td>
+<td class="org-left"><a href="https://lifeofpenguin.blogspot.com/">Anand Tamariya</a></td>
+<td class="org-left"><a href="https://lifeofpenguin.blogspot.com/2025/02/emacs-font-is-wider.html">Emacs Font is wider</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-13</td>
+<td class="org-left"><a href="https://readingworldmagazine.com/">yuri tricys</a></td>
+<td class="org-left"><a href="https://readingworldmagazine.com/languages/2025-02-14-from-cupidity-to-romance-and-roses/">Etymology: From Cupidity to Romance And Roses</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-12</td>
+<td class="org-left"><a href="https://arnesonium.com/">Erik L. Arneson</a></td>
+<td class="org-left"><a href="https://arnesonium.com/2025/02/maybe-succeeds-sometimes">maybe: A command-line tool that succeeds sometimes</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-12</td>
+<td class="org-left"><a href="https://lukeplant.me.uk/blog/">Luke Plant</a></td>
+<td class="org-left"><a href="https://lukeplant.me.uk/blog/posts/christ-the-true-and-better-frodo/">Christ the True and Better Frodo</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-12</td>
+<td class="org-left"><a href="https://www.unwoundstack.com/blog">Unwound Stack</a></td>
+<td class="org-left"><a href="https://www.unwoundstack.com/blog/peppering-passwords-in-rust.html">Peppering Passwords in Rust</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-08</td>
+<td class="org-left"><a href="https://tech.toryanderson.com/">Tory Anderson</a></td>
+<td class="org-left"><a href="https://tech.toryanderson.com/2025/02/09/snippets-that-defy-orgmode-tangling/">snippets that defy orgmode tangling</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-08</td>
+<td class="org-left"><a href="https://chrismaiorana.com">Chris Maiorana</a></td>
+<td class="org-left"><a href="https://chrismaiorana.com/from-emacs-to-microsoft-word/">From Emacs To Microsoft Word (And Beyond, Really)</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-08</td>
+<td class="org-left"><a href="http://tsengf.blogspot.com/">Anything goes</a></td>
+<td class="org-left"><a href="http://tsengf.blogspot.com/2025/02/pizero-otg-host-or-peripheral.html">PiZero OTG: Host or Peripheral</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-03</td>
+<td class="org-left"><a href="https://metaredux.com/">Meta Redux</a></td>
+<td class="org-left"><a href="https://metaredux.com/posts/2025/02/03/projectile-introduces-significant-caching-improvements.html">Projectile Introduces Significant Caching Improvements</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-02</td>
+<td class="org-left"><a href="https://goykhman.ca/gene/blog/">Gene Goykhman</a></td>
+<td class="org-left"><a href="https://goykhman.ca/gene/blog/2025-02-02-quickly-summing-up-the-whole-stack-in-emacs-calc.html">Quickly summing up the whole stack in Emacs Calc</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-02</td>
+<td class="org-left"><a href="https://www.dwarfb.in/">Bz01</a></td>
+<td class="org-left"><a href="https://www.dwarfb.in/blog/using-spritely-hoot-on-nixos/">Using spritely hoot on nixos</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-01</td>
+<td class="org-left"><a href="https://baty.net/">Jack Baty</a></td>
+<td class="org-left"><a href="https://baty.net/posts/2025/01/i-have-a-new-rss-feed">FYI: I have a new blog and RSS feed</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-29</td>
+<td class="org-left"><a href="https://tony-zorman.com/atom.xml">Tony Zorman</a></td>
+<td class="org-left"><a href="https://tony-zorman.com/posts/speeding-up-latex.html">Speeding up LaTeX compilation</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-26</td>
+<td class="org-left"><a href="http://arialdomartini.github.io/">Arialdo Martini</a></td>
+<td class="org-left"><a href="http://arialdomartini.github.io/emacs-imenu">Emacs: a peek under Imenu’s hood</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-25</td>
+<td class="org-left"><a href="http://yitang.uk/atom.xml">Yi Tang</a></td>
+<td class="org-left"><a href="http://yitang.uk/2025/01/26/setup-sshagent-systemd-service-for-emacs/">Setup ssh-agent Systemd Service for Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-23</td>
+<td class="org-left"><a href="https://punchagan.muse-amuse.in/">punchagan</a></td>
+<td class="org-left"><a href="https://punchagan.muse-amuse.in/blog/some-useful-git-configuration-for-windows/">Some useful Git configuration for Windows</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-14</td>
+<td class="org-left"><a href="https://srijan.ch/">Srijan Choudhary</a></td>
+<td class="org-left"><a href="https://srijan.ch/notes/2025-01-15-001">2025-01-15-001</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-10</td>
+<td class="org-left"><a href="https://isamert.net">Isa Mert Gurbuz</a></td>
+<td class="org-left"><a href="https://isamert.net/.emacs.d/init.el.html">.emacs.d/.init.el</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-07</td>
+<td class="org-left"><a href="https://mentat.za.net/blog/">Stefan van der Walt</a></td>
+<td class="org-left"><a href="https://mentat.za.net/blog/2025/01/08/pomodoros-with-org-timer/?utm_source=atom_feed">Pomodoros with org-timer</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-03</td>
+<td class="org-left"><a href="https://whhone.com/">Wai Hon</a></td>
+<td class="org-left"><a href="https://whhone.com/posts/org-agenda-repeated-tasks/">Distinguish Repeated Tasks in Org Agenda</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-01</td>
+<td class="org-left"><a href="https://karthinks.com/">Karthik Chikmagalur</a></td>
+<td class="org-left"><a href="https://karthinks.com/software/tool-use-with-gptel-looking-for-testers/">Tool use with gptel: looking for testers!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-21</td>
+<td class="org-left"><a href="https://arne.me">Arne Bahlo</a></td>
+<td class="org-left"><a href="https://arne.me/blog/favorites-2024">My favorite things of 2024</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-18</td>
+<td class="org-left"><a href="https://mclare.blog">Maryanne Wachter</a></td>
+<td class="org-left"><a href="https://mclare.blog/posts/why-is-multithreading-selenium-lousy-on-macos">Why is multithreading Selenium lousy on MacOS?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-13</td>
+<td class="org-left"><a href="https://lambdaland.org/">Lambda Land</a></td>
+<td class="org-left"><a href="https://lambdaland.org/posts/2024-12-14_emacs_catchup/">What's New in Emacs: Last Decade Edition</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-06</td>
+<td class="org-left"><a href="https://mac4translators.blogspot.com/">Jean-Christophe Helary</a></td>
+<td class="org-left"><a href="https://mac4translators.blogspot.com/2021/09/building-vanilla-emacs-on-macos-with.html">Building "vanilla" emacs on macOS, with MacPorts, and more&#x2026;</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-21</td>
+<td class="org-left"><a href="https://jd.codes/">JD Gonzales</a></td>
+<td class="org-left"><a href="https://jd.codes/posts/kamal-tip-private-network/">Kamal Tip - Private Network only Database Server</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-15</td>
+<td class="org-left"><a href="https://jlamothe.net/blog/feed.atom">Jonathan Lamothe</a></td>
+<td class="org-left"><a href="https://jlamothe.net/blog/2024-11-15">Organizing My Life with org-mode</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-14</td>
+<td class="org-left"><a href="https://hristos.co/atom.xml">Hristos N. Triantafillou</a></td>
+<td class="org-left"><a href="https://hristos.co/blog/void-linux-on-a-framework-laptop-two-years-later">Void Linux On A Framework Laptop: Two Years Later</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-14</td>
+<td class="org-left"><a href="http://www.hoowl.se">Hanno</a></td>
+<td class="org-left"><a href="http://www.hoowl.se/git_annex_managing_ancient_data.html">git-annex: Managing my most ancient data</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-07</td>
+<td class="org-left"><a href="https://cce.whatthefuck.computer/updates.xml">Ryan Rix</a></td>
+<td class="org-left"><a href="https://cce.whatthefuck.computer/updates#20241107T142834.711602">Two Updates: Org+Nix dev streams, and my new DNS resolver</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-03</td>
+<td class="org-left"><a href="https://emacsnotes.wordpress.com">Emacs Notes</a></td>
+<td class="org-left"><a href="https://emacsnotes.wordpress.com/2024/11/03/enable-completions-for-font-family-field-in-m-x-customize-face-ret/">Enable completions for `Font Family’ field in `M-x customize-face RET’</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-02</td>
+<td class="org-left"><a href="https://purplg.dev/">Ben Whitley</a></td>
+<td class="org-left"><a href="https://purplg.dev/posts/denote-project-tasks/">Denote Project Tasks</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-27</td>
+<td class="org-left"><a href="http://ag91.github.io">Andrea</a></td>
+<td class="org-left"><a href="http://ag91.github.io/blog/2024/10/27/tips-to-contribute-to-scala-metals-lsp-server-with-emacs">A useful function to contribute to Scala Metals lsp server with Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-24</td>
+<td class="org-left"><a href="https://summeremacs.github.io/">Summer Emacs</a></td>
+<td class="org-left"><a href="https://summeremacs.github.io/posts/erc-flipping/">ERC Flipping Buffers</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-03</td>
+<td class="org-left"><a href="https://jiewawa.me/">Jiewawa</a></td>
+<td class="org-left"><a href="https://jiewawa.me/2024/10/useful-emacs-commands-for-reading/">Useful Emacs commands for reading</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-11</td>
+<td class="org-left"><a href="https://acidwords.com/">Sanel Zukan</a></td>
+<td class="org-left"><a href="https://acidwords.com/posts/2024-09-12-evil-mode-in-terminal-without-alt-meta.html">evil-mode in terminal without Alt/Meta</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-08</td>
+<td class="org-left"><a href="https://coredumped.dev/">Troy Hinckley</a></td>
+<td class="org-left"><a href="https://coredumped.dev/2024/09/09/what-is-the-best-pointer-tagging-method/">What is the best pointer tagging method?</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-16</td>
+<td class="org-left"><a href="https://wiktor.it/">Wiktor Gołgowski</a></td>
+<td class="org-left"><a href="https://wiktor.it/blog/06-org-roam-custom-linking-during-capture/">Org-roam: custom linking during capture</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-14</td>
+<td class="org-left"><a href="https://emacsair.me/">Jonas Bernoulli</a></td>
+<td class="org-left"><a href="https://emacsair.me/2024/08/14/forge-0.4">Forge 0.4.0 and 0.4.1 released</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-11</td>
+<td class="org-left"><a href="https://www.n16f.net/">Nicolas Martyanoff</a></td>
+<td class="org-left"><a href="https://www.n16f.net/blog/controlling-link-opening-in-emacs/">Controlling link opening in Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-31</td>
+<td class="org-left"><a href="https://emacspeak.blogspot.com/">T. V. Raman</a></td>
+<td class="org-left"><a href="https://emacspeak.blogspot.com/2024/07/emacspeak-speech-odyssey.html">Emacspeak &#x2014; A Speech Odyssey</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-30</td>
+<td class="org-left"><a href="https://jao.io/blog">jao</a></td>
+<td class="org-left"><a href="https://jao.io/blog/eww-to-org.html">eww to org</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-27</td>
+<td class="org-left"><a href="https://www.snamellit.com">Peter Tillemans</a></td>
+<td class="org-left"><a href="https://www.snamellit.com/blog/emacs-refactor/">Refactoring Emacs Config using Org</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-07</td>
+<td class="org-left"><a href="https://www.lonecpluspluscoder.com/">Timo Geusch</a></td>
+<td class="org-left"><a href="https://www.lonecpluspluscoder.com/post/2024-07-07-timemachine-on-samba/">If you get this error from Time Machine on Samba, check available disk space</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-23</td>
+<td class="org-left"><a href="https://pvagner.sk/tag/EmacsA11yTips">Peter Vágner</a></td>
+<td class="org-left"><a href="https://pvagner.sk/2024/emacs-a11y-tip-3-emacs-with-speechd-el-running-on-termux">Emacs A11y Tip #3: Emacs with speechd-el running on Termux for Android</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-05</td>
+<td class="org-left"><a href="https://zck.org">Zachary Kanfer</a></td>
+<td class="org-left"><a href="https://zck.org/less-a-survival-guide">Less: a Survival Guide</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-23</td>
+<td class="org-left"><a href="https://blog.hoetzel.info/">Jürgen Hötzel</a></td>
+<td class="org-left"><a href="https://blog.hoetzel.info/post/consult-gnome-search/">Gnome Search Provider: Emacs Integration</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-22</td>
+<td class="org-left"><a href="https://gretzuni.com/">Gretzuni</a></td>
+<td class="org-left"><a href="https://gretzuni.com/articles/b-logroll">B/logroll</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-14</td>
+<td class="org-left"><a href="https://bryan-murdock.blogspot.com/">Bryan Murdock</a></td>
+<td class="org-left"><a href="https://bryan-murdock.blogspot.com/2020/03/how-to-retroactively-annex-files.html">How To Retroactively Annex Files Already in a Git Repo</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-02</td>
+<td class="org-left"><a href="https://www.emoses.org/">Evan Moses</a></td>
+<td class="org-left"><a href="https://www.emoses.org/posts/target-in-blueprints/">Home Assistant: using target in blueprints</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-11</td>
+<td class="org-left"><a href="https://emacstil.com/">Emacs TIL</a></td>
+<td class="org-left"><a href="https://emacstil.com/til/2024/04/12/the-night-before-a-coding-interview/">The Night Before A Coding Interview</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-03-26</td>
+<td class="org-left"><a href="https://mrincon.net/tags/emacs/">M. Rincón</a></td>
+<td class="org-left"><a href="https://mrincon.net/posts/eat/">Eat Evil</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-02-12</td>
+<td class="org-left"><a href="https://camdez.com/">Cameron Desautels</a></td>
+<td class="org-left"><a href="https://camdez.com/blog/2024/02/12/chinese-zodiac-time-for-emacs/">Chinese Zodiac Time for Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-19</td>
+<td class="org-left"><a href="http://corwin.bru.st/">Corwin Brust</a></td>
+<td class="org-left"><a href="http://corwin.bru.st/2024-01-19-emacs-29.2-windows-binaries/">Emacs 29.2 Windows Binaries</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-10</td>
+<td class="org-left"><a href="https://www.bennee.com/~alex/">Alex Bennée</a></td>
+<td class="org-left"><a href="https://www.bennee.com/~alex/blog/2023/12/10/a-systems-programmers-perspectives-on-generative-ai/">A Systems Programmer's Perspectives on Generative AI</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-09</td>
+<td class="org-left"><a href="https://lucidmanager.org/">Peter Prevos</a></td>
+<td class="org-left"><a href="https://lucidmanager.org/productivity/writing-prose-with-emacs/">Writing Prose with Emacs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-05</td>
+<td class="org-left"><a href="https://www.fitzsim.org/blog">Thomas Fitzsimmons</a></td>
+<td class="org-left"><a href="https://www.fitzsim.org/blog/?p=479">Product Idea: CRT-alike OLED driver</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-21</td>
+<td class="org-left"><a href="http://whattheemacsd.com/atom.xml">What the .emacs.d!?</a></td>
+<td class="org-left"><a href="http://whattheemacsd.com/buffers.el-01.html">buffers.el-01</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-16</td>
+<td class="org-left"><a href="https://www.murilopereira.com">Murilo Pereira</a></td>
+<td class="org-left"><a href="https://www.murilopereira.com/i-just-made-my-first-dollar-on-the-internet">I just made my first $1 on the internet!</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-07</td>
+<td class="org-left"><a href="https://www.philnewton.net/blogs">Phil Newton</a></td>
+<td class="org-left"><a href="https://www.philnewton.net/blog/updated-pocket-highlights-bookmarklet/">Updated Pocket highlights bookmarklet</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-06</td>
+<td class="org-left"><a href="http://shapr.github.io">Shae Erisson</a></td>
+<td class="org-left"><a href="http://shapr.github.io/posts/2023-08-07-private-storage-how-to.html">How to use Private Storage on Android</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-18</td>
+<td class="org-left"><a href="https://philjackson.github.io">Phil Jackson</a></td>
+<td class="org-left"><a href="https://philjackson.github.io//babashka/clojure/2023/07/18/using-djblues-portal-for-tap-in-babashka/">Using Djblue's portal for tap in Babashka</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-06-29</td>
+<td class="org-left"><a href="https://en.liujiacai.net/">Jiacai Liu</a></td>
+<td class="org-left"><a href="https://en.liujiacai.net/2023/06/29/embed-git-commit-in-zig/">Embed git commit in Zig programs</a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-21</td>
+<td class="org-left"><a href="https://fritzgrabo.com/posts/">Fritz Grabo</a></td>
+<td class="org-left"><a href="https://fritzgrabo.com/posts/introducing-elfeed-webkit/">Introducing <code>elfeed-webkit</code></a></td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-01</td>
+<td class="org-left"><a href="https://plantarum.ca/">Tyler Smith</a></td>
+<td class="org-left"><a href="https://plantarum.ca/post/">Posts</a></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Making this table was fun. It's nice to see a lot
+of people also writing and learning out loud. This
+reminded me a little of <a href="https://emacsconf.org/2020/talks/19/">EmacsConf - 2020 - talks -
+Sharing blogs (and more) with org-webring</a>. <mark>TODO:</mark>
+Could be fun to have a blogroll page again.
+</p>
+
+<p>
+I notice I tend to like:
+</p>
+
+<ul class="org-ul">
+<li>posts about adapting technology to personal
+interests, more than posts about the industry or
+generalizations</li>
+<li>detailed posts about things I'm currently
+interested in (Emacs, personal knowledge
+management, some Javascript), more than detailed
+tech posts about things I've decided not to get
+into at the moment</li>
+<li>"I" posts more than "You" posts: personal
+reflections rather than didactic advice</li>
+<li>curiosity, fun, experimentation</li>
+</ul>
+
+<p>
+Looking forward to discovering more!
+</p>
+
+<p>
+Related:
+</p>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2025/03/old-school-blogger/#old-school-blogger">Old-school blogger</a></li>
+</ul>
+
+<p>
+<a href="https://social.sachachua.com/@sacha/statuses/01JPRF4YA2Z51EZWD2KM6TRWE6">See discussion on Mastodon</a>
+</p>
+<div><a href="https://sachachua.com/blog/2025/03/reading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01JPRF4YA2Z51EZWD2KM6TRWE6" target="_blank" rel="noopener noreferrer">comment on Mastodon</a>, <a href="https://sachachua.com/blog/2025/03/reading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file/#comment">comment with Disqus (JS required)</a>, or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F03%2Freading-more-blogs-emacs-lisp-listing-blogs-based-on-an-opml-file%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

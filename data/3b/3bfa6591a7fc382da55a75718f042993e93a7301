@@ -1,0 +1,97 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/01/mdfixup-apex-rb.7517.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+<p>My two biggest projects over the last week have been <a href="https://github.com/ttscoff/md-fixup">Markdown Fixup</a> and <a href="https://github.com/ApexMarkdown/apex">Apex</a>. It seemed worthwhile to integrate the two in some useful way.</p>
+
+<blockquote>
+  <p>A quick update on Markdown Fixup: I fixed the regex replacement engine to handle multi-line replacements. This is kind of a big deal if you&rsquo;re trying to convert things like BBCode to Markdown as part of the pipeline.</p>
+</blockquote>
+
+<p>I&rsquo;ve added a new plugin that integrates <code class="language-plaintext highlighter-rouge">md-fixup</code> directly into Apex&rsquo;s processing pipeline. If you haven&rsquo;t been tracking md-fixup, it&rsquo;s an opinionated markdown linter and fixer that can normalize spacing, fix emphasis markers, and apply custom regex replacements to your markdown files. And if you haven&rsquo;t been following Apex, it&rsquo;s my &ldquo;universal markdown processor&rdquo; project that handles all kinds of Markdown extensions in one place.</p>
+
+<h2 id="why-a-plugin">Why a plugin?</h2>
+
+<p>You could always just pipe md-fixup into apex:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>md-fixup file.md | apex <span class="nt">--mode</span> kramdown</code></pre></div></div>
+
+<p>That works fine for simple cases, but if you want to run md-fixup as part of a pipeline with other Apex plugins, the plugin version is the way to go. Plugins run in a deterministic order, and you can enable or disable them as needed without changing your workflow.</p>
+
+<h2 id="when-it-runs">When it runs</h2>
+
+<p>The md-fixup plugin runs in the <code class="language-plaintext highlighter-rouge">pre_parse</code> phase, which means it processes your raw markdown text before Apex parses it. This is important for a couple of reasons:</p>
+
+<ul>
+  <li><strong>Compatibility</strong>: md-fixup can normalize your markdown to ensure it&rsquo;s compatible with Apex&rsquo;s formatting expectations</li>
+  <li><strong>Regex replacements</strong>: Most importantly, if you&rsquo;re using custom regex replacements in your <code class="language-plaintext highlighter-rouge">replacements.yml</code> file, those run before Apex processes the text. This means you can transform markdown syntax itself, not just the final HTML output</li>
+</ul>
+
+<h2 id="installation">Installation</h2>
+
+<p>The plugin is available in the Apex plugin directory. You can see it listed with:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex <span class="nt">--list-plugins</span></code></pre></div></div>
+
+<p>Install it with:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex <span class="nt">--install-plugin</span> md-fixup</code></pre></div></div>
+
+<p>The plugin assumes you already have the <a href="https://github.com/ttscoff/md-fixup?tab=readme-ov-file#installation">md-fixup binary installed</a> and available in your PATH. (And it uses the Rust version, which is what <code class="language-plaintext highlighter-rouge">brew install md-fixup</code> will install.)</p>
+
+<h2 id="configuring-replacements">Configuring replacements</h2>
+
+<p>After installation, the plugin creates a support directory at <code class="language-plaintext highlighter-rouge">~/.config/apex/support/md-fixup/</code> with a template <code class="language-plaintext highlighter-rouge">replacements.yml</code> file. Edit this file to add your custom regex replacements.</p>
+
+<p>The file uses YAML format with a <code class="language-plaintext highlighter-rouge">replacements:</code> array. Each replacement has:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">name</code>: A descriptive name for the replacement</li>
+  <li><code class="language-plaintext highlighter-rouge">pattern</code>: A regex pattern to match</li>
+  <li><code class="language-plaintext highlighter-rouge">replacement</code>: The replacement text (can use regex groups like <code class="language-plaintext highlighter-rouge">$1</code>, <code class="language-plaintext highlighter-rouge">$2</code>)</li>
+  <li><code class="language-plaintext highlighter-rouge">timing</code>: When to apply (<code class="language-plaintext highlighter-rouge">before</code> or <code class="language-plaintext highlighter-rouge">after</code> other processing)</li>
+  <li><code class="language-plaintext highlighter-rouge">in_code_blocks</code>: Whether to apply inside code blocks (<code class="language-plaintext highlighter-rouge">true</code>/<code class="language-plaintext highlighter-rouge">false</code>)</li>
+  <li><code class="language-plaintext highlighter-rouge">in_frontmatter</code>: Whether to apply in frontmatter (<code class="language-plaintext highlighter-rouge">true</code>/<code class="language-plaintext highlighter-rouge">false</code>)</li>
+</ul>
+
+<p>Here&rsquo;s an example:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">replacements</span><span class="pi">:</span>
+  <span class="pi">-</span> <span class="na">name</span><span class="pi">:</span> <span class="s2">"</span><span class="s">normalize-http"</span>
+    <span class="na">pattern</span><span class="pi">:</span> <span class="s2">"</span><span class="s">http://"</span>
+    <span class="na">replacement</span><span class="pi">:</span> <span class="s2">"</span><span class="s">https://"</span>
+    <span class="na">timing</span><span class="pi">:</span> <span class="s">after</span>
+    <span class="na">in_code_blocks</span><span class="pi">:</span> <span class="no">false</span>
+    <span class="na">in_frontmatter</span><span class="pi">:</span> <span class="no">false</span>
+
+  <span class="pi">-</span> <span class="na">name</span><span class="pi">:</span> <span class="s2">"</span><span class="s">fix-double-spaces"</span>
+    <span class="na">pattern</span><span class="pi">:</span> <span class="s2">"</span><span class="nv">  </span><span class="s">+"</span>
+    <span class="na">replacement</span><span class="pi">:</span> <span class="s2">"</span><span class="nv"> </span><span class="s">"</span>
+    <span class="na">timing</span><span class="pi">:</span> <span class="s">after</span>
+    <span class="na">in_code_blocks</span><span class="pi">:</span> <span class="no">false</span>
+    <span class="na">in_frontmatter</span><span class="pi">:</span> <span class="no">false</span></code></pre></div></div>
+
+<h2 id="running-with-plugins">Running with plugins</h2>
+
+<p>To use the plugins on a file, you can enable it globally, or run them for a specific conversion:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex <span class="nt">--plugins</span> file.md</code></pre></div></div>
+
+<p>The plugin runs automatically if you&rsquo;ve enabled plugins globally.</p>
+
+<p>The plugin is hosted at <a href="https://github.com/ApexMarkdown/apex-plugin-md-fixup">https://github.com/ApexMarkdown/apex-plugin-md-fixup</a> if you want to check out the code or contribute improvements.</p>
+
+<p>And if you haven&rsquo;t, <a href="https://github.com/ApexMarkdown/apex">check out Apex</a>.</p>
+
+<p>Quick side note: it&rsquo;s been pointed out that md-fixup makes a great
+Marked preprocessor. Marked 3 adds enough search and replace
+capabilities that it might not be necessary, but for Marked 2, or if you
+prefer to edit all your replacements in a dedicated YAML file, you can
+just set <code class="language-plaintext highlighter-rouge">md-fixup</code> as your Custom Proprocessor.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115923183050762555">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Markdown+Fixup+plugin+for+Apex%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F19%2Fmarkdown-fixup-plugin-for-apex%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F19%2Fmarkdown-fixup-plugin-for-apex%2F&text=Markdown+Fixup+plugin+for+Apex&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F19%2Fmarkdown-fixup-plugin-for-apex%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17256661.gif" height="1" width="1"/>

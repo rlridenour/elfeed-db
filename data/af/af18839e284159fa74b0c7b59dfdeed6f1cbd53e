@@ -1,0 +1,96 @@
+<p>For a while I have used <a href="https://github.com/gitwatch/gitwatch">gitwatch</a> to autocommit my Orgmode and Denote files to my private repo but I always manually started gitwatch which means I often forget to start it. I tried to setup a launch agent for it but that fails because of <a href="https://github.com/gitwatch/gitwatch/issues/115">issues with fswatch</a> spawning multiple gitwatch processes which inevitably causes git lock issues. What I ended up doing is using <a href="https://github.com/casey/just">just</a> and fswatch from a launch agent, bypassing gitwatch.</p>
+<h2>Setup Just and fswatch on macOS</h2>
+<p>If you want to automatically commit and push changes to a git repository whenever files change (great for any text-based workflow), here&#39;s a simple setup using Just and fswatch instead of gitwatch.</p>
+<h3>Prerequisites</h3>
+<pre><code class="language-bash">brew install fswatch just
+</code></pre>
+<h3>Step 1: Add a Just Recipe</h3>
+<p>Add this recipe to your <code>justfile</code>:</p>
+<pre><code class="language-just"># Auto-commit and push files on change
+watch-org:
+    #!/bin/bash
+    cd /path/to/your/repo
+    /opt/homebrew/bin/fswatch -0 --recursive \
+        --exclude &#39;\.git/&#39; \
+        --exclude &#39;\.swp$&#39; \
+        --exclude &#39;~$&#39; \
+        . | while read -d &quot;&quot; event; do
+        git add -A
+        if ! git diff-index --quiet HEAD 2&gt;/dev/null; then
+            git commit -m &quot;Auto-commit: $(date &#39;+%Y-%m-%d %H:%M:%S&#39;)&quot;
+            git push origin main
+        fi
+    done
+</code></pre>
+<p><strong>Important:</strong> Use the full path to <code>fswatch</code> (<code>/opt/homebrew/bin/fswatch</code>) - launchd services don&#39;t have your shell&#39;s PATH.</p>
+<p>Test it manually first:</p>
+<pre><code class="language-bash">just watch-org
+</code></pre>
+<p>Make a change to a file, and you should see it auto-commit. Press <code>Ctrl+C</code> to stop.</p>
+<h3>Step 2: Create a Launch Agent</h3>
+<p>Create <code>~/Library/LaunchAgents/com.autocommit.org.plist</code>:</p>
+<pre><code class="language-xml">&lt;?xml version=&quot;1.0&quot; encoding=&quot;UTF-8&quot;?&gt;
+&lt;!DOCTYPE plist PUBLIC &quot;-//Apple//DTD PLIST 1.0//EN&quot; &quot;http://www.apple.com/DTDs/PropertyList-1.0.dtd&quot;&gt;
+&lt;plist version=&quot;1.0&quot;&gt;
+&lt;dict&gt;
+    &lt;key&gt;Label&lt;/key&gt;
+    &lt;string&gt;com.autocommit.org&lt;/string&gt;
+    
+    &lt;key&gt;ProgramArguments&lt;/key&gt;
+    &lt;array&gt;
+        &lt;string&gt;/opt/homebrew/bin/just&lt;/string&gt;
+        &lt;string&gt;--justfile&lt;/string&gt;
+        &lt;string&gt;/path/to/your/justfile&lt;/string&gt;
+        &lt;string&gt;watch-org&lt;/string&gt;
+    &lt;/array&gt;
+    
+    &lt;key&gt;RunAtLoad&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;key&gt;KeepAlive&lt;/key&gt;
+    &lt;true/&gt;
+    
+    &lt;key&gt;StandardOutPath&lt;/key&gt;
+    &lt;string&gt;/tmp/autocommit.log&lt;/string&gt;
+    
+    &lt;key&gt;StandardErrorPath&lt;/key&gt;
+    &lt;string&gt;/tmp/autocommit.err&lt;/string&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+</code></pre>
+<p>Update the paths:</p>
+<ul>
+<li>Path to <code>just</code> (find with <code>which just</code>)</li>
+<li>Path to your <code>justfile</code></li>
+<li>Recipe name (<code>watch-org</code> or whatever you called it)</li>
+</ul>
+<h3>Step 3: Load the Service</h3>
+<pre><code class="language-bash"># Load the service
+launchctl load ~/Library/LaunchAgents/com.autocommit.org.plist
+
+# Verify it&#39;s running
+launchctl list | grep autocommit
+ps aux | grep fswatch | grep -v grep
+</code></pre>
+<p>Make a change to a file in your repo and check:</p>
+<pre><code class="language-bash">git log -1
+</code></pre>
+<p>You should see your auto-commit!</p>
+<h3>Managing the Service</h3>
+<pre><code class="language-bash"># Stop
+launchctl unload ~/Library/LaunchAgents/com.autocommit.org.plist
+
+# Start
+launchctl load ~/Library/LaunchAgents/com.autocommit.org.plist
+
+# Check logs
+tail -f /tmp/autocommit.err
+</code></pre>
+<h3>Why This Beats gitwatch</h3>
+<ul>
+<li><strong>No multiple process spawning issues</strong> - fswatch is lightweight and stable</li>
+<li><strong>No regex exclusion bugs</strong> - fswatch handles <code>.git/</code> exclusions properly on macOS</li>
+<li><strong>Easy to customize</strong> - your logic lives in a simple justfile recipe</li>
+<li><strong>One process</strong> - clean and efficient</li>
+</ul>
+<p>The service will automatically start on boot and keep your repo in sync!</p>

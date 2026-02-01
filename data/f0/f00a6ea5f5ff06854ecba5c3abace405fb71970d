@@ -1,0 +1,57 @@
+<p>Cloning git repositories is a pretty common task. For me, it typically goes something like:</p>
+<ul>
+<li>Copy git repo URL from browser.</li>
+<li>Drop to Emacs eshell.</li>
+<li>Change current directory.</li>
+<li>Type &quot;git clone &quot;.</li>
+<li>Paste git repo URL.</li>
+<li>Run git command.</li>
+<li>Change directory to cloned repo.</li>
+<li>Open dired.</li>
+</ul>
+<p>No biggie, but why go through the same steps every time? We can do better. We have a hyper malleable editor, so let's get it to grab the URL from clipboard and do its thing.</p>
+<p><em>shell-command</em> or <em>async-shell-command</em> can help in this space, but require additional work: change location, re-type command, what if directory already exists… This is Emacs, so we can craft the exact experience we want. I did take inspiration from <em>shell-command</em> to display the process buffer correctly (git progress, control codes, etc.) and landed on the following experience:</p>
+<p><img src="https://xenodium.github.io/images/emacs-clone-git-repo-from-clipboard/git_clone_dired.gif" alt=""></p>
+<pre><code class="language-{.commonlisp">;; -*- lexical-binding: t -*-
+
+(defun ar/git-clone-clipboard-url ()
+  &quot;Clone git URL in clipboard asynchronously and open in dired when finished.&quot;
+  (interactive)
+  (cl-assert (string-match-p &quot;^\\(http\\|https\\|ssh\\)://&quot; (current-kill 0)) nil &quot;No URL in clipboard&quot;)
+  (let* ((url (current-kill 0))
+         (download-dir (expand-file-name &quot;~/Downloads/&quot;))
+         (project-dir (concat (file-name-as-directory download-dir)
+                              (file-name-base url)))
+         (default-directory download-dir)
+         (command (format &quot;git clone %s&quot; url))
+         (buffer (generate-new-buffer (format &quot;*%s*&quot; command)))
+         (proc))
+    (when (file-exists-p project-dir)
+      (if (y-or-n-p (format &quot;%s exists. delete?&quot; (file-name-base url)))
+          (delete-directory project-dir t)
+        (user-error &quot;Bailed&quot;)))
+    (switch-to-buffer buffer)
+    (setq proc (start-process-shell-command (nth 0 (split-string command)) buffer command))
+    (with-current-buffer buffer
+      (setq default-directory download-dir)
+      (shell-command-save-pos-or-erase)
+      (require 'shell)
+      (shell-mode)
+      (view-mode +1))
+    (set-process-sentinel proc (lambda (process state)
+                                 (let ((output (with-current-buffer (process-buffer process)
+                                                 (buffer-string))))
+                                   (kill-buffer (process-buffer process))
+                                   (if (= (process-exit-status process) 0)
+                                       (progn
+                                         (message &quot;finished: %s&quot; command)
+                                         (dired project-dir))
+                                     (user-error (format &quot;%s\n%s&quot; command output))))))
+    (set-process-filter proc #'comint-output-filter)))
+</code></pre>
+<p>Comment on <a href="https://www.reddit.com/r/emacs/comments/k3iter/simplequick_git_repo_clone_from_browser_to_emacs/">reddit</a> or <a href="https://twitter.com/xenodium/status/1333111043791458309">twitter</a>.</p>
+<h2>Updates</h2>
+<ul>
+<li>Added lexical binding.</li>
+<li>Checks clipboard for ssh urls also.</li>
+</ul>

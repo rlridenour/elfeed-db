@@ -1,0 +1,59 @@
+<p>For one of our project we decided to use TeamCity on our Mac Mini (which is under table in the same room where we are).</p>
+<p>It was interesting experience with some pitfalls and I would like to share how we did it.
+Want to mention that installation of TeamCity is not subject of this article and I’m sure you can find a lot of posts about it in the internet.</p>
+<p>One more important thing. TeamCity on our MacMini was installed to <strong>/Library/TeamCity</strong> folder.
+Docker machine shares only home directory (/Users) but some of our docker containers requires <strong>/Library/TeamCity/hash/our project name/src</strong> directory to be shared.</p>
+<h1>How does our project directory structure look</h1>
+<br/>
+<p>Project structure</p>
+<pre tabindex="0"><code>├── docker
+│ ├── application
+├── scripts
+└── src
+ ├── app
+ ├── bootstrap
+ ├── config
+ ├── database
+ ├── public
+ ├── resources
+ ├── storage
+ ├── tests
+ └── vendor
+</code></pre><br/>
+Our `docker-compose.yml` looks similarly to this:
+<pre tabindex="0"><code>application:
+ build: ./application
+ volumes:
+ - ../src:/var/www/application
+</code></pre><br/>
+<p>So, because our TeamCity loads the project inside <strong>/Library/TeamCity</strong> folder which is not shared between host and docker-machine we have the issue. From docker container&rsquo;s standpoint the folder looks empty.</p>
+<h1>What to do.</h1>
+<br/>
+<ul>
+<li>Open VirtualBox Manager.</li>
+<li>Choose your docker-machine (default - in my case)</li>
+<li>Press Settings.</li>
+<li>Go to Shared Folders tab and press Add new shared folder (folder with + icon at the right hand side)</li>
+</ul>
+<p><a target="_blank" href="https://codelearn.me/assets/img/vbox_manager_gui.png"><img alt="vbox manager gui" src="https://codelearn.me/assets/img/vbox_manager_gui.png" width="600px"/></a></p>
+<p>Add <strong>Library</strong> folder to the folders list.</p>
+<p>That’s not enough. All these steps are only shares the folder to the VM but it is not mounted yet.</p>
+<p>Login inside docker-machine via ssh (<strong>docker-machine ssh</strong>) and mount /Library folder like that:</p>
+<pre tabindex="0"><code>mkdir /Library &amp;&amp; mount -t vboxsf Library /Library
+</code></pre><br/>
+And…. DONE!
+Congratulations! Oh yeah, after docker-machine restart everything will gone…
+<a target="_blank" href="https://codelearn.me/assets/img/thanks_satan.gif"><img alt="thanks satan" src="https://codelearn.me/assets/img/thanks_satan.gif" width="600px"/></a>
+<p>Since docker-machine is heir of boot2docker we can use special boot2docker feature that allow us to run the script right after machine is started.</p>
+<ul>
+<li>Login inside of docker-machine (docker-machine ssh)</li>
+<li>go to - /var/lib/boot2docker/</li>
+<li>create bootlocal.sh file</li>
+<li>open it and enter the next few lines</li>
+</ul>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e">#!/bin/sh
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"></span>
+</span></span><span style="display:flex;"><span>mkdir /Library
+</span></span><span style="display:flex;"><span>mount -t vboxsf Library /Library
+</span></span></code></pre></div><br/>
+That’s it. Now you can stop/start your docker-machine and after it will be started it execute bootlocal.sh file and this file will create /Library folder and mount host’s /Library folder to the guest /Library one.

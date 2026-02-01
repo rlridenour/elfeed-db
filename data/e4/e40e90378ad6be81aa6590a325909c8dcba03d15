@@ -1,0 +1,1608 @@
+<h2 id="contents">Contents</h2>
+
+<ul>
+  <li><a href="https://nmunro.github.io/2024/12/29/ningle-1.html">Part 1 (Hello World)</a></li>
+  <li><a href="https://nmunro.github.io/2024/12/30/ningle-2.html">Part 2 (Basic Templates)</a></li>
+  <li><a href="https://nmunro.github.io/2025/01/30/ningle-3.html">Part 3 (Introduction to middleware and Static File management)</a></li>
+  <li><a href="https://nmunro.github.io/2025/02/28/ningle-4.html">Part 4 (Forms)</a></li>
+  <li><a href="https://nmunro.github.io/2025/03/31/ningle-5.html">Part 5 (Environmental Variables)</a></li>
+  <li><a href="https://nmunro.github.io/2025/04/30/ningle-6.html">Part 6 (Database Connections)</a></li>
+  <li><a href="https://nmunro.github.io/2025/05/31/ningle-7.html">Part 7 (Envy Configuation Switching)</a></li>
+  <li><a href="https://nmunro.github.io/2025/06/29/ningle-8.html">Part 8 (Mounting Middleware)</a></li>
+  <li><a href="https://nmunro.github.io/2025/07/31/ningle-9.html">Part 9 (Authentication System)</a></li>
+  <li><a href="https://nmunro.github.io/2025/08/28/ningle-10.html">Part 10 (Email)</a></li>
+  <li><a href="https://nmunro.github.io/2025/09/30/ningle-11.html">Part 11 (Posting Tweets &amp; Advanced Database Queries)</a></li>
+  <li><a href="https://nmunro.github.io/2025/10/29/ningle-12.html">Part 12 (Clean Up &amp; Bug Fix)</a></li>
+  <li>Part 13 (Adding Comments)</li>
+</ul>
+
+<h2 id="introduction">Introduction</h2>
+
+<p>Hello and welcome back, I hope you are well! In this tutorial we will be exploring how to work with comments, I originally didn't think I would add too many Twitter like features, but I realised that having a self-referential model would actually be a useful lesson. In addition to demonstrating how to achieve this, we can look at how to complete a migration successfully.</p>
+
+<p>This will involve us adjusting our models, adding a form (and respective validator), improving and expanding our controllers, adding the appropriate controller to our app and tweak our templates to accomodate the changes.</p>
+
+<p>Note: There is also an improvement to be made in our models code, <code class="language-plaintext highlighter-rouge">mito</code> provides a convenience method to get the <code class="language-plaintext highlighter-rouge">id</code>, <code class="language-plaintext highlighter-rouge">created-at</code>, and <code class="language-plaintext highlighter-rouge">updated-at</code> slots. We will integrate it as we alter our models.</p>
+
+<h3 id="srcmodelslisp">src/models.lisp</h3>
+
+<p>When it comes to changes to the <code class="language-plaintext highlighter-rouge">post</code> model it is <em>very</em> important that the <code class="language-plaintext highlighter-rouge">:col-type</code> is set to <code class="language-plaintext highlighter-rouge">(or :post :null)</code> and that <code class="language-plaintext highlighter-rouge">:initform nil</code> is also set. This is because when you run the migrations, existing rows will not have data for the <code class="language-plaintext highlighter-rouge">parent</code> column and so in the process of migration we have to provide a default. It should be possible to use <code class="language-plaintext highlighter-rouge">(or :post :integer)</code> and set <code class="language-plaintext highlighter-rouge">:initform 0</code> if you so wished, but I chose to use <code class="language-plaintext highlighter-rouge">:null</code> and <code class="language-plaintext highlighter-rouge">nil</code> as my migration pattern.</p>
+
+<p>This also ensures that new posts default to having no parent, which is the right design choice here.</p>
+
+<h4 id="package-and-post-model">Package and Post model</h4>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defpackage</span> ningle-tutorial-project/models
+  (:use :cl :mito :sxql)
+  (:import-from :ningle-auth/models #:user)
+  (:export #:post
+           #:id
+           #:content
+<span class="gi">+          #:comments
+</span>           #:likes
+           #:user
+           #:liked-post-p
+<span class="gd">-          #:logged-in-posts
+-          #:not-logged-in-posts
+</span><span class="gi">+          #:posts
++          #:parent
+</span>           #:toggle-like))
+
+(in-package ningle-tutorial-project/models)
+
+(deftable post ()
+  ((user    :col-type ningle-auth/models:user :initarg :user    :accessor user)
+<span class="gi">+  (parent  :col-type (or :post :null)        :initarg :parent  :reader parent :initform nil)
+</span>   (content :col-type (:varchar 140)          :initarg :content :accessor content)))
+</code></pre></div></div>
+
+<h4 id="comments">Comments</h4>
+
+<p>Comments are really a specialist type of post that happens to have a non-nil parent value, we will take what we previously learned from working with post objects and extend it. In reality the only real difference is <code class="language-plaintext highlighter-rouge">(sxql:where (:= parent :?))</code>, perhaps I shall see if this could support conditionals inside it, but that's another experiment for another day.</p>
+
+<p>I want to briefly remind you of what the <code class="language-plaintext highlighter-rouge">:?</code> does, as security is important!</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">:?</code> is a placeholder, it is a way to ensure that values are not placed in the SQL without being escaped, this prevents <a href="https://en.wikipedia.org/wiki/SQL_injection">SQL Injection</a> attacks, the <code class="language-plaintext highlighter-rouge">retrieve-by-sql</code> takes a key argument <code class="language-plaintext highlighter-rouge">:binds</code> which takes a list of values that will be interpolated into the right parts of the SQL query with the correct quoting.</p>
+
+<p>We used this previously, but I want to remind you to not just inject values into a SQL query without quoting them.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defmethod</span> likes ((post post))
+  (mito:count-dao 'likes :post post))
+
++(defgeneric comments (post user)
+<span class="gi">+ (:documentation "Gets the comments for a logged in user"))
++
++(defmethod comments ((post post) (user user))
++    (mito:retrieve-by-sql
++        (sxql:yield
++            (sxql:select
++                (:post.*
++                    (:as :user.username :username)
++                    (:as (:count :likes.id) :like_count)
++                    (:as (:count :user_likes.id) :liked_by_user))
++                (sxql:from :post)
++                (sxql:where (:= :parent :?))
++                (sxql:left-join :user :on (:= :post.user_id :user.id))
++                (sxql:left-join :likes :on (:= :post.id :likes.post_id))
++                (sxql:left-join (:as :likes :user_likes)
++                                :on (:and (:= :post.id :user_likes.post_id)
++                                          (:= :user_likes.user_id :?)))
++                (sxql:group-by :post.id)
++                (sxql:order-by (:desc :post.created_at))
++                (sxql:limit 50)))
++            :binds (list (mito:object-id post) (mito:object-id user))))
++
++(defmethod comments ((post post) (user null))
++    (mito:retrieve-by-sql
++       (sxql:yield
++       (sxql:select
++           (:post.*
++             (:as :user.username :username)
++             (:as (:count :likes.id) :like_count))
++           (sxql:from :post)
++           (sxql:where (:= :parent :?))
++           (sxql:left-join :user :on (:= :post.user_id :user.id))
++           (sxql:left-join :likes :on (:= :post.id :likes.post_id))
++           (sxql:group-by :post.id)
++           (sxql:order-by (:desc :post.created_at))
++           (sxql:limit 50)))
++       :binds (list (mito:object-id post))))
+</span></code></pre></div></div>
+
+<h4 id="posts-refactor">Posts refactor</h4>
+
+<p>I had not originally planned on this, but as I was writing the comments code it became clear that I was creating lots of duplication, and maybe I still am, but I hit upon a way to simplify the model interface, at least. Ideally it makes no difference if a user is logged in or not at the point the route is hit, the api should be to give the user object (whatever that might be, because it may be nil) and let a specialised method figure out what to do there. So in addition to adding comments (which is what prompted this change) we will also slightly refactor the posts <code class="language-plaintext highlighter-rouge">logged-in-posts</code> and <code class="language-plaintext highlighter-rouge">not-logged-in-posts</code> into a single, unified <code class="language-plaintext highlighter-rouge">posts</code> method cos it's silly of me to have split them like that.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defmethod</span> liked-post-p ((ningle-auth/models:user user) (post post))
+  (mito:find-dao 'likes :user user :post post))
+
+-(defgeneric logged-in-posts (user)
+<span class="gd">-  (:documentation "Gets the posts for a logged in user"))
+</span><span class="gi">+(defgeneric posts (user)
++  (:documentation "Gets the posts"))
++
+</span><span class="gd">-(defmethod logged-in-posts ((user user))
+-  (let ((uuid (slot-value user 'mito.dao.mixin::id)))
+</span><span class="gi">+(defmethod posts ((user user))
++   (mito:retrieve-by-sql
++        (sxql:yield
++            (sxql:select
++                (:post.*
++                  (:as :user.username :username)
++                  (:as (:count :likes.id) :like_count)
++                  (:as (:count :user_likes.id) :liked_by_user))
++                (sxql:from :post)
++                (sxql:left-join :user :on (:= :post.user_id :user.id))
++                (sxql:left-join :likes :on (:= :post.id :likes.post_id))
++                (sxql:left-join (:as :likes :user_likes)
++                                :on (:and (:= :post.id :user_likes.post_id)
++                                          (:= :user_likes.user_id :?)))
++                (sxql:group-by :post.id)
++                (sxql:order-by (:desc :post.created_at))
++                (sxql:limit 50)))
++            :binds (list (mito:object-id user))))
++
+</span><span class="gd">-(defun not-logged-in-posts ()
+</span><span class="gi">+(defmethod posts ((user null))
++    (mito:retrieve-by-sql
++        (sxql:yield
++        (sxql:select
++            (:post.*
++              (:as :user.username :username)
++              (:as (:count :likes.id) :like_count))
++            (sxql:from :post)
++            (sxql:left-join :user :on (:= :post.user_id :user.id))
++            (sxql:left-join :likes :on (:= :post.id :likes.post_id))
++            (sxql:group-by :post.id)
++            (sxql:order-by (:desc :post.created_at))
++            (sxql:limit 50)))))
+</span></code></pre></div></div>
+
+<p>There is also another <em>small</em> fix in this code, turns out there's a set of convenience methods that mito provides:</p>
+
+<ul>
+  <li>(mito:object-at ...)</li>
+  <li>(mito:created-at ...)</li>
+  <li>(mito:updated-at ...)</li>
+</ul>
+
+<p>Previously we used <code class="language-plaintext highlighter-rouge">mito.dao.mixin::id</code> (and could have done the same for create-at, and updated-at), in combination with <code class="language-plaintext highlighter-rouge">slot-value</code>, which means <code class="language-plaintext highlighter-rouge">(slot-value user 'mito.dao.mixin::id')</code> simply becomes <code class="language-plaintext highlighter-rouge">(mito:object-id user)</code>, which is <em>much</em> nicer!</p>
+
+<h4 id="full-listing">Full Listing</h4>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/models</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:mito</span> <span class="ss">:sxql</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:import-from</span> <span class="ss">:ningle-auth/models</span> <span class="ss">#:user</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:post</span>
+           <span class="ss">#:id</span>
+           <span class="ss">#:content</span>
+           <span class="ss">#:comments</span>
+           <span class="ss">#:likes</span>
+           <span class="ss">#:user</span>
+           <span class="ss">#:liked-post-p</span>
+           <span class="ss">#:posts</span>
+           <span class="ss">#:parent</span>
+           <span class="ss">#:toggle-like</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/models</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">deftable</span> <span class="nv">post</span> <span class="p">()</span>
+  <span class="p">((</span><span class="nv">user</span>    <span class="ss">:col-type</span> <span class="nv">ningle-auth/models:user</span> <span class="ss">:initarg</span> <span class="ss">:user</span>    <span class="ss">:accessor</span> <span class="nv">user</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">parent</span>  <span class="ss">:col-type</span> <span class="p">(</span><span class="nb">or</span> <span class="ss">:post</span> <span class="ss">:null</span><span class="p">)</span>        <span class="ss">:initarg</span> <span class="ss">:parent</span>  <span class="ss">:reader</span> <span class="nv">parent</span> <span class="ss">:initform</span> <span class="no">nil</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">content</span> <span class="ss">:col-type</span> <span class="p">(</span><span class="ss">:varchar</span> <span class="mi">140</span><span class="p">)</span>          <span class="ss">:initarg</span> <span class="ss">:content</span> <span class="ss">:accessor</span> <span class="nv">content</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">deftable</span> <span class="nv">likes</span> <span class="p">()</span>
+  <span class="p">((</span><span class="nv">user</span> <span class="ss">:col-type</span> <span class="nv">ningle-auth/models:user</span> <span class="ss">:initarg</span> <span class="ss">:user</span> <span class="ss">:reader</span> <span class="nv">user</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">post</span> <span class="ss">:col-type</span> <span class="nv">post</span>                    <span class="ss">:initarg</span> <span class="ss">:post</span> <span class="ss">:reader</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="ss">:unique-keys</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">likes</span> <span class="p">(</span><span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Returns the number of likes a post has"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">likes</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">mito:count-dao</span> <span class="ss">'likes</span> <span class="ss">:post</span> <span class="nv">post</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">comments</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">user</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Gets the comments for a logged in user"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">comments</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">user</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+            <span class="p">(</span><span class="nv">sxql:select</span>
+                <span class="p">(</span><span class="ss">:post.*</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:user_likes.id</span><span class="p">)</span> <span class="ss">:liked_by_user</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:where</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:parent</span> <span class="ss">:?</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="p">(</span><span class="ss">:as</span> <span class="ss">:likes</span> <span class="ss">:user_likes</span><span class="p">)</span>
+                                <span class="ss">:on</span> <span class="p">(</span><span class="ss">:and</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:user_likes.post_id</span><span class="p">)</span>
+                                          <span class="p">(</span><span class="ss">:=</span> <span class="ss">:user_likes.user_id</span> <span class="ss">:?</span><span class="p">)))</span>
+                <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))</span>
+            <span class="ss">:binds</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">user</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">comments</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">user</span> <span class="nb">null</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+        <span class="p">(</span><span class="nv">sxql:select</span>
+            <span class="p">(</span><span class="ss">:post.*</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:where</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:parent</span> <span class="ss">:?</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))</span>
+        <span class="ss">:binds</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">toggle-like</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Toggles the like of a user to a given post"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">toggle-like</span> <span class="p">((</span><span class="nv">ningle-auth/models:user</span> <span class="nv">user</span><span class="p">)</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">liked-post</span> <span class="p">(</span><span class="nv">liked-post-p</span> <span class="nv">user</span> <span class="nv">post</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">if</span> <span class="nv">liked-post</span>
+        <span class="p">(</span><span class="nv">mito:delete-dao</span> <span class="nv">liked-post</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'likes</span> <span class="ss">:post</span> <span class="nv">post</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">not</span> <span class="nv">liked-post</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">liked-post-p</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Returns true if a user likes a given post"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">liked-post-p</span> <span class="p">((</span><span class="nv">ningle-auth/models:user</span> <span class="nv">user</span><span class="p">)</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'likes</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:post</span> <span class="nv">post</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">posts</span> <span class="p">(</span><span class="nv">user</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Gets the posts"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nv">user</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+            <span class="p">(</span><span class="nv">sxql:select</span>
+                <span class="p">(</span><span class="ss">:post.*</span>
+                  <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+                  <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">)</span>
+                  <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:user_likes.id</span><span class="p">)</span> <span class="ss">:liked_by_user</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="p">(</span><span class="ss">:as</span> <span class="ss">:likes</span> <span class="ss">:user_likes</span><span class="p">)</span>
+                                <span class="ss">:on</span> <span class="p">(</span><span class="ss">:and</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:user_likes.post_id</span><span class="p">)</span>
+                                          <span class="p">(</span><span class="ss">:=</span> <span class="ss">:user_likes.user_id</span> <span class="ss">:?</span><span class="p">)))</span>
+                <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))</span>
+            <span class="ss">:binds</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">user</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nb">null</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+        <span class="p">(</span><span class="nv">sxql:select</span>
+            <span class="p">(</span><span class="ss">:post.*</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<h3 id="srcformslisp">src/forms.lisp</h3>
+
+<p>All we have to do here is define our <code class="language-plaintext highlighter-rouge">form</code> and <code class="language-plaintext highlighter-rouge">validators</code> and ensure they are exported, not really a lot of work!</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defpackage</span> ningle-tutorial-project/forms
+  (:use :cl :cl-forms)
+  (:export #:post
+           #:content
+<span class="gd">-          #:submit))
+</span><span class="gi">+          #:submit
++          #:comment
++          #:parent))
+</span>
+(in-package ningle-tutorial-project/forms)
+
+(defparameter *post-validator* (list (clavier:not-blank)
+                                     (clavier:is-a-string)
+                                     (clavier:len :max 140)))
+
++(defparameter *post-parent-validator* (list (clavier:not-blank)
+<span class="gi">+                                            (clavier:fn (lambda (x) (&gt; (parse-integer x) 0)) "Checks positive integer")))
+</span>
+(defform post (:id "post" :csrf-protection t :csrf-field-name "csrftoken" :action "/post")
+  ((content  :string   :value "" :constraints *post-validator*)
+   (submit   :submit   :label "Post")))
+
++(defform comment (:id "post" :csrf-protection t :csrf-field-name "csrftoken" :action "/post/comment")
+<span class="gi">+  ((content  :string   :value "" :constraints *post-validator*)
++   (parent   :hidden   :value 0  :constraints *post-parent-validator*)
++   (submit   :submit   :label "Post")))
+</span></code></pre></div></div>
+
+<p>In our <code class="language-plaintext highlighter-rouge">*post-parent-validator*</code> we validate that the content of the parent field is not blank (as it is a comment and needs a reference to a parent) and we used a custom validator using <code class="language-plaintext highlighter-rouge">clavier:fn</code> and passing a lambda to verify the item is a positive integer.</p>
+
+<p>We then create our <code class="language-plaintext highlighter-rouge">comment</code> form, which is very similar to our existing <code class="language-plaintext highlighter-rouge">post</code> form, with the difference of pointing to a different http endpoint <code class="language-plaintext highlighter-rouge">/post/comment</code> rather than just <code class="language-plaintext highlighter-rouge">/post</code>, and we have a hidden <code class="language-plaintext highlighter-rouge">parent</code> slot, which we set to <code class="language-plaintext highlighter-rouge">0</code> by default, so by default the form will be invalid, but that's ok, because we can't possibly know what the parent id would be until the form is rendered and we can set the parent id value at the point we render the form, so it really is nothing to worry about.</p>
+
+<h4 id="full-listing-1">Full Listing</h4>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/forms</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:cl-forms</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:post</span>
+           <span class="ss">#:content</span>
+           <span class="ss">#:submit</span>
+           <span class="ss">#:comment</span>
+           <span class="ss">#:parent</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/forms</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defparameter</span> <span class="vg">*post-validator*</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">clavier:not-blank</span><span class="p">)</span>
+                                     <span class="p">(</span><span class="nv">clavier:is-a-string</span><span class="p">)</span>
+                                     <span class="p">(</span><span class="nv">clavier:len</span> <span class="ss">:max</span> <span class="mi">140</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defparameter</span> <span class="vg">*post-parent-validator*</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">clavier:not-blank</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="nv">clavier:fn</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="nv">x</span><span class="p">)</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="nv">x</span><span class="p">)</span> <span class="mi">0</span><span class="p">))</span> <span class="s">"Checks positive integer"</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">defform</span> <span class="nv">post</span> <span class="p">(</span><span class="ss">:id</span> <span class="s">"post"</span> <span class="ss">:csrf-protection</span> <span class="no">t</span> <span class="ss">:csrf-field-name</span> <span class="s">"csrftoken"</span> <span class="ss">:action</span> <span class="s">"/post"</span><span class="p">)</span>
+  <span class="p">((</span><span class="nv">content</span>  <span class="ss">:string</span>   <span class="ss">:value</span> <span class="s">""</span> <span class="ss">:constraints</span> <span class="vg">*post-validator*</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">submit</span>   <span class="ss">:submit</span>   <span class="ss">:label</span> <span class="s">"Post"</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">defform</span> <span class="nv">comment</span> <span class="p">(</span><span class="ss">:id</span> <span class="s">"post"</span> <span class="ss">:csrf-protection</span> <span class="no">t</span> <span class="ss">:csrf-field-name</span> <span class="s">"csrftoken"</span> <span class="ss">:action</span> <span class="s">"/post/comment"</span><span class="p">)</span>
+  <span class="p">((</span><span class="nv">content</span>  <span class="ss">:string</span>   <span class="ss">:value</span> <span class="s">""</span> <span class="ss">:constraints</span> <span class="vg">*post-validator*</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">parent</span>   <span class="ss">:hidden</span>   <span class="ss">:value</span> <span class="mi">0</span>  <span class="ss">:constraints</span> <span class="vg">*post-parent-validator*</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">submit</span>   <span class="ss">:submit</span>   <span class="ss">:label</span> <span class="s">"Post"</span><span class="p">)))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<h3 id="srccontrollerslisp">src/controllers.lisp</h3>
+
+<p>Having simplified the models, we can also simplify the controllers!</p>
+
+<p>Let's start by setting up our package information:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defpackage</span> ningle-tutorial-project/controllers
+<span class="gd">- (:use :cl :sxql :ningle-tutorial-project/forms)
+</span><span class="gi">+ (:use :cl :sxql)
++ (:import-from :ningle-tutorial-project/forms
++               #:post
++               #:content
++               #:parent
++               #:comment)
+</span><span class="gd">- (:export #:logged-in-index
+-          #:index
+</span><span class="gi">+ (:export #:index
+</span>           #:post-likes
+           #:single-post
+           #:post-content
+<span class="gi">+          #:post-comment
+</span>           #:logged-in-profile
+           #:unauthorized-profile
+           #:people
+           #:person))
+
+(in-package ningle-tutorial-project/controllers)
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">index</code> and <code class="language-plaintext highlighter-rouge">logged-in-index</code> can now be consolidated:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">-(defun logged-in-index (params)
+</span><span class="gi">+(defun index (params)
+</span><span class="err">(let*</span> ((user (gethash :user ningle:*session*))
+<span class="gd">-     (form (cl-forms:find-form 'post))
+-     (posts (ningle-tutorial-project/models:logged-in-posts user)))
+-  (djula:render-template* "main/index.html" nil :title "Home" :user user :posts posts :form form)))
+-
+-
+-(defun index (params))
+-(let ((posts (ningle-tutorial-project/models:not-logged-in-posts)))
+-  (djula:render-template* "main/index.html" nil :title "Home" :user (gethash :user ningle:*session*) :posts posts)))
+</span><span class="gi">+      (posts (ningle-tutorial-project/models:posts user))
++  (djula:render-template* "main/index.html" nil :title "Home" :user user :posts posts :form (if user (cl-forms:find-form 'post) nil))))
+</span></code></pre></div></div>
+
+<p>Our <code class="language-plaintext highlighter-rouge">post-likes</code> controller comes next:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defun</span> post-likes (params)
+  (let* ((user (gethash :user ningle:*session*))
+         (post (mito:find-dao 'ningle-tutorial-project/models:post :id (parse-integer (ingle:get-param :id params))))
+         (res (make-hash-table :test 'equal)))
+<span class="gd">-    (setf (gethash :post res) (parse-integer (ingle:get-param :id params)) )
+-    (setf (gethash :likes res) (ningle-tutorial-project/models:likes post))
+-    (setf (gethash :liked res) (ningle-tutorial-project/models:toggle-like user post))
+</span><span class="gi">+   ;; Bail out if post does not exist
++   (unless post
++     (setf (gethash "error" res) "post not found")
++     (setf (getf (lack.response:response-headers ningle:*response*) :content-type) "application/json")
++     (setf (lack.response:response-status ningle:*response*) 404)
++     (return-from post-likes (com.inuoe.jzon.stringify res)))
++
++   (setf (gethash "post" res) (mito:object-id post))
++   (setf (gethash "liked" res) (ningle-tutorial-project/models:toggle-like user post))
++   (setf (gethash "likes" res) (ningle-tutorial-project/models:likes post))
++   (setf (getf (lack.response:response-headers ningle:*response*) :content-type) "application/json")
++   (setf (lack.response:response-status ningle:*response*) 201)
++   (com.inuoe.jzon:stringify res)))
+</span></code></pre></div></div>
+
+<p>Here we begin by first checking that the post exists, if for some reason someone sent a request to our server without a valid post an error might be thrown and no response would be sent at all, which is not good, so we use <code class="language-plaintext highlighter-rouge">unless</code> as our "if not" check to return the standard http code for not found, the good old 404!</p>
+
+<p>If however there is no error (a post matching the id exists) we can continue, we build up the hash-table, including the "post", "liked", and "likes" properties of a post. Remember these are not direct properties of a post model, but calculated based on information in other tables, especially the <code class="language-plaintext highlighter-rouge">toggle-like</code> (actually it's very important to ensure you call <code class="language-plaintext highlighter-rouge">toggle-like</code> first, as it changes the db state that calling <code class="language-plaintext highlighter-rouge">likes</code> will depend on), as it returns the toggled status, that is, if a user clicks it once it will like the post, but if they click it again it will "unlike" the post.</p>
+
+<p>Now, with our single post, we have implemented a lot more information, comments, likes, our new comment form, etc so we have to really build up a more comprehensive <code class="language-plaintext highlighter-rouge">single-post</code> controller.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defun</span> single-post (params)
+    (handler-case
+<span class="gd">-       (let ((post (mito:find-dao 'ningle-tutorial-project/models:post :id (parse-integer (ingle:get-param :id params)))))
+-           (djula:render-template* "main/post.html" nil :title "Post" :post post))
+</span><span class="gi">+
++       (let* ((post-id (parse-integer (ingle:get-param :id params)))
++              (post (mito:find-dao 'ningle-tutorial-project/models:post :id post-id))
++              (comments (ningle-tutorial-project/models:comments post (gethash :user ningle:*session*)))
++              (likes (ningle-tutorial-project/models:likes post))
++              (form (cl-forms:find-form 'comment))
++              (user (gethash :user ningle:*session*)))
++         (cl-forms:set-field-value form 'ningle-tutorial-project/forms:parent post-id)
++         (djula:render-template* "main/post.html" nil
++                                 :title "Post"
++                                 :post post
++                                 :comments comments
++                                 :likes likes
++                                 :form form
++                                 :user user))
+</span>
+        (parse-error (err)
+            (setf (lack.response:response-status ningle:*response*) 404)
+            (djula:render-template* "error.html" nil :title "Error" :error err))))
+</code></pre></div></div>
+
+<p>Where previously we just rendered the template, we now do a lot more! We can get the likes, comments etc which is a massive step up in functionality.</p>
+
+<p>The next function to look at is <code class="language-plaintext highlighter-rouge">post-content</code>, thankfully there isn't too much to change here, all we need to do is ensure we pass through the parent (which will be nil).</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(when</span> valid
+    (cl-forms:with-form-field-values (content) form
+<span class="gd">-       (mito:create-dao 'ningle-tutorial-project/models:post :content content :user user)
+</span><span class="gi">+       (mito:create-dao 'ningle-tutorial-project/models:post :content content :user user :parent nil)
+</span>        (ingle:redirect "/")))))
+</code></pre></div></div>
+
+<p>Now, finally in our controllers we add the <code class="language-plaintext highlighter-rouge">post-comment</code> controller.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gi">+(defun post-comment (params)
++   (let ((user (gethash :user ningle:*session*))
++         (form (cl-forms:find-form 'comment)))
++       (handler-case
++           (progn
++               (cl-forms:handle-request form) ; Can throw an error if CSRF fails
++
++               (multiple-value-bind (valid errors)
++                   (cl-forms:validate-form form)
++
++                   (when errors
++                       (format t "Errors: ~A~%" errors))
++
++                   (when valid
++                       (cl-forms:with-form-field-values (content parent) form
++                           (mito:create-dao 'ningle-tutorial-project/models:post :content content :user user :parent (parse-integer parent))
++                           (ingle:redirect "/")))))
++
++           (simple-error (err)
++               (setf (lack.response:response-status ningle:*response*) 403)
++               (djula:render-template* "error.html" nil :title "Error" :error err)))))
+</span></code></pre></div></div>
+
+<p>We have seen this pattern before, but with some minor differences in which form to load (<code class="language-plaintext highlighter-rouge">comment</code> instead of <code class="language-plaintext highlighter-rouge">post</code>), and setting the parent from the value injected into the form at the point the form is rendered.</p>
+
+<h4 id="full-listing-2">Full Listing</h4>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/controllers</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:sxql</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:import-from</span> <span class="ss">:ningle-tutorial-project/forms</span>
+                <span class="ss">#:post</span>
+                <span class="ss">#:content</span>
+                <span class="ss">#:parent</span>
+                <span class="ss">#:comment</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:index</span>
+           <span class="ss">#:post-likes</span>
+           <span class="ss">#:single-post</span>
+           <span class="ss">#:post-content</span>
+           <span class="ss">#:post-comment</span>
+           <span class="ss">#:logged-in-profile</span>
+           <span class="ss">#:unauthorized-profile</span>
+           <span class="ss">#:people</span>
+           <span class="ss">#:person</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/controllers</span><span class="p">)</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">posts</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/index.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Home"</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:posts</span> <span class="nv">posts</span> <span class="ss">:form</span> <span class="p">(</span><span class="k">if</span> <span class="nv">user</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)</span> <span class="no">nil</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-likes</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))))</span>
+         <span class="p">(</span><span class="nv">res</span> <span class="p">(</span><span class="nb">make-hash-table</span> <span class="ss">:test</span> <span class="ss">'equal</span><span class="p">)))</span>
+    <span class="c1">;; Bail out if post does not exist</span>
+    <span class="p">(</span><span class="nb">unless</span> <span class="nv">post</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">getf</span> <span class="p">(</span><span class="nv">lack.response:response-headers</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="ss">:content-type</span><span class="p">)</span> <span class="s">"application/json"</span><span class="p">)</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"error"</span> <span class="nv">res</span><span class="p">)</span> <span class="s">"post not found"</span><span class="p">)</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">return-from</span> <span class="nv">post-likes</span> <span class="p">(</span><span class="nv">com.inuoe.jzon.stringify</span> <span class="nv">res</span><span class="p">)))</span>
+
+    <span class="c1">;; success, continue</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"post"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"liked"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:toggle-like</span> <span class="nv">user</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"likes"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:likes</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">getf</span> <span class="p">(</span><span class="nv">lack.response:response-headers</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="ss">:content-type</span><span class="p">)</span> <span class="s">"application/json"</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">201</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">com.inuoe.jzon:stringify</span> <span class="nv">res</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">single-post</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">handler-case</span>
+        <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))))</span>
+              <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'comment</span><span class="p">)))</span>
+          <span class="p">(</span><span class="nv">cl-forms:set-field-value</span> <span class="nv">form</span> <span class="ss">'ningle-tutorial-project/forms:parent</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/post.html"</span> <span class="no">nil</span>
+                                  <span class="ss">:title</span> <span class="s">"Post"</span>
+                                  <span class="ss">:post</span> <span class="nv">post</span>
+                                  <span class="ss">:comments</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:comments</span> <span class="nv">post</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+                                  <span class="ss">:likes</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:likes</span> <span class="nv">post</span><span class="p">)</span>
+                                  <span class="ss">:form</span> <span class="nv">form</span>
+                                  <span class="ss">:user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)))</span>
+
+        <span class="p">(</span><span class="kt">parse-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+            <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-content</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">handler-case</span>
+            <span class="p">(</span><span class="k">progn</span>
+                <span class="p">(</span><span class="nv">cl-forms:handle-request</span> <span class="nv">form</span><span class="p">)</span> <span class="c1">; Can throw an error if CSRF fails</span>
+
+                <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">valid</span> <span class="nv">errors</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">cl-forms:validate-form</span> <span class="nv">form</span><span class="p">)</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">errors</span>
+                        <span class="p">(</span><span class="nb">format</span> <span class="no">t</span> <span class="s">"Errors: ~A~%"</span> <span class="nv">errors</span><span class="p">))</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">valid</span>
+                        <span class="p">(</span><span class="nv">cl-forms:with-form-field-values</span> <span class="p">(</span><span class="nv">content</span><span class="p">)</span> <span class="nv">form</span>
+                            <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:content</span> <span class="nv">content</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:parent</span> <span class="no">nil</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">ingle:redirect</span> <span class="s">"/"</span><span class="p">)))))</span>
+
+            <span class="p">(</span><span class="kt">simple-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+                <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">)))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-comment</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'comment</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">handler-case</span>
+            <span class="p">(</span><span class="k">progn</span>
+                <span class="p">(</span><span class="nv">cl-forms:handle-request</span> <span class="nv">form</span><span class="p">)</span> <span class="c1">; Can throw an error if CSRF fails</span>
+
+                <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">valid</span> <span class="nv">errors</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">cl-forms:validate-form</span> <span class="nv">form</span><span class="p">)</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">errors</span>
+                        <span class="p">(</span><span class="nb">format</span> <span class="no">t</span> <span class="s">"Errors: ~A~%"</span> <span class="nv">errors</span><span class="p">))</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">valid</span>
+                        <span class="p">(</span><span class="nv">cl-forms:with-form-field-values</span> <span class="p">(</span><span class="nv">content</span> <span class="nv">parent</span><span class="p">)</span> <span class="nv">form</span>
+                            <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:content</span> <span class="nv">content</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:parent</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="nv">parent</span><span class="p">))</span>
+                            <span class="p">(</span><span class="nv">ingle:redirect</span> <span class="s">"/"</span><span class="p">)))))</span>
+
+            <span class="p">(</span><span class="kt">simple-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+                <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">)))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">logged-in-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/profile.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Profile"</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">unauthorized-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="s">"Unauthorized"</span><span class="p">))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">people</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">users</span> <span class="p">(</span><span class="nv">mito:retrieve-dao</span> <span class="ss">'ningle-auth/models:user</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/people.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"People"</span> <span class="ss">:users</span> <span class="nv">users</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">person</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">username-or-email</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:person</span> <span class="nv">params</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">person</span> <span class="p">(</span><span class="nb">first</span> <span class="p">(</span><span class="nv">mito:select-dao</span>
+                            <span class="ss">'ningle-auth/models:user</span>
+                            <span class="p">(</span><span class="nv">where</span> <span class="p">(</span><span class="ss">:or</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:username</span> <span class="nv">username-or-email</span><span class="p">)</span>
+                                        <span class="p">(</span><span class="ss">:=</span> <span class="ss">:email</span> <span class="nv">username-or-email</span><span class="p">)))))))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/person.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Person"</span> <span class="ss">:person</span> <span class="nv">person</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<h3 id="srcmainlisp">src/main.lisp</h3>
+
+<p>The change to our <code class="language-plaintext highlighter-rouge">main.lisp</code> file is a single line that connects our controller to the urls we have declared we are using.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(setf</span> (ningle:route *app* "/post" :method :POST :logged-in-p t) #'post-content)
+<span class="gi">+(setf (ningle:route *app* "/post/comment" :method :POST :logged-in-p t) #'post-comment)
+</span><span class="err">(setf</span> (ningle:route *app* "/profile" :logged-in-p t) #'logged-in-profile)
+</code></pre></div></div>
+
+<h4 id="full-listing-3">Full Listing</h4>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:ningle-tutorial-project/controllers</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:start</span>
+           <span class="ss">#:stop</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defvar</span> <span class="vg">*app*</span> <span class="p">(</span><span class="nb">make-instance</span> <span class="ss">'ningle:app</span><span class="p">))</span>
+
+<span class="c1">;; requirements</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:requirement</span> <span class="vg">*app*</span> <span class="ss">:logged-in-p</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="nv">value</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">)</span> <span class="nv">value</span><span class="p">)))</span>
+
+<span class="c1">;; routes</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">index</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post/:id/likes"</span> <span class="ss">:method</span> <span class="ss">:POST</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">post-likes</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post/:id"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">single-post</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post"</span> <span class="ss">:method</span> <span class="ss">:POST</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">post-content</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post/comment"</span> <span class="ss">:method</span> <span class="ss">:POST</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">post-comment</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/profile"</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">logged-in-profile</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/profile"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">unauthorized-profile</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/people"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">people</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/people/:person"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">person</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">ningle:not-found</span> <span class="p">((</span><span class="nv">app</span> <span class="nv">ningle:&lt;app&gt;</span><span class="p">))</span>
+    <span class="p">(</span><span class="k">declare</span> <span class="p">(</span><span class="k">ignore</span> <span class="nv">app</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="s">"Not Found"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">start</span> <span class="p">(</span><span class="k">&amp;key</span> <span class="p">(</span><span class="nv">server</span> <span class="ss">:woo</span><span class="p">)</span> <span class="p">(</span><span class="nv">address</span> <span class="s">"127.0.0.1"</span><span class="p">)</span> <span class="p">(</span><span class="nv">port</span> <span class="mi">8000</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">djula:add-template-directory</span> <span class="p">(</span><span class="nv">asdf:system-relative-pathname</span> <span class="ss">:ningle-tutorial-project</span> <span class="s">"src/templates/"</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">djula:set-static-url</span> <span class="s">"/public/"</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">clack:clackup</span>
+     <span class="p">(</span><span class="nv">lack.builder:builder</span> <span class="p">(</span><span class="nv">envy-ningle:build-middleware</span> <span class="ss">:ningle-tutorial-project/config</span> <span class="vg">*app*</span><span class="p">))</span>
+     <span class="ss">:server</span> <span class="nv">server</span>
+     <span class="ss">:address</span> <span class="nv">address</span>
+     <span class="ss">:port</span> <span class="nv">port</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">stop</span> <span class="p">(</span><span class="nv">instance</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">clack:stop</span> <span class="nv">instance</span><span class="p">))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<h3 id="srctemplatesmainindexhtml">src/templates/main/index.html</h3>
+
+<p>There are some small changes needed in the index.html file, they're largely just optimisations. The first is changing a boolean around likes to integer, this gets into the weeds of JavaScript types, and ensuring things were of the <code class="language-plaintext highlighter-rouge">Number</code> type in JS just made things easier. Some of the previous code even treated booleans as strings, which was pretty bad, I don't write JS in any real capacity, so I often make mistakes with it, because it so very often <em>appears</em> to work instead of just throwing an error.</p>
+
+<p>~ Lines 28 - 30</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    data-logged-in="true"
+<span class="gd">-   data-liked="false"
+</span><span class="gi">+   data-liked="0"
+</span>    aria-label="Like post "&gt;
+</code></pre></div></div>
+
+<p>~ Lines 68 - 70</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    const icon = btn.querySelector("i");
+<span class="gd">-   const liked = btn.dataset.liked === "true";
+</span><span class="gi">+   const liked = Number(btn.dataset.liked) === 1;
+</span>    const previous = parseInt(countSpan.textContent, 10) || 0;
+</code></pre></div></div>
+
+<p>~ Lines 96 - 100</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    if (!resp.ok) {
+        // Revert optimistic changes on error
+        countSpan.textContent = previous;
+        countSpan.textContent = previous;
+<span class="gd">-       btn.dataset.liked = liked ? "true" : "false";
+</span><span class="gi">+       btn.dataset.liked = liked ? 1 : 0;
+</span>        if (liked) {
+</code></pre></div></div>
+
+<p>~ Lines 123 - 129</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code>      console.error("Like failed:", err);
+      // Revert optimistic changes on error
+      countSpan.textContent = previous;
+<span class="gd">-     btn.dataset.liked = liked ? "true" : "false";
+</span><span class="gi">+     btn.dataset.liked = liked ? 1 : 0;
+</span>      if (liked) {
+        icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+      } else {
+</code></pre></div></div>
+
+<h3 id="srctemplatesmainposthtml">src/templates/main/post.html</h3>
+
+<p>The changes to this file as so substantial that the file might as well be brand new, so in the interests of clarity, I will simply show the file in full.</p>
+
+<h4 id="full-listing-4">Full Listing</h4>
+
+<figure class="highlight"><pre><code class="language-html"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+93
+94
+95
+96
+97
+98
+99
+100
+101
+102
+103
+104
+105
+106
+107
+108
+109
+110
+111
+112
+113
+114
+115
+116
+117
+118
+119
+120
+121
+122
+123
+124
+125
+126
+127
+128
+129
+130
+131
+132
+133
+134
+135
+136
+137
+138
+139
+140
+141
+142
+143
+144
+145
+146
+147
+148
+149
+150
+151
+152
+153
+154
+155
+156
+157
+158
+159
+160
+161
+</pre></td><td class="code"><pre>{% extends "base.html" %}
+
+{% block content %}
+<span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"container"</span><span class="nt">&gt;</span>
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col-12"</span><span class="nt">&gt;</span>
+            <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card post mb-3"</span> <span class="na">data-href=</span><span class="s">"/post/{{ post.id }}"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-body"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;h5</span> <span class="na">class=</span><span class="s">"card-title mb-2"</span><span class="nt">&gt;</span>{{ post.content }}<span class="nt">&lt;/h5&gt;</span>
+                <span class="nt">&lt;p</span> <span class="na">class=</span><span class="s">"card-subtitle text-muted mb-0"</span><span class="nt">&gt;</span>@{{ post.user.username }}<span class="nt">&lt;/p&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-footer d-flex justify-content-between align-items-center"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;button</span> <span class="na">type=</span><span class="s">"button"</span>
+                        <span class="na">class=</span><span class="s">"btn btn-sm btn-outline-primary like-button"</span>
+                        <span class="na">data-post-id=</span><span class="s">"{{ post.id }}"</span>
+                        <span class="na">data-logged-in=</span><span class="s">"{% if user.username != "</span><span class="err">"</span> <span class="err">%}</span><span class="na">true</span><span class="err">{%</span> <span class="na">else</span> <span class="err">%}</span><span class="na">false</span><span class="err">{%</span> <span class="na">endif</span> <span class="err">%}"</span>
+                        <span class="na">data-liked=</span><span class="s">"{% if post.liked-by-user == 1 %}1{% else %}0{% endif %}"</span>
+                        <span class="na">aria-label=</span><span class="s">"Like post {{ post.id }}"</span><span class="nt">&gt;</span>
+                    {% if post.liked-by-user == 1 %}
+                      <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up-fill text-primary"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                    {% else %}
+                      <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up text-muted"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                    {% endif %}
+                    <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"ms-1 like-count"</span><span class="nt">&gt;</span>{{ likes }}<span class="nt">&lt;/span&gt;</span>
+                <span class="nt">&lt;/button&gt;</span>
+
+                <span class="nt">&lt;small</span> <span class="na">class=</span><span class="s">"text-muted"</span><span class="nt">&gt;</span>Posted on: {{ post.created-at }}<span class="nt">&lt;/small&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+            <span class="nt">&lt;/div&gt;</span>
+        <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;/div&gt;</span>
+
+    <span class="c">&lt;!-- Post form --&gt;</span>
+    {% if user %}
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row mb-4"</span><span class="nt">&gt;</span>
+            <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col"</span><span class="nt">&gt;</span>
+                {% if form %}
+                    {% form form %}
+                {% endif %}
+            <span class="nt">&lt;/div&gt;</span>
+        <span class="nt">&lt;/div&gt;</span>
+    {% endif %}
+
+    {% if comments %}
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row mb-4"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col-12"</span><span class="nt">&gt;</span>
+            <span class="nt">&lt;h2&gt;</span>Comments<span class="nt">&lt;/h2&gt;</span>
+        <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;/div&gt;</span>
+    {% endif %}
+
+    {% for comment in comments %}
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row mb-4"</span><span class="nt">&gt;</span>
+            <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col-12"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card post mb-3"</span> <span class="na">data-href=</span><span class="s">"/post/{{ comment.id }}"</span><span class="nt">&gt;</span>
+                    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-body"</span><span class="nt">&gt;</span>
+                        <span class="nt">&lt;h5</span> <span class="na">class=</span><span class="s">"card-title mb-2"</span><span class="nt">&gt;</span>{{ comment.content }}<span class="nt">&lt;/h5&gt;</span>
+                        <span class="nt">&lt;p</span> <span class="na">class=</span><span class="s">"card-subtitle text-muted mb-0"</span><span class="nt">&gt;</span>@{{ comment.username }}<span class="nt">&lt;/p&gt;</span>
+                    <span class="nt">&lt;/div&gt;</span>
+
+                    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-footer d-flex justify-content-between align-items-center"</span><span class="nt">&gt;</span>
+                        <span class="nt">&lt;button</span> <span class="na">type=</span><span class="s">"button"</span>
+                                <span class="na">class=</span><span class="s">"btn btn-sm btn-outline-primary like-button"</span>
+                                <span class="na">data-post-id=</span><span class="s">"{{ comment.id }}"</span>
+                                <span class="na">data-logged-in=</span><span class="s">"{% if user.username != "</span><span class="err">"</span> <span class="err">%}</span><span class="na">true</span><span class="err">{%</span> <span class="na">else</span> <span class="err">%}</span><span class="na">false</span><span class="err">{%</span> <span class="na">endif</span> <span class="err">%}"</span>
+                                <span class="na">data-liked=</span><span class="s">"{% if comment.liked-by-user == 1 %}1{% else %}0{% endif %}"</span>
+                                <span class="na">aria-label=</span><span class="s">"Like post {{ comment.id }}"</span><span class="nt">&gt;</span>
+                            {% if comment.liked-by-user == 1 %}
+                                <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up-fill text-primary"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                            {% else %}
+                                <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up text-muted"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                            {% endif %}
+                            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"ms-1 like-count"</span><span class="nt">&gt;</span>{{ comment.like-count }}<span class="nt">&lt;/span&gt;</span>
+                        <span class="nt">&lt;/button&gt;</span>
+                        <span class="nt">&lt;small</span> <span class="na">class=</span><span class="s">"text-muted"</span><span class="nt">&gt;</span>Posted on: {{ comment.created-at }}<span class="nt">&lt;/small&gt;</span>
+                    <span class="nt">&lt;/div&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+            <span class="nt">&lt;/div&gt;</span>
+        <span class="nt">&lt;/div&gt;</span>
+    {% endfor %}
+<span class="nt">&lt;/div&gt;</span>
+{% endblock %}
+
+{% block js %}
+document.querySelectorAll(".like-button").forEach(btn =&gt; {
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    e.preventDefault();
+
+    // Check login
+    if (btn.dataset.loggedIn !== "true") {
+      alert("You must be logged in to like posts.");
+      return;
+    }
+
+    const postId = btn.dataset.postId;
+    const countSpan = btn.querySelector(".like-count");
+    const icon = btn.querySelector("i");
+    const liked = Number(btn.dataset.liked) === 1;
+    const previous = parseInt(countSpan.textContent, 10) || 0;
+    const url = `/post/${postId}/likes`;
+
+    // Optimistic UI toggle
+    countSpan.textContent = liked ? previous - 1 : previous + 1;
+    btn.dataset.liked = liked ? 0 : 1;
+
+    // Toggle icon classes optimistically
+    if (liked) {
+      // Currently liked, so unlike it
+      icon.className = "bi bi-hand-thumbs-up text-muted";
+    } else {
+      // Currently not liked, so like it
+      icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+    }
+
+    const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]');
+    const headers = { "Content-Type": "application/json" };
+    if (csrfTokenMeta) headers["X-CSRF-Token"] = csrfTokenMeta.getAttribute("content");
+
+    fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ toggle: true })
+    })
+    .then(resp =&gt; {
+      if (!resp.ok) {
+        // Revert optimistic changes on error
+        countSpan.textContent = previous;
+        btn.dataset.liked = liked ? 1 : 0;
+        icon.className = liked ? "bi bi-hand-thumbs-up-fill text-primary" : "bi bi-hand-thumbs-up text-muted";
+        throw new Error("Network response was not ok");
+      }
+      return resp.json();
+    })
+    .then(data =&gt; {
+      if (data <span class="err">&amp;&amp;</span> typeof data.likes !== "undefined") {
+        countSpan.textContent = data.likes;
+        btn.dataset.liked = data.liked ? 1 : 0;
+        icon.className = data.liked ? "bi bi-hand-thumbs-up-fill text-primary" : "bi bi-hand-thumbs-up text-muted";
+      }
+    })
+    .catch(err =&gt; {
+      console.error("Like failed:", err);
+      // Revert optimistic changes on error
+      countSpan.textContent = previous;
+      btn.dataset.liked = liked ? 1 : 0;
+      icon.className = liked ? "bi bi-hand-thumbs-up-fill text-primary" : "bi bi-hand-thumbs-up text-muted";
+    });
+  });
+});
+
+document.querySelectorAll(".card.post").forEach(card =&gt; {
+  card.addEventListener("click", function () {
+    const href = card.dataset.href;
+    if (href) {
+      window.location.href = href;
+    }
+  });
+});
+{% endblock %}
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<h3 id="learning-outcomes">Learning Outcomes</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Learning Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Understand</strong></td>
+      <td>Understand how to model a self-referential <code class="language-plaintext highlighter-rouge">post</code> table in Mito (using a nullable <code class="language-plaintext highlighter-rouge">parent</code> column) and why <code class="language-plaintext highlighter-rouge">(or :post :null)</code>/<code class="language-plaintext highlighter-rouge">:initform nil</code> are important for safe migrations and representing "top-level" posts versus comments.</td>
+    </tr>
+    <tr>
+      <td><strong>Apply</strong></td>
+      <td>Apply Mito, SXQL, and cl-forms to implement a comment system end-to-end: defining <code class="language-plaintext highlighter-rouge">comments</code>/<code class="language-plaintext highlighter-rouge">posts</code> generics, adding validators (including a custom <code class="language-plaintext highlighter-rouge">clavier:fn</code>), wiring controllers and routes, and rendering comments and like-buttons in templates.</td>
+    </tr>
+    <tr>
+      <td><strong>Analyse</strong></td>
+      <td>Analyse and reduce duplication in the models/controllers layer by consolidating separate code paths (logged-in vs anonymous) into generic functions specialised on <code class="language-plaintext highlighter-rouge">user</code>/<code class="language-plaintext highlighter-rouge">null</code>, and by examining how SQL joins and binds shape the returned data.</td>
+    </tr>
+    <tr>
+      <td><strong>Evaluate</strong></td>
+      <td>Evaluate different design and safety choices in the implementation (nullable vs sentinel parents, optimistic UI vs server truth, HTTP status codes, SQL placeholders, CSRF and login checks) and judge which approaches are more robust and maintainable.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="github">Github</h2>
+
+<ul>
+  <li>The link for this tutorials code is available <a href="https://github.com/nmunro/ningle-tutorial-project/releases/tag/tutorial-13">here</a>.</li>
+</ul>
+
+<h3 id="common-lisp-hyperspec">Common Lisp HyperSpec</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Type</th>
+      <th>Why it appears in this lesson</th>
+      <th>CLHS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defpackage</code></td>
+      <td>Macro</td>
+      <td>Define project packages like <code class="language-plaintext highlighter-rouge">ningle-tutorial-project/models</code>, <code class="language-plaintext highlighter-rouge">/forms</code>, <code class="language-plaintext highlighter-rouge">/controllers</code>, and the main system package.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">in-package</code></td>
+      <td>Macro</td>
+      <td>Enter each package before defining tables, forms, controllers, and the main app functions.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defvar</code></td>
+      <td>Special Operator</td>
+      <td>Define <code class="language-plaintext highlighter-rouge">*app*</code> as a global Ningle application object.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_defvar.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_defvar.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defparameter</code></td>
+      <td>Special Operator</td>
+      <td>Define validator configuration variables like <code class="language-plaintext highlighter-rouge">*post-validator*</code> and <code class="language-plaintext highlighter-rouge">*post-parent-validator*</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_defpar.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_defpar.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defgeneric</code></td>
+      <td>Macro</td>
+      <td>Declare generic functions such as <code class="language-plaintext highlighter-rouge">likes</code>, <code class="language-plaintext highlighter-rouge">comments</code>, <code class="language-plaintext highlighter-rouge">toggle-like</code>, <code class="language-plaintext highlighter-rouge">liked-post-p</code>, and <code class="language-plaintext highlighter-rouge">posts</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defmethod</code></td>
+      <td>Macro</td>
+      <td>Specialise behaviour for <code class="language-plaintext highlighter-rouge">likes</code>, <code class="language-plaintext highlighter-rouge">comments</code>, <code class="language-plaintext highlighter-rouge">toggle-like</code>, <code class="language-plaintext highlighter-rouge">liked-post-p</code>, <code class="language-plaintext highlighter-rouge">posts</code>, and <code class="language-plaintext highlighter-rouge">ningle:not-found</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defun</code></td>
+      <td>Macro</td>
+      <td>Define controller functions like <code class="language-plaintext highlighter-rouge">index</code>, <code class="language-plaintext highlighter-rouge">post-likes</code>, <code class="language-plaintext highlighter-rouge">single-post</code>, <code class="language-plaintext highlighter-rouge">post-content</code>, <code class="language-plaintext highlighter-rouge">post-comment</code>, <code class="language-plaintext highlighter-rouge">people</code>, <code class="language-plaintext highlighter-rouge">person</code>, <code class="language-plaintext highlighter-rouge">start</code>, etc.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defun.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defun.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">make-instance</code></td>
+      <td>Generic Function</td>
+      <td>Create the Ningle app object: <code class="language-plaintext highlighter-rouge">(make-instance 'ningle:app)</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_ins.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_ins.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">let</code> / <code class="language-plaintext highlighter-rouge">let*</code></td>
+      <td>Special Operator</td>
+      <td>Introduce local bindings like <code class="language-plaintext highlighter-rouge">user</code>, <code class="language-plaintext highlighter-rouge">posts</code>, <code class="language-plaintext highlighter-rouge">post</code>, <code class="language-plaintext highlighter-rouge">comments</code>, <code class="language-plaintext highlighter-rouge">likes</code>, <code class="language-plaintext highlighter-rouge">form</code>, and <code class="language-plaintext highlighter-rouge">res</code> in controllers.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">lambda</code></td>
+      <td>Special Operator</td>
+      <td>Used for the <code class="language-plaintext highlighter-rouge">:logged-in-p</code> requirement: <code class="language-plaintext highlighter-rouge">(lambda (value) (and (cu-sith:logged-in-p) value))</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_fn_lam.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_fn_lam.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">setf</code></td>
+      <td>Macro</td>
+      <td>Set routes, response headers/status codes, and update hash-table entries in the JSON response.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_setf.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_setf.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">gethash</code></td>
+      <td>Function</td>
+      <td>Access session values (e.g. the <code class="language-plaintext highlighter-rouge">:user</code> from <code class="language-plaintext highlighter-rouge">ningle:*session*</code>) and JSON keys in result hash-tables.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_gethas.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_gethas.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">make-hash-table</code></td>
+      <td>Function</td>
+      <td>Build the hash-table used as the JSON response body in <code class="language-plaintext highlighter-rouge">post-likes</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_has.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_has.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">equal</code></td>
+      <td>Function</td>
+      <td>Used as the <code class="language-plaintext highlighter-rouge">:test</code> function for the JSON response hash-table.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_equal.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_equal.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">list</code></td>
+      <td>Function</td>
+      <td>Build the <code class="language-plaintext highlighter-rouge">:binds</code> list for <code class="language-plaintext highlighter-rouge">mito:retrieve-by-sql</code> and other list values.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_list.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_list.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">first</code></td>
+      <td>Accessor</td>
+      <td>Take the first result from <code class="language-plaintext highlighter-rouge">mito:select-dao</code> in the <code class="language-plaintext highlighter-rouge">person</code> controller.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_firstc.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_firstc.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">slot-value</code></td>
+      <td>Function</td>
+      <td>Discussed when explaining the old pattern <code class="language-plaintext highlighter-rouge">(slot-value user '...:id)</code> that was replaced by <code class="language-plaintext highlighter-rouge">mito:object-id</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_slot__.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_slot__.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-integer</code></td>
+      <td>Function</td>
+      <td>Convert route params and hidden form <code class="language-plaintext highlighter-rouge">parent</code> values into integers (<code class="language-plaintext highlighter-rouge">post-id</code>, <code class="language-plaintext highlighter-rouge">parent</code>, etc.).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">format</code></td>
+      <td>Function</td>
+      <td>Print validation error information in the controllers (<code class="language-plaintext highlighter-rouge">(format t "Errors: ~A~%" errors)</code>).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_format.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_format.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">handler-case</code></td>
+      <td>Macro</td>
+      <td>Handle <code class="language-plaintext highlighter-rouge">parse-error</code> for invalid ids and <code class="language-plaintext highlighter-rouge">simple-error</code> for CSRF failures, mapping them to 404 / 403 responses.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_hand_1.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_hand_1.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-error</code></td>
+      <td>Condition Type</td>
+      <td>Signalled when parsing fails (e.g. malformed <code class="language-plaintext highlighter-rouge">:id</code> route parameters), caught in <code class="language-plaintext highlighter-rouge">single-post</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/e_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/e_parse_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">simple-error</code></td>
+      <td>Condition Type</td>
+      <td>Used to represent CSRF and similar failures caught in <code class="language-plaintext highlighter-rouge">post-content</code> and <code class="language-plaintext highlighter-rouge">post-comment</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/e_smp_er.htm">http://www.lispworks.com/documentation/HyperSpec/Body/e_smp_er.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">multiple-value-bind</code></td>
+      <td>Macro</td>
+      <td>Bind the <code class="language-plaintext highlighter-rouge">(valid errors)</code> results from <code class="language-plaintext highlighter-rouge">cl-forms:validate-form</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_mpv_bn.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_mpv_bn.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">progn</code></td>
+      <td>Special Operator</td>
+      <td>Group side-effecting calls (handle request, validate, then create/redirect) under a single handler in <code class="language-plaintext highlighter-rouge">handler-case</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_progn.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_progn.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">when</code></td>
+      <td>Macro</td>
+      <td>Conditionally log validation errors and perform DAO creation only when the form is valid.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">unless</code></td>
+      <td>Macro</td>
+      <td>Early-exit error path in <code class="language-plaintext highlighter-rouge">post-likes</code> when the post cannot be found (<code class="language-plaintext highlighter-rouge">(unless post ... (return-from ...))</code>).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">return-from</code></td>
+      <td>Special Operator</td>
+      <td>Non-locally return from <code class="language-plaintext highlighter-rouge">post-likes</code> after sending a 404 JSON response.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_ret_fr.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_ret_fr.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">declare</code></td>
+      <td>Special Operator</td>
+      <td>Used with <code class="language-plaintext highlighter-rouge">(declare (ignore app))</code> in the <code class="language-plaintext highlighter-rouge">ningle:not-found</code> method to silence unused-argument warnings.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_declar.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_declar.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">and</code> / <code class="language-plaintext highlighter-rouge">or</code></td>
+      <td>Macro</td>
+      <td>Logical composition in the login requirement and in the <code class="language-plaintext highlighter-rouge">where</code> clause for username/email matching.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/a_and.htm">http://www.lispworks.com/documentation/HyperSpec/Body/a_and.htm</a></td>
+    </tr>
+  </tbody>
+</table>

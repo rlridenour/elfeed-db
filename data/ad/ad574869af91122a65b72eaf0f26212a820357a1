@@ -1,0 +1,122 @@
+<p>Already I think I can improve <code>my/quick-window-jump</code>: which was a window jumping mechanism I created in my previous post which uses a unique key identifier for window navigation just like <code>ace-window</code> but condensed into a minimal elisp defun implementation.</p>
+<p>While the original implementation worked, I recently revisited and refined it to improve its modularity, visual feedback, and overall usability.</p>
+<p>The main headline of the improvement is porting the <code>ace-window</code> window label identifier navigation mechanism using overlays!, see below:</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20241209085935-emacs--Emacs-core-window-jumping-visual-feedback.jpg" width="100%">
+</figure>
+
+<p>In this post, I’ll detail the evolution of <code>my/quick-window-jump</code>, highlighting the changes made to simplify the code, provide immediate visual indicators, and improve the end-user experience.</p>
+<hr>
+<h2 id="the-original-implementation">The Original Implementation</h2>
+<h3 id="original-code">Original Code</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(defun my/quick-window-jump ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Jump to a window by typing its assigned character label.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Windows are labeled starting from the top-left window and proceed top to bottom left to right.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (let* ((<span style="color:#a6e22e">window-list</span> (my/get-windows)) <span style="color:#75715e">; Get sorted list of windows</span>
+</span></span><span style="display:flex;"><span>         (window-keys (seq-take <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;j&#34;</span> <span style="color:#e6db74">&#34;k&#34;</span> <span style="color:#e6db74">&#34;l&#34;</span> <span style="color:#e6db74">&#34;;&#34;</span> <span style="color:#e6db74">&#34;a&#34;</span> <span style="color:#e6db74">&#34;s&#34;</span> <span style="color:#e6db74">&#34;d&#34;</span> <span style="color:#e6db74">&#34;f&#34;</span>) <span style="color:#75715e">; Assign key labels</span>
+</span></span><span style="display:flex;"><span>                                (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>)))
+</span></span><span style="display:flex;"><span>         (window-map (cl-pairlis window-keys <span style="color:#a6e22e">window-list</span>)) <span style="color:#75715e">; Create key-to-window map</span>
+</span></span><span style="display:flex;"><span>         (key (read-key (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Select window [%s]: &#34;</span> (string-join window-keys <span style="color:#e6db74">&#34;, &#34;</span>)))))
+</span></span><span style="display:flex;"><span>    (if-let ((<span style="color:#a6e22e">selected-window</span> (<span style="color:#a6e22e">cdr</span> (<span style="color:#a6e22e">assoc</span> (<span style="color:#a6e22e">char-to-string</span> key) window-map)))) <span style="color:#75715e">; Jump to selected window</span>
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">select-window</span> <span style="color:#a6e22e">selected-window</span>)
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">message</span> <span style="color:#e6db74">&#34;No window assigned to key: %c&#34;</span> key))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/get-windows ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Return a list of windows in the current frame, ordered from top to bottom, left to right.&#34;</span>
+</span></span><span style="display:flex;"><span>  (<span style="color:#a6e22e">sort</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)
+</span></span><span style="display:flex;"><span>        (lambda (w1 w2)
+</span></span><span style="display:flex;"><span>          (let ((edges1 (<span style="color:#a6e22e">window-edges</span> w1))
+</span></span><span style="display:flex;"><span>                (edges2 (<span style="color:#a6e22e">window-edges</span> w2)))
+</span></span><span style="display:flex;"><span>            (or (<span style="color:#a6e22e">&lt;</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2)) <span style="color:#75715e">; Compare top edges</span>
+</span></span><span style="display:flex;"><span>                (and (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2)) <span style="color:#75715e">; If equal, compare left edges</span>
+</span></span><span style="display:flex;"><span>                     (<span style="color:#a6e22e">&lt;</span> (cadr edges1) (cadr edges2))))))))
+</span></span></code></pre></div><p>While functional, several downsides existed in this implementation:</p>
+<ul>
+<li><strong>Separation of Logic:</strong> The <code>my/get-windows</code> function added an extra layer of abstraction that wasn’t strictly necessary, as sorting logic could be directly embedded into the main function.</li>
+<li><strong>Lack of Visual Feedback:</strong> The function provided no immediate indicator of which windows corresponded to which keys. Users had to guess or manually map the output of the key labels to the positions in their frame layout.</li>
+</ul>
+<hr>
+<h2 id="the-new-and-improved-implementation">The New and Improved Implementation</h2>
+<p>The updated version of <code>my/quick-window-jump</code> refines the original function by:</p>
+<ol>
+<li>
+<p><strong>Inlining Window Sorting Logic:</strong> Sorting logic is now part of the main function rather than relying on a separate helper, simplifying maintenance and reducing cognitive overhead.</p>
+</li>
+<li>
+<p><strong>Adding Overlay Labels:</strong> Temporary overlays are added to each window, displaying the assigned key visually within the actual window. This makes it easier for users to identify which key corresponds to which window without having to manually figure it out.</p>
+</li>
+</ol>
+<p>Here’s the updated code:</p>
+<h3 id="improved-code">Improved Code</h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(defun my/quick-window-jump ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Jump to a window by typing its assigned character label.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Windows are labeled starting from the top-left window and proceeding top to bottom, then left to right.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (let* ((my/quick-window-overlays <span style="color:#66d9ef">nil</span>) <span style="color:#75715e">; Temporary list for overlays</span>
+</span></span><span style="display:flex;"><span>         <span style="color:#75715e">;; Sort windows by position (top-to-bottom, left-to-right)</span>
+</span></span><span style="display:flex;"><span>         (<span style="color:#a6e22e">window-list</span> (<span style="color:#a6e22e">sort</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)
+</span></span><span style="display:flex;"><span>                            (lambda (w1 w2)
+</span></span><span style="display:flex;"><span>                              (let ((edges1 (<span style="color:#a6e22e">window-edges</span> w1))
+</span></span><span style="display:flex;"><span>                                    (edges2 (<span style="color:#a6e22e">window-edges</span> w2)))
+</span></span><span style="display:flex;"><span>                                (or (<span style="color:#a6e22e">&lt;</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                    (and (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                         (<span style="color:#a6e22e">&lt;</span> (cadr edges1) (cadr edges2))))))))
+</span></span><span style="display:flex;"><span>         <span style="color:#75715e">;; Assign key labels to windows</span>
+</span></span><span style="display:flex;"><span>         (window-keys (seq-take <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;j&#34;</span> <span style="color:#e6db74">&#34;k&#34;</span> <span style="color:#e6db74">&#34;l&#34;</span> <span style="color:#e6db74">&#34;;&#34;</span> <span style="color:#e6db74">&#34;a&#34;</span> <span style="color:#e6db74">&#34;s&#34;</span> <span style="color:#e6db74">&#34;d&#34;</span> <span style="color:#e6db74">&#34;f&#34;</span>)
+</span></span><span style="display:flex;"><span>                                (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>)))
+</span></span><span style="display:flex;"><span>         (window-map (cl-pairlis window-keys <span style="color:#a6e22e">window-list</span>))) <span style="color:#75715e">; Create map of keys to windows</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">;; Add overlays to display key labels in each window</span>
+</span></span><span style="display:flex;"><span>    (setq my/quick-window-overlays
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">mapcar</span> (lambda (entry)
+</span></span><span style="display:flex;"><span>                    (let* ((key (<span style="color:#a6e22e">car</span> entry))
+</span></span><span style="display:flex;"><span>                           (window (<span style="color:#a6e22e">cdr</span> entry))
+</span></span><span style="display:flex;"><span>                           (start (<span style="color:#a6e22e">window-start</span> window)) <span style="color:#75715e">; Start position of window</span>
+</span></span><span style="display:flex;"><span>                           (overlay (<span style="color:#a6e22e">make-overlay</span> start start (<span style="color:#a6e22e">window-buffer</span> window)))) <span style="color:#75715e">; Create overlay</span>
+</span></span><span style="display:flex;"><span>                      (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;after-string</span>  <span style="color:#75715e">; Add a visual label</span>
+</span></span><span style="display:flex;"><span>                                   (<span style="color:#a6e22e">propertize</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;[%s]&#34;</span> key)
+</span></span><span style="display:flex;"><span>                                               <span style="color:#e6db74">&#39;face</span> <span style="color:#f92672">&#39;</span>(:foreground <span style="color:#e6db74">&#34;white&#34;</span>
+</span></span><span style="display:flex;"><span>                                                                   :background <span style="color:#e6db74">&#34;blue&#34;</span>
+</span></span><span style="display:flex;"><span>                                                                   :weight bold)))
+</span></span><span style="display:flex;"><span>                      (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;window</span> window) <span style="color:#75715e">; Associate overlay with window</span>
+</span></span><span style="display:flex;"><span>                      overlay))
+</span></span><span style="display:flex;"><span>                  window-map))
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">;; Read key input from user</span>
+</span></span><span style="display:flex;"><span>    (let ((key (read-key (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Select window [%s]: &#34;</span> (string-join window-keys <span style="color:#e6db74">&#34;, &#34;</span>)))))
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; Clear overlays and reset</span>
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">mapc</span> <span style="color:#a6e22e">#&#39;delete-overlay</span> my/quick-window-overlays)
+</span></span><span style="display:flex;"><span>      (setq my/quick-window-overlays <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; Select window based on key or show error</span>
+</span></span><span style="display:flex;"><span>      (when-let ((<span style="color:#a6e22e">selected-window</span> (<span style="color:#a6e22e">cdr</span> (<span style="color:#a6e22e">assoc</span> (<span style="color:#a6e22e">char-to-string</span> key) window-map))))
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">select-window</span> <span style="color:#a6e22e">selected-window</span>)))))
+</span></span></code></pre></div><hr>
+<h2 id="key-improvements">Key Improvements</h2>
+<ol>
+<li>
+<p><strong>Eliminating Redundancy</strong>
+By folding the <code>my/get-windows</code> functionality into <code>my/quick-window-jump</code>, the updated function is now self-contained. This reduces dependency on external helpers and makes the logic easier to follow.</p>
+</li>
+<li>
+<p><strong>Enhancing User Experience with Visual Overlays</strong>
+The use of temporary overlays provides immediate, intuitive feedback by displaying key mappings directly inside the appropriate windows. This reduces guesswork and makes navigation significantly faster.</p>
+<p>Each window is temporarily labeled with a key, using the following visual attributes:</p>
+<ul>
+<li><strong>Foreground:</strong> White for contrast.</li>
+<li><strong>Background:</strong> Blue for prominence.</li>
+<li><strong>Bold Font:</strong> For easy readability.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2 id="why-these-changes-matter">Why These Changes Matter</h2>
+<p>Well I guess they don&rsquo;t really, it&rsquo;s just for me and its just for fun! 😀</p>
+<ol>
+<li>
+<p><strong>Reduced Mental Burden:</strong> The new approach lets users navigate windows without having to remember or deduce key-to-window mappings. Visual feedback ensures immediate understanding of the layout.</p>
+</li>
+<li>
+<p><strong>Improved Modularity:</strong> By embedding all functionality into a single function and handling cleanup directly, the updated implementation is more modular and self-contained.</p>
+</li>
+<li>
+<p><strong>Enhanced Readability and Maintainability:</strong> Fewer moving parts and a more streamlined design make the function easier to maintain or extend in the future.</p>
+</li>
+</ol>

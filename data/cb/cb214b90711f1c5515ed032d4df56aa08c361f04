@@ -1,0 +1,158 @@
+<p>For many years most Emacs users used <code class="language-plaintext highlighter-rouge">setq</code> to set the various configuration options of
+Emacs and the packages that they were using. This probably wasn’t the best option (read on),
+but it was the most popular way of doing things. Now, however, it’s finally time for a change!<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<h2 id="why-do-we-need-setopt">Why do we need setopt?</h2>
+
+<p>In Emacs 29, a new macro <code class="language-plaintext highlighter-rouge">setopt</code> was introduced to provide a more appropriate method for setting user options (variables defined with <code class="language-plaintext highlighter-rouge">defcustom</code>).</p>
+
+<p>As mentioned above, traditionally, Emacs users have employed <code class="language-plaintext highlighter-rouge">setq</code> to assign values to variables. However, <code class="language-plaintext highlighter-rouge">setq</code> does not invoke any custom setter functions associated with user options, which can lead to unexpected behavior. Here’s example of such a setter function from <code class="language-plaintext highlighter-rouge">copilot.el</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">copilot--lsp-settings-changed</span> <span class="p">(</span><span class="nc">symbol</span> <span class="nv">value</span><span class="p">)</span>
+  <span class="s">"Restart the Copilot LSP due to SYMBOL changed to VALUE.
+
+This function will be called by the customization framework when the
+`copilot-lsp-settings' is changed.  When changed with `setq', then this function
+will not be called."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">was-bound</span> <span class="p">(</span><span class="nb">boundp</span> <span class="nc">symbol</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">set-default</span> <span class="nc">symbol</span> <span class="nv">value</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">when</span> <span class="nv">was-bound</span>
+      <span class="c1">;; Notifying the agent with the new value does only work if we include the</span>
+      <span class="c1">;; last value (as nil) as well. For example, having the value</span>
+      <span class="c1">;; '(:github-enterprise (:uri "https://example2.ghe.com")) and setting it</span>
+      <span class="c1">;; to nil would require to send the value '(:github-enterprise (:uri nil))</span>
+      <span class="c1">;; to the server. Otherwise, the value is ignored, since sending nil is</span>
+      <span class="c1">;; not enough.</span>
+      <span class="p">(</span><span class="nv">copilot--start-agent</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nv">defcustom</span> <span class="nv">copilot-lsp-settings</span> <span class="no">nil</span>
+  <span class="s">"Settings for the Copilot LSP server.
+
+This value will always be sent to the server when the server starts or the value
+changes.  See
+https://github.com/github/copilot-language-server-release?tab=readme-ov-file#configuration-management
+for complete documentation.
+
+To change the value of this variable, the customization framework provided by
+Emacs must be used.  Either use `setopt' or `customize' to change the value.  If
+the value was set without the customization mechanism, then the LSP has to be
+manually restarted with `copilot-diagnose'.  Otherwise, the change will not be
+applied.
+
+For example to use GitHub Enterprise use the following configuration:
+ '(:github-enterprise (:uri \"https://example.ghe.com\"))
+
+Exchange the URI with the correct URI of your organization."</span>
+  <span class="ss">:set</span> <span class="nf">#'</span><span class="nv">copilot--lsp-settings-changed</span>
+  <span class="ss">:type</span> <span class="ss">'sexp</span>
+  <span class="ss">:group</span> <span class="ss">'copilot</span>
+  <span class="ss">:package-version</span> <span class="o">'</span><span class="p">(</span><span class="nv">copilot</span> <span class="o">.</span> <span class="s">"0.2"</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>In case it’s not obvious - the important thing is the <code class="language-plaintext highlighter-rouge">:set</code> property of <code class="language-plaintext highlighter-rouge">copilot-lsp-settings</code>.
+Basically, every time this option is changed, a callback function should be invoked, but this won’t
+happen if you make the change using <code class="language-plaintext highlighter-rouge">setq</code>.</p>
+
+<p>The <code class="language-plaintext highlighter-rouge">setopt</code> macro addresses this by ensuring that when you set a user option,
+any associated setter functions are properly called, maintaining the integrity
+of the option’s behavior.</p>
+
+<p>Even more importantly for me - <code class="language-plaintext highlighter-rouge">setopt</code> also checks whether the value is valid
+for the user option. For instance, using <code class="language-plaintext highlighter-rouge">setopt</code> to set a user option defined
+with a number type to a string will signal an error.
+I’m pretty sure this will prevent a lot of (weird) configuration issues going forward! (and
+inspire more package authors to declare their <code class="language-plaintext highlighter-rouge">defcustom</code>s properly)</p>
+
+<p>Now let’s update a bit of legacy code to use <code class="language-plaintext highlighter-rouge">setopt</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">user-full-name</span> <span class="s">"Bozhidar Batsov"</span>
+      <span class="nv">user-mail-address</span> <span class="s">"bozhidar@emacsninja.com"</span><span class="p">)</span>
+
+<span class="c1">;; Always load newest byte code</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">load-prefer-newer</span> <span class="no">t</span><span class="p">)</span>
+
+<span class="c1">;; reduce the frequency of garbage collection by making it happen on</span>
+<span class="c1">;; each 50MB of allocated data (the default is on every 0.76MB)</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">gc-cons-threshold</span> <span class="mi">50000000</span><span class="p">)</span>
+
+<span class="c1">;; warn when opening files bigger than 100MB</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">large-file-warning-threshold</span> <span class="mi">100000000</span><span class="p">)</span>
+
+<span class="c1">;; quit Emacs directly even if there are running processes</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">confirm-kill-processes</span> <span class="no">nil</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This will be become:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setopt</span> <span class="nv">user-full-name</span> <span class="s">"Bozhidar Batsov"</span>
+        <span class="nv">user-mail-address</span> <span class="s">"bozhidar@emacsninja.com"</span><span class="p">)</span>
+
+<span class="c1">;; Always load newest byte code</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">load-prefer-newer</span> <span class="no">t</span><span class="p">)</span>
+
+<span class="c1">;; reduce the frequency of garbage collection by making it happen on</span>
+<span class="c1">;; each 50MB of allocated data (the default is on every 0.76MB)</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">gc-cons-threshold</span> <span class="mi">50000000</span><span class="p">)</span>
+
+<span class="c1">;; warn when opening files bigger than 100MB</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">large-file-warning-threshold</span> <span class="mi">100000000</span><span class="p">)</span>
+
+<span class="c1">;; quit Emacs directly even if there are running processes</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">confirm-kill-processes</span> <span class="no">nil</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Pretty shocking, right?</p>
+
+<h2 id="when-to-use-what">When to Use What?</h2>
+
+<p>The introduction of <code class="language-plaintext highlighter-rouge">setopt</code> has sparked discussions within the Emacs community
+regarding the best practices for setting variables. Some users have expressed
+uncertainty about when to use <code class="language-plaintext highlighter-rouge">setq</code>, <code class="language-plaintext highlighter-rouge">customize-set-variable</code>, or the new
+<code class="language-plaintext highlighter-rouge">setopt</code>. My take on the subject is pretty simple:</p>
+
+<ul>
+  <li>Use <code class="language-plaintext highlighter-rouge">setopt</code> for user options to ensure that any custom setter functions are invoked.
+    <ul>
+      <li>It has shorter name then <code class="language-plaintext highlighter-rouge">customize-set-variable</code> and can be used to set multiple options just like <code class="language-plaintext highlighter-rouge">setq</code>.</li>
+      <li>Shows a warning when a configuration value does not match its <code class="language-plaintext highlighter-rouge">:type</code> specification.</li>
+      <li>Unlike <code class="language-plaintext highlighter-rouge">setq</code>, it does not complain when a variable is not declared. (which is quite normal when dealing with a lot of autoloaded packages)</li>
+    </ul>
+  </li>
+  <li>Use <code class="language-plaintext highlighter-rouge">setq</code> only for variables that are not defined in terms of <code class="language-plaintext highlighter-rouge">defcustom</code>.
+    <ul>
+      <li>Amusingly, <code class="language-plaintext highlighter-rouge">setopt</code> will work with regular variables as well, but it won’t be as efficient as <code class="language-plaintext highlighter-rouge">setq</code>. Not to mention using it in such a way will be super confusing!</li>
+    </ul>
+  </li>
+</ul>
+
+<p>The way I see it, unless you’re running an older Emacs version, and you’re not using
+<code class="language-plaintext highlighter-rouge">setopt</code> extensively in your Emacs config, you’re missing out!</p>
+
+<h2 id="further-reading">Further Reading</h2>
+
+<p>For more detailed discussions and perspectives on this topic, check out:</p>
+
+<ul>
+  <li><a href="https://www.reddit.com/r/emacs/comments/178em7u/why_was_setopt_introduced_in_emacs_29/">Reddit Thread: Why was <code class="language-plaintext highlighter-rouge">setopt</code> introduced in Emacs 29?</a></li>
+  <li><a href="https://emacs.stackexchange.com/questions/78419/im-unsure-which-option-to-use-for-setting-a-variable-setq-customize-set-variable">Emacs Stack Exchange: Which option to use for setting a variable</a></li>
+</ul>
+
+<p>Check out the <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Setting-Variables.html">official Emacs docs</a> on <code class="language-plaintext highlighter-rouge">setopt</code> as well.</p>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>I always knew that <code class="language-plaintext highlighter-rouge">setq</code> was flawed, but I kept using it for ages mostly because of inertia.
+I didn’t like the long name of <code class="language-plaintext highlighter-rouge">customize-set-variable</code> and I never use the <code class="language-plaintext highlighter-rouge">M-x customize</code>
+directly. I guess that’s why I rarely bothered to have setter callbacks in the packages that
+I wrote and maintain. Going forward I’ll certainly reconsider this.</p>
+
+<p>That’s all I have for you today. If you haven’t adopted <code class="language-plaintext highlighter-rouge">setopt</code> already, go wild and <code class="language-plaintext highlighter-rouge">setopt</code>
+all the things!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>How big of a change? Depends on whether you’re using <code class="language-plaintext highlighter-rouge">use-package</code> and how exactly are you using it! :D (in case you’re wondering - <code class="language-plaintext highlighter-rouge">:custom</code> settings are handled with <code class="language-plaintext highlighter-rouge">customize-set-variable</code> internally) <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

@@ -1,0 +1,79 @@
+<p>I spent quite a bit of time yesterday migrating from <a href="https://syncthing.net/">Syncthing</a> to <a href="https://github.com/bcpierce00/unison">Unison</a>.</p>
+<h2 id="why">Why</h2>
+<p>About six months ago, I decided to move away from Syncthing due to an ethical dilemma.</p>
+<p>Syncthing&rsquo;s usability is amazing, and I love the software. I am sad that I had to make the migration, but very happy that Unison exists and works great.</p>
+<h2 id="how-the-migration-went">How the migration went</h2>
+<p>It went smoothly (except one thing). Every operating system I have, including relatively rare ones like NetBSD, has the Unison package in their repo.</p>
+<p>I chose to use <a href="https://en.wikipedia.org/wiki/Spoke%E2%80%93hub_distribution_paradigm">hub-and-spoke</a> architecture where I have everything synced into a bucket (Hub) which is a NAS I have at home and every other machine just
+syncs everything to and from it.</p>
+<p>I have an Ansible playbook to configure my NAS so I just extended it with &ldquo;Install Unison&rdquo; task and that&rsquo;s it. I also added a few profiles to sync different things.</p>
+<h3 id="unison-profile">Unison Profile</h3>
+<p>A profile is just a configuration file that you can call <strong>anything.prf</strong> and put in your <code>~/.unison</code> folder on the client.</p>
+<p>In this file you can define your local folder, your remote folder you want to sync to/from (a folder on the Hub machine in my case) and add a few configuration options
+to tell Unison how to handle permissions, what files to sync or not to sync, etc.</p>
+<p>Looks like this:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-php" data-lang="php"><span style="display:flex;"><span><span style="color:#a6e22e">root</span> <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;/local/folder&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">root</span> <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34;ssh://remote-user@the-hub.local//home/remote-user/unison-sync&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">batch</span> <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">fastcheck</span> <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">times</span> <span style="color:#f92672">=</span> <span style="color:#66d9ef">true</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">owner</span> <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">group</span> <span style="color:#f92672">=</span> <span style="color:#66d9ef">false</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">perms</span> <span style="color:#f92672">=</span> <span style="color:#ae81ff">0</span>
+</span></span></code></pre></div><p>Now you can just call <strong>unison anything</strong> (&ldquo;anything&rdquo; is the profile name) and it will sync both roots defined in the profile.</p>
+<h3 id="simplicity">Simplicity</h3>
+<p>As you probably noticed it all works via SSH. There are other options but all my devices have SSH access anyway.
+This simplifies my mental model a lot. I just control the access as usual
+using SSH keys which I already do and Unison doesn&rsquo;t add a new layer of access control complexity.</p>
+<h2 id="android-difficulties-the-one-thing">Android difficulties (the one thing)</h2>
+<p>The migration to Unison was a bit tricky on my Android phone. I didn&rsquo;t even realise it would be an issue until I migrated all my machines and then opened my phone&rsquo;s Termux and typed:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>pkg install unison
+</span></span></code></pre></div><p>&hellip; and nothing happened. <strong>There is no Unison in Termux repos</strong>.</p>
+<p>Following <a href="https://github.com/termux/termux-packages/issues/129">this thread</a> I was able to compile this script to get OCaml and Unison source code and compile them both:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># These are probably already set in Termux but I&#39;ll set them just in case.</span>
+</span></span><span style="display:flex;"><span>export PREFIX<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;/data/data/com.termux/files/usr&#39;</span>
+</span></span><span style="display:flex;"><span>export HOME<span style="color:#f92672">=</span><span style="color:#e6db74">&#39;/data/data/com.termux/files/home&#39;</span>
+</span></span><span style="display:flex;"><span>export TMPDIR<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;</span>$HOME<span style="color:#e6db74">/tmp&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>mkdir -p $TMPDIR <span style="color:#75715e"># download and compile stuff in this folder</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Build OCaml first</span>
+</span></span><span style="display:flex;"><span>OCAML_VERSION<span style="color:#f92672">=</span>5.3.0
+</span></span><span style="display:flex;"><span>curl -L https://github.com/ocaml/ocaml/releases/download/<span style="color:#e6db74">${</span>OCAML_VERSION<span style="color:#e6db74">}</span>/ocaml-<span style="color:#e6db74">${</span>OCAML_VERSION<span style="color:#e6db74">}</span>.tar.gz -o <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/ocaml.tar.gz&#34;</span>
+</span></span><span style="display:flex;"><span>tar xzf <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/ocaml.tar.gz&#34;</span> -C <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>cd <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/ocaml-</span><span style="color:#e6db74">${</span>OCAML_VERSION<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Seems like we need -Wno-error=implicit-function-declaration during the configuration process</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># otherwise it won&#39;t compile.</span>
+</span></span><span style="display:flex;"><span>sh ./configure --prefix<span style="color:#f92672">=</span>$PREFIX --disable-warn-error --without-afl LDFLAGS<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;-landroid-shmem&#34;</span> CFLAGS<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;-Wno-error=implicit-function-declaration&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Same -Wno-error=implicit-function-declaration during the compilation process</span>
+</span></span><span style="display:flex;"><span>make world CFLAGS<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;-Wno-error=implicit-function-declaration&#34;</span>
+</span></span><span style="display:flex;"><span>make install
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Build Unison second</span>
+</span></span><span style="display:flex;"><span>UNISON_VERSION<span style="color:#f92672">=</span>2.53.7
+</span></span><span style="display:flex;"><span>curl -L https://github.com/bcpierce00/unison/archive/v<span style="color:#e6db74">${</span>UNISON_VERSION<span style="color:#e6db74">}</span>.tar.gz -o <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/unison.tar.gz&#34;</span>
+</span></span><span style="display:flex;"><span>tar xzf <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/unison.tar.gz&#34;</span> -C <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>cd <span style="color:#e6db74">&#34;</span>$TMPDIR<span style="color:#e6db74">/unison-</span><span style="color:#e6db74">${</span>UNISON_VERSION<span style="color:#e6db74">}</span><span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Not sure if -Wno-error=implicit-function-declaration needed here but</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># I&#39;m gonna add it just in case</span>
+</span></span><span style="display:flex;"><span>make NATIVE<span style="color:#f92672">=</span>false CFLAGS<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;-Wno-error=implicit-function-declaration&#34;</span>
+</span></span><span style="display:flex;"><span>make NATIVE<span style="color:#f92672">=</span>false install
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># I don&#39;t want to keep source of both things I just compiled</span>
+</span></span><span style="display:flex;"><span>rm -rf $TMPDIR
+</span></span></code></pre></div><p>This worked. So now I have Unison on Android as well.</p>
+<p>Hopefully OCaml and Unison packages will both be available in Termux soon.</p>
+<h2 id="usability">Usability</h2>
+<p>Syncthing is very seamless usability wise. With Unison I have to manually trigger the sync process.
+I now have a couple of <a href="https://github.com/termux/termux-widget">Termux Widgets</a> that sync my phone with the Hub.</p>
+<p>There is a way to configure <strong>watch</strong> mechanism for Unison which I&rsquo;ll probably do later. I haven&rsquo;t decided yet if I want it or not.
+Somehow I find the fact that synchronisation magic happens only on my request very satisfying.</p>
+<h2 id="summary">Summary</h2>
+<p>So far I&rsquo;m pretty happy with it.</p>
+<p>My Hub is available everywhere thanks to Tailscale so I can sync things any time anywhere.</p>
+<p>Termux Widgets are pretty nice too. I had to change my workflow a bit but it&rsquo;s ok.</p>
+<p>I was very close to rolling my own set of bash scripts to sync my files but I&rsquo;m very happy I found about Unison.</p>
+<p>Another positive side effect that I&rsquo;ve noticed so far is that my Android phone&rsquo;s battery is holding the charge so much better. Usually by 3PM it is below 50% but right now it&rsquo;s 75%.</p>

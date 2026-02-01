@@ -1,0 +1,153 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/01/md-fixup-header-rb.7517.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+
+<p><a href="https://www.barebones.com/products/bbedit">BBEdit</a> has a cool feature called
+<a href="https://www.barebones.com/products/bbedit/benefitsexercise.html">Text Factories</a>
+for automating repetitive text transformations. When
+Younghart
+<a href="https://forum.brettterpstra.com/t/a-quick-markdown-fixup-update/4418/2">mentioned it on the forum</a>,
+it got me thinking.</p>
+
+<p>While I can&rsquo;t replicate the full power of Text Factories
+(which can chain multiple transformations, with all of
+BBEdit&rsquo;s power), I could at least add a flexible regex
+search-and-replace system to md-fixup.</p>
+
+<p>So that&rsquo;s what I built: a YAML-driven regex replacement
+engine that lets you define custom patterns that run as part
+of an <a href="https://github.com/ttscoff/md-fixup"><code class="language-plaintext highlighter-rouge">md-fixup</code></a> pass. It&rsquo;s not a replacement for Text
+Factories &mdash; it only does regex search and replace &mdash; but
+it offers a way to extend <code class="language-plaintext highlighter-rouge">md-fixup</code> with your own
+transformations.</p>
+
+<h2 id="how-it-works">How It Works</h2>
+
+<p>Replacements are defined in a YAML file and can be scoped to
+run before or after Markdown Fixup&rsquo;s built-in rules. Each
+replacement can optionally run inside code blocks or YAML
+frontmatter, giving you fine-grained control over where
+transformations happen.</p>
+
+<p>The replacement file lives in one of these locations
+(checked in order):</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">.md-fixup-replacements</code> in your current directory</li>
+  <li>
+    <p>The path specified in your config file&rsquo;s
+<code class="language-plaintext highlighter-rouge">replacements_file:</code> key</p>
+  </li>
+  <li><code class="language-plaintext highlighter-rouge">~/.config/md-fixup/replacements.yml</code> (or
+<code class="language-plaintext highlighter-rouge">$XDG_CONFIG_HOME/md-fixup/replacements.yml</code>)</li>
+</ul>
+
+<h2 id="setting-up-replacements">Setting Up Replacements</h2>
+
+<p>Here&rsquo;s a simple example that fixes double spaces and
+normalizes HTTP links:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">replacements</span><span class="pi">:</span>
+  <span class="pi">-</span> <span class="na">name</span><span class="pi">:</span> <span class="s2">"</span><span class="s">fix-double-spaces"</span>
+    <span class="na">pattern</span><span class="pi">:</span> <span class="s2">"</span><span class="nv">  </span><span class="s">+"</span>
+    <span class="na">replacement</span><span class="pi">:</span> <span class="s2">"</span><span class="nv"> </span><span class="s">"</span>
+    <span class="na">timing</span><span class="pi">:</span> <span class="s">after</span>
+    <span class="na">in_code_blocks</span><span class="pi">:</span> <span class="no">false</span>
+    <span class="na">in_frontmatter</span><span class="pi">:</span> <span class="no">false</span>
+
+  <span class="pi">-</span> <span class="na">name</span><span class="pi">:</span> <span class="s2">"</span><span class="s">normalize-http"</span>
+    <span class="na">pattern</span><span class="pi">:</span> <span class="s2">"</span><span class="s">http://"</span>
+    <span class="na">replacement</span><span class="pi">:</span> <span class="s2">"</span><span class="s">https://"</span>
+    <span class="na">timing</span><span class="pi">:</span> <span class="s">after</span></code></pre></div></div>
+
+<p>Each replacement has a few key properties:</p>
+
+<ul>
+  <li>
+    <p><strong>name</strong>: A human-readable identifier (useful for
+debugging)</p>
+  </li>
+  <li>
+    <p><strong>pattern</strong>: A Rust <code class="language-plaintext highlighter-rouge">regex</code> pattern (supports capture
+groups)</p>
+  </li>
+  <li>
+    <p><strong>replacement</strong>: The replacement string (use <code class="language-plaintext highlighter-rouge">$1</code>, <code class="language-plaintext highlighter-rouge">$2</code>,
+etc. for capture groups)</p>
+  </li>
+  <li>
+    <p><strong>timing</strong>: When to run&mdash;<code class="language-plaintext highlighter-rouge">before</code> or <code class="language-plaintext highlighter-rouge">after</code> the built-in
+rules</p>
+  </li>
+  <li>
+    <p><strong>in_code_blocks</strong>: If <code class="language-plaintext highlighter-rouge">true</code>, the pattern runs inside
+fenced code blocks</p>
+  </li>
+  <li>
+    <p><strong>in_frontmatter</strong>: If <code class="language-plaintext highlighter-rouge">true</code>, the pattern runs inside
+YAML frontmatter</p>
+  </li>
+</ul>
+
+<h2 id="a-more-complex-example">A More Complex Example</h2>
+
+<p>Here&rsquo;s one that swaps version numbers using capture groups:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">replacements</span><span class="pi">:</span>
+  <span class="pi">-</span> <span class="na">name</span><span class="pi">:</span> <span class="s2">"</span><span class="s">swap-version"</span>
+    <span class="na">pattern</span><span class="pi">:</span> <span class="s2">"</span><span class="s">(</span><span class="se">\\</span><span class="s">d+)</span><span class="se">\\</span><span class="s">.(</span><span class="se">\\</span><span class="s">d+)"</span>
+    <span class="na">replacement</span><span class="pi">:</span> <span class="s2">"</span><span class="s">$2.$1"</span>
+    <span class="na">timing</span><span class="pi">:</span> <span class="s">before</span></code></pre></div></div>
+
+<p>This would turn &ldquo;Version 1.2 is released&rdquo; into &ldquo;Version 2.1
+is released&rdquo;. The pattern captures two groups of digits
+separated by a dot, then swaps them in the replacement.
+Stupid example, of course (why would you ever do that?), but
+hopefully you get the idea.</p>
+
+<h2 id="controlling-replacements">Controlling Replacements</h2>
+
+<p>You can enable or disable replacements via your config file:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">width</span><span class="pi">:</span> <span class="m">80</span>
+<span class="na">replacements</span><span class="pi">:</span> <span class="no">true</span>
+<span class="na">replacements_file</span><span class="pi">:</span> <span class="s">~/my-replacements.yml</span>
+<span class="na">rules</span><span class="pi">:</span>
+  <span class="na">skip</span><span class="pi">:</span>
+    <span class="pi">-</span> <span class="s">wrap</span></code></pre></div></div>
+
+<p>Or use command-line flags:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Force enable</span>
+md-fixup <span class="nt">--replacements</span> file.md
+
+<span class="c"># Force disable</span>
+md-fixup <span class="nt">--no-replacements</span> file.md
+
+<span class="c"># Use a specific file</span>
+md-fixup <span class="nt">--replacement-file</span> ./custom.yml file.md</code></pre></div></div>
+
+<p>This regex replacement system is intentionally limited, and
+as mentioned, is no replacement for Text Factories. It only
+does regex search and replace, but it runs automatically as
+part of md-fixup&rsquo;s fixup pass, which means you can integrate
+custom transformations into your existing workflow without
+switching tools.</p>
+
+<p>If you need the full power of Text Factories, by all means
+use <a href="https://www.barebones.com/products/bbedit">BBEdit</a>. It&rsquo;s an amazing text editor. But if you just
+need a few regex replacements to run alongside Markdown
+Fixup&rsquo;s built-in rules, this might be exactly what you&rsquo;re
+looking for.</p>
+
+<p>Check out the latest version of <a href="https://github.com/ttscoff/md-fixup">Markdown Fixup on GitHub</a>.
+Find installation and usage instructions there!</p>
+
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115893841894623108">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Regex+Replacements+for+Markdown+Fixup%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F14%2Fregex-replacements-for-markdown-fixup%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F14%2Fregex-replacements-for-markdown-fixup%2F&text=Regex+Replacements+for+Markdown+Fixup&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F14%2Fregex-replacements-for-markdown-fixup%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17253235.gif" height="1" width="1"/>

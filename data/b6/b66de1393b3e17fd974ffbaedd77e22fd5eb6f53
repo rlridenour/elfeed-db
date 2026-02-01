@@ -1,0 +1,77 @@
+<p>Previously, <code>my/quick-window-jump</code> was geared mostly toward managing two or more windows. The behaviour was straightforward:</p>
+<ul>
+<li>If two windows were open, the function would directly jump to the other window.</li>
+<li>For more than two windows, a key selection interface would allow you to pick a window to switch to.</li>
+</ul>
+<p>However, the function didn’t handle a single-window scenario intelligently. A horizontal split from a single window is something I do very frequently, by frequently, I mean at least every minute! This split is currently bound to its own keybinding, but couldn&rsquo;t my <code>ace-window</code> defun clone do this? For example, I find that the transition from a single window to a split never happens vertically for me, so why not make <code>my/quick-window-jump</code> perform a horizontal split from a single window and then move the point to that window?</p>
+<p>In addition, it is very rare for me to vertically split into more than two columns. I could probably drop my current horizontal split keybinding now. If I do require another horizontal split, the default <code>C-x 3</code> is already bound to muscle memory.</p>
+<p>Lets take this function to the next level of convenience, with a very simple change, simply an extra (length window-list) and the relevant logic.</p>
+<p>Below is the updated implementation of <code>my/quick-window-jump</code>:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/quick-window-jump ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Jump to a window by typing its assigned character label.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">If there is only a single window, split it horizontally.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">If there are only two windows, jump directly to the other window.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (let* ((<span style="color:#a6e22e">window-list</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)))
+</span></span><span style="display:flex;"><span>    (cond
+</span></span><span style="display:flex;"><span>     <span style="color:#75715e">;; If there is only a single window, split it horizontally.</span>
+</span></span><span style="display:flex;"><span>     ((<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>) <span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span>      (split-window-horizontally)
+</span></span><span style="display:flex;"><span>      (other-window <span style="color:#ae81ff">1</span>)) <span style="color:#75715e">;; Move focus to the new window immediately after splitting.</span>
+</span></span><span style="display:flex;"><span>     <span style="color:#75715e">;; If there are only two windows, switch to the other one directly.</span>
+</span></span><span style="display:flex;"><span>     ((<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>) <span style="color:#ae81ff">2</span>)
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">select-window</span> (<span style="color:#a6e22e">other-window-for-scrolling</span>)))
+</span></span><span style="display:flex;"><span>     <span style="color:#75715e">;; Otherwise, present the key selection interface.</span>
+</span></span><span style="display:flex;"><span>     (<span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>      (let* ((my/quick-window-overlays <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>             (sorted-windows (<span style="color:#a6e22e">sort</span> <span style="color:#a6e22e">window-list</span>
+</span></span><span style="display:flex;"><span>                                   (lambda (w1 w2)
+</span></span><span style="display:flex;"><span>                                     (let ((edges1 (<span style="color:#a6e22e">window-edges</span> w1))
+</span></span><span style="display:flex;"><span>                                           (edges2 (<span style="color:#a6e22e">window-edges</span> w2)))
+</span></span><span style="display:flex;"><span>                                       (or (<span style="color:#a6e22e">&lt;</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                           (and (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2))
+</span></span><span style="display:flex;"><span>                                                (<span style="color:#a6e22e">&lt;</span> (cadr edges1) (cadr edges2))))))))
+</span></span><span style="display:flex;"><span>             (window-keys (seq-take <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;j&#34;</span> <span style="color:#e6db74">&#34;k&#34;</span> <span style="color:#e6db74">&#34;l&#34;</span> <span style="color:#e6db74">&#34;;&#34;</span> <span style="color:#e6db74">&#34;a&#34;</span> <span style="color:#e6db74">&#34;s&#34;</span> <span style="color:#e6db74">&#34;d&#34;</span> <span style="color:#e6db74">&#34;f&#34;</span>)
+</span></span><span style="display:flex;"><span>                                    (<span style="color:#a6e22e">length</span> sorted-windows)))
+</span></span><span style="display:flex;"><span>             (window-map (cl-pairlis window-keys sorted-windows)))
+</span></span><span style="display:flex;"><span>        (setq my/quick-window-overlays
+</span></span><span style="display:flex;"><span>              (<span style="color:#a6e22e">mapcar</span> (lambda (entry)
+</span></span><span style="display:flex;"><span>                        (let* ((key (<span style="color:#a6e22e">car</span> entry))
+</span></span><span style="display:flex;"><span>                               (window (<span style="color:#a6e22e">cdr</span> entry))
+</span></span><span style="display:flex;"><span>                               (start (<span style="color:#a6e22e">window-start</span> window))
+</span></span><span style="display:flex;"><span>                               (overlay (<span style="color:#a6e22e">make-overlay</span> start start (<span style="color:#a6e22e">window-buffer</span> window))))
+</span></span><span style="display:flex;"><span>                          (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;after-string</span>
+</span></span><span style="display:flex;"><span>                                       (<span style="color:#a6e22e">propertize</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;[%s]&#34;</span> key)
+</span></span><span style="display:flex;"><span>                                                   <span style="color:#e6db74">&#39;face</span> <span style="color:#f92672">&#39;</span>(:foreground <span style="color:#e6db74">&#34;white&#34;</span> :background <span style="color:#e6db74">&#34;blue&#34;</span> :weight bold)))
+</span></span><span style="display:flex;"><span>                          (<span style="color:#a6e22e">overlay-put</span> overlay <span style="color:#e6db74">&#39;window</span> window)
+</span></span><span style="display:flex;"><span>                          overlay))
+</span></span><span style="display:flex;"><span>                      window-map))
+</span></span><span style="display:flex;"><span>        (let ((key (read-key (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Select window [%s]: &#34;</span> (string-join window-keys <span style="color:#e6db74">&#34;, &#34;</span>)))))
+</span></span><span style="display:flex;"><span>          (<span style="color:#a6e22e">mapc</span> <span style="color:#a6e22e">#&#39;delete-overlay</span> my/quick-window-overlays)
+</span></span><span style="display:flex;"><span>          (setq my/quick-window-overlays <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>          (when-let ((<span style="color:#a6e22e">selected-window</span> (<span style="color:#a6e22e">cdr</span> (<span style="color:#a6e22e">assoc</span> (<span style="color:#a6e22e">char-to-string</span> key) window-map))))
+</span></span><span style="display:flex;"><span>            (<span style="color:#a6e22e">select-window</span> <span style="color:#a6e22e">selected-window</span>))))))))
+</span></span></code></pre></div><p>The updated <code>my/quick-window-jump</code> function now adapts to any window configuration dynamically. Here is now an overview on how it now works:</p>
+<ol>
+<li>
+<p><strong>Single Window? Split It Automatically</strong></p>
+<ul>
+<li>If there’s only one window open, the function splits it horizontally and shifts focus to the new window.</li>
+</ul>
+</li>
+<li>
+<p><strong>Two Windows? Still Jump Directly</strong></p>
+<ul>
+<li>The behaviour for two windows remains unchanged. It efficiently switches focus to the other window directly without inefficiencies.</li>
+</ul>
+</li>
+<li>
+<p><strong>More Than Two Windows? Key Selection Interface</strong></p>
+<ul>
+<li>When multiple windows are open, the function presents the familiar key selection interface, allowing you to jump exactly where you intend.</li>
+</ul>
+</li>
+</ol>
+<p>Will there be more tweaks?, not sure, but this is the advantage of now creating my own defun for this piece of functionality!</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20241213115239-emacs--Emacs-core-window-jumping-between-two-windows.jpg" width="100%">
+</figure>

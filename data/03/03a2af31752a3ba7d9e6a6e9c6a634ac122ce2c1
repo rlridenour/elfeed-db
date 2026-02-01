@@ -1,0 +1,109 @@
+<div class="update" id="orgf693aec">
+<p>
+<span class="timestamp-wrapper"><time class="timestamp" datetime="2026-01-31">[2026-01-31 Sat]</time></span>: Fix flycheck-checkers.
+</p>
+
+</div>
+
+<p>
+After learning about French spellcheck and grammar checking from <a href="https://eeame-97718b.frama.io/jours/jour11/">Emacs expliqué à mes enfants</a>, I added <a href="https://github.com/milouse/flycheck-grammalecte">flycheck-grammalecte</a> to my config. Nudged by <a href="https://mastodon.zaclys.com/@lann/115974248832191444">@lann@mastodon.zaclys.com</a>, I finally got around to figuring out why my setup sometimes worked and sometimes didn't. When I checked <code>flycheck-verify-setup</code>, I noticed that grammalecte kept getting disabled. A little digging around showed me that it was getting disabled because of too many errors. That was because it was trying to work on my whole file instead of just the portion that I <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Narrowing.html">narrowed</a> to with <code>org-narrow-to-subtree</code> (ooh, just noticed an <code>org-toggle-narrow-to-subtree</code> command). I like having all of my French journal entries in one file because I can use <code>consult-line</code> (which I've bound to <code>M-g l</code>) to quickly look up examples of where else I've used a word. So I needed to define a checker that runs only on the narrowed part of the buffer.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-flycheck-grammalecte-buffer</span> (checker callback)
+  (<span class="org-keyword">let*</span> ((temp-file-name (make-temp-file <span class="org-string">"grammalecte"</span>))
+         (output-buffer (get-buffer-create temp-file-name))
+         (buffer (current-buffer))
+         (cmdline (delq nil <span class="org-highlight-quoted-quote">`</span>(<span class="org-string">"python3"</span>
+                              ,(expand-file-name <span class="org-string">"flycheck_grammalecte.py"</span>
+                                                 grammalecte&#45;&#45;site-directory)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-spellcheck <span class="org-string">"-S"</span>)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-grammar <span class="org-string">"-G"</span>)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-apos <span class="org-string">"-A"</span>)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-nbsp <span class="org-string">"-N"</span>)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-esp <span class="org-string">"-W"</span>)
+                              ,(<span class="org-keyword">unless</span> flycheck-grammalecte-report-typo <span class="org-string">"-T"</span>)
+                              (option-list <span class="org-string">"-f"</span> flycheck-grammalecte-filters)
+                              (eval (flycheck-grammalecte&#45;&#45;prepare-arg-list
+                                     <span class="org-string">"-f"</span> flycheck-grammalecte-filters-by-mode))
+                              (eval (flycheck-grammalecte&#45;&#45;prepare-arg-list
+                                     <span class="org-string">"-b"</span> flycheck-grammalecte-borders-by-mode))
+                              ,temp-file-name)))
+         (args (mapcan (<span class="org-keyword">lambda</span> (arg) (flycheck-substitute-argument arg checker)) cmdline))
+         (command (flycheck&#45;&#45;wrap-command (car args) (cdr args))))
+    (write-region (buffer-string) nil temp-file-name)
+    (make-process <span class="org-builtin">:name</span> <span class="org-string">"grammalecte"</span>
+                  <span class="org-builtin">:buffer</span> output-buffer
+                  <span class="org-builtin">:command</span> command
+                  <span class="org-builtin">:sentinel</span>
+                  (<span class="org-keyword">lambda</span> (process status)
+                    (<span class="org-keyword">let</span> ((errors (<span class="org-keyword">with-current-buffer</span> (process-buffer process)
+                                    (message <span class="org-string">"%s"</span> (buffer-string))
+                                    (flycheck-parse-with-patterns
+                                     (buffer-string)
+                                     checker
+                                     (current-buffer)))))
+                      (delete-file temp-file-name)
+                      (kill-buffer output-buffer)
+                      <span class="org-comment-delimiter">;; </span><span class="org-comment">offset</span>
+                      (funcall
+                       callback
+                       <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">finished</span>
+                       (<span class="org-keyword">let</span> ((offset (<span class="org-keyword">save-excursion</span> (goto-char (point-min))
+                                                     (line-number-at-pos nil t))))
+                         (mapcar
+                          (<span class="org-keyword">lambda</span> (err)
+                            (<span class="org-keyword">let</span> ((new-err (copy-flycheck-error err)))
+                              (<span class="org-keyword">setf</span> (cl-struct-slot-value <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">flycheck-error</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">buffer</span> new-err)
+                                    buffer)
+                              (<span class="org-keyword">setf</span> (cl-struct-slot-value <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">flycheck-error</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">line</span> new-err)
+                                    (+ (flycheck-error-line new-err)
+                                       offset -1))
+                              (<span class="org-keyword">setf</span> (cl-struct-slot-value <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">flycheck-error</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">-end-line</span> new-err)
+                                    (+ (flycheck-error-end-line new-err)
+                                       offset -1))
+                              new-err))
+                          errors))))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-flycheck-grammalecte-setup</span> ()
+  <span class="org-doc">"Build the flycheck checker, matching your taste."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">unless</span> (grammalecte&#45;&#45;version)
+    (advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">grammalecte-download-grammalecte</span> <span class="org-builtin">:after-while</span>
+                <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">flycheck-grammalecte&#45;&#45;retry-setup</span>))
+  (grammalecte&#45;&#45;augment-pythonpath-if-needed)
+  (flycheck-define-generic-checker <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-grammalecte-narrowed</span>
+    <span class="org-doc">"Report Grammalecte errors, but only for the narrowed section."</span>
+    <span class="org-builtin">:start</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-flycheck-grammalecte-buffer</span>
+    <span class="org-builtin">:modes</span> flycheck-grammalecte-enabled-modes
+    <span class="org-builtin">:predicate</span> (<span class="org-keyword">lambda</span> ()
+                 (<span class="org-keyword">if</span> (functionp flycheck-grammalecte-predicate)
+                     (funcall flycheck-grammalecte-predicate)
+                   t))
+    <span class="org-builtin">:enabled</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">grammalecte&#45;&#45;version</span>
+    <span class="org-builtin">:verify</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">flycheck-grammalecte&#45;&#45;verify-setup</span>)
+  (<span class="org-keyword">setf</span> (flycheck-checker-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-grammalecte-narrowed</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">error-patterns</span>)
+        (seq-map (<span class="org-keyword">lambda</span> (p)
+                   (cons (flycheck-rx-to-string <span class="org-highlight-quoted-quote">`</span>(<span class="org-keyword">and</span> ,@(cdr p))
+                                                <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">no-group</span>)
+                         (car p)))
+                 flycheck-grammalecte&#45;&#45;error-patterns))
+  (add-to-list <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">flycheck-checkers</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-grammalecte-narrowed</span>)
+  (flycheck-grammalecte&#45;&#45;patch-flycheck-mode-map))
+</code></pre>
+</div>
+
+
+<p>
+After I use <code>my-flycheck-grammalecte-setup</code>, I can use <code>flycheck-select-checker</code> to select <code>my-grammalecte-narrowed</code> and then use <code>flycheck-buffer</code> to run it. Then it will underline all the number/gender agreement issues I usually have. It's nice that I can practise editing my text with this script before I run the text through an LLM (also via flycheck) for feedback on wording.
+</p>
+
+
+<figure id="orgb6f1823">
+<a href="https://sachachua.com/blog/2026/01/emacs-and-french-focus-flycheck-grammalecte-on-the-narrowed-part-of-the-buffer/2026-01-30_22-20-20.png"><img src="https://sachachua.com/blog/2026/01/emacs-and-french-focus-flycheck-grammalecte-on-the-narrowed-part-of-the-buffer/2026-01-30_22-20-20.png" alt="2026-01-30_22-20-20.png"></a>
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot of grammalecte providing grammar feedback</figcaption>
+</figure>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#multimedia-learning-french">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/emacs-and-french-focus-flycheck-grammalecte-on-the-narrowed-part-of-the-buffer/index.org">View org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Femacs-and-french-focus-flycheck-grammalecte-on-the-narrowed-part-of-the-buffer%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

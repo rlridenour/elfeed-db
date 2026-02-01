@@ -1,0 +1,60 @@
+<p>I have improved my <code>trace-macroexpand</code> system so you can say, in effect &lsquo;trace the expansion of only the macros in the interface to a given package&rsquo;. This is a fairly useful thing.</p>
+<!-- more-->
+
+<p>Tracing macroexpansion in Common Lisp is a pretty useful thing to be able to do, in my experience. It is completely possible to do this in portable CL via <a href="https://www.lispworks.com/documentation/HyperSpec/Body/v_mexp_h.htm"><code>*macroexpand-hook*</code></a>: you simply put your tracing function on this hook, making sure it actually does expand the macro. <a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html#tracing-macroexpansion-trace-macroexpand"><code>trace-macroexpand</code></a> does just this, and lets you specify which macros you want to be traced.</p>
+
+<p>It has always allowed you to say &lsquo;trace all macros whose home package is this package&rsquo;. That&rsquo;s less useful than you might think:</p>
+
+<ul>
+ <li>it means that not only macros whose names are exported from the packqge are traced, but any macros in its guts are also traced, which generally a user of the package should not be interested in;</li>
+ <li>it <em>doesn&rsquo;t</em> trace macros which are exported from a package but whose home package is not that package.</li></ul>
+
+<p>Very often the second thing is exactly what you want: you want to be able to say &lsquo;let me see the expansion of macros in the public interface to this package, but I don&rsquo;t care about the internal details of it&rsquo;.</p>
+
+<p>It can now do exactly that.</p>
+
+<p><code>trace-macro-package</code> now takes a list of <em>package specifiers</em>. If a package specifier is a list of one or more other package specifiers, then it changes their meaning to be &lsquo;trace the exports of these packages only&rsquo;.</p>
+
+<p>Here is an example:</p>
+
+<pre class="brush: lisp"><code>&gt; (find-symbol "FOR" :org.tfeb.star)
+for
+:external
+
+&gt; (symbol-package *)
+#&lt;The ORG.TFEB.STAR/IMPL package, 188/512 internal, 6/16 external&gt;
+
+&gt; (trace-macroexpand t)
+nil
+
+&gt; (setf *trace-macroexpand-per-line-prefix* "| ")
+"| "
+
+&gt; (trace-macro-package :org.tfeb.star)
+("ORG.TFEB.STAR")
+
+&gt; (for ((_ (in-naturals 10))))
+nil
+
+&gt; (untrace-macro-package :org.tfeb.star)
+nil
+
+&gt; (trace-macro-package '(:org.tfeb.star))
+(("ORG.TFEB.STAR"))
+
+&gt; (for ((_ (in-naturals 10))))
+| (for (#))
+|  -&gt; (multiple-value-bind (#:&lt;v&gt;) 0 ...)
+nil</code></pre>
+
+<p>As well as this, both <code>trace-macro-package</code> and <code>untrace-macro-package</code> now <em>canonicalise</em> the specifiers they are given, which means, for instance that <code>(trace-macro-package '("FOO" "BAR"))</code> is exactly the same as <code>(trace-macro-package '("FOO") '("BAR"))</code>: this means that things like</p>
+
+<pre class="brush: lisp"><code>&gt; (trace-macro-package '("FOO" "BAR"))
+
+[...]
+
+&gt; (untrace-macro-package '("FOO"))</code></pre>
+
+<p>will work properly.</p>
+
+<p>This change is in version 10.9.0 of the <a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html">TFEB.ORG Lisp hax</a>, <a href="https://tfeb.org/computer/repos/tfeb-lisp-hax.git">git repo</a>.</p>

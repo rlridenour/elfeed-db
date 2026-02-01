@@ -1,0 +1,152 @@
+<p>Every 90 days my <a href="https://letsencrypt.org">letsencrypt</a> certificate
+expires and I renew it manually. I have to cut and paste data from the
+certbot script into repl forms to serve the right data on the right
+path and it&rsquo;s such a pain that sometimes I put it off until after it
+expires, and people email me about it, and I feel bad.</p>
+
+<p>The manual process looks something like this (not my actual domain or
+challenges):</p>
+
+<pre><code># certbot certonly --manual -d my.example.com
+
+Saving debug log to /var/log/letsencrypt/letsencrypt.log
+Plugins selected: Authenticator manual, Installer None
+Cert is due for renewal, auto-renewing...
+Renewing an existing certificate
+Performing the following challenges:
+http-01 challenge for my.example.com
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+NOTE: The IP of this machine will be publicly logged as having requested this
+certificate. If you're running certbot in manual mode on a machine that is not
+your server, please ensure you're okay with that.
+
+Are you OK with your IP being logged?
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+(Y)es/(N)o: y
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Create a file containing just this data:
+
+uaut.gj61B3f7oYQcWZSF4kxS4OFh8KQlsDVtPXrw60Tkj2JLW7RtZaVE0MIWwiEKRlxph7SaLwp1ETFjaGDUKN
+
+And make it available on your web server at this URL:
+
+<a href="http://my.example.com/.well-known/acme-challenge/SpZa7sf4QMEFoF7lKh7aT4EZjNWSVcur2jODPQkgExa">http://my.example.com/.well-known/acme-challenge/SpZa7sf4QMEFoF7lKh7aT4EZjNWSVcur2jODPQkgExa</a>
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Press Enter to Continue
+</code></pre>
+
+<p>There&rsquo;s no way that letsencrypt&rsquo;s certbot program will automatically
+get support for my custom hunchentoot &ldquo;framework&rdquo; and I don&rsquo;t really
+want to look into adding it myself.</p>
+
+<p>For a while I thought about writing some
+<a href="https://en.wikipedia.org/wiki/Expect">Expect</a> functionality in SBCL -
+<code>sb-ext:run-program</code> already supports a <code>:pty</code> option so it wouldn&rsquo;t
+be super-difficult. With a theoretical cl-expect you could spawn
+certbot with the right options, slurp out the verification secret and
+URL via the process&rsquo;s standard output stream, and call whatever code
+you need to serve the secret at that location.</p>
+
+<p>I realized today there&rsquo;s a halfway solution that takes the worst
+cutting and pasting out of the loop. The unix command <a href="http://man7.org/linux/man-pages/man1/script.1.html">script
+&ndash;flush</a> starts an
+interactive session where all input and output is saved to a file. My
+Lisp webserver can then read certbot program output from that file and
+configure the webserver automagically for me. I still have to manually
+start certbot and enter a few REPL commands, but it&rsquo;s easier than
+before.</p>
+
+<p>Here&rsquo;s the core of Lisp side of things for processing the <code>script</code>
+file:</p>
+
+<pre><code>(defun scrape-letsencrypt-interaction (file)
+  (let (secret path)
+    (with-open-file (stream file)
+      (labels (...)
+        (loop
+          (skip-past "Create a file containing")
+          (next-line)
+          (setf secret (read-trimmed-line))
+          (skip-past "make it available")
+          (next-line)
+          (setf path (substring-after ".well-known" (read-trimmed-line))))))))
+</code></pre>
+
+<p>This could be done just as well (perhaps with
+<a href="http://edicl.github.io/cl-ppcre/">cl-ppcre</a>, but I didn&rsquo;t want to
+pull it in as dependency.</p>
+
+<p>Here are the functions from <code>labels</code>:</p>
+
+<pre><code>((next-line ()
+   (let ((line (read-line stream nil)))
+     (when (null line)
+       (unless (and secret path)
+     (error "Didn't find a secret and path anywhere in ~S"
+            file))
+       (return-from scrape-letsencrypt-interaction
+         (values secret path)))
+     line))
+ (skip-past (string)
+   (loop
+     (let ((line (next-line)))
+       (when (search string line)
+         (return)))))
+ (read-trimmed-line ()
+   (string-trim '(#\Return)
+                (next-line)))
+ (substring-after (string target)
+   (let ((pos (search string target)))
+     (unless pos
+       (error "Could not find ~S in ~S" string target))
+     (subseq target pos))))
+</code></pre>
+
+<p>The goal here is to only look at the last secret and URL in the script
+output, so the main loop keeps track of what it&rsquo;s seen so far and
+<code>next-line</code> returns those values at EOF. The output also has ugly
+trailing <code>^M</code> noise so <code>read-trimmed-line</code> takes care of that.</p>
+
+<p>Here&rsquo;s the whole thing all together:</p>
+
+<pre><code>(defun scrape-letsencrypt-interaction (file)
+  (let (secret path)
+    (with-open-file (stream file)
+      (labels ((next-line ()
+                 (let ((line (read-line stream nil)))
+                   (when (null line)
+                     (unless (and secret path)
+                       (error "Didn't find a secret and path anywhere in ~S"
+                              file))
+                     (return-from scrape-letsencrypt-interaction
+                       (values secret path)))
+                   line))
+               (skip-past (string)
+                 (loop
+                   (let ((line (next-line)))
+                     (when (search string line)
+                       (return)))))
+               (read-trimmed-line ()
+                 (string-trim '(#\Return)
+                              (next-line)))
+               (substring-after (string target)
+                 (let ((pos (search string target)))
+                   (unless pos
+                     (error "Could not find ~S in ~S" string target))
+                   (subseq target pos))))
+        (loop
+          (skip-past "Create a file containing")
+          (next-line)
+          (setf secret (read-trimmed-line))
+          (skip-past "make it available")
+          (next-line)
+          (setf path (substring-after ".well-known" (read-trimmed-line))))))))
+</code></pre>
+
+<p>I don&rsquo;t mind shaving only half a yak when it feels like useful
+progress!</p>
+
+<p>Someday I&rsquo;ll get around to a proper Expect-like thing&hellip;</p>

@@ -1,0 +1,156 @@
+<p>
+I was curious about <a href="https://parakeettdt.com/">parakeet</a> because I heard that it was faster than Whisper on the <a href="https://huggingface.co/spaces/hf-audio/open_asr_leaderboard">HuggingFace leaderboard</a>. When I installed it and got it running on my laptop (CPU only, no GPU), it seemed like my results were a little faster than whisper.cpp with the large model, but much slower than whisper.cpp with the base model. The base model is decent for quick dictation, so I got curious about other backends and other models.
+</p>
+
+<p>
+In order to try <a href="https://github.com/natrys/whisper.el">natrys/whisper.el</a> with other backends, I needed to work around how whisper.el validates the model names and sends requests to the servers. Here's the quick and dirty code for doing so, in case you want to try it out for yourself.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper-url-format</span> <span class="org-string">"http://%s:%d/transcribe"</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper&#45;&#45;transcribe-via-local-server</span> ()
+  <span class="org-doc">"Transcribe audio using the local whisper server."</span>
+  (message <span class="org-string">"[-] Transcribing via local server"</span>)
+  (whisper&#45;&#45;setup-mode-line <span class="org-builtin">:show</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">transcribing</span>)
+  (whisper&#45;&#45;ensure-server)
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;transcribing-process
+        (whisper&#45;&#45;process-curl-request
+         (format my-whisper-url-format whisper-server-host whisper-server-port)
+         (list <span class="org-string">"Content-Type: multipart/form-data"</span>)
+         (list (concat <span class="org-string">"file=@"</span> whisper&#45;&#45;temp-file)
+               <span class="org-string">"temperature=0.0"</span>
+               <span class="org-string">"temperature_inc=0.2"</span>
+               <span class="org-string">"response_format=json"</span>
+               (concat <span class="org-string">"model="</span> whisper-model)
+               (concat <span class="org-string">"language="</span> whisper-language)))))
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper&#45;&#45;check-model-consistency</span> () t)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper&#45;&#45;ensure-server</span> () t)
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper</span>
+  (advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper&#45;&#45;transcribe-via-local-server</span> <span class="org-builtin">:override</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper&#45;&#45;transcribe-via-local-server</span>)
+  (advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper&#45;&#45;check-model-consistency</span> <span class="org-builtin">:override</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper&#45;&#45;check-model-consistency</span>)
+  (advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper&#45;&#45;ensure-server</span> <span class="org-builtin">:override</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper&#45;&#45;ensure-server</span>)
+  )
+</code></pre>
+</div>
+
+
+<p>
+Then I have this function for trying things out.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-test-whisper-api</span> (url <span class="org-type">&amp;optional</span> args)
+  (<span class="org-keyword">with-temp-buffer</span>
+    (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">call-process</span> <span class="org-string">"curl"</span> nil t nil <span class="org-string">"-s"</span>
+           url
+         (append (mapcan
+                  (<span class="org-keyword">lambda</span> (h) (list <span class="org-string">"-H"</span> h))
+                  (list <span class="org-string">"Content-Type: multipart/form-data"</span>))
+                 (mapcan
+                  (<span class="org-keyword">lambda</span> (h) (list <span class="org-string">"-F"</span> h))
+                  (list (concat <span class="org-string">"file=@"</span> whisper&#45;&#45;temp-file)
+                        <span class="org-string">"temperature=0.0"</span>
+                        <span class="org-string">"temperature_inc=0.2"</span>
+                        <span class="org-string">"response_format=verbose_json"</span>
+                        (concat <span class="org-string">"language="</span> whisper-language)))
+                 args))
+    (message <span class="org-string">"%s %s"</span> (buffer-string) url)))
+</code></pre>
+</div>
+
+
+<p>
+Here's the audio file. It is around 10 seconds long. I run the benchmark 3 times and report the average time.
+</p>
+
+<p>
+</p><div class="audio"><audio controls="1" preload="metadata" src="https://sachachua.com/blog/2026/01/emacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models/2026-01-19-14-17-53.wav" type="audio/x-wav"><a href="https://sachachua.com/blog/2026/01/emacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models/2026-01-19-14-17-53.wav">Download the audio</a></audio></div>
+<a href="https://sachachua.com/blog/2026/01/emacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models/2026-01-19-14-17-53.wav">Download</a>
+<p></p>
+
+<details><summary>Code for running the benchmarks</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orgca6b441"><code>(<span class="org-keyword">let</span> ((times <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">3</span>))
+(mapcar
+ (<span class="org-keyword">lambda</span> (group)
+   (<span class="org-keyword">let</span> ((whisper&#45;&#45;temp-file <span class="org-string">"/home/sacha/recordings/whisper/2026-01-19-14-17-53.wav"</span>))
+     <span class="org-comment-delimiter">;; </span><span class="org-comment">warm up the model</span>
+     (eval (cadr group))
+     (list
+      (format <span class="org-string">"%.3f"</span>
+              (/ (car
+                  (benchmark-call (<span class="org-keyword">lambda</span> () (eval (cadr group))) times))
+                 times))
+      (car group))))
+ <span class="org-highlight-quoted-quote">'</span>(
+   (<span class="org-string">"parakeet"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 5092)))
+   (<span class="org-string">"whisper.cpp base-q4_0"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/inference"</span> whisper-server-host 8642)))
+   (<span class="org-string">"speaches whisper-base"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 8001)
+     (list <span class="org-string">"-F"</span> <span class="org-string">"model=Systran/faster-whisper-base"</span>)))
+   (<span class="org-string">"speaches whisper-base.en"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 8001)
+     (list <span class="org-string">"-F"</span> <span class="org-string">"model=Systran/faster-whisper-base.en"</span>)))
+   (<span class="org-string">"speaches whisper-small"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 8001)
+     (list <span class="org-string">"-F"</span> <span class="org-string">"model=Systran/faster-whisper-small"</span>)))
+   (<span class="org-string">"speaches whisper-small.en"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 8001)
+     (list <span class="org-string">"-F"</span> <span class="org-string">"model=Systran/faster-whisper-small.en"</span>)))
+   (<span class="org-string">"speaches lorneluo/whisper-small-ct2-int8"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span> whisper-server-host 8001)
+     (list <span class="org-string">"-F"</span> <span class="org-string">"model=lorneluo/whisper-small-ct2-int8"</span>)))
+   <span class="org-comment-delimiter">;; </span><span class="org-comment">needed export TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1</span>
+   (<span class="org-string">"whisperx-server Systran/faster-whisper-small"</span>
+    (my-test-whisper-api
+     (format <span class="org-string">"http://%s:%d/transcribe"</span> whisper-server-host 8002)))))
+)
+</code></pre>
+</div>
+
+</details>
+
+<p>
+I tried it with:
+</p>
+<ul class="org-ul">
+<li><a href="https://parakeettdt.com/">parakeet</a></li>
+<li><a href="https://huggingface.co/ggerganov/whisper.cpp">whisper.cpp</a> (as <a href="https://github.com/natrys/whisper.el">whisper.el</a> sets it up)</li>
+<li><a href="https://github.com/speaches-ai/speaches">speaches</a>, which is a front-end for <a href="https://github.com/SYSTRAN/faster-whisper">faster-whisper</a>, and</li>
+<li><a href="https://codeberg.org/aryak/whisperx-server">whisperx-server</a>, which is a front-end for <a href="https://github.com/m-bain/whisperX">whisperx</a></li>
+</ul>
+
+<p>
+Looks like speaches + faster-whisper-base is the winner for now. I like how speaches lets me switch models on the fly, so maybe I can use base.en generally and switch to base when I want to try dictating in French. Here's how I've set it up to use the server I just set up.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> whisper-server-port 8001 whisper-model <span class="org-string">"Systran/faster-whisper-base.en"</span>
+      my-whisper-url-format <span class="org-string">"http://%s:%d/v1/audio/transcriptions"</span>)
+</code></pre>
+</div>
+
+
+<p>
+At some point, I'll override <code>whisper&#45;&#45;ensure-server</code> so that starting it up is smoother.
+</p>
+
+<p>
+Benchmark notes: I have a Lenovo P52 laptop (released 2018) with an Intel Core i7-8850H (6 cores, 12 threads; 2.6 GHz base / 4.3 GHz turbo) with 64GB RAM and an SSD. I haven't figured out how to get the GPU working under Ubuntu yet.
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-emacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/emacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KFERY839GS115F3J8Z6BNT1K" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Femacs-and-whisper-el-trying-out-different-speech-to-text-backends-and-models%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

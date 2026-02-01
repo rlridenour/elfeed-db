@@ -1,0 +1,81 @@
+<p><a href="https://github.com/abo-abo/swiper">Ivy</a> is great. I've been meaning to figure out a way to swap sources while running ivy. This would enable me to cycle through different sources using the existing search parameters.</p>
+<p>At first look, <em>'ivy-set-sources</em> seemed like the right choice, but it's used during setup to agregate sources. Subsequent <em>'ivy-set-sources</em> calls are ignored during an <em>'ivy-read</em> session.</p>
+<p>There's an ivy <a href="https://github.com/abo-abo/swiper/issues/606">feature request</a> over at github with a similar goal in mind. Although the feature is not yet supported, there's a handy suggestion to use <em>'ivy-quit-and-run</em> to quit the current command and run a different one.</p>
+<p>With <em>'ivy-quit-and-run</em> in mind, we can write our <em>'ar/ivy-read</em> function to take a list of sources and add a little logic to cycle through them using a keybiding, in my case &lt;left&gt; and &lt;right&gt;.</p>
+<pre><code class="language-{.commonlisp">;;; -*- lexical-binding: t; -*-
+
+(require 'cl)
+
+(cl-defstruct
+    ar/ivy-source
+  prompt
+  collection
+  action)
+
+(cl-defun ar/ivy-read (sources &amp;key index initial-input)
+  (let ((kmap (make-sparse-keymap))
+        (source))
+    (cl-assert (&gt; (length sources) 0))
+    (when (null index) (setq index 0))
+    (setq source (nth index sources))
+    (define-key kmap (kbd &quot;&lt;right&gt;&quot;) (lambda ()
+                                       (interactive)
+                                       (ivy-quit-and-run (ar/ivy-read sources
+                                                                      :index (if (&gt;= (1+ index)
+                                                                                     (length sources))
+                                                                                 0
+                                                                               (1+ index))
+                                                                      :initial-input ivy-text))))
+    (define-key kmap (kbd &quot;&lt;left&gt;&quot;) (lambda ()
+                                      (interactive)
+                                      (ivy-quit-and-run (ar/ivy-read sources
+                                                                     :index (if (&lt; (1- index)
+                                                                                   0)
+                                                                                (1- (length sources))
+                                                                              (1- index))
+                                                                     :initial-input ivy-text))))
+    (ivy-read (ar/ivy-source-prompt source)
+              (ar/ivy-source-collection source)
+              :action (ar/ivy-source-action source)
+              :initial-input initial-input
+              :keymap kmap)))
+
+(defun ar/ivy-food-menu ()
+  (interactive)
+  (ar/ivy-read (list
+                (make-ar/ivy-source :prompt &quot;Pizza: &quot;
+                                    :action (lambda (selection)
+                                              (message &quot;Selected pizza: %s&quot; selection))
+                                    :collection (lambda (str pred v)
+                                                  (list &quot;Bianca Neve - Mozzarella, Ricotta, Sausage, Extra Virgin Olive Oil, Basil&quot;
+                                                        &quot;Boscaiola - Mozzarella, Tomato Sauce, Sausage, Mushrooms, Extra Virgin Olive Oil, Basil&quot;
+                                                        &quot;Calzone - Ricotta, Ham, Mushrooms, Artichokes. Topped with Tomato Sauce and Extra Virgin Olive Oil.&quot;
+                                                        &quot;Capricciosa - Mozzarella,Tomato Sauce, Prosciutto Cotto Ham, Mushrooms, Artichokes, Extra Virgin Olive Oil.&quot;
+                                                        &quot;Carciofi - Mozzarella, Tomato Sauce, Artichokes, Extra Virgin Olive Oil, Basil.&quot;
+                                                        &quot;Diavola - Mozzarella, Tomato Sauce, Spicy Salami, Extra Virgin Olive Oil, Basil.&quot;
+                                                        &quot;Funghi - Mozzarella, Tomato Sauce, Mushrooms, Extra Virgin Olive Oil, Basil.&quot;)))
+                (make-ar/ivy-source :prompt &quot;Tacos: &quot;
+                                    :action (lambda (selection)
+                                              (message &quot;Selected taco: %s&quot; selection))
+                                    :collection (lambda (str pred v)
+                                                  (list &quot;Pork pibil - Slow cooked in citrus &amp; spices, with pink pickled onions.&quot;
+                                                        &quot;Grilled chicken &amp; avocado - Ancho rub, guacamole &amp; green tomatillo salsa.&quot;
+                                                        &quot;Plantain - Sweet &amp; spicy chipotle &amp; crumbled feta.&quot;
+                                                        &quot;Poblano pepper - Caramelised onions, corn &amp; cashew nut mole.&quot;
+                                                        &quot;Buttermilk chicken - Served crispy fried with habanero &amp; white onion relish &amp; spiced mayo.&quot;
+                                                        &quot;Sustainable battered cod - mSC certified cod with shredded slaw, chipotle mayo &amp; pickled cucumber.&quot;
+                                                        &quot;Chargrilled steak - Avocado &amp; chipotle salsas.&quot;)))
+                (make-ar/ivy-source :prompt &quot;Burgers: &quot;
+                                    :action (lambda (selection)
+                                              (message &quot;Selected burger: %s&quot; selection))
+                                    :collection (lambda (str pred v)
+                                                  (list &quot;The cheese - Aged beef patty with american cheese, gherkins, ketchup &amp; mustard.&quot;
+                                                        &quot;The yeah! - Aged beef patty with american cheese, gherkins, yeah! sauce &amp; salad.&quot;
+                                                        &quot;The yfc or hot yfc - Crispy chicken with lime or chipotle crema, lettuce, pickled onion &amp; slaw.&quot;
+                                                        &quot;The rancher - Grilled chicken with ranch dressing, bacon &amp; salad.&quot;
+                                                        &quot;The bubbah - Aged beef patty with smokey aubergine, pickled red cabbage, lettuce, roast toms, onions &amp; cheddar.&quot;
+                                                        &quot;The bulgogi - Sesame-spiced beef patty with miso mayo, pickled radish, onion, cucumber &amp; spring onion.&quot;
+                                                        &quot;The summer - Aged beef patty with sriracha mayo, lettuce, onion, toms, avo, cheddar &amp; bacon.&quot;))))))
+</code></pre>
+<p><img src="https://xenodium.github.io/images/swapping-emacs-ivy-collectionssources/ivy-cycle-sources.gif" alt=""></p>
+<p>ps. Menu data from <a href="https://starofkings.co.uk/food-and-drink/">Star of Kings</a>, <a href="https://www.wahaca.co.uk/menu/food/">Wahaca</a>, and <a href="https://pizzarino.us/menu">Pizzarino</a>.</p>

@@ -1,0 +1,395 @@
+<p>
+I like to draw sketchnotes when I want to untangle a thought or build up a thought over several posts.<sup><a id="fnr.shape-of-thought" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.shape-of-thought" role="doc-backlink">1</a></sup> Following up on <a href="https://sachachua.com/blog/2025/10/playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews/">Playing around with org-db-v3 and consult: vector search of my blog post Org files, with previews</a>, I want to be able to search my sketches using approximate text matches. I also want to have an approximate search interface that includes both sketches and blog posts.
+</p>
+
+<p>
+Here's what I've gotten working so far:
+</p>
+
+<div class="media-post" id="org2427186">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_20.07.47.webm" type="video/webm"><track kind="subtitles" label="Captions" src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_20.07.47.vtt" srclang="en" default=""><a href="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_20.07.47.webm">Download the video</a></video><figcaption><div>Screencast of my-sketch-similar and my-consult-similar</div></figcaption></figure>
+<p></p>
+
+<ul class="org-ul">
+<li><span class="audio-time" data-start="0.000" data-stop="27.959">0:00</span>: <b>Text preview</b>:
+All right, so here's a preview of how I can flip through the images that are similar to my current text. Let's say, for example, I've got my-sketch-similar. I'm passing in my whole blog post. This one is a text preview. It just very quickly goes through the OCR text.</li>
+
+<li><span class="audio-time" data-start="27.960" data-stop="51.259">0:27</span>: <b>Image preview</b>:
+I can use the actual images since Emacs has image support. It's a bit slower and sometimes it doesn't work. So far it's working, which is nice, but you can tell there's a bit of a delay.</li>
+
+<li><span class="audio-time" data-start="51.260" data-stop="72.059">0:51</span>: <b>External viewer like Geeqie</b>:
+The third option is to use an external program like <a href="https://www.geeqie.org/">Geeqie</a>. Geeqie? Anyway, that one seems a lot faster.</li>
+
+<li><span class="audio-time" data-start="72.060" data-stop="123.840">1:12</span>: <b>my-consult-similar</b>:
+Then I can use that with this new multiple source consult command that I've just defined. So, for example, if I say my-consult-similar, I can then flip through the related blog posts as well as the related sketches in one go. I was calling it with a C-u universal prefix argument, but I can also call it and type in, for example, parenting and anxiety. Then I can see my recent blog posts and sketches that are related to that topic. I think I should be able to just&hellip; Yes, if I press enter, it will insert the link. So that's what I hacked up today.</li>
+</ul>
+
+</div>
+<div id="outline-container-consult-org-db-v3-semantic-search-of-my-sketches-using-text-the-data" class="outline-3">
+<h3 id="consult-org-db-v3-semantic-search-of-my-sketches-using-text-the-data">The data</h3>
+<div class="outline-text-3" id="text-consult-org-db-v3-semantic-search-of-my-sketches-using-text-the-data">
+<p>
+As part of my sketchnote process,<sup><a id="fnr.process" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.process" role="doc-backlink">2</a></sup> I convert my sketches to text files.<sup><a id="fnr.my-image-recognize" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.my-image-recognize" role="doc-backlink">3</a></sup> I usually use <a href="https://cloud.google.com/vision/docs/ocr">Google Cloud Vision</a> to automatically convert the images to text. By keeping .txt files beside image files, I can easily search for images and include them in blog posts.<sup><a id="fnr.include-sketch" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.include-sketch" role="doc-backlink">4</a></sup> I usually edit the file afterwards to clean up the layound and fix misrecognized words, but even the raw text output can make files more searchable.
+</p>
+
+<p>
+I indexed the sketches' text files with:
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orgd576a14"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-db-v3-index-recent-sketches</span> (after)
+  (<span class="org-keyword">interactive</span> (list
+                (<span class="org-keyword">when</span> current-prefix-arg
+                  (org-read-date nil nil nil <span class="org-string">"After: "</span> nil <span class="org-string">"-2w"</span>))))
+  (<span class="org-keyword">setq</span> after (<span class="org-keyword">or</span> after (org-read-date nil nil <span class="org-string">"-2w"</span>)))
+  (mapcar <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">org-db-v3-index-file-async</span>
+          (seq-remove
+           (<span class="org-keyword">lambda</span> (o) (string&gt; after (file-name-base o)))
+           (directory-files <span class="org-string">"~/sync/sketches"</span> t <span class="org-string">"\\.txt$"</span>))))
+</code></pre>
+</div>
+
+
+<p></p>
+</div>
+</div>
+<div id="outline-container-consult-org-db-v3-semantic-search-of-my-sketches-using-text-completion-code" class="outline-3">
+<h3 id="consult-org-db-v3-semantic-search-of-my-sketches-using-text-completion-code">Completion code</h3>
+<div class="outline-text-3" id="text-consult-org-db-v3-semantic-search-of-my-sketches-using-text-completion-code">
+<p>
+Writing the Consult completion code for the sketches was pretty straightforward because I could base it on my blog posts.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org5daa2c1"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-db-v3-sketch&#45;&#45;collection</span> (input)
+  <span class="org-doc">"Perform the RAG search and format the results for Consult.</span>
+<span class="org-doc">Returns a list of cons cells (DISPLAY-STRING . PLIST)."</span>
+  (mapcar
+   (<span class="org-keyword">lambda</span> (o)
+     (cons (file-name-base (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> o)) o))
+   (seq-uniq
+    (my-org-db-v3-to-emacs-rag-search input 100 <span class="org-string">"%sync/sketches%"</span>)
+    (<span class="org-keyword">lambda</span> (a b) (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> a)
+                           (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> b))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-sketch-similar</span> (<span class="org-type">&amp;optional</span> query hide-initial)
+  <span class="org-doc">"Vector-search blog posts using `</span><span class="org-doc"><span class="org-constant">emacs-rag-search</span></span><span class="org-doc">' and present results via Consult.</span>
+<span class="org-doc">If called with \\[universal-argument</span><span class="org-doc"><span class="org-warning">\</span></span><span class="org-doc">], use the current post's text.</span>
+<span class="org-doc">If a region is selected, use that as the default QUERY.</span>
+<span class="org-doc">HIDE-INITIAL means hide the initial query, which is handy if the query is very long."</span>
+  (<span class="org-keyword">interactive</span> (my-11ty-interactive-context current-prefix-arg))
+  (consult&#45;&#45;read
+   (<span class="org-keyword">if</span> hide-initial
+       (my-org-db-v3-sketch&#45;&#45;collection query)
+     (consult&#45;&#45;dynamic-collection
+         <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-org-db-v3-sketch&#45;&#45;collection</span>
+       <span class="org-builtin">:min-input</span> 3 <span class="org-builtin">:debounce</span> 1))
+   <span class="org-builtin">:lookup</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult&#45;&#45;lookup-cdr</span>
+   <span class="org-builtin">:prompt</span> <span class="org-string">"Search sketches (approx): "</span>
+   <span class="org-builtin">:category</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">sketch</span>
+   <span class="org-builtin">:sort</span> nil
+   <span class="org-builtin">:require-match</span> t
+   <span class="org-builtin">:state</span> (my-image&#45;&#45;state)
+   <span class="org-builtin">:initial</span> (<span class="org-keyword">unless</span> hide-initial query)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-sketch-similar-insert</span> (link)
+  <span class="org-doc">"Vector-search sketches and insert a link.</span>
+<span class="org-doc">If called with \\[universal-argument</span><span class="org-doc"><span class="org-warning">\</span></span><span class="org-doc">], use the current post's text.</span>
+<span class="org-doc">If a region is selected, use that as the default QUERY.</span>
+<span class="org-doc">HIDE-INITIAL means hide the initial query, which is handy if the query is very long."</span>
+  (<span class="org-keyword">interactive</span> (list
+                (<span class="org-keyword">if</span> embark&#45;&#45;command
+                    (read-string <span class="org-string">"Sketch: "</span>)
+                  (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-sketch-similar</span>
+                         (my-11ty-interactive-context current-prefix-arg)))))
+  (my-insert-sketch-and-text link))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-sketch-similar-link</span> (link)
+  <span class="org-doc">"Vector-search sketches and insert a link.</span>
+<span class="org-doc">If called with \\[universal-argument</span><span class="org-doc"><span class="org-warning">\</span></span><span class="org-doc">], use the current post's text.</span>
+<span class="org-doc">If a region is selected, use that as the default QUERY.</span>
+<span class="org-doc">HIDE-INITIAL means hide the initial query, which is handy if the query is very long."</span>
+  (<span class="org-keyword">interactive</span> (list
+                (<span class="org-keyword">if</span> embark&#45;&#45;command
+                    (read-string <span class="org-string">"Sketch: "</span>)
+                  (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-sketch-similar</span>
+                         (my-11ty-interactive-context current-prefix-arg)))))
+  (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (listp link) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> link))
+    (<span class="org-keyword">setq</span> link (my-image-filename (file-name-base link))))
+  (insert (org-link-make-string (concat <span class="org-string">"sketchLink:"</span> link) (file-name-base link))))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+(From <a href="https://sachachua.com/dotemacs#org-mode-vector-search-consult-based-interface-for-searching-blog-posts-handle-sketches-too">Handle sketches too</a> in my config)
+</p>
+</div>
+</div>
+<div id="outline-container-consult-org-db-v3-semantic-search-of-my-sketches-using-text-previewing-images" class="outline-3">
+<h3 id="consult-org-db-v3-semantic-search-of-my-sketches-using-text-previewing-images">Previewing images</h3>
+<div class="outline-text-3" id="text-consult-org-db-v3-semantic-search-of-my-sketches-using-text-previewing-images">
+<p>
+Displaying images in Emacs can be a little bit slow, so I wanted to have different options for preview. The fastest way might be to preview just the text to see whether this is a relevant image.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> my-sketch-preview <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span>)
+</code></pre>
+</div>
+
+
+
+<figure id="org810ea22">
+<img src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_14-46-06.png" alt="2025-10-29_14-46-06.png">
+
+</figure>
+
+<p>
+Another way to preview to load the actual image, if I have a bit more patience.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> my-sketch-preview t)
+</code></pre>
+</div>
+
+
+
+<figure id="orgef1abba">
+<img src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_14-47-45.png" alt="2025-10-29_14-47-45.png">
+
+<figcaption><span class="figure-number">Figure 2: </span>Screenshot of image preview</figcaption>
+</figure>
+
+<p>
+Sometimes Consult says "No partial preview of a binary file", though, so I can probably look into how to get around that.
+</p>
+
+<p>
+Using an external program is another option. Here I have some code to use <a href="https://www.geeqie.org/">Geeqie</a> to display the images.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> my-sketch-preview <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">geeqie</span>)
+</code></pre>
+</div>
+
+
+
+<figure id="org59ce92a">
+<img src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_14-48-57.png" alt="2025-10-29_14-48-57.png">
+
+<figcaption><span class="figure-number">Figure 3: </span>Using Geeqie to flip through images</figcaption>
+</figure>
+
+<p>
+Using Geeqie feels faster and more reliable than using Emacs to preview images.
+</p>
+
+<p>
+The preview is implemented by the following function in the <a href="https://sachachua.com/dotemacs#completing-sketches">Completing sketches</a> part of my config.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orgb78ed7d"><code>(<span class="org-keyword">declare-function</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-geeqie-view</span> <span class="org-string">"Sacha.el"</span>)
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-sketch-preview</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span>
+  <span class="org-doc">"*Preview sketches.</span>
+<span class="org-doc">'text means show the associated text.</span>
+<span class="org-doc">'geeqie means open image in Geeqie.</span>
+<span class="org-doc">t means open image in Emacs."</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-image&#45;&#45;state</span> ()
+  <span class="org-doc">"Manage preview window and cleanup."</span>
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">These functions are closures captured when the state is initialized by consult&#45;&#45;read</span>
+  (<span class="org-keyword">let</span> ((preview (consult&#45;&#45;buffer-preview))
+        (open (consult&#45;&#45;temporary-files)))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">The returned lambda is the actual preview function called by Consult</span>
+    (<span class="org-keyword">lambda</span> (action cand)
+      (<span class="org-keyword">unless</span> cand
+        (funcall open))
+      (<span class="org-keyword">when</span> my-sketch-preview
+        (<span class="org-keyword">let</span> ((filename (<span class="org-keyword">cond</span>
+                         ((<span class="org-keyword">and</span> (eq my-sketch-preview <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span>)
+                               (listp cand)
+                               (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> cand))
+                          (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> cand))
+                         ((<span class="org-keyword">and</span> (listp cand)
+                               (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> cand))
+                          (my-image-filename (file-name-base (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> cand))))
+                         (t cand))))
+          (<span class="org-keyword">when</span> filename
+            (<span class="org-keyword">pcase</span> my-sketch-preview
+              (<span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">geeqie</span> (my-geeqie-view (list filename)))
+              (_ (funcall preview action
+                          (<span class="org-keyword">and</span> cand
+                               (eq action <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">preview</span>)
+                               (funcall open filename)))))))))))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+The following function calls geeqie. It's in the <a href="https://sachachua.com/dotemacs#manage-photos-with-geeqie">Manage photos with geeqie</a> part of my config.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org65362eb"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-geeqie-view</span> (filenames)
+  (<span class="org-keyword">interactive</span> <span class="org-string">"f"</span>)
+  (start-process-shell-command
+   <span class="org-string">"geeqie"</span> nil
+   (concat
+    <span class="org-string">"geeqie &#45;&#45;remote "</span>
+    (mapconcat
+     (<span class="org-keyword">lambda</span> (f)
+       (concat <span class="org-string">"file:"</span> (shell-quote-argument f)))
+     (<span class="org-keyword">cond</span>
+      ((listp filenames) filenames)
+      ((file-directory-p filenames)
+       (list (car (seq-filter <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">file-regular-p</span> (directory-files filenames t)))))
+      (t (list filenames)))
+     <span class="org-string">" "</span>))))
+</code></pre>
+</div>
+
+
+<p></p>
+</div>
+</div>
+<div id="outline-container-consult-org-db-v3-semantic-search-of-my-sketches-using-text-multiple-sources" class="outline-3">
+<h3 id="consult-org-db-v3-semantic-search-of-my-sketches-using-text-multiple-sources">Multiple sources</h3>
+<div class="outline-text-3" id="text-consult-org-db-v3-semantic-search-of-my-sketches-using-text-multiple-sources">
+<p>
+Now I can make a Consult source that combines both blog posts and sketches using semantic search. I wanted to have the same behaviour as my other functions. If I call it interactively, I want to type in text. If I call it with a region, I want to search for that region.  If I call it with the universal prefix argument <code>C-u</code>, I want to use the current post text as a starting point. Since this behaviour shows up in several functions, I finally got around to writing a function that encapsulates it.
+</p>
+
+<p>
+Then I can use that for the interactive arguments of my new <code>my-consult-similar</code> function.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org3da0104"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-consult-source-similar-blog-posts</span>
+  (list <span class="org-builtin">:name</span> <span class="org-string">"Blog posts"</span>
+        <span class="org-builtin">:narrow</span> ?b
+        <span class="org-builtin">:category</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-blog</span>
+        <span class="org-builtin">:state</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-blog-post&#45;&#45;state</span>
+        <span class="org-builtin">:async</span> (consult&#45;&#45;dynamic-collection
+                   (<span class="org-keyword">lambda</span> (input)
+                     (seq-take
+                      (my-org-db-v3-blog-post&#45;&#45;collection input)
+                      5)))
+        <span class="org-builtin">:action</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-embark-blog-insert-link</span>))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-consult-source-similar-sketches</span>
+  (list <span class="org-builtin">:name</span> <span class="org-string">"Sketches"</span>
+        <span class="org-builtin">:narrow</span> ?s
+        <span class="org-builtin">:category</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">sketch</span>
+        <span class="org-builtin">:async</span> (consult&#45;&#45;dynamic-collection
+                   (<span class="org-keyword">lambda</span> (input)
+                     (seq-take (my-org-db-v3-sketch&#45;&#45;collection input) 5)))
+        <span class="org-builtin">:state</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-image&#45;&#45;state</span>
+        <span class="org-builtin">:action</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-insert-sketch-and-text</span>))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-consult-similar</span> (query hide-initial)
+  (<span class="org-keyword">interactive</span> (my-11ty-interactive-context current-prefix-arg))
+  (<span class="org-keyword">if</span> hide-initial
+      (<span class="org-keyword">let</span> ((new-sources
+             (list
+              (append
+               (copy-sequence my-consult-source-similar-blog-posts)
+               (list <span class="org-builtin">:items</span> (seq-take (my-org-db-v3-blog-post&#45;&#45;collection query) 5)))
+              (append
+               (copy-sequence my-consult-source-similar-sketches)
+               (list <span class="org-builtin">:items</span> (seq-take (my-org-db-v3-sketch&#45;&#45;collection query) 5))))))
+        (<span class="org-keyword">dolist</span> (source new-sources)
+          (<span class="org-keyword">cl-remf</span> source <span class="org-builtin">:async</span>))
+        (consult&#45;&#45;multi new-sources))
+    (consult&#45;&#45;multi <span class="org-highlight-quoted-quote">'</span>(my-consult-source-similar-blog-posts
+                      my-consult-source-similar-sketches)
+                    <span class="org-builtin">:initial</span> query)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-db-v3-index-recent-public</span> (after)
+  (<span class="org-keyword">interactive</span> (list
+                (<span class="org-keyword">when</span> current-prefix-arg
+                  (org-read-date nil nil nil <span class="org-string">"After: "</span> nil <span class="org-string">"-2w"</span>))))
+  (<span class="org-keyword">setq</span> after (<span class="org-keyword">or</span> after (org-read-date nil nil <span class="org-string">"-2w"</span>)))
+  (mapc <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">org-db-v3-index-file-async</span>
+        (my-blog-org-files-except-reviews after))
+  (my-org-db-v3-index-recent-sketches after))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+This is what it looks like given this whole post:
+</p>
+
+
+<figure id="org88eaf05">
+<img src="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/2025-10-29_14-36-24.png" alt="2025-10-29_14-36-24.png">
+
+<figcaption><span class="figure-number">Figure 4: </span>Screenshot of semantic search for both blog posts and sketches</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-consult-org-db-v3-semantic-search-of-my-sketches-using-text-thoughts-and-next-steps" class="outline-3">
+<h3 id="consult-org-db-v3-semantic-search-of-my-sketches-using-text-thoughts-and-next-steps">Thoughts and next steps</h3>
+<div class="outline-text-3" id="text-consult-org-db-v3-semantic-search-of-my-sketches-using-text-thoughts-and-next-steps">
+<p>
+The vector search results from my sketches don't feel as relevant as the blog posts, possibly because there's a lot less text in my sketches. Handwriting is tiring, and I can only fit so much on a page. Still, now that I'm sorting results by similarity score, maybe we'll see what we get and how we can tweak things..
+</p>
+
+<p>
+It might be nifty to use <code>embark-become</code> to switch between exact title match, full-text search, and vector search.
+</p>
+
+<p>
+<code>plz</code> supports asynchronous requests and org-db-v3.el has examples of doing this, so maybe I can replicate some of <a href="https://github.com/zzkt/remembrance-agent">Remembrance Agent</a>'s functionality by having an <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Idle-Timers.html">idle timer</a> asynchronously update a dedicated buffer with resources that are similar to the current paragraph, or maybe the last X words near point.
+</p>
+
+<p>
+I wonder if it makes sense to mix results from different sources in the same list instead of splitting it up into different categories.
+</p>
+</div>
+</div>
+<div id="blog-2025-10-consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts-footnotes">
+<h3 class="footnotes">Footnotes</h3>
+<div id="blog-2025-10-consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts-text-footnotes">
+
+<div class="footdef"><sup><a id="fn.shape-of-thought" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.shape-of-thought" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://sachachua.com/blog/2025/07/finding-the-shape-of-my-thoughts/">Finding the shape of my thoughts</a>
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.process" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.process" role="doc-backlink">2</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://sachachua.com/blog/2023/01/recolor-rename-and-file-my-sketches-automatically/">Rename, recolor, and file my sketches automatically</a>
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.my-image-recognize" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.my-image-recognize" role="doc-backlink">3</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara"><a href="https://sachachua.com/dotemacs#keybindings-embark-converting-handwriting-to-text">Converting handwriting to text</a></p></div></div>
+
+<div class="footdef"><sup><a id="fn.include-sketch" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.include-sketch" role="doc-backlink">4</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara"><a href="https://sachachua.com/dotemacs#org-mode-writing-about-sketches-and-including-their-text">Writing about sketches and including their text</a></p></div></div>
+
+
+</div>
+</div><div><a href="https://sachachua.com/blog/2025/10/consult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts/index.org">View org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F10%2Fconsult-org-db-v3-approximate-search-of-my-sketches-using-text-and-a-multi-source-consult-command-for-approximately-searching-sketches-and-blog-posts%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

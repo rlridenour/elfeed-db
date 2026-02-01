@@ -1,0 +1,336 @@
+<p>I had a couple of SQL database queries that I wanted to improve. Instead of going my usual route of searching for the answer in <a href="https://www.sqlite.org/docs.html">SQLite’s documentation</a>, I decided to give ChatGPT a crack at it. I hoped that I would not only get better queries, but that I’d also learn something about SQL by studying the answers. It took a couple of tries, but I did end up with queries that work, and I think I know a little more SQL than I did before.</p>
+<p>I should say here that I’m sure I could have used Claude or any other LLM for this. ChatGPT was just the one that came to mind first, which is probably the way OpenAI likes it.</p>
+<h2>Background</h2>
+<p>The database at issue is one I’ve slowly built over the past couple of years to organize all of my technical books. It uses SQLite because I didn’t want to run a database server. The database has three tables: one with a record for each book, one with a record for each author, and one that ties the books and authors together. This structure is what’s most commonly recommended for a library. It uses the third table to handle the many-to-many relationship between books and authors—books can have more than one author and authors can write more than one book.</p>
+<p>Here are how the tables are defined. The <code>book</code> table is</p>
+<pre><code>CREATE TABLE IF NOT EXISTS "book" (
+"id" INTEGER UNIQUE PRIMARY KEY AUTOINCREMENT NOT NULL,
+"title" TEXT NOT NULL,
+"subtitle" TEXT,
+"volume" TEXT,
+"edition" TEXT,
+"publisher" TEXT,
+"published" TEXT,
+"lccn" TEXT,
+"loc" TEXT,
+"added" TEXT NOT NULL
+);
+</code></pre>
+<p>The <code>author</code> table is</p>
+<pre><code>CREATE TABLE IF NOT EXISTS "author" (
+"id" INTEGER UNIQUE NOT NULL PRIMARY KEY AUTOINCREMENT,
+"name" TEXT
+);
+</code></pre>
+<p>And the <code>book_author</code> table is</p>
+<pre><code>CREATE TABLE IF NOT EXISTS "book_author" (
+"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+"book_id" INTEGER,
+"author_id" INTEGER
+);
+</code></pre>
+<p>My goal is to have shell scripts that allow me to search the database by title or author so I can quickly find books on my shelves, which are organized by the <a href="https://en.wikipedia.org/wiki/Library_of_Congress_Classification">Library of Congress Classification number</a>. That’s the <code>loc</code> field in the <code>book</code> table.</p>
+<p>Because the main portion of each shell script will be the corresponding SQL query, that’s what I’ll be focusing on in the following sections.</p>
+<h2>Search by title</h2>
+<p>I do know a little SQL, so I started out with elementary queries. My original query for searching by title looked like this:</p>
+<pre><code>SELECT b.title, a.name, b.loc
+FROM book_author ba
+JOIN author a ON a.id = ba.author_id
+JOIN book b ON b.id = ba.book_id
+WHERE b.title LIKE '%string%'
+ORDER BY b.loc;
+</code></pre>
+<p>(The upper case is unnecessary, but that’s the way most people display SQL code.)</p>
+<p>The <code>'%string%'</code> in the last line is the placeholder for some portion of the title I’m looking for. The percent sign is SQL’s wildcard character. Using this query to search for titles with the word “planning” returns this:</p>
+<pre><code>Design and planning of engineering systems|Meredith, Dale Dean|TA168 .D48
+Design and planning of engineering systems|Wong, Kam W.|TA168 .D48
+Design and planning of engineering systems|Woodhead, Ronald W.|TA168 .D48
+Design and planning of engineering systems|Wortman, Robert H.|TA168 .D48
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing|TA340 .A5 (v. 1)
+Probability concepts in engineering planning and design|Tang, Wilson H.|TA340 .A5 (v. 1)
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing|TA340 .A5 (v. 2)
+Probability concepts in engineering planning and design|Tang, Wilson H.|TA340 .A5 (v. 2)
+</code></pre>
+<p>This works, inasmuch as it returns all the books that have “planning” in the title. But it returns eight answers when there are only three books. The <em>Design and planning…</em> book is returned four times because it has four co-authors. And both volumes of <em>Probability concepts…</em><sup id="fnref:ang"><a href="#fn:ang" rel="footnote">1</a></sup> are returned twice because they have two co-authors.</p>
+<p>On my own, I learned I could cut down on the repeats by adding a <code>GROUP BY</code> clause, like this:</p>
+<pre><code>SELECT b.title, a.name, b.loc
+FROM book_author ba
+inner JOIN author a ON a.id = ba.author_id
+inner JOIN book b ON b.id = ba.book_id
+WHERE b.title LIKE '%string%'
+GROUP BY b.id ORDER BY b.loc;
+</code></pre>
+<p>With this, a search for “planning” yields</p>
+<pre><code>Design and planning of engineering systems|Meredith, Dale Dean|TA168 .D48
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing|TA340 .A5 (v. 1)
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing|TA340 .A5 (v. 2)
+</code></pre>
+<p>which is an improvement, in that it returns only one entry per book. The downside is that grouping eliminates all but one author from the results.</p>
+<p>I lived with this for several months, and it wasn’t really a problem. The authors who were cut out of the results were the secondary authors,<sup id="fnref:book_id"><a href="#fn:book_id" rel="footnote">2</a></sup> and I typically knew books by their primary authors.</p>
+<p>But it was unsatisfactory. I knew there had to be a way to combine all the authors while still maintaining just one result for each book. This is where I decided to hand the problem over to ChatGPT.</p>
+<p>I gave ChatGPT the definitions of the three tables, just as I gave them above, and made this request:</p>
+<blockquote>
+<p>I want a query that will search for books whose titles contain a given word or phrase and returns the book’s title, loc, publisher, published, as well as the names of all its authors.</p>
+</blockquote>
+<p>ChatGPT’s response was</p>
+<pre><code>SELECT 
+ b.title, 
+ b.loc, 
+ b.publisher, 
+ b.published, 
+ GROUP_CONCAT(a.name, ', ') AS authors
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE b.title LIKE '%' || :search_term || '%'
+GROUP BY b.id;
+</code></pre>
+<p>which I turned into</p>
+<pre><code>SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE b.title LIKE '%string%'
+GROUP BY b.id ORDER by b.loc;
+</code></pre>
+<p>The edits were for the following reasons:</p>
+<ol>
+<li>I decided I didn’t really need the publication info.</li>
+<li>I wanted the output in a different order.</li>
+<li>The author names would be better separated by semicolons than by commas.</li>
+<li>I preferred my original order of the <code>JOIN</code>s.</li>
+<li>The <code>AS authors</code> part didn’t do anything.</li>
+<li>I had forgotten to tell ChatGPT that I wanted the output in LOC order.</li>
+</ol>
+<p>That may seem like a lot of changes, but it took almost no time, and what I ended up with was basically what I had before but with the key addition of the <a href="https://www.sqlite.org/lang_aggfunc.html#group_concat"><code>GROUP_CONCAT</code> aggregation function</a>, something I’d never seen before. But I’d used aggregation functions in <a href="https://pandas.pydata.org/docs/index.html">Pandas</a>,<sup id="fnref:history"><a href="#fn:history" rel="footnote">3</a></sup> so it was pretty easy to figure out how it worked.</p>
+<p>With this new query, my search for books with “planning” in the title returned</p>
+<pre><code>Design and planning of engineering systems|Meredith, Dale Dean; Wong, Kam W.; Woodhead, Ronald W.; Wortman, Robert H.|TA168 .D48
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing; Tang, Wilson H.|TA340 .A5 (v. 1)
+Probability concepts in engineering planning and design|Ang, Alfredo Hua-Sing; Tang, Wilson H.|TA340 .A5 (v. 2)
+</code></pre>
+<p>which has some pretty long lines, but contains all the information I want.</p>
+<p>Here’s the shell script, named <code>bytitle</code>, that uses this query:</p>
+<pre><code>bash:
+ 1:  #!/usr/bin/env bash
+ 2:  
+ 3:  n='%'$1'%'
+ 4:  
+ 5:  c=".mode line
+ 6:  SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+ 7:  FROM book_author ba
+ 8:  JOIN author a ON a.id = ba.author_id
+ 9:  JOIN book b ON b.id = ba.book_id
+10:  WHERE b.title LIKE '$n' GROUP BY b.id ORDER BY b.loc;"
+11:  
+12:  sqlite3 library.db &lt;&lt;&lt;$c | sed 's/.* = //'
+</code></pre>
+<p>Line 3 puts the argument between percent signs, so that’s what gets used in the <code>LIKE</code> clause on Line 10. Line 5 starts the commands we’re going to send to SQLite; it’s a <a href="https://www.sqlite.org/cli.html#special_commands_to_sqlite3_dot_commands_">dot command</a> that <a href="https://www.sqlite.org/cli.html#changing_output_formats">changes the output format</a> to put each field on it’s own line. Lines 6–10 is the query we’ve been talking about. Line 12 is the pipeline that runs the SQLite commands via a <a href="https://tldp.org/LDP/abs/html/x17837.html">here-string</a> and then uses <code>sed</code> to edit out the prefix stuff that <code>.mode line</code> creates.</p>
+<p>Running</p>
+<pre><code>bytitle planning
+</code></pre>
+<p>returns</p>
+<pre><code>Design and planning of engineering systems
+Meredith, Dale Dean; Wong, Kam W.; Woodhead, Ronald W.; Wortman, Robert H.
+TA168 .D48
+
+Probability concepts in engineering planning and design
+Ang, Alfredo Hua-Sing; Tang, Wilson H.
+TA340 .A5 (v. 1)
+
+Probability concepts in engineering planning and design
+Ang, Alfredo Hua-Sing; Tang, Wilson H.
+TA340 .A5 (v. 2)
+</code></pre>
+<p>which I find pretty easy to read.</p>
+<h2>Search by author</h2>
+<p>I won’t go through as much detail for this one. This was my original query:</p>
+<pre><code>SELECT b.title, a.name, b.loc
+FROM book_author ba
+JOIN author a ON a.id = ba.author_id
+JOIN book b on b.id = ba.book_id
+WHERE a.name LIKE '%string%'
+GROUP BY b.id ORDER BY b.loc;
+</code></pre>
+<p>Searching “gere” gave me</p>
+<pre><code>Theory of elastic stability|Gere, James M.|QA931 .T54 1961
+Mechanics of materials|Gere, James M.|TA405 .G44 1984
+Matrix analysis of framed structures|Gere, James M.|TA645 .W36 1980
+</code></pre>
+<p>which gives me all the books written by James Gere but, as with my original title searches, doesn’t give me any of the other authors of those books.</p>
+<p>My request to ChatGPT was</p>
+<blockquote>
+<p>Now I need a query for the same database that will search for books that have an author whose name contains a given string. I want the query to return the books’ loc, title, as well as the names of all its authors.</p>
+</blockquote>
+<p>and the response was</p>
+<pre><code>SELECT 
+ b.loc, 
+ b.title, 
+ GROUP_CONCAT(a.name, ', ') AS authors
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE a.name LIKE '%' || :search_term || '%'
+GROUP BY b.id;
+</code></pre>
+<p>which looked suspiciously like the query for title searching. I didn’t think it would work, and it didn’t. It returned exactly the same results as my original query above because the <code>WHERE</code> clause is finding only entries like “gere.” I was kind of happy that it didn’t work—that meant I was learning.</p>
+<p>I told ChatGPT that I was getting only one author for books that had multiple authors, and it came up with this alternative:</p>
+<pre><code>SELECT 
+ b.loc, 
+ b.title, 
+ GROUP_CONCAT(a.name, ', ') AS authors
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE b.id IN (
+ SELECT DISTINCT ba.book_id
+ FROM book_author ba
+ JOIN author a ON ba.author_id = a.id
+ WHERE a.name LIKE '%' || :search_term || '%'
+)
+GROUP BY b.id
+ORDER BY b.title;
+</code></pre>
+<p>I edited this to</p>
+<pre><code>SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+FROM book_author ba
+JOIN author a ON a.id = ba.author_id
+JOIN book b ON b.id = ba.book_id
+WHERE b.id IN (
+ SELECT ba.book_id
+ FROM book_author ba
+ JOIN author a ON a.id = ba.author_id
+ WHERE a.name LIKE '%string%'
+)
+GROUP BY b.id ORDER BY b.loc;
+</code></pre>
+<p>and now a search for “gere” returns</p>
+<pre><code>Theory of elastic stability|Timoshenko, Stephen; Gere, James M.|QA931 .T54 1961
+Mechanics of materials|Gere, James M.; Timoshenko, Stephen|TA405 .G44 1984
+Matrix analysis of framed structures|Weaver, William; Gere, James M.|TA645 .W36 1980
+</code></pre>
+<p>Same three books, of course, but now we see the other authors, and in two cases the other authors are primary, so it’s helpful to have them in the output.</p>
+<p>This version works because it first finds all the books that have “gere” in the author’s name and <em>then</em> concatenates the authors of each of those books. The initial query—or subquery—is the part in parentheses.</p>
+<p>The shell script that came from this, named <code>byauthor</code>, is this:</p>
+<pre><code>#!/usr/bin/env bash
+
+n='%'$1'%'
+
+c=".mode line
+SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+FROM book_author ba
+JOIN author a ON a.id = ba.author_id
+JOIN book b ON b.id = ba.book_id
+WHERE b.id IN (
+ SELECT ba.book_id
+ FROM book_author ba
+ JOIN author a ON a.id = ba.author_id
+ WHERE a.name LIKE '$n'
+)
+GROUP BY b.id ORDER BY b.loc;"
+
+sqlite3 library.db &lt;&lt;&lt;$c | sed 's/.* = //'
+</code></pre>
+<p>The only difference between this and <code>bytitle</code> is the query.</p>
+<h2>Searching by title and author</h2>
+<p>With my new SQL knowledge, I decided to tackle a new problem: a script that searches on both title and author, where the title is the first argument and the author is the second. No need for ChatGPT this time. The code for <code>bytitleauthor</code> is pretty obvious:</p>
+<pre><code>bash:
+ 1:  #!/usr/bin/env bash
+ 2:  
+ 3:  t='%'$1'%'
+ 4:  n='%'$2'%'
+ 5:  
+ 6:  c=".mode line
+ 7:  SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+ 8:  FROM book_author ba
+ 9:  JOIN author a ON a.id = ba.author_id
+10:  JOIN book b ON b.id = ba.book_id
+11:  WHERE b.title LIKE '$t'
+12:  AND b.id IN (
+13:   SELECT ba.book_id
+14:   FROM book_author ba
+15:   JOIN author a ON a.id = ba.author_id
+16:   WHERE a.name LIKE '$n'
+17:  )
+18:  GROUP BY b.id ORDER BY b.loc;"
+19:  
+20:  sqlite3 library.db &lt;&lt;&lt;$c | sed 's/.* = //'
+</code></pre>
+<h2>Finally</h2>
+<p>It’s not surprising that ChatGPT did better on these jobs than it did in <a href="https://leancrew.com/all-this/2023/06/chatgpt-and-beam-bending/">my previous test</a> of it. There is, presumably, an awful lot of SQL code in its training corpus, so it had a much better chance of getting a correct answer. Still, it had to try twice to get the author search right.</p>
+<p>Another thing that makes LLMs relatively successful in generating code has to do with our relationship to the answers. We can check the LLM’s code just as we would check our own: does it process the data correctly? If not, we can often see immediately what part of the LLM-generated code needs to be tweaked. Otherwise, we just have it roll the dice again. Either way, there’s a decent likelihood that we’ll end up satisfied, even if the LLM stumbled around.</p>
+<p>One thing I can’t judge about the SQL code in this post is how good it is. It works, but that doesn’t mean it’s the best or preferred way to make the query. If you’re an SQL expert and see something off in any of these queries, shoot me an email and set me right.</p>
+<div class="update">
+<p><strong>Update 23 Mar 2025 2:25 PM</strong> 
+I’ve been informed by someone on Mastodon whose posts cannot be linked that there’s value to the <code>AS authors</code> extension to the <code>GROUP_CONCAT</code> function, just not in my scripts as currently written.</p>
+<p>Sometimes you want the output to include field names. In those cases, renaming the concatenated names field to <code>authors</code> will make the output nicer. For example, if I issue a <code>.mode json</code> command and then run</p>
+<pre><code>SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE b.title LIKE '%planning%'
+GROUP BY b.id ORDER by b.loc;
+</code></pre>
+<p>I get</p>
+<pre><code>[
+ {
+  "title": "Design and planning of engineering systems",
+  "GROUP_CONCAT(a.name, '; ')": "Meredith, Dale Dean; Wong, Kam W.; Woodhead, Ronald W.; Wortman, Robert H.",
+  "loc": "TA168 .D48"
+ },
+ {
+  "title": "Probability concepts in engineering planning and design",
+  "GROUP_CONCAT(a.name, '; ')": "Ang, Alfredo Hua-Sing; Tang, Wilson H.",
+  "loc": "TA340 .A5 (v. 1)"
+ },
+ {
+  "title": "Probability concepts in engineering planning and design",
+  "GROUP_CONCAT(a.name, '; ')": "Ang, Alfredo Hua-Sing; Tang, Wilson H.",
+  "loc": "TA340 .A5 (v. 2)"
+ }
+]
+</code></pre>
+<p>The <code>GROUP_CONCAT(a.name, '; ')</code> field name is really clumsy. But if I run</p>
+<pre><code>SELECT b.title, GROUP_CONCAT(a.name, '; ') AS authors, b.loc
+FROM book b
+JOIN book_author ba ON b.id = ba.book_id
+JOIN author a ON ba.author_id = a.id
+WHERE b.title LIKE '%planning%'
+GROUP BY b.id ORDER by b.loc;
+</code></pre>
+<p>I get</p>
+<pre><code>[
+ {
+  "title": "Design and planning of engineering systems",
+  "authors": "Meredith, Dale Dean; Wong, Kam W.; Woodhead, Ronald W.; Wortman, Robert H.",
+  "loc": "TA168 .D48"
+ },
+ {
+  "title": "Probability concepts in engineering planning and design",
+  "authors": "Ang, Alfredo Hua-Sing; Tang, Wilson H.",
+  "loc": "TA340 .A5 (v. 1)"
+ },
+ {
+  "title": "Probability concepts in engineering planning and design",
+  "authors": "Ang, Alfredo Hua-Sing; Tang, Wilson H.",
+  "loc": "TA340 .A5 (v. 2)"
+ }
+]
+</code></pre>
+<p>which is much nicer. (For what it’s worth, I ran the JSON output through the <a href="https://jqlang.org/"><code>jq</code> command</a> to make it easier to read.)</p>
+<p>I expect to be doing exactly this in the not-too-distant future. I plan to move this system online and put a web interface in front of it. I like the idea of being able to get at the database from my phone when I’m in a used bookstore.</p>
+<p>Thanks, locked-down Mastodoner!</p>
+</div>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:ang">
+<p>These are two separate books. They have different subtitles, and the second was published nearly a decade after the first. I have a strong relationship with these books because Al Ang was my thesis advisor and Wilson Tang was on my defense committee. I used the books as both a student and a teacher. The second volume was still in galley form when I took the class that used it; we got photocopies of several chapters with handwritten edits on the pages. <a href="#fnref:ang" rev="footnote">↩</a></p>
+</li>
+<li id="fn:book_id">
+<p>In filling out the <code>book_author</code> table, I always entered records for a book in the order that the authors were given on the title page. <code>GROUP BY</code> kept the first one. <a href="#fnref:book_id" rev="footnote">↩</a></p>
+</li>
+<li id="fn:history">
+<p>Yes, I know Pandas got aggregation functions from SQL, not the other way around. But I learned them in Pandas first. <a href="#fnref:history" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

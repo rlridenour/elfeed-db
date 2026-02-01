@@ -1,0 +1,147 @@
+
+	
+<p>
+Spike detection in time series is essential to water treatment plant control. Spikes in SCADA data are events in the data stream of water treatment plants or similar installations. These spikes can indicate problems with the process and could result in an increased risk to public health. The WSAA <em>Health Based Targets Manual</em> specifies a series of decision rules to assess the performance of filtration processes. For example, this rule evaluates the performance of conventional filtration:</p>
+<blockquote>
+<p>Individual filter turbidity ≤ 0.2 NTU for 95% of the month and not &gt; 0.5 NTU for ≥ 15 consecutive minutes.</p>
+</blockquote>
+<p>
+<a href="https://lucidmanager.org/data-science/percentile-calculations/">Turbidity</a> is a measure for the cloudiness of fluid because of large numbers of individual particles otherwise invisible to the naked eye. Turbidity is an essential parameter in water treatment because a high level of cloudiness strongly correlates with the presence of microbes. This article uses the R language to show how to implement this specific decision rule.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Simulation
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>I first create a simulated SCADA feed for turbidity to create a minimum working example. The <em>turbidity</em> data frame contains 24 hours of data. The <a href="https://stat.ethz.ch/R-manual/R-devel/library/base/html/seq.POSIXt.html">seq.POSIXt()</a> function creates 24 hours of timestamps at a one-minute spacing. In addition, the <a href="https://www.rdocumentation.org/search?q=rnorm">rnorm()</a> function creates 1440 turbidity readings with an average of 0.1 NTU and a standard deviation of 0.01 NTU. The image below visualises the simulated data. The next step is to assess this data following the decision rule.</p>
+<p>
+<a href = "https://github.com/pprevos/r4h2o/" target="_blank"
+   title="Download r4h2o from GitHub"
+   alt="Download r4h2o from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">r4h2o</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Simulate turbidity data</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">set.seed</span>(<span style="color:#60e;font-weight:bold">1234</span>)
+</span></span><span style="display:flex;"><span>  turbidity <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data.frame</span>(DateTime <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">seq.POSIXt</span>(<span style="color:#06b;font-weight:bold">as.POSIXct</span>(<span style="background-color:#fff0f0">&#34;2017-01-01 00:00:00&#34;</span>),
+</span></span><span style="display:flex;"><span>                                                by <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;min&#34;</span>, length.out <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">24</span> <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">60</span>),
+</span></span><span style="display:flex;"><span>                          Turbidity <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rnorm</span>(n <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">24</span><span style="color:#333">*</span><span style="color:#60e;font-weight:bold">60</span>, mean <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.1</span>, sd <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.01</span>)
+</span></span><span style="display:flex;"><span>                          )</span></span></code></pre></div>
+</div>
+<p>
+The second section simulates five spikes in the data. The first line picks a random start time for the spike. The second line in the for-loop picks a duration between 10 and 30 minutes. In addition, the third line simulates the value of the spike. The mean value of the spike is determined by the <a href="https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/Binomial">rbinom()</a> function to create either a low or a high spike. The remainder of the spike simulation inserts the new data into the turbidity data frame.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Spike detection</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Simulate data</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">for</span> (i <span style="color:#080;font-weight:bold">in</span> <span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">5</span>) {
+</span></span><span style="display:flex;"><span>    time <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(turbidity<span style="color:#333">$</span>DateTime, <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>    duration <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">sample</span>(<span style="color:#60e;font-weight:bold">10</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">30</span>, <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>    value <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rnorm</span>(<span style="color:#60e;font-weight:bold">1</span>, <span style="color:#60e;font-weight:bold">0.5</span> <span style="color:#333">*</span> <span style="color:#06b;font-weight:bold">rbinom</span>(<span style="color:#60e;font-weight:bold">1</span>, <span style="color:#60e;font-weight:bold">1</span>, <span style="color:#60e;font-weight:bold">0.5</span>) <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">0.3</span>, <span style="color:#60e;font-weight:bold">0.05</span>)
+</span></span><span style="display:flex;"><span>    start <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">which</span>(turbidity<span style="color:#333">$</span>DateTime <span style="color:#333">==</span> time)
+</span></span><span style="display:flex;"><span>    turbidity<span style="color:#333">$</span>Turbidity[start<span style="color:#333">:</span>(start<span style="color:#333">+</span>duration <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>)] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rnorm</span>(duration, value, value<span style="color:#333">/</span><span style="color:#60e;font-weight:bold">10</span>)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggplot2)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>(turbidity, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> DateTime, y <span style="color:#333">=</span> Turbidity)) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_line</span>(size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.2</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_hline</span>(yintercept <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.5</span>, col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;red&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ylim</span>(<span style="color:#60e;font-weight:bold">0</span>,<span style="color:#06b;font-weight:bold">max</span>(turbidity<span style="color:#333">$</span>Turbidity)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_bw</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">10</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">ggtitle</span>(<span style="background-color:#fff0f0">&#34;Simulated SCADA data&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggsave</span>(<span style="background-color:#fff0f0">&#34;spikes.png&#34;</span>, width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">4</span>, height <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">3</span>)</span></span></code></pre></div>
+</div>
+<p>
+The image below visualises the simulated data using the mighty <a href="https://ggplot2.tidyverse.org/">ggplot2</a> package. Only four spikes are visible because two of them overlap. The next step is to assess this data following the decision rule.</p>
+<figure>
+<img src="https://lucidmanager.org/images/hydroinformatics/spikes.png" alt="Simulated turbidity spikes" title="Simulated turbidity spikes" width="500"/>
+<figcaption>
+Simulated turbidity spikes.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+SCADA Spike Detection
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The following code searches for all spikes over 0.50 NTU using the <a href="https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/rle">runlength function</a>. This function transforms a vector into a vector of values and lengths. For example, the run length of the vector <code class="verbatim">c(1, 1, 2, 2, 2, 3, 3, 3, 3, 5, 5, 6)</code> is:</p>
+<ul>
+<li><code class="verbatim">lengths: int [1:5] 2 3 4 2 1</code></li>
+<li><code class="verbatim">values : num [1:5] 1 2 3 5 6</code></li>
+</ul>
+<p>The value 1 has a length of 1. The value 2 has a length of 3, and so on. The spike detection code creates the run length for turbidity levels greater than 0.5, which results in a boolean vector. The <a href="https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/cumsum">cumsum</a> function calculates the starting point of each spike which allows us to calculate their duration.</p>
+<p>
+The code results in a data frame with all spikes higher than 0.50 NTU and longer than 15 minutes. The spike at 11:29 was higher than 0.50 NTU and lasted 24 minutes. The other three spikes are either lower than 0.50 NTU. The first high spike lasted less than 15 minutes.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Spike Detection Function</span>
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  spike.detect <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(DateTime, Value, Height, Duration) {
+</span></span><span style="display:flex;"><span>    runlength <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rle</span>(Value <span style="color:#333">&gt;</span> Height)
+</span></span><span style="display:flex;"><span>    spikes <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data.frame</span>(Spike <span style="color:#333">=</span> runlength<span style="color:#333">$</span>values,
+</span></span><span style="display:flex;"><span>                         times <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">cumsum</span>(runlength<span style="color:#333">$</span>lengths))
+</span></span><span style="display:flex;"><span>    spikes<span style="color:#333">$</span>Times <span style="color:#333">&lt;-</span> DateTime[spikes<span style="color:#333">$</span>times]
+</span></span><span style="display:flex;"><span>    spikes<span style="color:#333">$</span>Event <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">0</span>,spikes<span style="color:#333">$</span>Times[<span style="color:#60e;font-weight:bold">-1</span>] <span style="color:#333">-</span> spikes<span style="color:#333">$</span>Times[<span style="color:#333">-</span><span style="color:#06b;font-weight:bold">nrow</span>(spikes)])
+</span></span><span style="display:flex;"><span>    spikes <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">subset</span>(spikes, Spike <span style="color:#333">==</span> <span style="color:#080;font-weight:bold">TRUE</span> <span style="color:#333">&amp;</span> Event <span style="color:#333">&gt;</span> Duration)
+</span></span><span style="display:flex;"><span>    <span style="color:#080;font-weight:bold">return</span>(spikes)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">spike.detect</span>(turbidity<span style="color:#333">$</span>DateTime, turbidity<span style="color:#333">$</span>Turbidity, <span style="color:#60e;font-weight:bold">0.5</span>, <span style="color:#60e;font-weight:bold">15</span>)</span></span></code></pre></div>
+</div>
+<p>
+This approach was used for prototyping a <a href="https://issuu.com/australianwater/docs/water_journal_november_2015/64">software package</a> to assess water treatment plant data following the Health-Based Targets Manual. The finished product has been written in SQL and is available under an Open Source sharing license.</p>
+<p>
+The book <em>Data Science for Water Utilities</em> discusses <a href="https://lucidmanager.org/data-science/detecting-outliers-and-anomalies/">anomaly detection</a> in more detail.</p>
+<p>
+
+  <div class="box">
+    <div class="media">
+      <figure class="media-left">
+        <p class="image is-128x128">
+          <img src="https://lucidmanager.org/images/books/2023_ds4wu.jpg" alt = "Data Science for Water Utilities" title = "Data Science for Water Utilities">
+        </p>
+      </figure>
+      <div class="media-content">
+        <div class="content">
+          <p class="is-size-5 has-text-weight-bold">Data Science for Water Utilities</p>
+          <p class="mb-2">Data Science for Water Utilities published by CRC Press is an applied, practical guide that shows water professionals how to use data science to solve urban water management problems using the R language for statistical computing.</p>
+          <div class="buttons">
+            <a class="button is-info" href="https://routledge.com/9781032354545" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Routledge</span>
+            </a>
+            <a class="button is-info" href="https://www.amazon.com/Data-Science-Water-Utilities-Chapman/dp/1032354550" target="_blank">
+              <span class="icon">
+                <i class="fas fa-shopping-cart"></i>
+              </span>
+              <span>Amazon</span>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

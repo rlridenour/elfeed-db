@@ -1,0 +1,407 @@
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747924983220.png" alt="Claude Opus 4 and extended thinking with tools."><p class="image-caption">Claude Opus 4 and extended thinking with tools.</p></div>
+<p id="p2">For the past two days, I&rsquo;ve been testing an early access version of <a href="https://www.anthropic.com/claude/opus" rel="noopener noreferrer">Claude Opus 4</a>, the latest model by Anthropic that was just <a href="https://www.anthropic.com/news/claude-4" rel="noopener noreferrer">announced</a> today. You can read more about the model in <a href="URL" rel="noopener noreferrer">the official blog post</a> and find additional documentation <a href="https://www.anthropic.com/claude/opus" rel="noopener noreferrer">here</a>. What follows is a series of initial thoughts and notes based on the 48 hours I spent with Claude Opus 4, which I tested in both <a href="https://apps.apple.com/us/app/claude-by-anthropic/id6473753684" rel="noopener noreferrer">the Claude app</a> and <a href="https://docs.anthropic.com/en/docs/claude-code/overview" rel="noopener noreferrer">Claude Code</a>.</p>
+<p id="p3">For starters, Anthropic describes Opus 4 as its most capable hybrid model with improvements in coding, writing, and reasoning. I don&rsquo;t use AI for creative writing, but I have dabbled with &ldquo;vibe coding&rdquo; for a collection of personal <a href="https://obsidian.md" rel="noopener noreferrer">Obsidian</a> plugins (created and managed with Claude Code, following <a href="https://harper.blog/2025/05/08/basic-claude-code/" rel="noopener noreferrer">these tips by Harper Reed</a>), and I&rsquo;m especially interested in Claude&rsquo;s integrations with <a href="https://www.anthropic.com/news/research" rel="noopener noreferrer">Google Workspace</a> and <a href="https://docs.anthropic.com/en/docs/agents-and-tools/mcp" rel="noopener noreferrer">MCP</a> servers. (My favorite solution for MCP at the moment is <a href="https://zapier.com/mcp" rel="noopener noreferrer">Zapier</a>, which I&rsquo;ve been using for a long time for web automations.) So I decided to focus my tests on <strong>reasoning with integrations</strong> and some light experiments with the upgraded Claude Code in the macOS Terminal.</p>
+<p id="p4"><!--more--></p>
+<p id="p5">What I find most impressive about Opus 4 is the fact that <strong>extended thinking mode now works with tools</strong>. Specifically, the model is able to evaluate the responses of tool calls and reason over their output to adjust its strategy while following the user&rsquo;s instructions.<sup id="fnref-78519-directions"><a href="#fn-78519-directions" class="jetpack-footnote" rel="noopener noreferrer">1</a></sup> To evaluate the performance of Opus 4 against 3.7 Sonnet with extended thinking, I used an existing project of mine that:</p>
+<ul id="ul6"><li>Scans my Gmail inbox for messages that should be considered important with varying degrees of priority,</li>
+<li>Extracts their contents, and</li>
+<li>Saves each one as a new task in a specific Todoist project with details about the message and a deep-link to the conversation that I can reopen in <a href="https://superhuman.com" rel="noopener noreferrer">Superhuman</a>.</li>
+</ul><p id="p7">Here&rsquo;s the prompt I&rsquo;ve been using for this, formatted with XML delimiters based on Anthropic&rsquo;s prompt guidance:</p>
+<pre id="pre8"><code><span class="code-line">You are my intelligent email assistant specializing in prioritizing important messages that need attention. Your task is to analyze my Gmail inbox, identify truly important unreplied messages that require action, and create Todoist tasks for each important message.
+</span><span class="code-line">
+</span><span class="code-line">&lt;search_instructions&gt;
+</span><span class="code-line">CRITICAL: Search ONLY within my primary inbox (not archived messages).
+</span><span class="code-line">Use the search_gmail_messages tool with these specific parameters:
+</span><span class="code-line">- Use query "in:inbox is:unread" to find unread messages still in my inbox
+</span><span class="code-line">- Then use query "in:inbox -is:unread" to find read messages still in my inbox
+</span><span class="code-line">
+</span><span class="code-line">IMPORTANT - PAGINATION REQUIREMENTS:
+</span><span class="code-line">1. You MUST continue fetching results as long as a page_token is returned
+</span><span class="code-line">2. Make at least 5-7 search queries with pagination to ensure thorough coverage
+</span><span class="code-line">3. Examine AT LEAST 50-60 total inbox messages before concluding your search
+</span><span class="code-line">4. If a page_token is returned, ALWAYS use it to fetch the next page of results
+</span><span class="code-line">5. Only conclude your search when:
+</span><span class="code-line">   - You've examined at least 50 messages AND
+</span><span class="code-line">   - No more page_tokens are available OR
+</span><span class="code-line">   - You've found at least 15 important messages
+</span><span class="code-line">
+</span><span class="code-line">EFFICIENCY STRATEGY:
+</span><span class="code-line">1. First pass: Quickly scan ALL messages using snippets to identify potentially important ones
+</span><span class="code-line">2. Second pass: Only use read_gmail_thread for messages that appear important based on:
+</span><span class="code-line">   - Sender is a known contact or company executive
+</span><span class="code-line">   - Subject indicates a question, request, or time-sensitive matter
+</span><span class="code-line">   - Message is older than 3 days and appears unanswered
+</span><span class="code-line">3. Skip thread reading for obvious non-important messages (newsletters, automated emails, etc.)
+</span><span class="code-line">&lt;/search_instructions&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;importance_criteria&gt;
+</span><span class="code-line">RANK messages by importance (1=highest, 5=lowest):
+</span><span class="code-line">
+</span><span class="code-line">Priority 1 - URGENT ACTION REQUIRED:
+</span><span class="code-line">- Time-sensitive requests with deadlines within 48 hours
+</span><span class="code-line">- Messages from key contacts (Apple, major partners)
+</span><span class="code-line">- Legal or financial matters requiring immediate attention
+</span><span class="code-line">- Event confirmations or travel arrangements
+</span><span class="code-line">
+</span><span class="code-line">Priority 2 - BUSINESS CRITICAL:
+</span><span class="code-line">- Software releases, new programs, or beta invitations (excluding TestFlight emails)
+</span><span class="code-line">- Business partnership discussions or proposals
+</span><span class="code-line">- Customer complaints or support issues affecting revenue
+</span><span class="code-line">- Meeting requests from important contacts
+</span><span class="code-line">
+</span><span class="code-line">Priority 3 - PROFESSIONAL OPPORTUNITIES:
+</span><span class="code-line">- Industry contacts, developers, or press reaching out
+</span><span class="code-line">- Collaboration requests or interview invitations
+</span><span class="code-line">- Product review opportunities or early access offers
+</span><span class="code-line">- Speaking engagement or podcast invitations
+</span><span class="code-line">
+</span><span class="code-line">Priority 4 - RELATIONSHIP MAINTENANCE:
+</span><span class="code-line">- Messages from people you've corresponded with multiple times
+</span><span class="code-line">- Follow-up questions on ongoing projects
+</span><span class="code-line">- Messages waiting more than 5 days for response
+</span><span class="code-line">
+</span><span class="code-line">Priority 5 - GENERAL REQUESTS:
+</span><span class="code-line">- First-time contacts with legitimate questions
+</span><span class="code-line">- Feedback or suggestions about your work
+</span><span class="code-line">- Non-urgent scheduling requests
+</span><span class="code-line">&lt;/importance_criteria&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;exclusion_criteria&gt;
+</span><span class="code-line">AUTOMATICALLY EXCLUDE these message types:
+</span><span class="code-line">- Messages where you're only CC'd or BCC'd
+</span><span class="code-line">- Simple acknowledgments ("Thanks", "Got it", "Sounds good")
+</span><span class="code-line">- Threads where John Voorhees sent the last message with phrases like "Thanks" or mentions of "newsletter"
+</span><span class="code-line">- Automated emails from: TestFlight, App Store Connect (routine), GitHub, monitoring services
+</span><span class="code-line">- Marketing newsletters without personalized content
+</span><span class="code-line">- Social media notifications
+</span><span class="code-line">- Payment confirmations or receipts (unless disputed)
+</span><span class="code-line">- Calendar invitations you've already responded to
+</span><span class="code-line">- Threads where all questions have been definitively answered
+</span><span class="code-line">&lt;/exclusion_criteria&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;link_conversion&gt;
+</span><span class="code-line">After identifying important messages, convert all Gmail URLs to Superhuman deep links:
+</span><span class="code-line">
+</span><span class="code-line">1. Extract the thread ID from the Gmail message object (it's in the threadId field)
+</span><span class="code-line">2. Create the Superhuman deep link using the pattern: 
+</span><span class="code-line">   superhuman://viticci@macstories.net/thread/[THREAD_ID]
+</span><span class="code-line">3. IMPORTANT: Use the threadId, not the message ID, for better conversation context
+</span><span class="code-line">&lt;/link_conversion&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;todoist_integration&gt;
+</span><span class="code-line">CRITICAL MARKDOWN LINK REQUIREMENTS - YOU MUST FOLLOW THESE EXACTLY:
+</span><span class="code-line">
+</span><span class="code-line">&lt;markdown_link_format&gt;
+</span><span class="code-line">ALL TASK TITLES MUST BE FORMATTED AS CLICKABLE MARKDOWN LINKS. THIS IS MANDATORY.
+</span><span class="code-line">
+</span><span class="code-line">FORMAT: The 'content' field MUST ALWAYS use this exact Markdown syntax:
+</span><span class="code-line">[Action description](superhuman://viticci@macstories.net/thread/THREAD_ID)
+</span><span class="code-line">
+</span><span class="code-line">CORRECT EXAMPLES:
+</span><span class="code-line">&#9989; content: "[Review partnership proposal from Apple](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c123)"
+</span><span class="code-line">&#9989; content: "[URGENT: Respond to legal inquiry](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c456)"
+</span><span class="code-line">&#9989; content: "[Schedule meeting with developer](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c789)"
+</span><span class="code-line">
+</span><span class="code-line">INCORRECT EXAMPLES (NEVER DO THIS):
+</span><span class="code-line">&#10060; content: "Review partnership proposal from Apple"
+</span><span class="code-line">&#10060; content: "Review partnership proposal (superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c123)"
+</span><span class="code-line">&#10060; content: "Review partnership proposal - superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c123"
+</span><span class="code-line">
+</span><span class="code-line">VALIDATION: Before creating each task, verify:
+</span><span class="code-line">1. The content starts with '[' and contains '](' 
+</span><span class="code-line">2. The URL is inside parentheses immediately after the closing bracket
+</span><span class="code-line">3. There are NO spaces between ']' and '('
+</span><span class="code-line">4. The thread ID is included in the URL
+</span><span class="code-line">&lt;/markdown_link_format&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;multiple_links_handling&gt;
+</span><span class="code-line">WHEN A SINGLE TASK INVOLVES MULTIPLE MESSAGES:
+</span><span class="code-line">1. Create ONE task with the most important/recent message link in the title
+</span><span class="code-line">2. Add additional message links in the 'note' field using Markdown format
+</span><span class="code-line">3. Format additional links in notes as: "[Subject line](superhuman://viticci@macstories.net/thread/THREAD_ID)"
+</span><span class="code-line">
+</span><span class="code-line">EXAMPLE:
+</span><span class="code-line">content: "[Review multiple partnership inquiries](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c123)"
+</span><span class="code-line">note: "Priority: 2
+</span><span class="code-line">Additional related messages:
+</span><span class="code-line">- [Follow-up from Company X](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c456)
+</span><span class="code-line">- [Updated proposal from Company Y](superhuman://viticci@macstories.net/thread/18d4f5a6b8e9c789)"
+</span><span class="code-line">&lt;/multiple_links_handling&gt;
+</span><span class="code-line">
+</span><span class="code-line">TASK CREATION PARAMETERS
+</span><span class="code-line">project_id: 2353367065  (REQUIRED - "&#128229; Emails" project)
+</span><span class="code-line">content: [Action verb + description](superhuman://viticci@macstories.net/thread/[THREAD_ID])
+</span><span class="code-line">note: Concise 2-3 sentence summary including:
+</span><span class="code-line">  * Subject: [Subject line]
+</span><span class="code-line">  * From: [Sender name and email]
+</span><span class="code-line">  * Date: [Date received]
+</span><span class="code-line">  * Priority: [1-5 based on importance ranking]
+</span><span class="code-line">  * Additional links: [If multiple related messages]
+</span><span class="code-line">
+</span><span class="code-line">ERROR HANDLING PROTOCOL:
+</span><span class="code-line">- If date parsing fails: Remove date_string parameter and retry
+</span><span class="code-line">- If project assignment fails: Explicitly use project_id in retry
+</span><span class="code-line">- If content is too long: Shorten the description while keeping Markdown link format
+</span><span class="code-line">- After 2 failed attempts: Log the error and continue with next message
+</span><span class="code-line">- NEVER let one failed task stop the entire process
+</span><span class="code-line">
+</span><span class="code-line">TASK FORMATTING RULES:
+</span><span class="code-line">- ALWAYS use Markdown link format for the content field
+</span><span class="code-line">- Start with action verb when possible: "Review", "Respond to", "Schedule", "Complete"
+</span><span class="code-line">- Keep link text under 60 characters
+</span><span class="code-line">- Include urgency indicators for Priority 1-2 messages: "URGENT:", "TIME-SENSITIVE:"
+</span><span class="code-line">- Group related messages into single tasks when appropriate
+</span><span class="code-line">&lt;/todoist_integration&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;performance_optimization&gt;
+</span><span class="code-line">1. BATCH PROCESSING:
+</span><span class="code-line">   - Process messages in batches of 10
+</span><span class="code-line">   - Create all tasks for a batch before moving to next batch
+</span><span class="code-line">   - If encountering repeated errors, skip current batch
+</span><span class="code-line">
+</span><span class="code-line">2. SMART FILTERING:
+</span><span class="code-line">   - Skip messages from same sender if you've already created 3+ tasks for them
+</span><span class="code-line">   - Combine multiple messages about same topic into one task
+</span><span class="code-line">   - Prioritize recent messages (last 7 days) over older ones
+</span><span class="code-line">
+</span><span class="code-line">3. RESOURCE MANAGEMENT:
+</span><span class="code-line">   - Limit thread reads to 20 per session
+</span><span class="code-line">   - For threads with 10+ messages, only read last 3 messages
+</span><span class="code-line">   - Skip attachment analysis unless specifically mentioned in subject
+</span><span class="code-line">&lt;/performance_optimization&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;workflow&gt;
+</span><span class="code-line">Execute this optimized workflow:
+</span><span class="code-line">
+</span><span class="code-line">1. DISCOVERY PHASE (Comprehensive inbox scan):
+</span><span class="code-line">   - Search unread messages with pagination (target: 30+ messages)
+</span><span class="code-line">   - Search read messages with pagination (target: 30+ messages)
+</span><span class="code-line">   - Build list of potentially important messages with importance rankings
+</span><span class="code-line">
+</span><span class="code-line">2. ANALYSIS PHASE (Smart thread reading):
+</span><span class="code-line">   - Sort messages by importance ranking
+</span><span class="code-line">   - Read full threads only for Priority 1-3 messages
+</span><span class="code-line">   - Use snippets for Priority 4-5 initial assessment
+</span><span class="code-line">
+</span><span class="code-line">3. TASK CREATION PHASE (Batch processing with MANDATORY Markdown links):
+</span><span class="code-line">   - VERIFY each task content uses [text](url) Markdown format
+</span><span class="code-line">   - Create tasks in priority order
+</span><span class="code-line">   - Handle errors gracefully without stopping
+</span><span class="code-line">   - Double-check that EVERY task title is a clickable Markdown link
+</span><span class="code-line">
+</span><span class="code-line">4. SUMMARY PHASE (Structured report):
+</span><span class="code-line">
+</span><span class="code-line">   ## Email Analysis Summary
+</span><span class="code-line">   - Total messages scanned: [X]
+</span><span class="code-line">   - Important messages found: [Y]
+</span><span class="code-line">   - Tasks created successfully: [Z]
+</span><span class="code-line">
+</span><span class="code-line">   ### Priority Breakdown:
+</span><span class="code-line">   - Urgent (Priority 1): [count] messages
+</span><span class="code-line">   - Business Critical (Priority 2): [count] messages
+</span><span class="code-line">   - Professional (Priority 3): [count] messages
+</span><span class="code-line">   - Maintenance (Priority 4): [count] messages
+</span><span class="code-line">   - General (Priority 5): [count] messages
+</span><span class="code-line">
+</span><span class="code-line">   ### Top 3 Most Urgent Items:
+</span><span class="code-line">   1. [Brief description with Markdown link]
+</span><span class="code-line">   2. [Brief description with Markdown link]
+</span><span class="code-line">   3. [Brief description with Markdown link]
+</span><span class="code-line">
+</span><span class="code-line">   ### Errors/Issues:
+</span><span class="code-line">   - [List any messages that couldn't be processed]
+</span><span class="code-line">
+</span><span class="code-line">5. CONTINUOUS IMPROVEMENT:
+</span><span class="code-line">   - Note any patterns in important messages
+</span><span class="code-line">   - Identify senders who frequently send important messages
+</span><span class="code-line">   - Suggest inbox rules or filters if patterns emerge
+</span><span class="code-line">&lt;/workflow&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;final_markdown_reminder&gt;
+</span><span class="code-line">REMEMBER: EVERY SINGLE TODOIST TASK TITLE MUST BE A MARKDOWN LINK. 
+</span><span class="code-line">The 'content' parameter MUST ALWAYS follow this pattern:
+</span><span class="code-line">[Action text](superhuman://viticci@macstories.net/thread/THREAD_ID)
+</span><span class="code-line">
+</span><span class="code-line">This is NOT optional. This is MANDATORY for EVERY task created.
+</span><span class="code-line">&lt;/final_markdown_reminder&gt;
+</span><span class="code-line">
+</span><span class="code-line">Begin by searching your inbox systematically. Prioritize efficiency: scan first, analyze second, act third. Continue until you've examined at least 50 messages or found 15+ important ones. Focus on quality and actionability over quantity.
+</span></code></pre>
+<p id="p9">As you can see, it&rsquo;s a fairly advanced prompt that I started using a while back to tap into 3.7 Sonnet&rsquo;s agentic abilities for tool-calling based on Google Workspace and MCP.</p>
+<p id="p10">The biggest difference between the old 3.7 Sonnet with extended thinking and the new Opus 4 is that, as Anthropic advertises, Opus 4 can reason over every step of the tool chain. First, when the task kicks off, Opus 4 immediately strategizes a plan and thinks about all the steps it needs to follow to evaluate ~50 messages in my inbox. As you can see in the image below, the new Claude (right) alternates between reasoning steps and tool calls, understands how many email messages it has evaluated, and keeps going until it hits a desired target.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925151934.png" alt="How Opus 4 (right) begins strategizing with extended thinking."><p class="image-caption">How Opus 4 (right) begins strategizing with extended thinking.</p></div>
+<p id="p12">The reasoning steps mixed with results from tool calls don&rsquo;t stop at mere instruction-following: I also caught Opus 4 reasoning over the contents of message results from Gmail to understand the meaning of each message and prioritize it accordingly. Claude 3.7 Sonnet with extended thinking never did this.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925202040.png" alt="The new Opus 4 on the right."><p class="image-caption">The new Opus 4 on the right.</p></div>
+<p id="p14">After scanning my inbox, 3.7 Sonnet started calling Zapier&rsquo;s MCP server with my available tools and created tasks in succession:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925229623.png" alt="3.7 Sonnet with extended thinking did not actually think between tool calls."><p class="image-caption">3.7 Sonnet with extended thinking did not actually think between tool calls.</p></div>
+<p id="p16">Conversely, the new Opus 4 also applied reasoning in between every step of the MCP-based task creation chain:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925333884.png" alt="Thinking steps between Zapier tool calls."><p class="image-caption">Thinking steps between Zapier tool calls.</p></div>
+<p id="p18">Impressively, the new Opus 4 also recognized when it bumped into rate limits from Zapier and proactively offered to finish the task later:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925379635.png" alt="The new Opus 4 (right) noticed when it hit a rate limit and saved some tasks for later."><p class="image-caption">The new Opus 4 (right) noticed when it hit a rate limit and saved some tasks for later.</p></div>
+<p id="p20">While the results of this prompt were similar in that both 3.7 and Opus 4 analyzed my inbox, extracted Gmail messages and their unique thread IDs, and created tasks deep-linked to Superhuman, the output of Opus 4 was vastly better thanks, I believe, to the additional reasoning steps applied along the way.</p>
+<p id="p21">3.7 Sonnet analyzed 17 messages and created 6 tasks; the new Opus 4 scanned 40 messages and created 15 tasks (6 immediately and 9 after rate limits expired) &ndash; with superior understanding of different priorities based on the contents of each message.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925468684.png" alt="The tasks created by 3.7 Sonnet."><p class="image-caption">The tasks created by 3.7 Sonnet.</p></div>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925564739.png" alt="The tasks created by Opus 4."><p class="image-caption">The tasks created by Opus 4.</p></div>
+<p id="p24">I was impressed with the performance of extended thinking applied to tool call results, so I decided to take the experiment one step further: what if I rolled <em>two</em> MCP integrations plus native web search into the same long-running task? Anthropic claims that Opus 4 can work independently for longer periods of time on agentic tasks, so that seemed like a good idea to put it through its paces.</p>
+<p id="p25">I&rsquo;ve been playing around with the upgraded <a href="https://www.notion.com/product/ai" rel="noopener noreferrer">Notion AI</a>, and I&rsquo;ve been considering switching my &ldquo;perfect memory&rdquo; <a href="https://club.macstories.net/posts/my-obsidian-setup-part-12-rethinking-youtube-watch-later-with-markdown-and-ai" rel="noopener noreferrer">project</a> in Obsidian (based on <a href="https://en.wikipedia.org/wiki/Retrieval-augmented_generation" rel="noopener noreferrer">RAG</a> with <a href="https://www.obsidiancopilot.com/en" rel="noopener noreferrer">Obsidian Copilot</a> and GPT 4.1 over the API) to Notion instead. To test this, I started writing my daily notes in Notion rather than Obsidian (which is still my text editor for writing articles like this one) and created a prompt that asks Claude to:</p>
+<ul id="ul26"><li>Analyze my daily notes database in Notion,</li>
+<li>Find notes that seem actionable,</li>
+<li>Turn them into tasks in Todoist, and</li>
+<li>Attach some additional research based on web search to tasks that need it.</li>
+</ul><p id="p27">Here&rsquo;s the prompt:</p>
+<pre id="pre28"><code><span class="code-line">&lt;task&gt;
+</span><span class="code-line">Create Todoist tasks from undone items in my Notion daily notes, with research enhancement and intelligent subtask creation.
+</span><span class="code-line">&lt;/task&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;constraints&gt;
+</span><span class="code-line">- ALL tasks MUST be created in the "&#128211; Notion" project (project_id: 2353999254)
+</span><span class="code-line">- NEVER create tasks in any other project
+</span><span class="code-line">- Each task MUST include a link back to its source Notion daily note
+</span><span class="code-line">&lt;/constraints&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;instructions&gt;
+</span><span class="code-line">1. **Find Undone Daily Notes:**
+</span><span class="code-line">   &lt;notion_search&gt;
+</span><span class="code-line">   - Locate my "Daily Notes Tracker" database in Notion
+</span><span class="code-line">   - Use the Notion API to find undone entries:
+</span><span class="code-line">     ```
+</span><span class="code-line">     POST https://api.notion.com/v1/databases/{database_id}/query
+</span><span class="code-line">     {
+</span><span class="code-line">       "filter": {
+</span><span class="code-line">         "property": "Done",
+</span><span class="code-line">         "checkbox": {
+</span><span class="code-line">           "equals": false
+</span><span class="code-line">         }
+</span><span class="code-line">       }
+</span><span class="code-line">     }
+</span><span class="code-line">     ```
+</span><span class="code-line">   - Daily notes follow format: YYYY-MM-DD-DayName (e.g., "2025-05-20-Tuesday")
+</span><span class="code-line">   &lt;/notion_search&gt;
+</span><span class="code-line">
+</span><span class="code-line">2. **Extract Actionable Items:**
+</span><span class="code-line">   &lt;extraction_criteria&gt;
+</span><span class="code-line">   - Tasks with action verbs ("Create", "Finish", "Update", "Test", "Review", "Send")
+</span><span class="code-line">   - Questions requiring research or answers
+</span><span class="code-line">   - Ideas marked for implementation
+</span><span class="code-line">   - Follow-up items mentioned in meetings or conversations
+</span><span class="code-line">   - Anything with deadlines or time-sensitive markers
+</span><span class="code-line">   &lt;/extraction_criteria&gt;
+</span><span class="code-line">
+</span><span class="code-line">3. **Create Todoist Tasks:**
+</span><span class="code-line">   &lt;task_creation&gt;
+</span><span class="code-line">   For each actionable item:
+</span><span class="code-line">
+</span><span class="code-line">   a. **Project**: ALWAYS use project_id: 2353999254 (&#128211; Notion)
+</span><span class="code-line">
+</span><span class="code-line">   b. **Title**: Concise action item as task title
+</span><span class="code-line">
+</span><span class="code-line">   c. **Description**: 
+</span><span class="code-line">      ```
+</span><span class="code-line">      From: [YYYY-MM-DD-DayName](https://www.notion.so/YYYY-MM-DD-DayName-{page_id}?pvs=4)
+</span><span class="code-line">      ```
+</span><span class="code-line">      Replace with actual date, day name, and Notion page ID
+</span><span class="code-line">
+</span><span class="code-line">   d. **Note/Comment**: Include:
+</span><span class="code-line">      - Full context from the daily note
+</span><span class="code-line">      - Any mentioned URLs, references, or related items
+</span><span class="code-line">      - Related bullet points or sub-items from the note
+</span><span class="code-line">
+</span><span class="code-line">   e. **Research Enhancement** (when applicable):
+</span><span class="code-line">      If the task involves research, information gathering, or requires external data:
+</span><span class="code-line">      - Use web_search to find 2-3 current, relevant sources
+</span><span class="code-line">      - Summarize key findings in the task comment
+</span><span class="code-line">      - Include helpful links with brief descriptions
+</span><span class="code-line">      - Add actionable insights (e.g., "Best option appears to be X because...")
+</span><span class="code-line">   &lt;/task_creation&gt;
+</span><span class="code-line">
+</span><span class="code-line">4. **Intelligent Subtask Creation:**
+</span><span class="code-line">   &lt;subtask_logic&gt;
+</span><span class="code-line">   Analyze each task and create subtasks if it naturally breaks down into steps:
+</span><span class="code-line">   - Research tasks &rarr; subtasks for different aspects to investigate
+</span><span class="code-line">   - Implementation tasks &rarr; subtasks for planning, execution, testing
+</span><span class="code-line">   - Complex projects &rarr; subtasks for major milestones
+</span><span class="code-line">   - Multi-stakeholder tasks &rarr; subtasks for each person to contact
+</span><span class="code-line">
+</span><span class="code-line">   Only create subtasks when they add clarity and actionability.
+</span><span class="code-line">   &lt;/subtask_logic&gt;
+</span><span class="code-line">
+</span><span class="code-line">5. **Priority Assignment:**
+</span><span class="code-line">   &lt;priority_rules&gt;
+</span><span class="code-line">   - Items with deadlines or urgent language &rarr; Priority 1
+</span><span class="code-line">   - Items blocking other work &rarr; Priority 2
+</span><span class="code-line">   - Research and planning items &rarr; Priority 3
+</span><span class="code-line">   - Ideas and future considerations &rarr; Priority 4
+</span><span class="code-line">   &lt;/priority_rules&gt;
+</span><span class="code-line">&lt;/instructions&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;output_format&gt;
+</span><span class="code-line">## Created Tasks from Daily Notes:
+</span><span class="code-line">
+</span><span class="code-line">**From [Date]:**
+</span><span class="code-line">1. &#9989; [Task Title] - Created in &#128211; Notion
+</span><span class="code-line">   - Context: [Brief context from daily note]
+</span><span class="code-line">   - Research added: [If applicable]
+</span><span class="code-line">   - Subtasks created: [Number] subtasks [list if created]
+</span><span class="code-line">
+</span><span class="code-line">[Continue for all tasks...]
+</span><span class="code-line">
+</span><span class="code-line">**Summary:**
+</span><span class="code-line">- Total tasks created: X
+</span><span class="code-line">- Tasks with research enhancement: Y
+</span><span class="code-line">- Tasks with subtasks: Z
+</span><span class="code-line">- All tasks created in project: &#128211; Notion
+</span><span class="code-line">&lt;/output_format&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;error_handling&gt;
+</span><span class="code-line">- If project 2353950254 is not accessible, STOP and report the error
+</span><span class="code-line">- If rate limited, wait and retry
+</span><span class="code-line">- Report any tasks that couldn't be created with specific reasons
+</span><span class="code-line">- Never fallback to creating tasks in other projects
+</span><span class="code-line">&lt;/error_handling&gt;
+</span><span class="code-line">
+</span><span class="code-line">&lt;important_reminders&gt;
+</span><span class="code-line">- Every single task MUST be in project_id: 2353950254
+</span><span class="code-line">- Every task description MUST include the Notion page link
+</span><span class="code-line">- Do NOT modify any Notion pages
+</span><span class="code-line">- Research enhancement should add genuine value, not filler
+</span><span class="code-line">- Subtasks are optional - only create when they improve task clarity
+</span><span class="code-line">&lt;/important_reminders&gt;
+</span></code></pre>
+<p id="p29">This is a complex, agentic workflow that requires multiple tool calls (query a Notion database, find notes, extract text from notes, create tasks, search the web, update those tasks) and needs to run for a long period of time. It&rsquo;s the kind of workflow that &ndash; just like the email one above &ndash; I usually kick off in the morning and leave running while I&rsquo;m getting ready for the day.</p>
+<p id="p30">Opus 4 performed admirably in this test. For several minutes, the model called the Zapier MCP integration for different Notion API endpoints, analyzed my daily notes to find lines of text that seemed actionable, turned them into tasks, and intermixed every step with reasoning and web searches to see what additional research it could attach to the task in Todoist:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925679853.png" alt="Opus 4 and tool calls for Notion."><p class="image-caption">Opus 4 and tool calls for Notion.</p></div>
+<p id="p32">The result is very good! The tasks created in Todoist are deep-linked to the Notion page, and the additional research provided by Claude (as a comment to the task) includes some helpful tips and links to get started on the task more quickly:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925714966.png" alt=""><p class="image-caption"></p></div>
+<p id="p34">At this point in the LLM race, it&rsquo;s <a href="https://simonwillison.net/tags/llm-reasoning/" rel="noopener noreferrer">not a huge surprise</a> that more compute power with reasoning and longer execution times equals better results (<a href="https://platform.openai.com/docs/guides/reasoning?api-mode=responses" rel="noopener noreferrer">literally</a> <em><a href="https://arxiv.org/abs/2501.12948" rel="noopener noreferrer">everyone</a></em> <a href="https://github.com/QwenLM/QwQ" rel="noopener noreferrer">is</a> <a href="https://blog.google/technology/google-deepmind/google-gemini-updates-io-2025/" rel="noopener noreferrer">doing</a> <a href="https://www.anthropic.com/news/claude-3-7-sonnet" rel="noopener noreferrer">this</a>), but in Anthropic&rsquo;s case, reasoning steps applied to individual MCP/Google tool calls seem to yield drastically better results compared to their previous reasoning model that did <em>not</em> think about tool calls. This has been especially noticeable when troubleshooting results from tools, such as when Opus 4 realized it couldn&rsquo;t find my Notion daily notes and, unprompted, performed a direct API call using Zapier (to the correct endpoint, no less), then kept going:</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925781075.png" alt=""><p class="image-caption"></p></div>
+<p id="p36">Now, however, this sort of long-running, multi-tool agentic behavior begs for the ability to execute these complex prompts with a scheduled task approach. Like I mentioned above, these are multi-tool, agentic tasks that are best left to be executed with extended thinking and no further user input in the background. The problem is that, right now, Anthropic doesn&rsquo;t offer a scheduled tasks functionality similar to <a href="https://help.openai.com/en/articles/10291617-scheduled-tasks-in-chatgpt" rel="noopener noreferrer">what&rsquo;s possible in ChatGPT</a>.<sup id="fnref-78519-tasks"><a href="#fn-78519-tasks" class="jetpack-footnote" rel="noopener noreferrer">2</a></sup> I hope to see changes on this front in the near future.</p>
+<p id="p37">I&rsquo;m not a developer, and while I have been playing around with &ldquo;vibe coding&rdquo; my own Obsidian plugins, I don&rsquo;t think it&rsquo;d be fair for me to offer any in-depth assessment of the upgraded Claude Code powered by Opus 4. The only thing I will say is that, after loading the repo for one of my Obsidian plugins, Opus 4 identified a bug left by <a href="https://openai.com/index/introducing-codex/" rel="noopener noreferrer">OpenAI&rsquo;s Codex agent</a> and fixed it on its first try. But I&rsquo;ll leave it to other folks to test Opus 4 and see whether or not it improves upon 3.7 Sonnet or even the beloved 3.5 Sonnet for extended coding sessions.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747925862543.png" alt="Testing Claude Code with Opus 4."><p class="image-caption">Testing Claude Code with Opus 4.</p></div>
+<p id="p39">As part of my tests with Opus 4 over the last two days, I also tried my usual <a href="https://bsky.app/profile/viticci.macstories.net/post/3lply2qg52224" rel="noopener noreferrer">OCR</a> and <a href="https://bsky.app/profile/viticci.macstories.net/post/3llpbedpvcc2b" rel="noopener noreferrer">long-context tasks</a>. I wasn&rsquo;t told the context window of Opus 4 while I was testing it, but I can tell you that when I tried loading my archive of iOS reviews (~980,000 tokens in a single text file) as the input for Opus 4, I got an error. Unless the model released today is different from what I tested, this suggests that <a href="https://openai.com/index/gpt-4-1/" rel="noopener noreferrer">GPT 4.1</a> and <a href="https://deepmind.google/models/gemini/pro/" rel="noopener noreferrer">Gemini 2.5</a> will continue to be the only cloud-based models to support a 1M token context window. Context window limits have been one of the key Claude limitations for a while now, and I ran into them even when I was <em>not</em> stress-testing the model with my iOS review archive. For instance, this prompt that looks at my travel history in California&hellip;</p>
+<blockquote id="blockquote40"><p>
+  Can you search across my entire Gmail history, understand how many times I have gone to WWDC in California over the years, and create a timeline for each trip regarding Apple briefings, Apple events, and in-person events (like live shows) for each WWDC year I was there? I&rsquo;m trying to understand what, historically speaking, my WWDC week looks like.
+</p></blockquote>
+<p id="p41">&hellip;consistently ran out of tokens. Conversely, Gemini 2.5 Pro ran it from start to finish without issues.</p>
+<div class="media-wrapper"><img src="https://cdn.macstories.net/image-1747921310789.png" alt="Opus 4 could not search years&rsquo; worth of messages in Gmail."><p class="image-caption">Opus 4 could not search years&rsquo; worth of messages in Gmail.</p></div>
+<p id="p43">Advanced OCR continues to be an issue as well. I&rsquo;ve shared my thoughts on this before and <a href="https://www.macstories.net/notes/notes-on-early-mac-studio-ai-benchmarks-with-qwen3-235b-a22b-and-qwen2-5-vl-72b/" rel="noopener noreferrer">recently wrote</a> about how Qwen2.5-VL-72B running on my M3 Ultra Mac Studio is the only model that can OCR a long screenshot or PDF with coherent output in less than seven minutes, which o4-mini-high <a href="https://bsky.app/profile/viticci.macstories.net/post/3lmxsf3t3cc2o" rel="noopener noreferrer">previously achieved</a> in my tests. The new Opus 4, unfortunately, hallucinates OCR&rsquo;d text in heavy PDFs just as much as 3.7 Sonnet did. At this point, I have to say I&rsquo;m surprised that Anthropic isn&rsquo;t letting Claude write its own Python code in a sandboxed environment to overcome heavy-duty tasks like OpenAI did for o3 and o4-mini-high.</p>
+<p id="p44">So that&rsquo;s been my experience with the new Opus 4 in 48 hours. Funnily enough, just yesterday, OpenAI announced major improvements to their new <a href="https://platform.openai.com/docs/api-reference/responses" rel="noopener noreferrer">Responses API</a>, including <a href="https://openai.com/index/new-tools-and-features-in-the-responses-api/" rel="noopener noreferrer">tools and MCP support</a> for the o-series reasoning models.<sup id="fnref-78519-claudeAPI"><a href="#fn-78519-claudeAPI" class="jetpack-footnote" rel="noopener noreferrer">3</a></sup> This means that, technically speaking, you can now use o3 or o4-mini with reasoning applied to every step of a tool-calling chain and theoretically replicate the workflows I described above&hellip;but only in the API for now. If MCP support in the Responses API was &ldquo;<a href="https://x.com/sama/status/1904957253456941061" rel="noopener noreferrer">coming soon</a>&rdquo; and is now available, how long will it be until ChatGPT on desktop gets a visual interface for integrating with MCP tools and using them with reasoning? How long until someone figures out how to integrate tools natively <a href="https://bsky.app/profile/viticci.macstories.net/post/3lpku4gy2tc2w" rel="noopener noreferrer">on mobile devices</a>?</p>
+<p id="p45">Regardless of what happens next, I&rsquo;ve had a good experience with extended thinking and tools in the new <a href="https://www.anthropic.com/claude/opus" rel="noopener noreferrer">Claude Opus 4</a>. I&rsquo;m going to keep using it for my Google- and Zapier-based workflows&hellip;until the next big thing comes along, of course.</p>
+<p id="p46">You can read more about the new models released by Anthropic today <a href="https://www.anthropic.com/news/claude-4" rel="noopener noreferrer">here</a>.</p>
+<div class="footnotes" id="div47">
+<hr><ol><li id="fn-78519-directions">
+In my experience, the Claude family of models continues to be the best at following instructions (particularly <a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/use-xml-tags" rel="noopener noreferrer">in XML format</a>), followed by GPT 4.1&hellip;which also <a href="https://cookbook.openai.com/examples/gpt4-1_prompting_guide" rel="noopener noreferrer">adopted</a> XML-style prompting.&nbsp;<a href="#fnref-78519-directions" rel="noopener noreferrer">&#8617;&#65038;</a>
+</li>
+<li id="fn-78519-tasks">
+Although I should say that I really haven&rsquo;t found success with scheduled tasks in ChatGPT yet. Even after scheduled tasks were upgraded to use o3 and o4-mini, a recurring one I have set to fetch the title of a webpage every day fails to run for no apparent reason. Still, the point remains: ChatGPT lets you schedule execution of long-running background tasks, and Claude does not.&nbsp;<a href="#fnref-78519-tasks" rel="noopener noreferrer">&#8617;&#65038;</a>
+</li>
+<li id="fn-78519-claudeAPI">
+Anthropic also <a href="https://www.anthropic.com/news/agent-capabilities-api" rel="noopener noreferrer">announced</a> similar API capabilities earlier today.&nbsp;<a href="#fnref-78519-claudeAPI" rel="noopener noreferrer">&#8617;&#65038;</a>
+</li>
+</ol></div>
+<hr /><h3>Access Extra Content and Perks</h3><p><p>Founded in 2015, <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">Club MacStories</a> has delivered exclusive content every week for nearly a decade.</p>
+<p>What started with weekly and monthly email newsletters has blossomed into <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">a family of memberships</a> designed every MacStories fan.</p>
+<p><strong><a href="https://club.macstories.net/plans/club" rel="noopener noreferrer">Club MacStories</a></strong>: Weekly and monthly newsletters via email and the web that are brimming with apps, tips, automation workflows, longform writing, early access to the <a href="https://www.macstories.net/unwind/" rel="noopener noreferrer">MacStories Unwind podcast</a>, periodic giveaways, and more;</p>
+<p><strong><a href="https://club.macstories.net/plans/plus" rel="noopener noreferrer">Club MacStories+</a></strong>: Everything that Club MacStories offers, plus an active Discord community, advanced search and custom RSS features for exploring the Club&rsquo;s entire back catalog, bonus columns, and dozens of app discounts;</p>
+<p><strong><a href="https://club.macstories.net/plans/premier" rel="noopener noreferrer">Club Premier</a></strong>: All of the above <em>and</em> AppStories+, an extended version of our flagship podcast that&rsquo;s delivered early, ad-free, and in high-bitrate audio.</p>
+<p>Learn more <a href="https://club.macstories.net/plans?utm_source=ms&amp;utm_medium=web-inline" rel="noopener noreferrer">here</a> and from our <a href="https://club.macstories.net/faq" rel="noopener noreferrer">Club FAQs</a>.</p>
+</p><a href='https://club.macstories.net/?utm_source=ms&#038;utm_medium=rss'>Join Now</a>

@@ -1,0 +1,114 @@
+<p>I had been meaning to check out David Wilson's <a href="https://systemcrafters.cc">System Crafters</a> post detailing <a href="https://systemcrafters.net/emacs-tips/presentations-with-org-present/">his presentations style</a> achieved with the help of <a href="https://github.com/rlister/org-present">org-present</a> and his own customizations. If you're looking for ways to present from Emacs itself, David's post is well worth a look.</p>
+<p>org-present's spartan but effective approach resonated with me. David's touches bring the wonderfully stylish icing to the cake. I personally liked his practice of collapsing slide subheadings by default. This lead me to think about slide navigation in general…</p>
+<p>There were two things I wanted to achieve:</p>
+<ol>
+<li>Easily jump between areas of interest. Subheadings, links, and code blocks would be a good start.</li>
+<li>Collapse all but the current top-level heading within the slide, as navigation focus changes.</li>
+</ol>
+<p>A quick search for existing functions led me to <code>org-next-visible-heading</code>, <code>org-next-link</code>, and <code>org-next-block</code>. While these make it easy to jump through jump between headings, links, org block on their own, I wanted to jump to whichever one of these is next (similar a web browser's tab behaviour). In a way, <a href="https://en.wikipedia.org/wiki/DWIM">DWIM</a> style.</p>
+<p>I wrapped the existing functions to enable returning positions. This gave me <code>ar/rg-next-visible-heading-pos</code>, <code>ar/rg-next-link-pos</code>, and <code>ar/rg-next-block-pos</code> respectively. Now that I can find out the next location of either of these items, I can subsequently glue the navigation logic in a function like <code>ar/org-present-next-item</code>. To restore balance to the galaxy, I also added <code>ar/org-present-previous-item</code>.</p>
+<pre><code class="language-{.commonlisp">(defun ar/org-present-next-item (&amp;optional backward)
+  &quot;Present and reveal next item.&quot;
+  (interactive &quot;P&quot;)
+  ;; Beginning of slide, go to previous slide.
+  (if (and backward (eq (point) (point-min)))
+      (org-present-prev)
+    (let* ((heading-pos (ar/org-next-visible-heading-pos backward))
+           (link-pos (ar/org-next-link-pos backward))
+           (block-pos (ar/org-next-block-pos backward))
+           (closest-pos (when (or heading-pos link-pos block-pos)
+                          (apply (if backward #'max #'min)
+                                 (seq-filter #'identity
+                                             (list heading-pos
+                                                   link-pos
+                                                   block-pos))))))
+      (if closest-pos
+          (progn
+            (cond ((eq heading-pos closest-pos)
+                   (goto-char heading-pos))
+                  ((eq link-pos closest-pos)
+                   (goto-char link-pos))
+                  ((eq block-pos closest-pos)
+                   (goto-char block-pos)))
+            ;; Reveal relevant content.
+            (cond ((&gt; (org-current-level) 1)
+                   (ar/org-present-reveal-level2))
+                  ((eq (org-current-level) 1)
+                   ;; At level 1. Collapse children.
+                   (org-overview)
+                   (org-show-entry)
+                   (org-show-children)
+                   (run-hook-with-args 'org-cycle-hook 'children))))
+        ;; End of slide, go to next slide.
+        (org-present-next)))))
+
+(defun ar/org-present-previous-item ()
+  (interactive)
+  (ar/org-present-next-item t))
+
+(defun ar/org-next-visible-heading-pos (&amp;optional backward)
+  &quot;Similar to `org-next-visible-heading' but for returning position.
+
+Set BACKWARD to search backwards.&quot;
+  (save-excursion
+    (let ((pos-before (point))
+          (pos-after (progn
+                       (org-next-visible-heading (if backward -1 1))
+                       (point))))
+      (when (and pos-after (not (equal pos-before pos-after)))
+        pos-after))))
+
+(defun ar/org-next-link-pos (&amp;optional backward)
+  &quot;Similar to `org-next-visible-heading' but for returning position.
+
+Set BACKWARD to search backwards.&quot;
+  (save-excursion
+    (let* ((inhibit-message t)
+           (pos-before (point))
+           (pos-after (progn
+                        (org-next-link backward)
+                        (point))))
+      (when (and pos-after (or (and backward (&gt; pos-before pos-after))
+                               (and (not backward) (&gt; pos-after pos-before))))
+        pos-after))))
+
+(defun ar/org-next-block-pos (&amp;optional backward)
+  &quot;Similar to `org-next-block' but for returning position.
+
+Set BACKWARD to search backwards.&quot;
+  (save-excursion
+    (when (and backward (org-babel-where-is-src-block-head))
+      (org-babel-goto-src-block-head))
+    (let ((pos-before (point))
+          (pos-after (ignore-errors
+                       (org-next-block 1 backward)
+                       (point))))
+      (when (and pos-after (not (equal pos-before pos-after)))
+        ;; Place point inside block body.
+        (goto-char (line-beginning-position 2))
+        (point)))))
+
+(defun ar/org-present-reveal-level2 ()
+  (interactive)
+  (let ((loc (point))
+        (level (org-current-level))
+        (heading))
+    (ignore-errors (org-back-to-heading t))
+    (while (or (not level) (&gt; level 2))
+      (setq level (org-up-heading-safe)))
+    (setq heading (point))
+    (goto-char (point-min))
+    (org-overview)
+    (org-show-entry)
+    (org-show-children)
+    (run-hook-with-args 'org-cycle-hook 'children)
+    (goto-char heading)
+    (org-show-subtree)
+    (goto-char loc)))
+</code></pre>
+<p>Beware, this was a minimal effort (with redundant code, duplication, etc) and should likely be considered a proof of concept of sorts, but the results look promising. You can see a demo in action.</p>
+<p><img src="https://xenodium.github.io/images/emacs-org-present-in-style/org-navigate_x1.6.webp" alt=""></p>
+<p>While this was a fun exercise, I can't help but think there must be a cleaner way of doing it or there are existing packages that already do this for you. If you do know, I'd love to know.</p>
+<p>Future versions of this code will likely be updated in <a href="https://github.com/xenodium/dotsies/blob/main/emacs/features/fe-org.el">my Emacs org config</a>.</p>
+<h2>Update</h2>
+<p>Removed a bunch of duplication and now rely primarily on existing <code>org-next-visible-heading</code>, <code>org-next-link</code>, and <code>org-next-block</code>.</p>

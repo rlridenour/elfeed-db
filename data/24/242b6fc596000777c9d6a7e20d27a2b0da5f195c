@@ -1,0 +1,64 @@
+<p>I&rsquo;m really enjoying <strong>ready-player</strong> at the moment, so much so I think it might end up replacing <strong>emms</strong>.</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20240810072449-emacs--Ready-Player-Mode-Tweak.jpg" width="100%">
+</figure>
+
+<p>I listen to music in a very simple, almost old-fashioned way, album by album, and I have my music collection well organized, with each album in a separate directory and in a way, <code>emms</code> was a little too much.</p>
+<p><code>ready-player</code> is well integrated with dired, so opening an audio file, for example, will kickstart the listening process for me.  I like to have shuffle on (<code>ready-player-shuffle</code>), and with <code>ready-player-repeat</code> if there is more media to play in the current directory then it will enter a continuous play mode.</p>
+<p>Here are my current settings:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(use-package ready-player
+</span></span><span style="display:flex;"><span>  :init
+</span></span><span style="display:flex;"><span>  (ready-player-mode <span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span>  :custom
+</span></span><span style="display:flex;"><span>  (ready-player-thumbnail-max-pixel-height <span style="color:#ae81ff">200</span>)
+</span></span><span style="display:flex;"><span>  (ready-player-autoplay <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>  (ready-player-repeat <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>  (ready-player-shuffle <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>  (ready-player-open-playback-commands
+</span></span><span style="display:flex;"><span>    <span style="color:#f92672">&#39;</span>(
+</span></span><span style="display:flex;"><span>       (<span style="color:#e6db74">&#34;mpv&#34;</span> <span style="color:#e6db74">&#34;--audio-display=no&#34;</span>)
+</span></span><span style="display:flex;"><span>       (<span style="color:#e6db74">&#34;mplayer&#34;</span>)
+</span></span><span style="display:flex;"><span>       (<span style="color:#e6db74">&#34;ffplay&#34;</span>)
+</span></span><span style="display:flex;"><span>       (<span style="color:#e6db74">&#34;vlc&#34;</span>)
+</span></span><span style="display:flex;"><span>       )))
+</span></span></code></pre></div><p>The only little issue I have run into so far (and I encountered something similar with <code>emms</code>) is to figure out which media player back-end works best with my set-up, I am running SwayWM on Arch.</p>
+<p>For some reason <code>emms</code> would only run well with <code>vlc</code> (found by trial and error).  With <code>ready-player</code> the default <code>mpv</code> worked well in most cases except it wouldn&rsquo;t automatically move on to the next audio track when <code>ready-player-repeat</code> was set.</p>
+<p>I am happy with <code>ready-player</code> opening videos through <code>mpv</code> by default and would only really want to ever use <code>mpv</code> for video playback.</p>
+<p>So first things first, lets establish which back-end gives me a continuous audio playback.</p>
+<p>With a little trial and error (simply swapping around the back-ends) I found that <code>mplayer</code> was the one that worked for me, <code>mplayer</code> can play videos too but my muscle memory is so mpv-centric that I always want to be using mpv for video playback.</p>
+<p>With <code>ready-player</code> as far as I can tell there is just a single list of potential playback commands which applies to all media types.  <code>ready-player</code> is in its early stages of development so I wouldn&rsquo;t be surprised if at some stage this might get added for more flexibility/customization.  But for me it doesn&rsquo;t really matter and in fact gives me the opportunity to flex my elisp know-how.</p>
+<p>Can I write something to overcome this issue?</p>
+<p>Emacs is essentially just an elisp machine anyway, so lets write some elisp to augment the current <code>ready-player</code> functionality to suit my multiple playback-end needs, here is some elisp:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun set-ready-player-commands ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Set `ready-player-open-playback-commands` based on file extension.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let ((file-extension (file-name-extension (<span style="color:#a6e22e">buffer-file-name</span>))))
+</span></span><span style="display:flex;"><span>    (setq ready-player-open-playback-commands
+</span></span><span style="display:flex;"><span>      (cond
+</span></span><span style="display:flex;"><span>        ((<span style="color:#a6e22e">member</span> file-extension <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;mp4&#34;</span> <span style="color:#e6db74">&#34;mkv&#34;</span> <span style="color:#e6db74">&#34;mov&#34;</span> <span style="color:#e6db74">&#34;avi&#34;</span>))
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;mpv&#34;</span> <span style="color:#e6db74">&#34;--audio-display=no&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;mplayer&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;ffplay&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;vlc&#34;</span>)))
+</span></span><span style="display:flex;"><span>        ((<span style="color:#a6e22e">equal</span> file-extension <span style="color:#e6db74">&#34;mp3&#34;</span>)
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;mplayer&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;mpv&#34;</span> <span style="color:#e6db74">&#34;--audio-display=no&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;ffplay&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;vlc&#34;</span>)))
+</span></span><span style="display:flex;"><span>        (<span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;mpv&#34;</span> <span style="color:#e6db74">&#34;--audio-display=no&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;vlc&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;ffplay&#34;</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#e6db74">&#34;mplayer&#34;</span>)))))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(add-hook <span style="color:#e6db74">&#39;find-file-hook</span> <span style="color:#e6db74">&#39;set-ready-player-commands</span>)
+</span></span></code></pre></div><p>Simply, I just added some extra <code>ready-player</code> setup whenever a buffer is loaded from a file, essentially when I select it from dired.</p>
+<p>I set the playback commands based on the extension, so for a video file it can use <code>mpv</code>, for an mp3 it prefers <code>mplayer</code>, with a fallback for any other type of file.  I guess I could have been a little more flexible in defining a wider range of audio file, but I generally only listen to mp3.</p>
+<p>With that addressed, <code>ready-player</code> now seems to give me much less friction than <code>emms</code>, with <code>emms</code> I would have to perform roughly the following steps to even begin listening to a music album:</p>
+<ul>
+<li>first initialise - add files so emms can load in metadata</li>
+<li>browse to select music album</li>
+<li>push to a playlist</li>
+<li>jump to playlist to perform track functions</li>
+</ul>
+<p>I would have to remember <code>emms</code> commands, or build up muscle memory, but with <code>ready-player</code> I just need to navigate to the relevant music folder using <code>dired</code>, open a file and I&rsquo;m ready to go!, and the front-end is like any standard media player which makes more sense to me.</p>
+<p>If I want to modify playback then I&rsquo;m quite happy to jump to the playback buffer which can be accomplished quickly through vertico by fuzzy finding &ldquo;ready&rdquo;, or by pushing <code>ready-player</code> to its own tab.</p>
+<p>I think I will continue to play around with this cool little package.</p>

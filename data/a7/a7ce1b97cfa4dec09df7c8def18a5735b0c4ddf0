@@ -1,0 +1,160 @@
+<p>
+With the EmacsConf call for proposals now closed,
+I have a little time before EmacsConf speakers
+send in their pre-recorded videos come in for
+captioning. I decided to dust off the
+infrastructure to see what makes sense to upgrade.
+</p>
+
+<p>
+We use <a href="https://etherpad.org/">Etherpad</a> for collaborative note-taking
+during EmacsConf. It's straightforward to use and
+pretty reliable. Conference participants can use
+it to share notes, questions, and links. They can
+also use IRC to ask questions, and volunteers copy
+those questions into the pad for the talk. Hosts
+and speakers can keep an eye on the pad for
+questions. We send speakers a copy of their talk's
+pad after the conference, and we post that along
+with other follow-up questions on the conference
+wiki. Here's an example: <a href="https://emacsconf.org/2024/talks/papers/">Writing academic papers
+in Org-Roam</a>.
+</p>
+
+<p>
+A native Emacs solution for collaborative notes
+would be even better. <a href="https://elpa.gnu.org/packages/crdt.html">CRDT</a> was great for
+experimenting with real-time collaboration within
+Emacs, but I'm not sure it can handle a ton of
+simultaneous connections and I don't want to find
+out in the middle of the conference. Also, requiring
+Emacs would leave out the people who only have a
+web browser handy. It would be super cool if we
+had something with Emacs, web, and IRC interfaces,
+but for now, Etherpad will do.
+</p>
+
+<p>
+We started by using <a href="https://etherpad.wikimedia.org/">Wikimedia's instance</a>, and then
+we moved to hosting our own. For the past two
+years, we've used Etherpad 1.9.7.
+Etherpad is currently at version <a href="https://github.com/ether/etherpad-lite/releases/tag/v2.5.0">2.5.0</a>. There are
+some performance improvements, bugfixes, and
+security fixes, so I think it'll be worth
+upgrading to that. I don't know of any specific
+issues or upgrades, but it's a good idea to stay
+closer to the latest release than to get too far
+out of date.
+</p>
+
+<p>
+I switched our
+<a href="https://git.emacsconf.org/emacsconf-ansible/tree/roles/pad/tasks/main.yml">roles/pad/tasks/main.yml</a> to use
+<a href="https://galaxy.ansible.com/ui/standalone/roles/systemli/etherpad/">systemli.etherpad</a> from ansible-galaxy. I also
+figured out how to set up a <a href="https://developer.hashicorp.com/vagrant">Vagrant</a> virtual
+machine that I could destroy and reconfigure with
+<code>vagrant destroy; vagrant up &#45;&#45;provision</code>. Here's
+my Vagrant file for that:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-ruby"><code><span class="org-comment-delimiter"># </span><span class="org-comment">-*- mode: ruby -*-</span>
+<span class="org-type">Vagrant</span>.configure(<span class="org-string">"2"</span>) <span class="org-keyword">do</span> |config|
+  config.vm.box = <span class="org-string">"debian/bookworm64"</span>
+  config.vm.define <span class="org-string">"pad"</span> <span class="org-keyword">do</span> |pad|
+  <span class="org-keyword">end</span>
+  config.vm.provider <span class="org-string">"virtualbox"</span> <span class="org-keyword">do</span> |vb|
+    vb.memory = <span class="org-string">"2048"</span>
+  <span class="org-keyword">end</span>
+  config.vm.network <span class="org-string">"private_network"</span>, <span class="org-constant">ip:</span> <span class="org-string">"192.168.56.2"</span>
+  config.vm.provision <span class="org-string">"ansible"</span> <span class="org-keyword">do</span> |ansible|
+    ansible.playbook = <span class="org-string">"../../vagrant-playbook.yml"</span>
+  <span class="org-keyword">end</span>
+<span class="org-keyword">end</span>
+</code></pre>
+</div>
+
+
+<p>
+The playbook it refers to has this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-yaml"><code>- <span class="org-variable-name">name</span>: Pre-flight checks and package installation
+  <span class="org-variable-name">hosts</span>: pad
+  <span class="org-variable-name">become</span>: <span class="org-constant">true</span>
+  <span class="org-variable-name">gather_facts</span>: <span class="org-constant">false</span>
+  <span class="org-variable-name">pre_tasks</span>:
+    - <span class="org-variable-name">name</span>: Ensure ntpdate is installed for time sync
+      <span class="org-variable-name">ansible.builtin.apt</span>:
+        <span class="org-variable-name">name</span>: ntpdate
+        <span class="org-variable-name">state</span>: present
+        <span class="org-variable-name">update_cache</span>: <span class="org-constant">yes</span>
+    - <span class="org-variable-name">name</span>: Synchronize system clock
+      <span class="org-variable-name">ansible.builtin.command</span>: ntpdate pool.ntp.org
+      <span class="org-variable-name">changed_when</span>: <span class="org-constant">true</span>
+    - <span class="org-variable-name">name</span>: Ensure ACL package is installed
+      <span class="org-variable-name">ansible.builtin.apt</span>:
+        <span class="org-variable-name">name</span>: acl
+        <span class="org-variable-name">state</span>: present
+- <span class="org-variable-name">name</span>: Load vars
+  <span class="org-variable-name">hosts</span>: pad
+  <span class="org-variable-name">tags</span>: always
+  <span class="org-variable-name">tasks</span>:
+    - <span class="org-variable-name">include_vars</span>:
+        <span class="org-variable-name">file</span>: vagrant-vars.yml
+- <span class="org-variable-name">name</span>: Set up pad proxy
+  <span class="org-variable-name">hosts</span>: pad
+  <span class="org-variable-name">tags</span>: proxy
+  <span class="org-variable-name">roles</span>:
+    - pad-proxy
+- <span class="org-variable-name">name</span>: Set up pad
+  <span class="org-variable-name">hosts</span>: pad
+  <span class="org-variable-name">tags</span>: pad
+  <span class="org-variable-name">roles</span>:
+    - pad
+</code></pre>
+</div>
+
+
+<p>
+<a href="https://sachachua.com/blog/2013/12/setting-up-virtual-machines-with-vagrant/">I had used Vagrant in 2013</a>, and it felt good to
+have the time to set up more testing
+infrastructure. I liked being able to test my
+<code>pad</code> and <code>pad-proxy</code> roles against a local
+virtual machine. I could figure out whatever
+tweaks I needed without messing up the production
+instance that we use for some meetups in
+between conferences.
+</p>
+
+<p>
+Our production instance is on Debian 10 (Buster).
+That has reached its end of life for security
+updates, so <code>apt-cache update</code> doesn't work on it
+any more, and those steps in my Ansible playbook
+fail. I'm waiting for Amin Bandali to work on
+upgrading that server, since he has other stuff
+running on it. By setting <code>update_cache</code> variable
+that I override in my inventory.yml and referring
+to it with <code>update_cache: ""</code> in
+my task, I can conditionally disable the apt-cache
+update steps. That let me run the playbook against
+the production server, and now we're on Etherpad 2.x.
+</p>
+
+<p>
+I recently updated our <a href="https://bigbluebutton.org">BigBlueButton</a> instance to version 3.0.12. We've decided to stay with <a href="http://icecast.org/">Icecast</a> 2.4.4-1 for doing the livestreaming. We'll probably also keep <a href="https://obsproject.com">OBS</a> 29.1.2 and <a href="https://ffmpeg.org">ffmpeg</a> 6.0.1 instead of upgrading. With no must-have new features and other organizers' limited availability, it's better to keep those parts stable. This year, we'll continue using <a href="https://github.com/m-bain/whisperX">whisperx</a> to help with the first draft of captions, but we'll probably try <a href="https://huggingface.co/papers/2212.04356">large-v3</a> instead of <a href="https://huggingface.co/openai/whisper-large-v2">large-v2</a> by default. Some people find that large-v3's performance is better, some people find it's worse, so we'll see. Now that I know about whisperx's <code>&#45;&#45;initial_prompt</code> option, I might be able to nudge it to the vocabulary and punctuation style we like.
+</p>
+
+<p>
+Since the bones seem pretty solid, I'm looking
+forward to refamiliarizing myself with the Emacs
+Lisp code I wrote to help run the conference. I
+saved a bunch of improvement ideas from last year,
+and I can't wait to turn them into code. That's
+probably going to be lots of fun!</p>
+<div><a href="https://sachachua.com/blog/2025/09/emacsconf-infrastructure-upgrades/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K5VSNDEDB6HPJH31RTE9NN3H" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F09%2Femacsconf-infrastructure-upgrades%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

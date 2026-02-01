@@ -1,0 +1,77 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2025/12/apex-header-2-rb.7517.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+
+<p>I&rsquo;ve been working on making Apex (<a href="https://brettterpstra.com//projects/apex">my ultimate Markdown processor</a>) easier to integrate into Xcode projects, and I&rsquo;m excited to share what&rsquo;s new. The biggest change is full Swift Package Manager (SPM) support, which makes adding Apex to your project as simple as clicking a button in Xcode.</p>
+
+<p>While Apex is still in a 0.x state, I don&rsquo;t suggest it be used in production, but if developers want to start testing it out in an application scenario, it should be easy to load in a Mac or iOS app. Once it gets to 1.0, it will be a lot less likely to have breaking changes, and the API won&rsquo;t change in the 1.x series. I don&rsquo;t foresee many, if any, changes to the API moving forward, but we&rsquo;ll see how reception goes and what feedback arises.</p>
+
+<h3 id="swift-package-manager-support">Swift Package Manager Support</h3>
+
+<p>The easiest way to add Apex to your Xcode project now is through Swift Package Manager. Just open your project, go to the Package Dependencies tab, and add the Apex repository. Xcode handles the rest.</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="kd">import</span> <span class="kt">Apex</span>
+
+<span class="k">let</span> <span class="nv">markdown</span> <span class="o">=</span> <span class="s">"# Hello World"</span>
+<span class="k">let</span> <span class="nv">html</span> <span class="o">=</span> <span class="n">markdown</span><span class="o">.</span><span class="nf">apexHTML</span><span class="p">()</span></code></pre></div></div>
+
+<p>That&rsquo;s it. No framework dragging, no manual linking, no build configuration tweaks. SPM takes care of everything.</p>
+
+<p>The package supports both macOS 10.13+ and iOS 11+, so you can use Apex in your iOS apps too. I&rsquo;ve bundled libyaml as part of the package to make iOS support work seamlessly, with worrying about system library dependencies.</p>
+
+<h3 id="framework-build-options">Framework Build Options</h3>
+
+<p>If you prefer the traditional framework approach, that still works too. The CMake build now includes a module map in the framework, which means Swift can import the C API directly if you need it. The framework build is still the way to go if you&rsquo;re integrating with existing CMake projects or need more control over the build process.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>cmake <span class="nt">-DBUILD_FRAMEWORK</span><span class="o">=</span>ON ..
+make</code></pre></div></div>
+
+<p>The framework gets installed to <code class="language-plaintext highlighter-rouge">/Library/Frameworks</code> by default, or you can customize the install location.</p>
+
+<h3 id="better-swift-integration">Better Swift Integration</h3>
+
+<p>I&rsquo;ve improved the Swift API wrapper to make it more idiomatic. The <code class="language-plaintext highlighter-rouge">ApexOptions</code> struct now has a public initializer, so you can create options instances directly:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="k">var</span> <span class="nv">options</span> <span class="o">=</span> <span class="kt">ApexOptions</span><span class="p">()</span>
+<span class="n">options</span><span class="o">.</span><span class="n">pretty</span> <span class="o">=</span> <span class="kc">true</span>
+<span class="n">options</span><span class="o">.</span><span class="n">generateHeaderIDs</span> <span class="o">=</span> <span class="kc">true</span>
+<span class="k">let</span> <span class="nv">html</span> <span class="o">=</span> <span class="n">markdown</span><span class="o">.</span><span class="nf">apexHTML</span><span class="p">(</span><span class="nv">mode</span><span class="p">:</span> <span class="o">.</span><span class="n">gfm</span><span class="p">,</span> <span class="nv">options</span><span class="p">:</span> <span class="n">options</span><span class="p">)</span></code></pre></div></div>
+
+<p>The bridging between Swift and Objective-C has been cleaned up too. All the category methods on <code class="language-plaintext highlighter-rouge">NSString</code> are now properly accessible from Swift, so you get the full API surface without any awkward workarounds.</p>
+
+<h3 id="module-map-for-direct-c-access">Module Map for Direct C Access</h3>
+
+<p>If you need to use the C API directly from Swift, there&rsquo;s now a module map that makes it straightforward:</p>
+
+<div class="language-swift highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="kd">import</span> <span class="kt">Apex</span>
+
+<span class="k">let</span> <span class="nv">opts</span> <span class="o">=</span> <span class="nf">apex_options_default</span><span class="p">()</span>
+<span class="n">opts</span><span class="o">.</span><span class="n">pretty</span> <span class="o">=</span> <span class="kc">true</span>
+<span class="c1">// ... configure options ...</span>
+<span class="k">let</span> <span class="nv">html</span> <span class="o">=</span> <span class="nf">apex_markdown_to_html</span><span class="p">(</span><span class="n">markdown</span><span class="p">,</span> <span class="n">markdown</span><span class="o">.</span><span class="n">count</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">opts</span><span class="p">)</span></code></pre></div></div>
+
+<p>This is useful if you need fine-grained control or want to use features that aren&rsquo;t exposed through the higher-level Swift API yet.</p>
+
+<h3 id="testing-it-out">Testing It Out</h3>
+
+<p>I&rsquo;ve included a test script (<code class="language-plaintext highlighter-rouge">test_spm.sh</code>) that creates a temporary test project and verifies everything works. It does a clean build each time, so you can be confident the package builds correctly from scratch.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./test_spm.sh</code></pre></div></div>
+
+<p>The script tests all the main integration points—basic conversion, different modes, options, and standalone document generation.</p>
+
+<h3 id="one-more-thing">One More Thing</h3>
+
+<p>While I was working on this, I also enabled emoji autocorrect by default in unified mode. So if you type <code class="language-plaintext highlighter-rouge">:rocket:</code> and it doesn&rsquo;t quite match, Apex will try to find the closest match. It&rsquo;s a small quality-of-life improvement that makes the emoji syntax a bit more forgiving.</p>
+
+<p>The SPM package is ready to use in the <a href="https://github.com/ApexMarkdown/apex/releases/latest">latest release</a>, and I&rsquo;d love to hear how it works for you. If you run into any issues or have suggestions for improvements, let me know!</p>
+
+<p>Learn more about Apex on the <a href="https://brettterpstra.com//projects/apex">project page</a> and in the <a href="https://github.com/ApexMarkdown/apex/wiki">Apex wiki</a>. If you&rsquo;re interested in Xcode integration, there&rsquo;s a <a href="https://github.com/ApexMarkdown/apex/wiki/Xcode-Integration">whole page for that</a>.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115842882370658044">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Improved+Apex+Xcode+integration%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F05%2Fimproved-apex-xcode-integration%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F05%2Fimproved-apex-xcode-integration%2F&text=Improved+Apex+Xcode+integration&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F05%2Fimproved-apex-xcode-integration%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17247198.gif" height="1" width="1"/>

@@ -1,0 +1,38 @@
+<p>I thought I would share a simple concept that I have found very beneficial: creating an Emacs init file that remains almost fully functional for my use but doesn&rsquo;t include any external packages!</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20241206143221-emacs--Emacs-Core-Emacs-Init-Without-External-Packages.jpg" width="100%">
+</figure>
+
+<p>This setup benefits two main use cases. The first is when using Emacs at work without internet access, and the second is configuring it for use on Windows (with an internet connection). For some reason, my Windows version always seems to struggle to connect to MELPA/ELPA for package downloads, prompting me to resort to an initial complete local repository download. Even then, I still encounter some inconsistencies. I don&rsquo;t often use the native Windows Emacs version anyway, and now that WSL is mature enough, I know a fully functioning version of Emacs can run seamlessly.</p>
+<p>Anyway enough with the blithering.</p>
+<p>I have realized that over the years, I have accumulated many Elisp snippets that can actually replace several packages I have downloaded from MELPA.</p>
+<p>For example, while I couldn&rsquo;t live without <strong>ace-window</strong>, I only primarily use it for the window-jumping functionality. Now that I am familiar with the typical positions of the key identifiers in my window layout, I thought I would simply write my own implementation in Elisp:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/quick-window-jump ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Jump to a window by typing its assigned character label.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Windows are labeled starting from the top-left window and proceed top to bottom left to right.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (let* ((<span style="color:#a6e22e">window-list</span> (my/get-windows))
+</span></span><span style="display:flex;"><span>         (window-keys (seq-take <span style="color:#f92672">&#39;</span>(<span style="color:#e6db74">&#34;j&#34;</span> <span style="color:#e6db74">&#34;k&#34;</span> <span style="color:#e6db74">&#34;l&#34;</span> <span style="color:#e6db74">&#34;;&#34;</span> <span style="color:#e6db74">&#34;a&#34;</span> <span style="color:#e6db74">&#34;s&#34;</span> <span style="color:#e6db74">&#34;d&#34;</span> <span style="color:#e6db74">&#34;f&#34;</span>)
+</span></span><span style="display:flex;"><span>                                (<span style="color:#a6e22e">length</span> <span style="color:#a6e22e">window-list</span>)))
+</span></span><span style="display:flex;"><span>         (window-map (cl-pairlis window-keys <span style="color:#a6e22e">window-list</span>))
+</span></span><span style="display:flex;"><span>         (key (read-key (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;Select window [%s]: &#34;</span> (string-join window-keys <span style="color:#e6db74">&#34;, &#34;</span>)))))
+</span></span><span style="display:flex;"><span>    (if-let ((<span style="color:#a6e22e">selected-window</span> (<span style="color:#a6e22e">cdr</span> (<span style="color:#a6e22e">assoc</span> (<span style="color:#a6e22e">char-to-string</span> key) window-map))))
+</span></span><span style="display:flex;"><span>        (<span style="color:#a6e22e">select-window</span> <span style="color:#a6e22e">selected-window</span>)
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">message</span> <span style="color:#e6db74">&#34;No window assigned to key: %c&#34;</span> key))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/get-windows ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Return a list of windows in the current frame, ordered from top to bottom, left to right.&#34;</span>
+</span></span><span style="display:flex;"><span>  (<span style="color:#a6e22e">sort</span> (<span style="color:#a6e22e">window-list</span> <span style="color:#66d9ef">nil</span> <span style="color:#e6db74">&#39;no-mini</span>)
+</span></span><span style="display:flex;"><span>        (lambda (w1 w2)
+</span></span><span style="display:flex;"><span>          (let ((edges1 (<span style="color:#a6e22e">window-edges</span> w1))
+</span></span><span style="display:flex;"><span>                (edges2 (<span style="color:#a6e22e">window-edges</span> w2)))
+</span></span><span style="display:flex;"><span>            (or (<span style="color:#a6e22e">&lt;</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2)) <span style="color:#75715e">; Compare top edges</span>
+</span></span><span style="display:flex;"><span>                (and (<span style="color:#a6e22e">=</span> (<span style="color:#a6e22e">car</span> edges1) (<span style="color:#a6e22e">car</span> edges2)) <span style="color:#75715e">; If equal, compare left edges</span>
+</span></span><span style="display:flex;"><span>                     (<span style="color:#a6e22e">&lt;</span> (cadr edges1) (cadr edges2))))))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(global-set-key (kbd <span style="color:#e6db74">&#34;M-a&#34;</span>) <span style="color:#a6e22e">#&#39;</span>my/quick-window-jump)
+</span></span></code></pre></div><p>So the <code>ace-window</code> jumping functionality is now usable in an environment without access to MELPA!</p>
+<p>I thought I would present my &ldquo;no package&rdquo; Emacs config piece by piece one blog post at a time, showcasing 90% of the functionality I typically use day-to-day and how I have managed to either write some elisp, found out a built-in option, or adapted my workflow in some way.</p>
+<p>I still have my &ldquo;full-fat&rdquo; version, of course, but I have now based it on the <code>core</code> version (hence the name) and added extra things like <code>magit</code>, etc.</p>
+<p>However, <code>magit</code> is a good example on something I think I might be able to remove soon to switch to the built-in Emacs VC. I successfully use it at work with both Git and Subversion!</p>
+<p>If you are interested in seeing the full &ldquo;no fat&rdquo; version, have a ganders at: <a href="https://github.com/captainflasmr/Emacs-core">https://github.com/captainflasmr/Emacs-core</a></p>
+<p>There will be more to come on this topic in the coming weeks&hellip; 😀</p>

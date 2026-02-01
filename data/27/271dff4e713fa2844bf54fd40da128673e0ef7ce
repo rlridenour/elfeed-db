@@ -1,0 +1,66 @@
+<p>
+I found out about <a href="https://writewithharper.com/">Harper</a> the other day. Ever since I heard about it, I've been itching to set it up in my config and get rid of the horrible LanguageTool setup I had going. Now that I've got it working, I've gotta say I'm quite impressed. My previous LanguageTool setup was not smooth at all, and definitely not as fast as Harper is. I'm not sure how anyone else is doing spellchecking in Emacs (and particularly in <code>org-mode</code>) at the moment, but I recommend anyone using Emacs for most of their writing to give it a shot.
+</p>
+
+<p>
+I won't embarrass myself with a comparison of my LanguageTool config. Just know that it was slow and terrible. Copied from the Harper docs, this is what my config looks like:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (not (equal system-type 'windows-nt)) (locate-file <span class="org-string">"harper-ls"</span> exec-path))
+  (<span class="org-keyword">with-eval-after-load</span> 'eglot
+    (add-to-list 'eglot-server-programs
+               '(org-mode . (<span class="org-string">"harper-ls"</span> <span class="org-string">"--stdio"</span>))))
+
+  (<span class="org-keyword">setq-default</span> eglot-workspace-configuration
+              '(<span class="org-builtin">:harper-ls</span> (<span class="org-builtin">:dialect</span> <span class="org-string">"Australian"</span>)))
+
+  (add-hook 'org-mode-hook 'eglot-ensure))
+</pre>
+</div>
+
+<p>
+Some caveats: it doesn't look like Harper has <a href="https://github.com/Automattic/harper/issues/79#issuecomment-2638110954">support for <code>org-mode</code> specifically yet</a>, but it seems to generally work OK despite that. I have however noticed that it doesn't lint property tags, so for example your <code>#+title:</code> won't be spellchecked. Another minorly annoying little niggle is that straight seems to <a href="https://github.com/joaotavora/eglot/discussions/1487">misbehave with eglot</a>, or eldoc more specifically, printing <code>eldoc error: (invalid-function incf)</code> in the minibuffer instead of an actual error message. I was using <code>lsp-mode</code> before this - although I'm beginning to like the eglot interface more and more as I write this, so I think I may swap over to it where possible - so I never realised this issue. Per that GitHub issue link, <code>(use-package eldoc :straight (:type built-in))</code> seems to be the solution. 
+</p>
+
+<p>
+The only thing that's missing, and to be fair LanguageTool doesn't implement this either (in fact to my knowledge nothing implements this, I don't even think there's a Word plugin), is <a href="https://www.expresso-app.org/">text style metrics analysis</a>. Every so often I get the impulse to try to untangle what the source code for that website is doing, and then write a simple elisp wrapper for it, but I always get sidetracked before I start. Maybe now is the time.
+</p>
+
+<div class="outline-2">
+<h2 id="addendum">Addendum</h2>
+<div class="outline-text-2">
+<p>
+I've discovered another few quirks in setting this up (mostly to do with eglot and company), so I figured I'd go back to update this post and catalogue what I've had to do for future reference.
+</p>
+
+<p>
+eglot <a href="https://github.com/joaotavora/eglot/issues/324">overwrites <code>company-backends</code> by default</a>. This can be disabled with <code>(setq eglot-stay-out-of '(company))</code>. Figuring this out also convinced me to finally fix <code>company-ispell</code>, which I could not get working last time I tried.
+To get it working with both Ispell and flyspell it seems to need to following code-block:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">if</span> (file-exists-p <span class="org-string">"/usr/bin/hunspell"</span>)
+    (<span class="org-keyword">progn</span>
+      (eval-after-load <span class="org-string">"ispell"</span>
+        '(<span class="org-keyword">progn</span>
+         (<span class="org-keyword">setq</span> ispell-program-name <span class="org-string">"hunspell"</span>
+               ispell-dictionary   <span class="org-string">"en_AU"</span>
+               ispell-alternate-dictionary (file-truename (concat user-emacs-directory <span class="org-string">"en_AU.dict"</span>))
+               ispell-local-dictionary-alist '((<span class="org-string">"en_AU"</span> <span class="org-string">"[[:alpha:]]"</span> <span class="org-string">"[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">[:alpha:]]"</span> <span class="org-string">"[']"</span> nil (<span class="org-string">"-d"</span> <span class="org-string">"en_AU,en_AU-med"</span>) nil utf-8)))
+         (<span class="org-keyword">defun</span> <span class="org-function-name">ispell-get-coding-system</span> () 'utf-8)))
+      (eval-after-load <span class="org-string">"flyspell"</span>
+        '(<span class="org-keyword">progn</span>
+         (<span class="org-keyword">setq</span> ispell-program-name <span class="org-string">"hunspell"</span>
+               ispell-dictionary   <span class="org-string">"en_AU"</span>
+               ispell-alternate-dictionary (file-truename (concat user-emacs-directory <span class="org-string">"en_AU.dict"</span>))
+               ispell-local-dictionary-alist '((<span class="org-string">"en_AU"</span> <span class="org-string">"[[:alpha:]]"</span> <span class="org-string">"[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">[:alpha:]]"</span> <span class="org-string">"[']"</span> nil (<span class="org-string">"-d"</span> <span class="org-string">"en_AU,en_AU-med"</span>) nil utf-8)))
+         (<span class="org-keyword">defun</span> <span class="org-function-name">ispell-get-coding-system</span> () 'utf-8)))))
+</pre>
+</div>
+
+<p>
+I'm using Hunspell here - if you don't also <code>eval-after-load</code> for flyspell, then <code>ispell-program-name</code> gets overwritten (in my case, to <code>enchant-2</code>, which wasn't working). The alternate dictionary needs to be created, Hunspell doesn't ship a plaintext dictionary. You can make it by going to <code>/usr/share/hunspell/</code> and running <code>unmunch en_AU.dic en_AU.aff &gt;&gt; /~//.emacs.d/en_AU.dict</code>. You'll notice that I'm using <code>file-truename</code> to turn that user Emacs directory into an absolute path - for some reason, it wasn't working with just the relative path.
+</p>
+</div>
+</div>

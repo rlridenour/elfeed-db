@@ -1,0 +1,138 @@
+<p>
+I play a lot of solo tabletop RPGs, mostly for worldbuilding and writing purposes because thinking in the shoes of a person in the world helps you pinpoint what is and isn't ultimately important. Typically I use either pen and paper or <a href="https://jeansenvaars.itch.io/pum-companion">PUM Companion</a> to play, but I would like to play more complex games (particularly of my own design) and that requires some automation to be ergonomic for solo play. I've done this with spreadsheet scripting in the past, but that also has the problem of being very "numbers" focused, and it's difficult to structure it like I want to (it's still a narrative, after all).
+</p>
+
+<p>
+So, for this <a href="https://donaldh.wtf/2025/10/emacs-carnival-2025-11-an-ode-to-org-babel/">Emacs Carnival</a>, I wanted to solve this problem with Org Babel, because not only can it be used for literate programming in the traditional sense (as I've already talked about in <a href="https://www.cyan.sh/blog/posts/mixing-code-styles-with-org-babel.html">this blog</a>), it can also be used to interact with and manipulate the document the code itself is in. This allows the document to "come alive".
+</p>
+
+<p>
+As a proof of concept of how I want this to work, I've mocked up a <a href="https://fate-srd.com/fate-accelerated/get-started">Fate Accelerated</a> character sheet which does some very simple automations to make rolling dice easier. I've spent only a few hours mocking this up, and no doubt I will expand it, especially to include an oracle system of some sort for solo play as well. Let's have a look at how it works now.
+</p>
+
+<p>
+The full sheet can be found <a href="https://git.cyan.sh/BirDt/org-character-sheet/src/branch/master/Solo/fae+opse.org?display=source">here</a> but I'll copy code blocks here as relevant. I won't duplicate the structure, but essentially all the "code" of this sheet is inside it's own code header so that it can be hidden. In that header there is a startup block, which looks like this
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+name: startup</span>
+<span class="org-org-block-begin-line">#+begin_src elisp :results silent
+</span><span class="org-org-block">  (</span><span class="org-org-block"><span class="org-keyword">org-sbe</span></span><span class="org-org-block"> </span><span class="org-org-block"><span class="org-string">"fae"</span></span><span class="org-org-block">)
+
+  (</span><span class="org-org-block"><span class="org-keyword">define-minor-mode</span></span><span class="org-org-block"> </span><span class="org-org-block"><span class="org-function-name">srpg-mode</span></span><span class="org-org-block">
+    </span><span class="org-org-block"><span class="org-doc">"Minor mode for solo RPG gameplay."</span></span><span class="org-org-block">
+    </span><span class="org-org-block"><span class="org-builtin">:init-value</span></span><span class="org-org-block"> nil
+    </span><span class="org-org-block"><span class="org-builtin">:keymap</span></span><span class="org-org-block"> (make-keymap))
+
+  (define-key srpg-mode-map (kbd </span><span class="org-org-block"><span class="org-string">"M-r"</span></span><span class="org-org-block">) 'fae/take-action)
+</span><span class="org-org-block-end-line">#+end_src</span>
+</pre>
+</div>
+
+<p>
+The <code>org-sbe</code> macro evaluates another elisp code block that contains all the Fate system logic that I need. The minor mode is also defined here because I want key mapping, but I don't want to override any keys in the org major mode in other buffers. It's also defined here because I want the whole file to be redistributable.
+</p>
+
+<p>
+There is another code block before the Fate code that looks like this:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+name: prop-tbl-lookup</span>
+<span class="org-org-block-begin-line">#+begin_src elisp :var lookup="" target="" :results silent
+</span><span class="org-org-block">  (alist-get target
+         (mapcar #'(lambda (x) (cons (replace-regexp-in-string </span><span class="org-org-block"><span class="org-string">"</span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span></span><span class="org-org-block"><span class="org-string">\\[\\[</span></span><span class="org-org-block"><span class="org-string"><span class="org-constant">.*\\</span></span></span><span class="org-org-block"><span class="org-string">]\\[</span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span></span><span class="org-org-block"><span class="org-string">.*</span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span></span><span class="org-org-block"><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span></span><span class="org-org-block"><span class="org-string">\\]\\]"</span></span><span class="org-org-block"> </span><span class="org-org-block"><span class="org-string">"\\2"</span></span><span class="org-org-block"> (cadr x)) (car x)))
+                 (cl-remove-if (</span><span class="org-org-block"><span class="org-keyword">lambda</span></span><span class="org-org-block"> (x) (not (listp x))) lookup))
+         nil
+         nil
+         (</span><span class="org-org-block"><span class="org-keyword">lambda</span></span><span class="org-org-block"> (x y) (</span><span class="org-org-block"><span class="org-keyword">let</span></span><span class="org-org-block"> ((z (string-search x y)))
+                         (</span><span class="org-org-block"><span class="org-keyword">and</span></span><span class="org-org-block"> z (= 0 z)))))
+</span><span class="org-org-block-end-line">#+end_src</span>
+</pre>
+</div>
+
+<p>
+This is a bit disgusting, but essentially what it does is it searches a table (<code>lookup</code>) for a value based on the right column contents (<code>target</code>). In this block, <code>lookup</code> and <code>target</code> are empty strings - the code blocks in the Fate code will set those values when they call this block. This is the least annoying way of fetching values from an org table that I could figure out.
+</p>
+
+<p>
+You may be wondering about that regex replace. It converts links to their description, which is useful because the Fate approaches (skills) table for each character looks like this:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+name: pc1</span>
+<span class="org-org-table">| +x | Approach |</span>
+<span class="org-org-table">|----+----------|</span>
+<span class="org-org-table">| +2 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Careful&quot;)">Careful</a></span><span class="org-org-table">  |</span>
+<span class="org-org-table">| +0 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Clever&quot;)">Clever</a></span><span class="org-org-table">   |</span>
+<span class="org-org-table">| +8 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Flashy&quot;)">Flashy</a></span><span class="org-org-table">   |</span>
+<span class="org-org-table">| +3 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Forecful&quot;)">Forceful</a></span><span class="org-org-table"> |</span>
+<span class="org-org-table">| +0 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Quick&quot;)">Quick</a></span><span class="org-org-table">    |</span>
+<span class="org-org-table">| +0 | </span><span class="org-org-link"><a href="elisp:(fae/roll-approach &quot;pc1&quot; &quot;Sneaky&quot;)">Sneaky</a></span><span class="org-org-table">   |</span>
+</pre>
+</div>
+
+<p>
+If you've never seen <code>elisp:</code> links, I wouldn't blame you, but they are perfect here because they turn an otherwise static table into a bunch of clickable buttons. This is 1 way to roll checks in this sheet, which uses this snippet of code:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">fae/roll-approach</span> (table approach)
+  <span class="org-doc">"Get careful approach value."</span>
+  (+ (fae/roll-ndF 4)
+     (<span class="org-keyword">or</span> (org-babel-execute-src-block nil (org-babel-lob-get-info `(babel-call (<span class="org-builtin">:call</span> <span class="org-string">"prop-tbl-lookup"</span> <span class="org-builtin">:arguments</span> ,(format <span class="org-string">"%s, \"%s\""</span> table approach))))) 0)
+     (<span class="org-keyword">if</span> (y-or-n-p <span class="org-string">"Any other modifiers?"</span>)
+       (read-minibuffer <span class="org-string">"+? "</span>)
+       0)))
+</pre>
+</div>
+
+<p>
+<code>fae/roll-ndF</code> is just a dice rolling function and not that interesting. The <code>org-babel-execute-src-block</code> may draw your attention instead. What this is doing is constructing a <code>#+call:</code> block in code, which allows us to pass a dynamic table and approach as parameters. We can't use <code>org-sbe</code> here because any arguments passed to it are treated as strings, <code>(org-sbe table)</code> will treat <code>table</code> as a string literal <code>"table"</code> and not as it's actual value.
+</p>
+
+<p>
+We have one more way of rolling dice, which is bound the <code>M-r</code> in the minor mode:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">fae/get-approach-modifier</span> (approach)
+  <span class="org-doc">"Get approach value."</span>
+  (<span class="org-keyword">let</span> ((table (read-string <span class="org-string">"For which approach table? "</span>)))
+    (<span class="org-keyword">or</span> (org-babel-execute-src-block nil (org-babel-lob-get-info `(babel-call (<span class="org-builtin">:call</span> <span class="org-string">"prop-tbl-lookup"</span> <span class="org-builtin">:arguments</span> ,(format <span class="org-string">"%s, \"%s\""</span> table approach))))) 0)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">fae/take-action</span> ()
+  <span class="org-doc">"Say what you're trying to do and insert a roll outcome."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((action (read-string <span class="org-string">"What are you trying to do? "</span>))
+         (dice-roll (fae/roll-ndF 4))
+         (approach (completing-read
+                  <span class="org-string">"Select approach: "</span>
+                  '(<span class="org-string">"Careful"</span> <span class="org-string">"Clever"</span> <span class="org-string">"Flashy"</span> <span class="org-string">"Forceful"</span> <span class="org-string">"Quick"</span> <span class="org-string">"Sneaky"</span>)))
+         (app-mod (fae/get-approach-modifier approach))
+         (add-mod (<span class="org-keyword">if</span> (y-or-n-p <span class="org-string">"Any other modifiers?"</span>)
+                    (read-minibuffer <span class="org-string">"+? "</span>)
+                  0)))
+    (insert (format <span class="org-string">"%s (Approach %s, Rolled %s+%s+%s=%s)\n"</span> action approach dice-roll app-mod add-mod (+ dice-roll app-mod add-mod)))))
+</pre>
+</div>
+
+<p>
+This is used for logging the action at the current point instead of just displaying the result in the minibuffer, which is good because I like to keep track of my rolls and what I was trying to do with them.
+</p>
+
+<p>
+And finally, I want this to all set itself up automatically when I open the file, which can be done by putting this at the very bottom to run the startup block when the file opens.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-fundamental"># Local Variables&#58;
+# org-confirm-babel-evaluate: nil
+# eval: (progn (org-sbe <span class="org-string">"startup"</span>))
+# End:
+</pre>
+</div>
+
+<p>
+And that's all for now, until I extend this to include other features from Fate like fate point tracking and aspects/stunts.
+</p>

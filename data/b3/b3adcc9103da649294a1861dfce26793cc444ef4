@@ -1,0 +1,163 @@
+<p>[Equations in this post may not look right (or appear at all) in your RSS reader. Go to <a href="https://leancrew.com/all-this/2026/01/a-zeckendorf-table/">the original article</a> to see them rendered properly.]</p>
+  <hr />
+  <p>As a general rule, I don’t get the fascination mathematicians have with Fibonacci numbers, but I did enjoy <a href="https://www.youtube.com/watch?v=S5FTe5KP2Cw">this recent Numberphile video</a>. It’s about the <a href="https://mathworld.wolfram.com/ZeckendorfRepresentation.html">Zeckendorf representation</a> of numbers, which I’d never heard of, and it inspired me to build a short Mathematica notebook that reproduces one of the things in the video.</p>
+<p><a href="https://en.wikipedia.org/wiki/Zeckendorf%27s_theorem">Zeckendorf’s theorem</a> says that any positive integer can be uniquely represented as the sum of non-consecutive <a href="https://en.wikipedia.org/wiki/Fibonacci_sequence">Fibonacci numbers</a>. For example,</p>
+<math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mn>50</mn><mo>=</mo><mn>34</mn><mo>+</mo><mn>13</mn><mo>+</mo><mn>3</mn></mrow></math>
+<p>which are the ninth, seventh, and fourth Fibonacci numbers. In the video, Tony Padilla uses this fact in a crappy magic trick to divine the number Brady guesses. The trick involves this table of numbers:</p>
+<p><img alt="Zeckendorf table from Numberphile video" class="ss" src="https://leancrew.com/all-this/images2026/20260109-Zeckendorf%20table%20from%20Numberphile%20video.png" title="Zeckendorf table from Numberphile video" width="100%"/></p>
+<p>The trick goes like this: Brady chooses a number from 1 to 100. He then checks the rows in this table that contain his number. Tony then scans the table—not as quickly as he should to make it seem magical—and tells Brady the number he chose.</p>
+<p>The trick is in the construction of the table. Each row of the table starts with a Fibonacci number and contains every number (from 1 through 100) that includes that Fibonacci number in its Zeckendorf representation. To determine the number guessed, the “magician” adds up the first number in each checked row.</p>
+<p>I thought it would be fun to build the table. I opened Mathematica and started exploring its Fibonacci-related functions. It didn’t take long to see that the Wolfram Function Repository (a sort of external library for the Wolfram Language) has a <a href="https://resources.wolframcloud.com/FunctionRepository/resources/ZeckendorfRepresentation"><code>ZeckendorfRepresentation</code> function</a>. When given a number, it returns a list of ones and zeros corresponding to the Zeckendorf representation of that number. For example,</p>
+<pre><code>ResourceFunction["ZeckendorfRepresentation"][50]
+</code></pre>
+<p>returns</p>
+<pre><code>{1, 0, 1, 0, 0, 1, 0, 0}
+</code></pre>
+<p>The Fibonacci numbers included in the Zeckendorf representation correspond to the ones, and those that are skipped correspond to the zeros. The most significant Fibonacci number (i.e., the largest) comes first in the list. You may have noticed that although 34 is the ninth Fibonacci number, the list above is only eight digits long. Recall that the Fibonacci sequence starts with two ones:</p>
+<pre><code>1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, …
+</code></pre>
+<p>The first one is redundant in a Zeckendorf representation, so it’s ignored.</p>
+<p>To make the table, I started with the list of Fibonacci numbers less than 100, not including the initial one. The <a href="https://reference.wolfram.com/language/ref/Fibonacci.html"><code>Fibonacci</code> function</a> returns the nth Fibonacci number, so I built the list this way:</p>
+<pre><code>fibs = Select[Map[Fibonacci, Range[2, 15]], # &lt; 100 &amp;]
+</code></pre>
+<p>The call to <a href="http://reference.wolfram.com/language/ref/Map.html"><code>Map</code></a> created a list of the 2nd through 15th Fibonacci numbers. I couldn’t remember how many Fibonacci numbers are less than 100, but I figured the 15th had to be above 100. I then used <a href="https://reference.wolfram.com/language/ref/Select.html"><code>Select</code></a> and a <a href="file:///Users/mark/git/blog-preview/post-preview.html">pure function</a> to filter the higher numbers out of the list.<sup id="fnref:11th"><a href="#fn:11th" rel="footnote">1</a></sup> This returned</p>
+<pre><code>{1, 2, 3, 5, 8, 13, 21, 34, 55, 89}
+</code></pre>
+<p>Next I created a list of the Zeckendorf representations of every integer from 1 through 100. Because the Zeckendorf representations are themselves lists of varying length, I decided it would be easier to work with reversed Zeckendorf representations, where the least significant digit comes first.</p>
+<pre><code>rzeck = Map[Reverse,
+            Map[ResourceFunction["ZeckendorfRepresentation"],
+                Range[1, 100]
+               ]
+           ];
+</code></pre>
+<p>The <code>rzeck</code> list is kind of long, but here are the first ten and last two entries:</p>
+<pre><code>{{1},
+ {0, 1},
+ {0, 0, 1},
+ {1, 0, 1},
+ {0, 0, 0, 1},
+ {1, 0, 0, 1},
+ {0, 1, 0, 1},
+ {0, 0, 0, 0, 1},
+ {1, 0, 0, 0, 1},
+ {0, 1, 0, 0, 1},
+ [etc]
+ {0, 1, 0, 0, 1, 0, 0, 0, 0, 1},
+ {0, 0, 1, 0, 1, 0, 0, 0, 0, 1}}
+</code></pre>
+<p>The reversed Zeckendorf representation of 50 is</p>
+<pre><code>{0, 0, 1, 0, 0, 1, 0, 1}
+</code></pre>
+<p>so to get the Fibonacci numbers in that representation, we do this:</p>
+<pre><code>fibs[[Flatten[Position[rzeck[[50]], 1]]]]
+</code></pre>
+<p>The <a href="https://reference.wolfram.com/language/ref/Position.html"><code>Position</code> function</a> returns a nested list of where the ones are,</p>
+<pre><code>{{3}, {6}, {8}}
+</code></pre>
+<p>which is why it had to be run through <a href="http://reference.wolfram.com/language/ref/Flatten.html"><code>Flatten</code></a>.</p>
+<p>This idea is how I built a list of the Fibonacci terms from the Zeckendorf representations. I created a function like the code above and mapped it to every integer from 1 through 100.</p>
+<pre><code>fibTerms[n_] := fibs[[Flatten[Position[rzeck[[n]], 1]]]]
+f = Map[fibTerms, Range[1, 100]]
+</code></pre>
+<p>So now I have a list of 100 lists. Each sublist contains the Fibonacci numbers of the Zeckendorf representation for the corresponding index number of the outer list. Like this:</p>
+<pre><code>  1: {1}                    51: {1, 3, 13, 34}
+  2: {2}                    52: {5, 13, 34}
+  3: {3}                    53: {1, 5, 13, 34}
+  4: {1, 3}                 54: {2, 5, 13, 34}
+  5: {5}                    55: {55}
+  6: {1, 5}                 56: {1, 55}
+  7: {2, 5}                 57: {2, 55}
+  8: {8}                    58: {3, 55}
+  9: {1, 8}                 59: {1, 3, 55}
+ 10: {2, 8}                 60: {5, 55}
+ 11: {3, 8}                 61: {1, 5, 55}
+ 12: {1, 3, 8}              62: {2, 5, 55}
+ 13: {13}                   63: {8, 55}
+ 14: {1, 13}                64: {1, 8, 55}
+ 15: {2, 13}                65: {2, 8, 55}
+ 16: {3, 13}                66: {3, 8, 55}
+ 17: {1, 3, 13}             67: {1, 3, 8, 55}
+ 18: {5, 13}                68: {13, 55}
+ 19: {1, 5, 13}             69: {1, 13, 55}
+ 20: {2, 5, 13}             70: {2, 13, 55}
+ 21: {21}                   71: {3, 13, 55}
+ 22: {1, 21}                72: {1, 3, 13, 55}
+ 23: {2, 21}                73: {5, 13, 55}
+ 24: {3, 21}                74: {1, 5, 13, 55}
+ 25: {1, 3, 21}             75: {2, 5, 13, 55}
+ 26: {5, 21}                76: {21, 55}
+ 27: {1, 5, 21}             77: {1, 21, 55}
+ 28: {2, 5, 21}             78: {2, 21, 55}
+ 29: {8, 21}                79: {3, 21, 55}
+ 30: {1, 8, 21}             80: {1, 3, 21, 55}
+ 31: {2, 8, 21}             81: {5, 21, 55}
+ 32: {3, 8, 21}             82: {1, 5, 21, 55}
+ 33: {1, 3, 8, 21}          83: {2, 5, 21, 55}
+ 34: {34}                   84: {8, 21, 55}
+ 35: {1, 34}                85: {1, 8, 21, 55}
+ 36: {2, 34}                86: {2, 8, 21, 55}
+ 37: {3, 34}                87: {3, 8, 21, 55}
+ 38: {1, 3, 34}             88: {1, 3, 8, 21, 55}
+ 39: {5, 34}                89: {89}
+ 40: {1, 5, 34}             90: {1, 89}
+ 41: {2, 5, 34}             91: {2, 89}
+ 42: {8, 34}                92: {3, 89}
+ 43: {1, 8, 34}             93: {1, 3, 89}
+ 44: {2, 8, 34}             94: {5, 89}
+ 45: {3, 8, 34}             95: {1, 5, 89}
+ 46: {1, 3, 8, 34}          96: {2, 5, 89}
+ 47: {13, 34}               97: {8, 89}
+ 48: {1, 13, 34}            98: {1, 8, 89}
+ 49: {2, 13, 34}            99: {2, 8, 89}
+ 50: {3, 13, 34}           100: {3, 8, 89}
+</code></pre>
+<p>To get Tony’s table, I have to do a sort of inversion of the list <code>f</code>. This consists of going through every Fibonacci number in <code>fibs</code> and selecting the indices of <code>f</code> in which that Fibonacci number appears. Here’s the code:</p>
+<pre><code>Table[Select[f, MemberQ[i] -&gt; Index], {i, fibs}]
+</code></pre>
+<p><a href="https://reference.wolfram.com/language/ref/MemberQ.html"><code>MemberQ</code></a> is a Boolean function, returning True if the item is in the list. I’m using the operator form of it. The Wolfram Language has lots of <a href="https://www.wolfram.com/language/elementary-introduction/2nd-ed/28-tests-and-conditionals.html">test functions</a> that end with <code>Q</code>, which I think of as meaning “Question” or “Query.” It’s a convention taken from Lisp, where <a href="https://www.cs.cmu.edu/Groups/AI/html/cltl/clm/node69.html">predicate functions</a> tend to end with the letter <code>p</code>.</p>
+<p>Here’s the resulting table, formatted to make it easier to read:</p>
+<pre><code>1, 4, 6, 9, 12, 14, 17, 19, 22, 25, 27, 30, 33, 35,
+38, 40, 43, 46, 48, 51, 53, 56, 59, 61, 64, 67, 69,
+72, 74, 77, 80, 82, 85, 88, 90, 93, 95, 98
+
+2, 7, 10, 15, 20, 23, 28, 31, 36, 41, 44, 49, 54,
+57, 62, 65, 70, 75, 78, 83, 86, 91, 96, 99
+
+3, 4, 11, 12, 16, 17, 24, 25, 32, 33, 37, 38, 45,
+46, 50, 51, 58, 59, 66, 67, 71, 72, 79, 80, 87, 88,
+92, 93, 100
+
+5, 6, 7, 18, 19, 20, 26, 27, 28, 39, 40, 41, 52, 53,
+54, 60, 61, 62, 73, 74, 75, 81, 82, 83, 94, 95, 96
+
+8, 9, 10, 11, 12, 29, 30, 31, 32, 33, 42, 43, 44,
+45, 46, 63, 64, 65, 66, 67, 84, 85, 86, 87, 88, 97,
+98, 99, 100
+
+13, 14, 15, 16, 17, 18, 19, 20, 47, 48, 49, 50, 51,
+52, 53, 54, 68, 69, 70, 71, 72, 73, 74, 75
+
+21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33,
+76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88
+
+34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+47, 48, 49, 50, 51, 52, 53, 54
+
+55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67,
+68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80,
+81, 82, 83, 84, 85, 86, 87, 88
+
+89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100
+</code></pre>
+<p>If you compare it to the image of the table above, you’ll see that they match.</p>
+<p>Here’s the complete notebook:</p>
+<iframe height="800" src="https://www.wolframcloud.com/obj/mark80/Published/zeckendorf.nb?_embed=iframe" width="100%"></iframe>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:11th">
+<p>For the record, 89 is the 11th Fibonacci number. <a href="#fnref:11th" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>
+  

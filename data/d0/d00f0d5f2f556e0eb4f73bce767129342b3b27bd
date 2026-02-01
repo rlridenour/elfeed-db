@@ -1,0 +1,320 @@
+<p>New year marks the day Protesilaos <a href="https://protesilaos.com/codelog/2023-01-01-modus-themes-4-0-0/">releases modus-themes v4</a> into the wild; and my package update from MELPA already ingested preliminary changes on Friday Dec 30th (much to my chagrin, because I initially wanted to do something else than fiddling with my Emacs setup) that were absolutely not backwards compatible.</p>
+
+<p>While I migrated my configuration over, I reported some issues, which were promptly fixed, and after waiting for a couple days, this post is what’s left of my v3-to-v4 migration without any temporary workarounds.</p>
+
+<p>A lot of the old configuration options are gone; instead of many <code>defvar</code>s (i.e. “state” that affects theme loading) to affect e.g. the color of code blocks, the <del>selection</del> <ins>region</ins>, or buffer fringes, we’re now interacting with a large option list instead and declare what we want (i.e. one data source for the truth about the theme). That change means we all need to figure out which old setting now are affected by which names color, and then sprinkle some hooks on top to use named colors for our own purposes.</p>
+
+<p>This is not a migration <em>guide</em> by any means, but it could help you understand how the themes now work by following along. The <a href="https://protesilaos.com/emacs/modus-themes">v4 documentation is thorough,</a> but for a first read, you need to keep a lot of stuff in your head. I hope this eases that a bit.</p>
+
+<h2 id="new-themes-and-how-to-load-them">New themes, and how to load them</h2>
+
+<p>The modus-themes package comes with 6 themes:</p>
+
+<ol>
+  <li>Light
+    <ol>
+      <li><code>modus-operandi</code></li>
+      <li><code>modus-operandi-deuteranopia</code></li>
+      <li><code>modus-operandi-tinted</code></li>
+    </ol>
+  </li>
+  <li>Dark
+    <ol>
+      <li><code>modus-vivendi</code></li>
+      <li><code>modus-vivendi-deuteranopia</code></li>
+      <li><code>modus-vivendi-tinted</code></li>
+    </ol>
+  </li>
+</ol>
+
+<p>I used to have the deuteranopia <em>flag</em> enabled, so I’m now picking the base theme <code>modus-operandi-deuteranopia</code>. Same if you were &gt;50% using tinted variants: use <code>modus-operandi-tinted</code>. If in doubt, start with the default.</p>
+
+<p>To declare that I want to use the deuteranopia-friendly dark and light variant e.g. when I use <key>F5</key> to toggle themes, I start with:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-to-toggle</span> <span class="o">'</span><span class="p">(</span><span class="nv">modus-operandi-deuteranopia</span> <span class="nv">modus-vivendi-deuteranopia</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Before loading the theme (via built-in <code>load-theme</code>, which replaces the old <code>modus-themes-load-theme</code> that did some extra work), you need to set all your configuration options so they are available during the loading process. We’ll check these out in a minute, but this here is ultimately the last line in my theme config:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Replaces a call to (modus-themes-load-themes)</span>
+<span class="p">(</span><span class="nv">load-theme</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">modus-themes-to-toggle</span><span class="p">)</span> <span class="no">t</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Note that I could just as well write <code>(load-theme 'modus-operandi-deuteranopia)</code>, but this way I can treat the <code>modus-themes-to-toggle</code> variable as the source of truth. Hashtag <a href="/wiki/dry" title="DRY">DRY</a>.</p>
+
+<p><strong>Heads up:</strong> While the <code>load-theme</code> call above works anytime <em>after</em> I’ve confirmed the theme, it refuses to load the theme for the first time. I noticed that it wouldn’t load after a fresh start of Emacs. So I ran <code>(load-theme 'modus-operandi-deuteranopia)</code> once and gave my approval; same for the vivendi variant. Then all is good. (I also had no luck with <code>:no-confirm</code> parameter, by the way.)</p>
+
+<p>So that’s the basic wireframe for how I load and configure the theme. With my actual <code>use-package</code> call, this is the structrue:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">modus-themes</span>
+  <span class="ss">:init</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-to-toggle</span> <span class="o">'</span><span class="p">(</span><span class="nv">modus-operandi-deuteranopia</span> <span class="nv">modus-vivendi-deuteranopia</span><span class="p">))</span>
+  <span class="c1">;; ... setting all variable that need to</span>
+  <span class="c1">;; be present before loading the theme ...</span>
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="nv">load-theme</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">modus-themes-to-toggle</span><span class="p">)</span> <span class="no">t</span> <span class="no">t</span><span class="p">)</span>
+  <span class="ss">:bind</span> <span class="p">(</span><span class="s">"&lt;f5&gt;"</span> <span class="o">.</span> <span class="nv">modus-themes-toggle</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Next, we’ll fill out the placeholder I put in the <code>:init</code> section’s comments.</p>
+
+<h3 id="configuration-options">Configuration options</h3>
+
+<p>The simple configuration options for me that I kept and still like:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-italic-constructs</span> <span class="no">t</span>
+      <span class="nv">modus-themes-bold-constructs</span> <span class="no">t</span>
+      <span class="nv">modus-themes-variable-pitch-ui</span> <span class="no">t</span>
+      <span class="nv">modus-themes-mixed-fonts</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Most of the work is done by palettes and their overrides, that we’ll look at for the rest of this post. These affect <em>all colors</em>; but to affect bold constructs and font sizes, there are still a couple more variables that inform theme loading. These are listed as <a href="https://protesilaos.com/emacs/modus-themes#h:bf1c82f2-46c7-4eb2-ad00-dd11fdd8b53f">5. Customization options</a> in the docs. The ones I use are:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Color customizations</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-prompts</span> <span class="o">'</span><span class="p">(</span><span class="nv">bold</span><span class="p">))</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-completions</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-org-blocks</span> <span class="ss">'gray-background</span><span class="p">)</span>
+
+<span class="c1">;; Font sizes for titles and headings, including org</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-headings</span> <span class="o">'</span><span class="p">((</span><span class="mi">1</span> <span class="o">.</span> <span class="p">(</span><span class="nv">light</span> <span class="nv">variable-pitch</span> <span class="mf">1.5</span><span class="p">))</span>
+                              <span class="p">(</span><span class="nv">agenda-date</span> <span class="o">.</span> <span class="p">(</span><span class="mf">1.3</span><span class="p">))</span>
+                              <span class="p">(</span><span class="nv">agenda-structure</span> <span class="o">.</span> <span class="p">(</span><span class="nv">variable-pitch</span> <span class="nv">light</span> <span class="mf">1.8</span><span class="p">))</span>
+						      <span class="p">(</span><span class="no">t</span> <span class="o">.</span> <span class="p">(</span><span class="nv">medium</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>Only these simple variable settings did survive; the rest is trickier, because we need to understand the new (and very flexible and quite amazing) palettes.</p>
+
+<h2 id="palette-overrides">Palette overrides</h2>
+
+<p>The “more power to the user” release comes with some cost: you need to understand how the new palettes work. Theres a whole section in the docs, <a href="https://protesilaos.com/emacs/modus-themes#h:34c7a691-19bb-4037-8d2f-67a07edab150">5.11 Palette Overrides</a>: for each of the 6 themes, theres a <code>-palette-overrides</code> variable you can use to inject your own styles that, well, override the default settings of the respective theme. The actual code that merges overrides with the defaults is this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; modus-operandi-deuteranopia-theme.el</span>
+<span class="p">(</span><span class="nv">modus-themes-theme</span> <span class="nv">modus-operandi-deuteranopia</span>
+                    <span class="nv">modus-operandi-deuteranopia-palette</span>
+                    <span class="nv">modus-operandi-deuteranopia-palette-overrides</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Think of palettes are lists of color names and colors. If you peek into the <a href="https://git.sr.ht/~protesilaos/modus-themes/tree/main/item/modus-operandi-deuteranopia-theme.el"><code>modus-operandi-deuteranopia-theme.el</code> code</a>, you’ll see it boils down to a very long list like this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; modus-operandi-deuteranopia-theme.el</span>
+<span class="p">(</span><span class="nv">defconst</span> <span class="nv">modus-operandi-deuteranopia-palette</span>
+  <span class="o">'</span><span class="p">((</span><span class="nv">bg-main</span>          <span class="s">"#ffffff"</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">bg-dim</span>           <span class="s">"#f0f0f0"</span><span class="p">)</span>
+    <span class="c1">;; ...</span>
+    <span class="p">))</span>
+</code></pre></div></div>
+
+<p>The good news is that there are still many named colors, like <code>bg-main</code>. These semantic colors can be used to style other pieces of Emacs to have the modus colors.</p>
+
+<p>The bad news is getting to them is a bit more cumbersome if you need their values, but it works well and consistently. I’ll show some applications of this below.</p>
+
+<p>Another upside is that some “settings” are part of this list, too, usually further down, and they can reference the more basic color definitions. One example is <code>(fg-link blue-warmer)</code> which declared the link foreground color by referencing the <code>blue-warmer</code> color setting from elsewhere in the file. This replaces old settings like <code>(setq modus-themes-links '(neutral underline))</code>.</p>
+
+<p>I didn’t use many of these, but I noticed the deprecation warnings to guide me through the process.</p>
+
+<p>It’s <a href="https://lists.sr.ht/~protesilaos/modus-themes/%3C874jtew0gp.fsf%40hyperspace%3E#%3C874jtew0gp.fsf@hyperspace%3E">hard to say in retrospect (as e.g. Tony Zorman pointed out)</a> what e.g. the ‘neutrality’ setting used to do. You need to look up the hex colors and find close matches, is my guess. (After Tony’s email exchange, the v4 release candidate improved a lot, so your personal migration might go much smoother.)</p>
+
+<p>For example, if you don’t like the theme/palette’s default link color and want something with less contrast, override <code>fg-link</code> with <code>blue-faint</code> instead of <code>blue-warmer</code>, maybe.</p>
+
+<p>So how do you do that?</p>
+
+<p>If you want global overrides like the old <code>modus-themes-links</code> setting, you use the <em>shared</em> palette overrides, called <code>modus-themes-common-palette-overrides</code>. These should not use absolute hex colors but reference named colors instead. That way, you get the proper “faint blue” for the dark and light theme.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-common-palette-overrides</span>
+      <span class="o">'</span><span class="p">(</span><span class="c1">;; Globally use faint instead of warm blue for links</span>
+        <span class="p">(</span><span class="nv">fg-link</span> <span class="nv">blue-faint</span><span class="p">)</span>
+        <span class="c1">;; ... more overrides here ...</span>
+        <span class="p">))</span>
+</code></pre></div></div>
+
+<p>If you want to tweak just one particular palette, you choose one from the 6 palette override options like I mentioned above.</p>
+
+<p>Here’s an example to change the inactive background color of the light deuteranopia theme:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">customize-set-variable</span> <span class="ss">'modus-operandi-deuteranopia-palette-overrides</span>
+                        <span class="o">'</span><span class="p">(</span>
+                          <span class="c1">;; More subtle gray for the inactive window and modeline</span>
+                          <span class="p">(</span><span class="nv">bg-inactive</span> <span class="s">"#efefef"</span><span class="p">)</span>
+                          <span class="p">))</span>
+</code></pre></div></div>
+
+<p>Setting a light gray like <code>"#efefef"</code> <span title="#efefef" alt="#efefef" style="background: #efefef; border: 1px solid #00000088; border-radius: 0.1rem; display: inline-block; width: 1em; height: 1em; vertical-align: middle; margin-top: -0.2em; base-palette: 1;"></span> wouldn’t work for the modus-vivendi variants.</p>
+
+<p>Notice how I also actually use <code>customize-set-variable</code>, not <code>setq</code>: the variable <code>modus-themes-custom-auto-reload</code> is enabled by default, which means when I change the palette via <code>customize-set-variable</code>, the theme auto-reloads and shows the changes quickly. This is great to experiment with colors, so I recommend you use that, too.</p>
+
+<p>At this point, we know how to</p>
+
+<ul>
+  <li>pick the toggle-able themes, i.e. which dark and light one <key>F5</key> should switch between;</li>
+  <li>override color “pointers” (like <code>fg-link</code>) by referencing other named colors in the “common” palette;</li>
+  <li>override colors with absolute hex codes.</li>
+</ul>
+
+<p>You can also use override presets (<a href="https://protesilaos.com/emacs/modus-themes#h:b0bc811c-227e-42ec-bf67-15e1f41eb7bc">5.11.1 Palette override presets</a>) to get back e.g. an overall “faint” look and feel. The documentation explains how to use that and even how to <em>inherit</em> from it while setting your own colors. Armed with that knowledge, my actual common palette settings were the following (“were”, because I removed inheriting from <code>-faint</code> eventually to give the new colors a real chance):</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">customize-set-variable</span>
+ <span class="ss">'modus-themes-common-palette-overrides</span>
+ <span class="o">`</span><span class="p">(</span>
+   <span class="c1">;; Make the mode-line borderless and stand out less</span>
+   <span class="p">(</span><span class="nv">bg-mode-line-active</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">fg-mode-line-active</span> <span class="nv">fg-main</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">bg-mode-line-inactive</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">fg-mode-line-active</span> <span class="nv">fg-dim</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">border-mode-line-active</span> <span class="nv">bg-main</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">border-mode-line-inactive</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+
+   <span class="c1">;; Inherit rest from faint style</span>
+   <span class="o">,@</span><span class="nv">modus-themes-preset-overrides-faint</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>I’ll explain my choice for the mode-line color overrides in the next section.</p>
+
+<p>Depending on when you read this, this will just work – on 2022-12-30 <a href="https://lists.sr.ht/~protesilaos/modus-themes/%3Cm1cz81rq9m.fsf%40christiantietze.de%3E">I reported an issue</a> that the overrides wouldn’t merge properly. See there for a quick fix; I didn’t bother to put it here again because it was already fixed by Prot within the hour, but YMMV when you try to do crazy things with the themes.</p>
+
+<h2 id="working-with-modus-themes-color-values">Working with modus-themes color values</h2>
+
+<p>There’s no convenient way to get a single named color from the themes at the moment. The <code>modus-themes-with-colors</code> macro is clever, but at the time of writing, <a href="https://protesilaos.com/emacs/modus-themes#h:51ba3547-b8c8-40d6-ba5a-4586477fd4ae">the documentation</a> is sparse and only shows how you can use it to produce a list, i.e. use the macro for reading the variable names. On the mailing list, Prot shared more examples and <a href="https://protesilaos.com/emacs/modus-themes#h:5a0c58cc-f97f-429c-be08-927b9fbb0a9c">eventually included mode-line color overrides in the docs</a> based on our email exchange, which I believe serves as a better example.</p>
+
+<p>To understand the <code>modus-themes-with-colors</code> macro, you need to feel somewhat comfortable with Elisp macros because you’ll be using lists eventually and need to escape variable names for the colors inside these.</p>
+
+<p>Check out these links if you need a refresher for the backquoted <code>`(...)</code> list form and how the comma splicing works within macro expressions:</p>
+
+<ul>
+  <li>Emacs Lisp Manual, 10.4 Backquote: <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Backquote.html">https://www.gnu.org/software/emacs/manual/html_node/elisp/Backquote.html</a></li>
+  <li><a href="https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/">https://lisp-journey.gitlab.io/blog/common-lisp-macros-by-example-tutorial/</a></li>
+</ul>
+
+<p>With that, you can use theme color variables like so:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">modus-themes-with-colors</span>
+  <span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'tab-bar</span> <span class="no">nil</span> <span class="ss">:background</span> <span class="nv">bg-main</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>The macro makes all theme variables like <code>bg-main</code> available as locally bound variables.</p>
+
+<p>The actual use within backquoted lists is a bit different, as you’ll see next.</p>
+
+<h3 id="overriding-the-mode-line-even-more">Overriding the mode-line even more</h3>
+
+<p>Above, I shared my mode line color settings: commonly, I use the background color in the inactive window (to blend it in), and a light contrast in the active window. I tweaked the <code>bg-inactive</code> color of the light theme to be even less dark, so it’s a more subtle tonal contrast. (And IMHO less ugly.)</p>
+
+<p>These changes aren’t all, though. I also apply a box to the modeline to make it appear larger (and add whitespace around the text). The box should have the appropriate color to appear like an extension of the background, so I need to reference the mode-line background colors of the theme when adding a box.</p>
+
+<figure><a href="https://christiantietze.de/posts/2023/01/modus-themes-v4-changes/mode-line.png"><img alt="" src="https://christiantietze.de/posts/2023/01/modus-themes-v4-changes/mode-line.png" /></a><figcaption>The inactive window and the mode line have the same light gray color to blend in. The mlscroll indicator is a bit stark, still, but this is WIP.</figcaption></figure>
+
+<p><strong>Update 2023-12-13:</strong> I’ve changed the <code>mlscroll.el</code> settings in the meantime and thanks to updates to the package later in 2023, <a href="https://christiantietze.de/posts/2023/12/update-modus-themes-mlscroll-colors/">I can use the <code>scroll-bar</code> face directly.</a></p>
+
+<p><a href="https://lists.sr.ht/~protesilaos/modus-themes/%3Cm1fscxrr0s.fsf%40christiantietze.de%3E#%3C87o7rl2fwn.fsf@protesilaos.com%3E">With an improved implementation suggested by Prot</a>, I’m now using this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/modus-themes-customize-mode-line</span> <span class="p">()</span>
+  <span class="s">"Apply padding to mode-line via box that has the background color"</span>
+  <span class="p">(</span><span class="nv">modus-themes-with-colors</span>
+    <span class="p">(</span><span class="nv">custom-set-faces</span>
+     <span class="o">`</span><span class="p">(</span><span class="nv">mode-line</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span> <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">10</span> <span class="ss">:color</span> <span class="o">,</span><span class="nv">bg-mode-line-active</span><span class="p">))))</span>
+     <span class="o">`</span><span class="p">(</span><span class="nv">mode-line-inactive</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span> <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">10</span> <span class="ss">:color</span> <span class="o">,</span><span class="nv">bg-mode-line-inactive</span><span class="p">)))))))</span>
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'modus-themes-after-load-theme-hook</span> <span class="nf">#'</span><span class="nv">ct/modus-themes-customize-mode-line</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>You might wonder what <code>,c</code> means: it inlines the variable <code>c</code>’s value. What is <code>c</code>, then? Well, it’s locally bound in the <code>modus-themes-theme</code> function, and its value is <code>'((class color) (min-colors 256))</code>. This is actually scoping when the theme’s colors are applied: in a color environment with at least 256 colors available. There are no constructs in the modus-themes for e.g. terminals that only support 16 colors, but Emacs’s faces do support settings that are scoped to different environments (with <code>t</code> as the fallback). So this tells Emacs to only use these faces if it makes sense, and as users we need to remember to prepend this scoping variable.</p>
+
+<h3 id="overriding-tab-bar-faces-and-colors">Overriding tab bar faces and colors</h3>
+
+<p>With that tool as a good stand-in for the old <code>modus-themes-color</code> function, I could rewrite my tab-bar overrides to this form:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/modus-themes-tab-bar-colors</span> <span class="p">()</span>
+  <span class="s">"Override tab faces to have even less variety"</span>
+  <span class="p">(</span><span class="nv">modus-themes-with-colors</span>
+    <span class="p">(</span><span class="nv">custom-set-faces</span>
+     <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span>
+                 <span class="ss">:height</span> <span class="mf">0.8</span>
+                 <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-main</span>
+                 <span class="ss">:box</span> <span class="no">nil</span><span class="p">)))</span>
+     <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar-tab</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span>
+                     <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-main</span>
+                     <span class="ss">:underline</span> <span class="p">(</span><span class="ss">:color</span> <span class="o">,</span><span class="nv">blue-intense</span> <span class="ss">:style</span> <span class="nv">line</span><span class="p">)</span>
+                     <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">2</span> <span class="ss">:style</span> <span class="nv">flat-button</span><span class="p">))))</span>
+     <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar-tab-inactive</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span>
+                              <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-main</span>
+                              <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">2</span> <span class="ss">:style</span> <span class="nv">flat-button</span><span class="p">)))))))</span>
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'modus-themes-after-load-theme-hook</span> <span class="nf">#'</span><span class="nv">ct/modus-themes-tab-bar-colors</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>If you recall <a href="https://christiantietze.de/posts/2022/12/sf-symbols-emacs-tab-numbers/">my previous tab-bar related posts</a>, you will notice I am now referencing the faces <code>'tab-bar</code> etc. directly instead of changing <code>modus-*</code> tab bar colors.</p>
+
+<p>There used to be custom modus-themes faces like <code>modus-themes-tab-backdrop</code>. These are now gone in v4. In effect, they’re “inlined” when the merged palette specificiations are applied by the <code>modus-themes-theme</code> call which I already showed above. It maps over a list of face names and applies their style; for tabs, this is what’s going on:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; modus-themes.el</span>
+<span class="p">(</span><span class="nv">defconst</span> <span class="nv">modus-themes-faces</span>
+  <span class="o">'</span><span class="p">(</span>
+    <span class="c1">;; ...</span>
+    <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span> <span class="ss">:inherit</span> <span class="nv">modus-themes-ui-variable-pitch</span> <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-tab-bar</span><span class="p">)))</span>
+    <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar-tab-group-current</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span> <span class="ss">:inherit</span> <span class="nv">bold</span> <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-tab-current</span> <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">-2</span> <span class="ss">:color</span> <span class="o">,</span><span class="nv">bg-tab-current</span><span class="p">)</span> <span class="ss">:foreground</span> <span class="o">,</span><span class="nv">fg-alt</span><span class="p">)))</span>
+    <span class="o">`</span><span class="p">(</span><span class="nv">tab-bar-tab-group-inactive</span> <span class="p">((</span><span class="o">,</span><span class="nv">c</span> <span class="ss">:background</span> <span class="o">,</span><span class="nv">bg-tab-bar</span> <span class="ss">:box</span> <span class="p">(</span><span class="ss">:line-width</span> <span class="mi">-2</span> <span class="ss">:color</span> <span class="o">,</span><span class="nv">bg-tab-bar</span><span class="p">)</span> <span class="ss">:foreground</span> <span class="o">,</span><span class="nv">fg-alt</span><span class="p">)))</span>
+    <span class="c1">;; ...</span>
+   <span class="p">)</span>
+  <span class="s">"Face specs for use with `modus-themes-theme'."</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>A downside of v4 in its current form is that I couldn’t find a way to change the <code>:box</code>. So directly overriding the actual faces via <code>set-face-attribute</code> was my best idea; and Prot’s suggestion to use <code>custom-set-faces</code> made this even better. (The default application of boxes to the tab bar is “opt-out”, one could say, and requires more cumbersome overrides.)</p>
+
+<p>So while I could use the palette variables to change the color of tabs, I couldn’t remove the box, and I personally opted for doing all overrides in my custom function instead of setting the palette colors for <code>bg-tab-bar</code> and <code>bg-tab-curent</code> first, and then still override the box declaration later. This way, it’s all in one place and easy to revert. But that’ just my opinion.</p>
+
+<h2 id="in-summary">In summary</h2>
+
+<p>Printed below is my current configuration of the theme itself in full. On top, there are the hook-based overrides for a couple of things: the mode-line, the tab-bar, the mlscroll indicator, and neotree fonts. I’m also using the latest HEAD revision from Prot’s git repository instead of the latest MELPA release because things are moving so fast, but commented-out the <code>:load-path</code> option to share it here.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">modus-themes</span>
+  <span class="c1">;; :load-path "~/.emacs.d/src/modus-themes"</span>
+  <span class="ss">:ensure</span>
+  <span class="ss">:demand</span>
+  <span class="ss">:init</span>
+  <span class="p">(</span><span class="nb">require</span> <span class="ss">'modus-themes</span><span class="p">)</span>
+
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-to-toggle</span> <span class="o">'</span><span class="p">(</span><span class="nv">modus-operandi-deuteranopia</span> <span class="nv">modus-vivendi-deuteranopia</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-italic-constructs</span> <span class="no">t</span>
+	    <span class="nv">modus-themes-bold-constructs</span> <span class="no">t</span>
+	    <span class="nv">modus-themes-variable-pitch-ui</span> <span class="no">t</span>
+	    <span class="nv">modus-themes-mixed-fonts</span> <span class="no">t</span><span class="p">)</span>
+
+  <span class="c1">;; Color customizations</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-prompts</span> <span class="o">'</span><span class="p">(</span><span class="nv">bold</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-completions</span> <span class="no">nil</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-org-blocks</span> <span class="ss">'tinted-background</span><span class="p">)</span> <span class="c1">;'gray-background)</span>
+
+  <span class="c1">;; Font sizes for titles and headings, including org</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-headings</span> <span class="o">'</span><span class="p">((</span><span class="mi">1</span> <span class="o">.</span> <span class="p">(</span><span class="nv">light</span> <span class="nv">variable-pitch</span> <span class="mf">1.5</span><span class="p">))</span>
+                                <span class="p">(</span><span class="nv">agenda-date</span> <span class="o">.</span> <span class="p">(</span><span class="mf">1.3</span><span class="p">))</span>
+                                <span class="p">(</span><span class="nv">agenda-structure</span> <span class="o">.</span> <span class="p">(</span><span class="nv">variable-pitch</span> <span class="nv">light</span> <span class="mf">1.8</span><span class="p">))</span>
+						        <span class="p">(</span><span class="no">t</span> <span class="o">.</span> <span class="p">(</span><span class="nv">medium</span><span class="p">))))</span>
+  <span class="c1">;; Theme overrides</span>
+  <span class="p">(</span><span class="nv">customize-set-variable</span> <span class="ss">'modus-themes-common-palette-overrides</span>
+                          <span class="o">`</span><span class="p">(</span>
+                            <span class="c1">;; Make the mode-line borderless</span>
+                            <span class="p">(</span><span class="nv">bg-mode-line-active</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">fg-mode-line-active</span> <span class="nv">fg-main</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">bg-mode-line-inactive</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">fg-mode-line-active</span> <span class="nv">fg-dim</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">border-mode-line-active</span> <span class="nv">bg-inactive</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">border-mode-line-inactive</span> <span class="nv">bg-main</span><span class="p">)</span>
+
+                            <span class="c1">;; macOS Selection colors</span>
+                            <span class="p">(</span><span class="nv">bg-region</span> <span class="s">"mac:selectedTextBackgroundColor"</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">fg-region</span> <span class="s">"mac:selectedTextColor"</span><span class="p">)</span>
+                            <span class="p">))</span>
+  <span class="p">(</span><span class="nv">customize-set-variable</span> <span class="ss">'modus-operandi-deuteranopia-palette-overrides</span>
+                          <span class="o">`</span><span class="p">(</span>
+                            <span class="c1">;; More subtle gray for the inactive window and modeline</span>
+                            <span class="p">(</span><span class="nv">bg-inactive</span> <span class="s">"#efefef"</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">customize-set-variable</span> <span class="ss">'modus-vivendi-deuteranopia-palette-overrides</span>
+                          <span class="o">`</span><span class="p">(</span>
+                            <span class="c1">;; More subtle gray for the inactive window and modeline</span>
+                            <span class="p">(</span><span class="nv">bg-inactive</span> <span class="s">"#202020"</span><span class="p">)))</span>
+
+  <span class="c1">;; Quick fix: Don't load immediately, but during after-init-hook so all other modifications further down can be prepared</span>
+  <span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/modus-themes-init</span> <span class="p">()</span>
+    <span class="p">(</span><span class="nv">load-theme</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">modus-themes-to-toggle</span><span class="p">)))</span>
+
+  <span class="ss">:bind</span> <span class="p">(</span><span class="s">"&lt;f5&gt;"</span> <span class="o">.</span> <span class="nv">modus-themes-toggle</span><span class="p">)</span>
+  <span class="ss">:hook</span> <span class="p">(</span><span class="nv">after-init</span> <span class="o">.</span> <span class="nv">ct/modus-themes-init</span><span class="p">))</span>
+</code></pre></div></div>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

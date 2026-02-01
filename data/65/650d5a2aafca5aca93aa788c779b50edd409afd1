@@ -1,0 +1,107 @@
+
+<p>Have you ever wished you could turn your local network into a smart routing system? Instead of remembering IP addresses and ports, what if you could use simple, memorable URLs that trigger workflows, redirect to services, or even search your notes?</p>
+
+<p>That&rsquo;s exactly what <a href="https://github.com/rhsev/dy.lan">dy.lan</a> does. It&rsquo;s a self-hosted URL router with a plugin architecture that transforms your local network into a powerful automation platform. Built by Ralf Hülsmann, a Ruby rookie from Sevelen, Germany, dy.lan (pronounced &ldquo;Dylan&rdquo;) is a lightweight HTTP router designed specifically for local networks.</p>
+
+<h2 id="the-basic-concept">The Basic Concept</h2>
+
+<p>At its core, dy.lan acts as a central entry point that translates URLs into actions. Instead of remembering <code class="language-plaintext highlighter-rouge">192.168.1.73:8384</code> for Syncthing, you can access <code class="language-plaintext highlighter-rouge">http://sync.lan</code>. Instead of writing complex scripts, you can use <code class="language-plaintext highlighter-rouge">http://dy.lan/n/meeting</code> to search your Apple Notes.</p>
+
+<p>The project solves several common problems:</p>
+
+<ul>
+  <li><strong>Infrastructure abstraction</strong>: When a service moves to a new IP or port, you update one config line instead of hunting down bookmarks and scripts</li>
+  <li><strong>Workflow shortcuts</strong>: Turn URLs into actions with pattern-based routing</li>
+  <li><strong>Clean local services</strong>: Route HTTP traffic without the complexity of full reverse proxies like Traefik or nginx for simple use cases</li>
+  <li><strong>Extensibility</strong>: YAML configs for simple redirects, Ruby plugins for custom logic</li>
+</ul>
+
+<h2 id="plugin-architecture-and-extensibility">Plugin Architecture and Extensibility</h2>
+
+<p>What makes dy.lan powerful is its plugin system. The architecture is built around numbered plugins (00-, 10-, 20-&hellip;) that follow a first-match-wins priority system. Each plugin can:</p>
+
+<ul>
+  <li>Match URLs using regex patterns with capture groups</li>
+  <li>Filter by domain/host</li>
+  <li>Execute custom Ruby logic</li>
+  <li>Handle timeouts (default 500ms, configurable per plugin)</li>
+  <li>Auto-disable after 5 errors (circuit breaker pattern)</li>
+</ul>
+
+<p>Plugins are hot-reloadable for YAML configs (after domain-match), and the system is resilient &mdash; syntax errors and loops won&rsquo;t crash the server.</p>
+
+<p>The project includes 8 example plugins covering everything from simple redirects to API integrations, monitoring dashboards, and cron jobs. You can extend it with any feature you can implement in Ruby.</p>
+
+<h2 id="real-world-examples">Real-World Examples</h2>
+
+<p>Here are some practical ways dy.lan can be used:</p>
+
+<p><strong>Google Search Shortcut</strong></p>
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c1"># config/redirects.yaml</span>
+<span class="na">redirects</span><span class="pi">:</span>
+  <span class="pi">-</span> <span class="na">pattern</span><span class="pi">:</span> <span class="s1">'</span><span class="s">^/g/(.+)$'</span>
+    <span class="na">target</span><span class="pi">:</span> <span class="s1">'</span><span class="s">https://google.com/search?q=${1}'</span></code></pre></div></div>
+
+<p>Access <code class="language-plaintext highlighter-rouge">http://dy.lan/g/ruby</code> and it redirects to a Google search for &ldquo;ruby&rdquo;. Simple, memorable, and no coding required.</p>
+
+<p><strong>DEVONthink Search</strong>
+For more complex workflows, you can use a Ruby plugin:</p>
+
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="k">class</span> <span class="nc">DevonthinkPlugin</span> <span class="o">&lt;</span> <span class="no">Dylan</span><span class="o">::</span><span class="no">Plugin</span>
+  <span class="n">pattern</span> <span class="sr">%r{^/(</span><span class="se">\d</span><span class="sr">{8})}</span>
+
+  <span class="k">def</span> <span class="nf">call</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">request</span><span class="p">)</span>
+    <span class="n">alias_id</span> <span class="o">=</span> <span class="n">path</span><span class="p">.</span><span class="nf">match</span><span class="p">(</span><span class="n">pattern</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="no">Dylan</span><span class="o">::</span><span class="no">Response</span><span class="p">.</span><span class="nf">redirect</span><span class="p">(</span><span class="s2">"x-devonthink-item://</span><span class="si">#{</span><span class="n">alias_id</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+  <span class="k">end</span>
+<span class="k">end</span></code></pre></div></div>
+
+<p>Now <code class="language-plaintext highlighter-rouge">http://dy.lan/12345678</code> opens the document with that alias in DEVONthink.</p>
+
+<p><strong>Apple Notes Search</strong></p>
+<div class="language-ruby highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="k">class</span> <span class="nc">NotesPlugin</span> <span class="o">&lt;</span> <span class="no">Dylan</span><span class="o">::</span><span class="no">Plugin</span>
+  <span class="n">pattern</span> <span class="sr">%r{^/n/(.+)}</span>
+
+  <span class="k">def</span> <span class="nf">call</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">request</span><span class="p">)</span>
+    <span class="n">query</span> <span class="o">=</span> <span class="n">path</span><span class="p">.</span><span class="nf">match</span><span class="p">(</span><span class="n">pattern</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="no">Dylan</span><span class="o">::</span><span class="no">Response</span><span class="p">.</span><span class="nf">redirect</span><span class="p">(</span><span class="s2">"shortcuts://run-shortcut?name=search_notes&amp;input=</span><span class="si">#{</span><span class="n">query</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+  <span class="k">end</span>
+<span class="k">end</span></code></pre></div></div>
+
+<p>Access <code class="language-plaintext highlighter-rouge">http://dy.lan/n/example</code> to search your Apple Notes for &ldquo;example&rdquo; via Shortcuts.</p>
+
+<h2 id="deployment-options">Deployment Options</h2>
+
+<p>One of the great things about dy.lan is its flexibility. It can run on your Mac for local development or on a Synology NAS for 24/7 operation.</p>
+
+<p><strong>On Your Mac:</strong></p>
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>git clone https://github.com/rhsev/dy.lan
+<span class="nb">cd </span>dy.lan
+docker-compose <span class="nt">-f</span> docker-compose.mac.yml up <span class="nt">-d</span></code></pre></div></div>
+
+<p><strong>On Synology:</strong>
+The project includes <code class="language-plaintext highlighter-rouge">docker-compose.synology.yml</code> for easy deployment on NAS devices. With macvlan networking, you can give dy.lan its own dedicated IP address, avoiding conflicts with other reverse proxies.</p>
+
+<p>The performance is impressive: 6,000 requests per second on a Mac mini M4, and 2,500 requests per second on a Synology DS224+ (compared to ~200 req/s for YOURLS on similar hardware). All while using just 20-30 MB of RAM.</p>
+
+<h2 id="technical-highlights">Technical Highlights</h2>
+
+<p>Built with Ruby 4.0&rsquo;s async/fiber-based concurrency, dy.lan uses non-blocking I/O so slow plugins don&rsquo;t block fast ones. It&rsquo;s a pure Ruby implementation with no Rails, no middleware, and no database. Configuration is done through YAML files and Ruby plugins, with a browser-based dashboard for stats and container management.</p>
+
+<p>The system includes modern Ruby syntax (using <code class="language-plaintext highlighter-rouge">it</code> parameter in core code while keeping plugins explicit), configurable timeouts, circuit breakers, and domain filtering per plugin. It&rsquo;s designed to be simple, transparent, and easy to extend.</p>
+
+<h2 id="getting-started">Getting Started</h2>
+
+<p>If you want to try dy.lan yourself, check out the <a href="https://github.com/rhsev/dy.lan">GitHub repository</a>. The project is shared as-is, built to solve specific friction in personal automation workflows. Ralf has been developing and sharing this with me for a while, and I&rsquo;m glad he decided to make it public so others can benefit.</p>
+
+<p>Whether you need simple URL redirects, workflow automation, or a lightweight reverse proxy for local services, dy.lan provides a clean and extensible solution.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115968136522432127">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Dy.lan%3A+turn+your+local+network+into+a+workflow+engine%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F27%2Fa-url-router-that-turns-your-local-network-into-a-workflow-engine%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F27%2Fa-url-router-that-turns-your-local-network-into-a-workflow-engine%2F&text=Dy.lan%3A+turn+your+local+network+into+a+workflow+engine&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F01%2F27%2Fa-url-router-that-turns-your-local-network-into-a-workflow-engine%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17264591.gif" height="1" width="1"/>

@@ -1,0 +1,52 @@
+<p>For a while now I&rsquo;ve been using an <code>rsync</code> based <code>dired-copy</code> replacement for large copy asynchronous operations within emacs.  It is not uncommon for me to want to copy large files in emacs and rather than waiting for the operation to finish I leveraged <code>async-shell-command</code> to perform an rsync copy as thus:</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20240120084016-emacs--Dired-Async-Mode.jpg" width="100%">
+</figure>
+
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(<span style="color:#a6e22e">define-key</span> dired-mode-map (kbd <span style="color:#e6db74">&#34;C&#34;</span>) <span style="color:#e6db74">&#39;my/rsync</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/rsync (dest)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Rsync copy.&#34;</span>
+</span></span><span style="display:flex;"><span>  (interactive
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">list</span>
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">expand-file-name</span> (read-file-name <span style="color:#e6db74">&#34;rsync to:&#34;</span>
+</span></span><span style="display:flex;"><span>                          (dired-dwim-target-directory)))))
+</span></span><span style="display:flex;"><span>  (let ((files (dired-get-marked-files <span style="color:#66d9ef">nil</span> current-prefix-arg))
+</span></span><span style="display:flex;"><span>         (command <span style="color:#e6db74">&#34;rsync -arvz --progress --no-g &#34;</span>))
+</span></span><span style="display:flex;"><span>    (dolist (file files)
+</span></span><span style="display:flex;"><span>      (setq command (<span style="color:#a6e22e">concat</span> command (shell-quote-argument file) <span style="color:#e6db74">&#34; &#34;</span>)))
+</span></span><span style="display:flex;"><span>    (setq command (<span style="color:#a6e22e">concat</span> command (shell-quote-argument dest)))
+</span></span><span style="display:flex;"><span>    (async-shell-command command <span style="color:#e6db74">&#34;*rsync*&#34;</span>)
+</span></span><span style="display:flex;"><span>    (dired-unmark-all-marks)
+</span></span><span style="display:flex;"><span>    (other-window <span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">sleep-for</span> <span style="color:#ae81ff">1</span>)
+</span></span><span style="display:flex;"><span>    (dired-revert)
+</span></span><span style="display:flex;"><span>    (revert-buffer <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span> <span style="color:#66d9ef">nil</span>)))
+</span></span></code></pre></div><p>Generally this has worked pretty well for me and as a plus I could see the progress in a buffer named <code>*rsync*</code> (although I would typically dismiss it quickly using <code>winner-undo</code> or maybe adding something to <code>display-buffer-alist</code>)</p>
+<p>After watching the always excellent and informative video from <a href="https://www.youtube.com/@emacselements">Emacs Elements</a> - <a href="https://www.youtube.com/watch?v=1jCNrpp_STM&amp;t=80s">Best Way to Sort and Play Videos Is with Emacs</a> it opened my eyes to a built-in feature of emacs 29, namely <code>dired-async-mode</code> (Do dired actions asynchronously) which seems to pretty much do what it says.</p>
+<p>To activate, rather than having to map all those dired commands to async versions, the following just needs to be set up :</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(dired-async-mode <span style="color:#ae81ff">1</span>)
+</span></span></code></pre></div><p>Now when a copy via dired is activated it will happen asynchronously! - and also with other dired commands like rename but really it is generally a copy that will take the time.</p>
+<p>Out of the box a normal copy in dired using <code>C</code> activates the asynchronous task and the modeline displays something like the following in all windows :</p>
+<pre tabindex="0"><code class="language-nil" data-lang="nil">[1 Async job(s) running]
+</code></pre><p>When finished the modeline updates with a copy complete message and then after three seconds disappears.</p>
+<p>Three seconds you say? well how do I know that?, well I played around a little with the modeline finish message as of course this can be configured, this was my initial attempt:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/dired-async-mode-line-message (text face <span style="color:#66d9ef">&amp;rest</span> args)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Notify end of async operation in </span><span style="color:#e6db74">`mode-line&#39;</span><span style="color:#e6db74">.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let* ((my/message <span style="color:#e6db74">&#34;Dired Async has finished!!&#34;</span>)
+</span></span><span style="display:flex;"><span>          (mode-line-format (<span style="color:#a6e22e">concat</span>
+</span></span><span style="display:flex;"><span>                              <span style="color:#e6db74">&#34; &#34;</span> (<span style="color:#a6e22e">propertize</span>
+</span></span><span style="display:flex;"><span>                                    my/message
+</span></span><span style="display:flex;"><span>                                    <span style="color:#e6db74">&#39;face</span>
+</span></span><span style="display:flex;"><span>                                    <span style="color:#f92672">&#39;</span>(:background <span style="color:#e6db74">&#34;#ff0000&#34;</span> :foreground <span style="color:#e6db74">&#34;#ffffff&#34;</span> :inherit bold)
+</span></span><span style="display:flex;"><span>                                    ))))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">message</span> my/message)
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">force-mode-line-update</span>)
+</span></span><span style="display:flex;"><span>    (sit-for <span style="color:#ae81ff">8</span>)
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">force-mode-line-update</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(setq dired-async-message-function <span style="color:#e6db74">&#39;my/dired-async-mode-line-message</span>)
+</span></span></code></pre></div><p>I just felt I could try something a little more prominent to indicate the end of a copy but in the end I kept the default setup.</p>
+<p>The only issue I have observed thus far is that on an initial emacs startup the modeline for all windows displays <strong>[0 Async job(s) running]</strong> and only seems to disappear after the first copy.  It is a little annoying and even with the use of the <code>diminish</code> package my modeline can look a little cluttered.  I might need to look at this.</p>
+<hr>
+<p>Update <strong><span class="timestamp-wrapper"><span class="timestamp">&lt;2024-01-20 Sat 12:05&gt;</span></span></strong>
+Actually I do know why the above is happening, when I was messing around with the <code>my/dired-async-mode-line-message</code> function above I turned on <code>(dired-async--modeline-mode 1)</code> ooops! well now I have commented it out no modeline async message initially appears! - I thought I would just leave all this stuff in here 😀</p>

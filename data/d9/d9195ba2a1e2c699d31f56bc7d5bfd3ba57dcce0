@@ -1,0 +1,51 @@
+<p><img src="https://xenodium.github.io/images/emacs-dwim-swiper-vs-isearch-vs-phi-search/search-dwim.gif" alt=""></p>
+<p>I've <a href="https://xenodium.com/emacs-dwim-do-what-i-mean/">talked about DWIM</a> in the past, that wonderful Emacs ability to <a href="https://en.wikipedia.org/wiki/DWIM">do what ✨I✨ mean</a>.</p>
+<p>Emacs being hyper-configurable, we can always teach it more things, so it can do exactly what we mean.</p>
+<p>There are no shortages of buffer searching packages for Emacs. I'm a fan of Oleh Krehel's <a href="https://github.com/abo-abo/swiper">swiper</a>, but before that, I often relied on the built-in <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">isearch</a>. Swiper is my default goto mechanism and have it bound to <code>C-s</code> (replacing the built-in <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">isearch-forward</a>).</p>
+<p>Swiper services most needs until I start combining with other tools. Take <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Keyboard-Macros.html">keyboard macros</a> and <a href="https://github.com/magnars/multiple-cursors.el">multiple cursors</a>. Both wonderful, but neither can rely on swiper to do their thing. Ok, swiper does, but <a href="https://xenodium.com/emacs-swiper-and-multiple-cursors/">in a different way</a>.</p>
+<p>Rather than binding <code>C-s</code> to swiper, let's write a DWIM function that's aware of macros and multiple cursors. It must switch between swiper, isearch, and <a href="https://github.com/avkoval/phi-search">phi-search</a> depending on what I want (search buffer, define macro, or search multiple cursors).</p>
+<p>Let's also tweak swiper's behavior a little further and prepopulate its search term with the active region. Oh, and I also would like swiper to wrap around (see <a href="http://oremacs.com/swiper/">ivy-wrap</a>). But only swiper, not other ivy utilities. I know, I'm picky, but that's the whole point of DWIM… so here's my function to search forward that does exactly what ✨I✨ mean:</p>
+<pre><code class="language-{.commonlisp">(defun ar/swiper-isearch-dwim ()
+  (interactive)
+  ;; Are we using multiple cursors?
+  (cond ((and (boundp 'multiple-cursors-mode)
+              multiple-cursors-mode
+              (fboundp  'phi-search))
+         (call-interactively 'phi-search))
+        ;; Are we defining a macro?
+        (defining-kbd-macro
+          (call-interactively 'isearch-forward))
+        ;; Fall back to swiper.
+        (t
+         ;; Wrap around swiper results.
+         (let ((ivy-wrap t))
+           ;; If region is active, prepopulate swiper's search term.
+           (if (and transient-mark-mode mark-active (not (eq (mark) (point))))
+               (let ((region (buffer-substring-no-properties (mark) (point))))
+                 (deactivate-mark)
+                 (swiper-isearch region))
+             (swiper-isearch))))))
+</code></pre>
+<p>The above snippet searches forward, but I'm feeling a little off-balance. Let's write an equivalent to search backwards. We can then bind it to <code>C-r</code>, also overriding the built-in <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">isearch-backward</a>.</p>
+<pre><code class="language-{.commonlisp">(defun ar/swiper-isearch-backward-dwim ()
+  (interactive)
+  ;; Are we using multiple cursors?
+  (cond ((and (boundp 'multiple-cursors-mode)
+              multiple-cursors-mode
+              (fboundp  'phi-search-backward))
+         (call-interactively 'phi-search-backward))
+        ;; Are we defining a macro?
+        (defining-kbd-macro
+          (call-interactively 'isearch-backward))
+        ;; Fall back to swiper.
+        (t
+         ;; Wrap around swiper results.
+         (let ((ivy-wrap t))
+           ;; If region is active, prepopulate swiper's search term.
+           (if (and transient-mark-mode mark-active (not (eq (mark) (point))))
+               (let ((region (buffer-substring-no-properties (mark) (point))))
+                 (deactivate-mark)
+                 (swiper-isearch-backward region))
+             (swiper-isearch-backward))))))
+</code></pre>
+<p>These may be on the hacky side of things, but hey… they do the job. If there are better/supported ways of accomplishing a similar thing, I'd love to <a href="https://twitter.com/xenodium">hear about it</a>.</p>

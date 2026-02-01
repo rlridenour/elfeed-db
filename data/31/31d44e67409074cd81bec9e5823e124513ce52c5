@@ -1,0 +1,89 @@
+<h1 id="introduction">Introduction</h1>
+
+<p>An #emacs IRC user wants to pipe from a program into an Emacs buffer.
+<code class="language-plaintext highlighter-rouge">emacsclient</code> doesn’t read standard input<sup><a id="fnr.1" class="footref" href="#fn.1" role="doc-backlink">1</a></sup>. So, is there a
+way to do this with <code class="language-plaintext highlighter-rouge">emacsclient</code> and not writing a new server
+program? I think so.</p>
+
+<p>We’ll use a shell script called “pipe-to-emacs-buffer.sh”. It will
+take a single argument, the name of a buffer to receive the data. The
+Emacs Lisp code will create this buffer and set it as the current
+buffer.</p>
+
+<h1 id="shell-script">Shell script</h1>
+
+<h2 id="start">Start</h2>
+
+<figure class="highlight"><pre><code class="language-sh" data-lang="sh"><span class="c"># pipe-to-emacs-buffer.sh buffer-name</span>
+
+<span class="k">if</span> <span class="o">[</span> <span class="nv">$# </span><span class="nt">-lt</span> 1 <span class="o">]</span>
+<span class="k">then
+    </span><span class="nb">echo </span>usage: pipe-to-emacs-buffer.sh buffer-name
+    <span class="nb">exit </span>1
+<span class="k">fi
+
+</span><span class="nv">buffername</span><span class="o">=</span><span class="s2">"</span><span class="nv">$1</span><span class="s2">"</span></code></pre></figure>
+
+<h2 id="base64-encode-standard-input">Base64 encode standard input</h2>
+
+<p>So why base64 encoding? If standard input has non-text characters,
+e.g. a NUL, the string gets mangled. Encoding ensures the data is preserved.</p>
+
+<figure class="highlight"><pre><code class="language-sh" data-lang="sh"><span class="nv">input</span><span class="o">=</span><span class="si">$(</span><span class="nb">base64</span><span class="si">)</span></code></pre></figure>
+
+<p>This assumes that the program feeding the pipe is not a long-running
+program that never quits. In the case of a long running program, this
+code could be extended to use a loop of the shell’s <code class="language-plaintext highlighter-rouge">read</code>
+builtin and encoding to get all of the data over time, or make some
+decision not to get all the data.</p>
+
+<h2 id="run-emacsclient">Run emacsclient</h2>
+
+<figure class="highlight"><pre><code class="language-sh" data-lang="sh">emacsclient <span class="nt">--eval</span> <span class="s2">"(set-buffer (get-buffer-create </span><span class="se">\"</span><span class="k">${</span><span class="nv">buffername</span><span class="k">}</span><span class="se">\"</span><span class="s2">))"</span> <span class="nt">--eval</span> <span class="s2">"(insert (base64-decode-string </span><span class="se">\"</span><span class="k">${</span><span class="nv">input</span><span class="k">}</span><span class="se">\"</span><span class="s2">))"</span></code></pre></figure>
+
+<p><code class="language-plaintext highlighter-rouge">get-buffer-create</code> will either use an existing buffer
+or create one.</p>
+
+<p><code class="language-plaintext highlighter-rouge">insert</code> will insert the text before point.</p>
+
+<h1 id="lets-test-it">Let’s test it!</h1>
+
+<p>Here’s the output of <code class="language-plaintext highlighter-rouge">who</code> on my laptop:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>davemarq seat0        2025-11-11 09:44
+davemarq tty2         2025-11-11 09:44
+</code></pre></div></div>
+
+<p>So piping who into our program, along with the buffer name who.txt,
+should result in a buffer named who.txt in our running Emacs.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>davemarq:~$ who | ./pipe-to-emacs-buffer.sh who.txt
+#&lt;buffer who.txt&gt;
+nil
+</code></pre></div></div>
+
+<p>Looking at our buffer list, I see who.txt:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>* who.txt                                78 Fundamental      
+</code></pre></div></div>
+
+<p>Going to the who.txt buffer, I see</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>davemarq seat0        2025-11-11 09:44
+davemarq tty2         2025-11-11 09:44
+</code></pre></div></div>
+
+<p>Running our pipeline a second time gives me a who.txt buffer that
+looks like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>davemarq seat0        2025-11-11 09:44
+davemarq tty2         2025-11-11 09:44
+davemarq seat0        2025-11-11 09:44
+davemarq tty2         2025-11-11 09:44
+</code></pre></div></div>
+
+<h1 id="footnotes">Footnotes</h1>
+
+<p><sup><a id="fn.1" href="#fnr.1">1</a></sup> In reading emacsclient.c, it <em>does</em> read standard input, but
+prepends “-eval “ to every line before sending to Emacs. But this is
+not documented and didn’t work as I expected when I tried it.</p>

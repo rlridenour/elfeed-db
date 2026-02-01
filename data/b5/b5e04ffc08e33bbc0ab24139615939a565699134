@@ -1,0 +1,267 @@
+<p>
+One of the major boons I've found of using <code>org-roam</code> since my rework of my note taking environment is that I've been finding more ways to get use out of backlinks. I figured this would actually be a pretty useless feature, and I never spent so much time with it previously, but now that I'm more actively taking notes (and especially noting down random thoughts) I've found it very helpful. Being able to explore backwards through index cards has really been great for ideation, and particularly for worldbuilding.
+</p>
+
+<p>
+Unfortunately, while it's great for <i>notes</i>, I still prefer to have a proper project structure when I'm building up the world. Generally, I've done this via <a href="https://kanka.io/">Kanka</a> because it's free, but as I've started a new worldbuilding project recently I figured I should give it a shot in Org directly. I already had some use with <code>org-novelist</code> (which I have stopped using), and while there isn't a direct equivalent for worldbuilding, I figured that if I structured my articles as if I was using Zettelkasten, then it may work out.
+</p>
+
+<p>
+The main reason that I was using Kanka previously is because the end result is easily shareable. I won't go into the project structure of my worldbuilding setup in depth, but I want to show off the "sharing" part - publishing it as a wiki with <code>ox-publish</code>.
+</p>
+
+<p>
+As for why I chose to use basic <code>ox-publish</code> over <code>weblorg</code>, which I use for this blog: I want to do some hacky stuff to get some wiki functionality working here, and I want a more free-form directory structure.
+</p>
+
+<p>
+One other thing: I'm not using <code>org-roam</code> here, because I don't want to mess with having multiple DBs and I don't want to accidentally "cross-contaminate" from my personal notes to my public facing projects. That's a bad idea security-wise.
+</p>
+
+<p>
+Anyhow, <a href="https://systemcrafters.net/publishing-websites-with-org-mode/building-the-site/">System Crafters</a> has a good page on setting up a basic web project, and that's the basis of my build script. The only addition is this list to the <code>org-publish-project-list</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(list <span class="org-string">"org-static"</span>
+      <span class="org-builtin">:base-directory</span> <span class="org-string">"."</span>
+      <span class="org-builtin">:base-extension</span> <span class="org-string">"css</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">js</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">json</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">png</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">jpg</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">gif</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">pdf</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">mp3</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">ogg</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">swf"</span>
+      <span class="org-builtin">:publishing-directory</span> <span class="org-string">"./export"</span>
+      <span class="org-builtin">:recursive</span> t
+      <span class="org-builtin">:publishing-function</span> 'org-publish-attachment
+      )
+</pre>
+</div>
+
+<p>
+This capture's attachments, and crucially it also captures CSS files, JavaScript files, and JSON files. The CSS is less important here, it's just for styling which can be set like this in the HTML head (<code>base-path</code> here is the base URL of the website):
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span class="org-comment-delimiter">;; </span><span class="org-comment">Customize the HTML output
+</span>(<span class="org-keyword">setq</span> org-html-head (concat <span class="org-string">"&lt;link rel=\"stylesheet\" href=\""</span> base-path <span class="org-string">"/styles.css\" type=\"text/css\"&gt;"</span>))
+</pre>
+</div>
+
+<p>
+Just this on it's own already gives pretty exports (well, with a good stylesheet anyway). But there are two things which any good wiki needs: searching, and backlinks.
+</p>
+
+<p>
+I implemented searching with <a href="https://www.fusejs.io/">Fuse</a>: it's one JavaScript file that sits at the root of the project next to the build script. And now we get to the most disgusting Elisp code you'll ever see. <b>I welcome any attempts to clean this up, I know it is terrible.</b>
+Fuse needs a JSON file containing all the contents it should search, and I'm going to construct one by recursively going down through each org file in the project, fetching the title, filetags, and contents, then writing that to a JSON file.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">with-temp-file</span>
+  <span class="org-string">"search.json"</span>
+(insert <span class="org-string">"searchData = "</span>)
+(json-insert (vconcat (seq-filter
+                       (<span class="org-keyword">lambda</span> (x) x)
+                       (mapcar
+                        (<span class="org-keyword">lambda</span> (f)
+                          (<span class="org-keyword">when</span> (org-publish-find-property f <span class="org-builtin">:title</span> nil)
+                            (list
+                             <span class="org-builtin">:path</span> (concat base-path (string-trim-left f <span class="org-string">"."</span>))
+                             <span class="org-builtin">:title</span> (car (org-publish-find-property f <span class="org-builtin">:title</span> nil))
+                             <span class="org-builtin">:tags</span> (vconcat (org-publish-find-property f <span class="org-builtin">:filetags</span> nil))
+                             <span class="org-builtin">:contents</span> (<span class="org-keyword">with-temp-buffer</span>
+                                         (insert-file-contents f)
+                                         (goto-char (point-min))
+                                         (flush-lines <span class="org-string">"^#+"</span>)
+                                         (org-replace-all-links-by-description)
+                                         (goto-char (point-min))
+                                         (flush-lines <span class="org-string">"^$"</span>)
+                                         (flush-lines <span class="org-string">"^- $"</span>)
+                                         (buffer-string))
+                             )))
+                        (directory-files-recursively <span class="org-string">"."</span> <span class="org-string">"\\.org$"</span>))))))
+</pre>
+</div>
+
+<p>
+I'm prepending <code>searchData =</code> so that the file can be included in a script tag in the postamble, we'll see this in a bit.
+The <code>:contents</code> property is a bit confusing, so step by step:
+</p>
+<ol class="org-ol">
+<li>In a temporary buffer, insert the current org file, then go to the start of it.</li>
+<li>Get rid of all property lines.</li>
+<li>Replace all links with their descriptions, so getting rid of the plaintext syntax.</li>
+<li>Go back to the start of the buffer, and get rid of all empty lines.</li>
+<li>Get rid of all lines that are just a single dash - this happens in index cards where I have incomplete bullet lists.</li>
+<li>Return the whole buffer as a string.</li>
+</ol>
+
+<p>
+<code>org-replace-all-links-by-description</code> looks like this:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">org-replace-all-links-by-description</span> (<span class="org-type">&amp;optional</span> start end)
+  <span class="org-doc">"Find all org links and replace by their descriptions."</span>
+  (goto-char (point-min))
+  (<span class="org-keyword">while</span> (re-search-forward org-link-bracket-re nil t)
+    (replace-match (match-string-no-properties 
+                    (<span class="org-keyword">if</span> (match-end 2) 2 1)))))
+</pre>
+</div>
+
+<p>
+And I got that from <a href="https://emacs.stackexchange.com/questions/10707/in-org-mode-how-to-remove-a-link">here</a>.
+Also, in case it seems a bit weird to be using <code>vconcat</code> to turn the list into an array, <code>json-insert</code> doesn't work on lists. And the <code>seq-filter</code> - it's for getting rid of any random null values.
+</p>
+
+<p>
+Ok, all told that gives me a nice JSON file containing all the metadata I want to search. Now to search it.
+</p>
+
+<p>
+In the <code>org-html-preamble</code> (I'll come back to this in a second), I have a search box and an empty unordered list.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-html">&lt;<span class="org-function-name">input</span> <span class="org-variable-name">id</span>=<span class="org-string">"search_input"</span> <span class="org-variable-name">type</span>=<span class="org-string">"text"</span> <span class="org-variable-name">placeholder</span>=<span class="org-string">"Search for..."</span>&gt;
+&lt;<span class="org-function-name">ul</span> <span class="org-variable-name">id</span>=<span class="org-string">"search_results"</span>&gt;
+</pre>
+</div>
+
+<p>
+A simple JavaScript script can read when the search input is submitted, and then searches with Fuse. It will push results to the search results list:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-javascript">document.getElementById(<span class="org-string">"search_input"</span>).addEventListener(<span class="org-string">"keypress"</span>, search);
+
+<span class="org-keyword">const</span> <span class="org-variable-name">fuse</span> = <span class="org-keyword">new</span> <span class="org-type">Fuse</span>(searchData, {includeScore: <span class="org-constant">true</span>, ignoreDiacritics: <span class="org-constant">true</span>, includeMatches: <span class="org-constant">true</span>, ignoreLocation: <span class="org-constant">true</span>, useExtendedSearch: <span class="org-constant">true</span>, threshold: 0.3, keys: [{name: <span class="org-string">'title'</span>, weight: 2},{name: <span class="org-string">'tags'</span>, weight: 3},{name: <span class="org-string">'contents'</span>, weight: 1}]});
+
+<span class="org-keyword">function</span> <span class="org-function-name">search</span>(<span class="org-variable-name">event</span>) {
+    <span class="org-keyword">if</span> (event.key == <span class="org-string">"Enter"</span>) {
+      <span class="org-keyword">var</span> <span class="org-variable-name">x</span> = document.getElementById(<span class="org-string">"search_input"</span>);
+      <span class="org-keyword">var</span> <span class="org-variable-name">r</span> = document.getElementById(<span class="org-string">"search_results"</span>);
+      r.innerHTML = <span class="org-string">""</span>;
+      <span class="org-keyword">var</span> <span class="org-variable-name">sr</span> = fuse.search(x.value);
+      console.log(fuse.search(x.value));
+      sr.forEach((result) =&gt; {
+          <span class="org-keyword">var</span> <span class="org-variable-name">c</span> = document.createElement(<span class="org-string">'li'</span>);
+          <span class="org-keyword">var</span> <span class="org-variable-name">a</span> = document.createElement(<span class="org-string">'a'</span>);
+          <span class="org-keyword">var</span> <span class="org-variable-name">b</span> = document.createElement(<span class="org-string">'p'</span>);
+          <span class="org-keyword">var</span> <span class="org-variable-name">h</span> = document.createTextNode(result.item.title);
+
+          a.appendChild(h);
+          a.title = result.item.title;
+          a.href = result.item.path.replace(<span class="org-string">/\.[^/.]+$/</span>, <span class="org-string">".html"</span>);
+
+          <span class="org-keyword">const</span> <span class="org-variable-name">truncate</span> = (input) =&gt; input.length &gt; 125 ? <span class="org-string">`${input.substring(0, 125)}...`</span> : input;
+
+          b.appendChild(document.createTextNode(truncate(result.item.contents)));
+
+          c.appendChild(a);
+          c.appendChild(b);
+          r.appendChild(c);
+      });
+    }
+}
+</pre>
+</div>
+
+<p>
+Again I am aware that this is terrible. But, when I add this, Fuse, and the search data JSON to the post-amble like so:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">setq</span> org-html-postamble (concat
+                        (concat <span class="org-string">"&lt;script type=\"text/javascript\" src=\""</span> base-path <span class="org-string">"/search.json\"&gt;&lt;/script&gt;"</span>)
+                        (concat <span class="org-string">"&lt;script src=\""</span> base-path <span class="org-string">"/fuse.js\"&gt;&lt;/script&gt;"</span>)
+                        (concat <span class="org-string">"&lt;script src=\""</span> base-path <span class="org-string">"/search.js\"&gt;&lt;/script&gt;"</span>)))
+</pre>
+</div>
+
+<p>
+It all works! Search results get dredged up from the depths and shown underneath the search input bar.
+</p>
+
+<p>
+Now backlinks.
+</p>
+
+<p>
+This is actually conceptually simple: iterate through each org file, get a list of all the links inside it, then transpose it so that <code>((source-1 (target-1 target-2)))</code> becomes <code>((target-1 (source-1)) (target-2 (source-1)))</code>, and write that to the page somewhere.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span class="org-comment-delimiter">;; </span><span class="org-comment">Construct backlink tracker
+</span>(<span class="org-keyword">defvar</span> <span class="org-variable-name">backlink-hashmap</span> (make-hash-table <span class="org-builtin">:test</span> #'equal))
+
+(<span class="org-keyword">dolist</span> (i (mapcar
+          (<span class="org-keyword">lambda</span> (f)
+            (list
+             (list <span class="org-builtin">:file</span> (string-trim-left f <span class="org-string">"\\."</span>))
+             (list <span class="org-builtin">:links</span> (mapcar
+                           (<span class="org-keyword">lambda</span> (l)
+                             (string-trim-left (concat <span class="org-string">"/"</span> (file-relative-name (expand-file-name l (file-name-parent-directory f)) <span class="org-string">"."</span>)) <span class="org-string">"\\."</span>))
+                           (<span class="org-keyword">with-temp-buffer</span>
+                             (insert-file-contents f)
+                             (org-element-map (org-element-parse-buffer) 'link
+                               (<span class="org-keyword">lambda</span> (link)
+                                 (<span class="org-keyword">when</span> (string= (org-element-property <span class="org-builtin">:type</span> link) <span class="org-string">"file"</span>)
+                                   (org-element-property <span class="org-builtin">:path</span> link)))))))))
+          (directory-files-recursively <span class="org-string">"."</span> <span class="org-string">"\\.org$"</span>)))
+  (mapcar
+   (<span class="org-keyword">lambda</span> (b)
+     (<span class="org-keyword">let</span> ((new-lst (gethash b backlink-hashmap '())))
+       (remhash b backlink-hashmap)
+       (puthash b
+              (append new-lst (list (cadr (assoc <span class="org-builtin">:file</span> i))))
+              backlink-hashmap)))
+   (cadr (assoc <span class="org-builtin">:links</span> i))))
+
+<span class="org-comment-delimiter">;; </span><span class="org-comment">Remove duplicates
+</span>(maphash
+ (<span class="org-keyword">lambda</span> (x y)
+   (delq nil (delete-dups y)))
+ backlink-hashmap)
+</pre>
+</div>
+
+<p>
+For the nth time, this is terrible code. You'll particularly cringe at the file name transformation crap. Regardless, it does work, and <code>backlink-hashmap</code> gets populated in the way we want. One thing of note here: I'm using the relative file name as the key for the hash map, which means that setting the test to <code>equal</code> is necessary for queries to work.
+</p>
+
+<p>
+Now we can get the backlinks for anyfile with <code>gethash</code> and the name of our file, so we can fetch all of this data in a function for <code>org-html-preamble</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">build-navigation</span> (info)
+  <span class="org-doc">"Constructs navigation HTML. INFO contain all export options."</span>
+  (concat <span class="org-string">"&lt;nav&gt;
+  &lt;ul&gt;
+  &lt;li&gt;Project Name&lt;/li&gt;
+  &lt;li class=\"float-right sticky\"&gt;&lt;input id=\"search_input\" type=\"text\" placeholder=\"Search for...\"&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;a href=\""</span>
+        base-path
+        <span class="org-string">"/home.html\"&gt;Home &lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=\"#\"&gt;Backlinks &#9662;&lt;/a&gt;
+      &lt;ul&gt;"</span>
+        (mapconcat
+         (<span class="org-keyword">lambda</span> (x)
+           (concat <span class="org-string">"&lt;li&gt;&lt;a href=\""</span> (concat base-path (string-trim-right x <span class="org-string">"\\.org"</span>) <span class="org-string">".html"</span>) <span class="org-string">"\"&gt;"</span> (car (org-publish-find-property (expand-file-name (concat <span class="org-string">"."</span> x) (file-name-directory load-file-name)) <span class="org-builtin">:title</span> nil)) <span class="org-string">"&lt;/a&gt;&lt;/li&gt;"</span>))
+         (gethash
+          (concat <span class="org-string">"/"</span> (file-relative-name (plist-get info <span class="org-builtin">:input-file</span>) (file-name-directory load-file-name)))
+          backlink-hashmap))
+        <span class="org-string">"&lt;/ul&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+  &lt;/nav&gt;
+&lt;div&gt;
+&lt;ul id=\"search_results\"&gt;
+&lt;/ul&gt;
+&lt;/div&gt;"</span>))
+
+(<span class="org-keyword">setq</span> org-html-preamble 'build-navigation)
+</pre>
+</div>
+
+<p>
+And that's it. Each page now has a drop down in the navigation bar showing all backlinks. Hopefully you learned something in this process, even if that's that I'm terrible at writing Elisp.
+</p>

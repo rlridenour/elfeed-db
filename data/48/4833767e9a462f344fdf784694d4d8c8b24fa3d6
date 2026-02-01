@@ -1,0 +1,209 @@
+<div class="update" id="org90e9485">
+<p>
+<span class="timestamp-wrapper"><span class="timestamp">[2025-07-23 Wed]</span></span>: Handle Org link updates from the middle of a link.
+</p>
+
+</div>
+
+<p>
+I want to make it easy to write with more hyperlinks. This lets me <a href="https://sachachua.com/blog/2013/12/update-developing-thoughts-further/">develop thoughts over time</a>, building them out of small chunks that I can squeeze into my day. It also makes it easy for you to dig into things that pique your curiosity without wading through lots of irrelevant details. Looking up the right URLs as I go along tends to disrupt my train of thought. I want to make it easier to write down my thoughts first and then go back and add the URLs. I might have 5 links in a post. I might have 15. Sounds like an automation opportunity.
+</p>
+
+<p>
+If I use double square brackets around text to indicate where I want to add links, <a href="https://www.orgzlyrevived.com/">Orgzly Revived</a> and <a href="https://orgmode.org/">Org Mode</a> both display those as links, so I can preview what the paragraph might feel like. They're valid links. Org Mode prompts me to create new headings if I follow them. I never use these types of links to point to headings, though. Since I only use custom IDs for links, any <code>[[some text]]</code> links must be a placeholder waiting for a URL. I want to turn <code>[[some text]]</code> into something like <code>[[https://example.com][some text]]</code> in the Org Mode markup, which gets exported as a hyperlink like this: <a href="https://example.com">some text</a>. To figure out the target, I might search the web, my blog, or my bookmarks, or use the custom link types I've defined for Org Mode with their own completion functions.
+</p>
+
+<p>
+Most of my targets can be found with a web search. I can do that with <a href="https://github.com/armindarvish/consult-omni">consult-omni</a> with a default search based on the link text, prioritizing my <a href="https://sachachua.com/dotemacs#completion-consult-consult-omni-bookmarks">bookmarks</a> and <a href="https://sachachua.com/blog/2025/07/finding-my-blog-posts-with-consult-omni/">blog posts</a>. Then I don't even have to retype the search keywords.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-set-link-target-with-search</span> ()
+  <span class="org-doc">"Replace the current link's target with a web search.</span>
+<span class="org-doc">Assume the target is actually supposed to be the description.  For</span>
+<span class="org-doc">example, if the link is [[some text]], do a web search for 'some text',</span>
+<span class="org-doc">prompt for the link to use as the target, and move 'some text' to the</span>
+<span class="org-doc">description."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((bracket-pos (org-in-regexp org-link-bracket-re))
+         (bracket-target (match-string 1))
+         (bracket-desc (match-string 2))
+         result)
+    (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> bracket-pos bracket-target
+               (null bracket-desc)
+               <span class="org-comment-delimiter">;; </span><span class="org-comment">try to trigger only when the target is plain text and doesn't have a protocol</span>
+               (not (string-match <span class="org-string">":"</span> bracket-target)))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">we're in a bracketed link with no description and the target doesn't look like a link;</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">likely I've actually added the text for the description and now we need to include the link</span>
+      (<span class="org-keyword">let</span> ((link (consult-omni bracket-target nil nil t)))
+        (<span class="org-keyword">cond</span>
+         ((get-text-property 0 <span class="org-builtin">:url</span> link)
+          (<span class="org-keyword">setq</span> result (org-link-make-string (get-text-property 0 <span class="org-builtin">:url</span> link)
+                                             bracket-target)))
+         ((string-match <span class="org-string">":"</span> link)       <span class="org-comment-delimiter">; </span><span class="org-comment">might be a URL</span>
+          (<span class="org-keyword">setq</span> result (org-link-make-string link bracket-target))))
+        (<span class="org-keyword">when</span> result
+          (delete-region (car bracket-pos) (cdr bracket-pos))
+          (insert result)
+          result)))))
+</code></pre>
+</div>
+
+
+<p>
+This is what that looks like:
+</p>
+
+<div class="media-post" id="org26fc03a">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-21_23.58.10.webm" type="video/webm"><a href="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-21_23.58.10.webm">Download the video</a></video><figcaption><div>Screencast: filling in a link URL based on the text</div></figcaption></figure>
+<p></p>
+
+</div>
+
+<p>
+consult-omni shows me the title, first part of the URL, and a few words from the page. <code>C-o</code> in consult-omni previews search results, which could be handy.
+</p>
+
+<p>
+Sometimes a web search isn't the fastest way to find something. Some links might be to my Emacs configuration, project files, or other things for which I've written custom Org link types. I can store links to those and insert them, or I can choose those with completion.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-set-link-target-with-org-completion</span> ()
+  <span class="org-doc">"Replace the current link's target with `</span><span class="org-doc"><span class="org-constant">org-insert-link</span></span><span class="org-doc">' completion.</span>
+<span class="org-doc">Assume the target is actually supposed to be the description.  For</span>
+<span class="org-doc">example, if the link is [[some text]], do a web search for 'some text',</span>
+<span class="org-doc">prompt for the link to use as the target, and move 'some text' to the</span>
+<span class="org-doc">description."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((bracket-pos (org-in-regexp org-link-bracket-re))
+         (bracket-target (match-string 1))
+         (bracket-desc (match-string 2))
+         result)
+    (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> bracket-pos bracket-target
+               (null bracket-desc)
+               <span class="org-comment-delimiter">;; </span><span class="org-comment">try to trigger only when the target is plain text and doesn't have a protocol</span>
+               (not (string-match <span class="org-string">":"</span> bracket-target))
+               (org-element-lineage (org-element-context) <span class="org-highlight-quoted-quote">'</span>(link) t)) <span class="org-comment-delimiter">; </span><span class="org-comment">ignore text in code blocks, etc.</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">we're in a bracketed link with no description and the target doesn't look like a link;</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">likely I've actually added the text for the description and now we need to include the link.</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">This is a hack so that we don't have to delete the link until the new link has been inserted</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">since org-insert-link doesn' tbreak out the link prompting code into a smaller function.</span>
+      (<span class="org-keyword">let</span> ((org-link-bracket-re <span class="org-string">"{{{}}}"</span>))
+        (goto-char (cdr bracket-pos))
+        (org-insert-link nil nil bracket-target))
+      (delete-region (car bracket-pos) (cdr bracket-pos)))))
+</code></pre>
+</div>
+
+
+<p>
+Here's an example:
+</p>
+
+<div class="media-post" id="org36c3ad1">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-21_23.59.47.webm" type="video/webm"><a href="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-21_23.59.47.webm">Download the video</a></video><figcaption><div>Screencast showing how to specify a link with completion</div></figcaption></figure>
+<p></p>
+
+</div>
+
+<p>
+If I decide a web search isn't the best way to find the target, I can use <code>&lt;up&gt;</code> and <code>RET</code> to get out of the consult-omni web search and then go to the usual Org link completion interface.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-set-link-target-dwim</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">or</span> (my-org-set-link-target-with-search)
+      (my-org-set-link-target-with-org-completion)))
+</code></pre>
+</div>
+
+
+<p>
+If I can't find the page either way, I can use <code>C-g</code> to cancel the prompt, look around some more, and get the URL. When I go back to the web search prompt for the link target, I can press <code>&lt;up&gt; RET</code> to switch to the Org completion mode, and then paste in the URL with <code>C-y</code> or type it in. Not elegant, but it will do.
+</p>
+
+<p>
+I can now look for untargeted links and process each one. The <code>(undo-boundary)</code> in the function means I can undo one link at a time if I need to.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-scan-for-untargeted-links</span> ()
+  <span class="org-doc">"Look for [[some text]] and prompt for the actual targets."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">while</span> (re-search-forward org-link-bracket-re nil t)
+    (<span class="org-keyword">when</span> (<span class="org-keyword">and</span>
+           (not (match-string 2))
+           (<span class="org-keyword">and</span> (match-string 1) (not (string-match <span class="org-string">":"</span> (match-string 1))))
+           (org-element-lineage (org-element-context) <span class="org-highlight-quoted-quote">'</span>(link) t)) <span class="org-comment-delimiter">; </span><span class="org-comment">ignore text in code blocks, etc.</span>
+      (undo-boundary)
+      (my-org-set-link-target-dwim))))
+</code></pre>
+</div>
+
+
+<div class="media-post" id="org314d3ea">
+<p>
+Here's how that works:
+</p>
+
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-22_07.55.26.webm" type="video/webm"><a href="https://sachachua.com/blog/2025/07/finding-unlinked-text/2025-07-22_07.55.26.webm">Download the video</a></video><figcaption><div>Screencast showing how I can scan through the text for untargeted links and update them</div></figcaption></figure>
+<p></p>
+
+<details class="code-details" style="padding: 1em;
+                 border-radius: 15px;
+                 font-size: 0.9em;
+                 box-shadow: 0.05em 0.1em 5px 0.01em  #00000057;">
+                  <summary><strong>Play by play</strong></summary>
+<ol class="org-ol">
+<li><span class="media-time" data-start="0.000">0:00:00</span> I started with a search for "build thoughts out of smaller chunks" and deleted the default text to put in "developing" so that I could select my post on developing thoughts further.</li>
+<li><span class="media-time" data-start="8.000">0:00:08</span> I linked to Orgzly Revived from my bookmarks.</li>
+<li><span class="media-time" data-start="10.000">0:00:10</span> I selected the Org Mode website from the Google search results.</li>
+<li><span class="media-time" data-start="12.000">0:00:12</span> I selected the consult-omni Github page from the search results.</li>
+<li><span class="media-time" data-start="18.000">0:00:18</span> I used <code>&lt;up&gt; RET</code> to skip the web search instead of selecting a candidate, and then I selected the bookmarks section of my configuration using Org link completion.</li>
+<li><span class="media-time" data-start="25.000">0:00:25</span> I changed the search query and selected the post about using consult-omni with blog posts.</li>
+<li><span class="media-time" data-start="31.000">0:00:31</span> I chose the p-search Github repository from the Google search results.</li>
+</ol>
+
+
+</details>
+
+</div>
+
+<p>
+If <code>my-org-scan-for-untargeted-links</code> doesn't find anything, then the post is probably ready to go (at least in terms of links). That might help avoid accidentally posting placeholders. I'm going to experiment with going back to the default of having <code>org-export-with-broken-links</code> be <code>nil</code> again, so that's another safety net that should catch placeholders before they get published.
+</p>
+<div id="outline-container-orgd389be3" class="outline-3">
+<h3 id="orgd389be3">Next steps</h3>
+<div class="outline-text-3" id="text-orgd389be3">
+<p>
+I can look at the code for the web search and add the same kind of preview function for my bookmarks and blog posts.
+</p>
+
+<p>
+I can modify my <code>C-c C-l</code> binding (<a href="https://sachachua.com/dotemacs#org-links">my-org-insert-link-dwim</a>) to have the same kind of behaviour: do a web/bookmark/blog search first, and fall back to Org link completion.
+</p>
+
+<p>
+Someday it might be nice to add a font-locking rule so that links without proper targets can be shown in a different colour. <code>org-export-with-broken-links</code> and <code>org-link-search</code> both know about these types of links, so there might be a way to figure out font-locking.
+</p>
+
+<p>
+I might not use the exact words from the title, so it would be good to be able to specify additional keywords and rank by relevance. The <a href="https://github.com/zkry/p-search">p-search</a> talk from EmacsConf 2024 showed a possible approach that I haven't dug into yet. If I want to get really fancy, it would be neat to use the embedding of the link text to look up the most similar things (blog posts, bookmarks) and use that as the default.
+</p>
+
+<p>
+I'm looking forward to experimenting with this. I think it will simplify linking to things when I'm editing my drafts on my computer. That way, it might be easier for me to write about whatever nifty idea I'm curious about while helping people pick up whatever background information they need to make sense of it all.</p>
+</div>
+</div>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#completion-consult-consult-omni-using-web-searches-and-bookmarks-to-quickly-link-placeholders-in-org-mode">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2025/07/finding-unlinked-text/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K0TJXVX3W9QY2RYZ8XPD2FRR" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F07%2Ffinding-unlinked-text%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

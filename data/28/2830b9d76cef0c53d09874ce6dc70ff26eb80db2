@@ -1,0 +1,105 @@
+<p>In Emacs Org-Mode, the default key binding to “highlight” or “format” the selection is <kbd>C-c C-x C-f</kbd>. This will then ask for the org-mode syntax thingie to use, i.e. <code>*/_~=+</code>. Literally, that’s the prompt.</p>
+
+<p>So you have to know which character to use to embolden text. That’s <code>*</code>. But which one is code? It’s <code>~</code>. And <code>=</code> is for verbatim text, while <code>+</code> is for strike-through.</p>
+
+<p>This is defined in the variable <code>org-emphasis-alist</code>, and it’s default value is:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">((</span><span class="s">"*"</span> <span class="nv">bold</span><span class="p">)</span>
+ <span class="p">(</span><span class="s">"/"</span> <span class="nv">italic</span><span class="p">)</span>
+ <span class="p">(</span><span class="s">"_"</span> <span class="nv">underline</span><span class="p">)</span>
+ <span class="p">(</span><span class="s">"="</span> <span class="nv">org-verbatim</span> <span class="nv">verbatim</span><span class="p">)</span>
+ <span class="p">(</span><span class="s">"~"</span> <span class="nv">org-code</span> <span class="nv">verbatim</span><span class="p">)</span>
+ <span class="p">(</span><span class="s">"+"</span>
+  <span class="p">(</span><span class="ss">:strike-through</span> <span class="no">t</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>If you don’t know what any of these characters do, but if you know how to browse the Emacs help to get to this piece of information, you can learn the formatting syntax this way.</p>
+
+<p>I don’t like that. If I already know the character to type, I may just as well type it. There are plenty of options to have some characters surround the selected text, so that you can select text first, then hit <kbd>*</kbd>, and have the selection be emboldened. That’s not what I believe a formatting shortcut is useful for.</p>
+
+<p>As an actual convenience for users, UX and all, I believe “b” for “bold” and such would be much better to get started!</p>
+
+<p>That’s also closer to common shortcuts in rich text editors, so that may be a bonus for new users, too. And me, who never knows whether to type <code>=</code> or <code>~</code> for inline code.</p>
+
+<p>So here’s how you’d do that in Emacs nowadays: with a keymap.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+<span class="p">(</span><span class="nv">defvar-keymap</span> <span class="nv">ct/org-emphasis-map</span>
+  <span class="ss">:doc</span> <span class="s">"Keymap for quickly applying Org emphasis rules."</span>
+  <span class="ss">:name</span> <span class="s">"[b]old [i]talic [u]nderscore [v]erbatim [c]ode [s]trike-though"</span>
+  <span class="s">"b"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?*</span><span class="p">))</span>
+  <span class="s">"i"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?/</span><span class="p">))</span>
+  <span class="s">"u"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?_</span><span class="p">))</span>
+  <span class="s">"v"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?=</span><span class="p">))</span>
+  <span class="s">"c"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?~</span><span class="p">))</span>
+  <span class="s">"s"</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span> <span class="p">(</span><span class="nv">ct/org-emphasize-below-point</span> <span class="nv">?+</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>This adds all mnemonics (the initial letters of the styles) to the keymap and executes a function with the corresponding org-mode formatting character as argument.</p>
+
+<p>The function I call is <code>ct/org-emphasize-below-point</code> because that’s my personal way to auto emphasize the closest thing:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/org-emphasize-below-point</span> <span class="p">(</span><span class="k">&amp;optional</span> <span class="nb">char</span><span class="p">)</span>
+  <span class="s">"Emphasisez region with CHAR.
+  
+If there's no region, marks the closest s-expression, first.
+Opposed to word boundaries, sexp's work with `subword-mode' enabled."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">region-active-p</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">backward-sexp</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">mark-sexp</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">org-emphasize</span> <span class="nb">char</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p><code>subword-mode</code> makes by-word movement commands stop at capital letters in CamelCasedWords, which I find extremely useful in almost all circumstances. Except highlighting the word before the insertion point, because then I want the whole <em>word</em> word, not sub-word. So that’s what my function is for.</p>
+
+<p>If you’re not using any of that, call <code>(org-emphasize ?*)</code> etc. instead in the lambdas.</p>
+
+<p>So I don’t know any arguments in defense of the <code>*/_=~+</code>-based dispatcher, but I can come up with two arguments in favor of <code>biuvcs</code>:</p>
+
+<ol>
+  <li><strong>Ergonomics:</strong> It requires only letters that you can press without modifiers, while all but <code>=</code> and <code>/</code> of the original 6 require shift to access on QWERTY.</li>
+  <li><strong>Discoverability.</strong> Bold is <code>b</code>, italics is <code>i</code>. If you know what the style is called in English, you know which letter to press. If you forget, you can re-learn. The original 6 you had to learn and remember to use, which reduces the utility of <code>org-emphasize</code> because typing the character immediately works almost just as well.</li>
+  <li><em>Bonus:</em> <strong>Composability</strong> That’s not actually an argument for the letters I picked, but this approach uses a keymap to do its job instead of a one-off, bespoke function. You can use a keymap in GUI menus, or plug it into an Embark prefix key inside an org document.</li>
+</ol>
+
+<p>Finally, as a hat-tip to <code>markdown-mode</code>, I bound this to <kbd>C-c C-s</kbd>:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">org-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"C-c C-s"</span><span class="p">)</span> <span class="nv">ct/org-emphasis-map</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The Markdown mode’s style helper formats the prompt much more nicely, though; here, look:</p>
+
+<figure><a href="https://christiantietze.de/posts/2024/12/org-mode-emphasis-keymap-mnemonics/2024-12-03_markdown-mode-emphasis-menu.png"><img alt="" src="https://christiantietze.de/posts/2024/12/org-mode-emphasis-keymap-mnemonics/2024-12-03_markdown-mode-emphasis-menu.png" /></a><figcaption>This is how markdown-mode renders the mnemonics for you</figcaption></figure>
+
+<p>I love this attention to detail, but I was too lazy for that; the function that produces the propertized (i.e.: styled) string for the modeline is this:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">markdown--style-map-prompt</span> <span class="p">()</span>
+  <span class="s">"Return a formatted prompt for Markdown markup insertion."</span>
+  <span class="p">(</span><span class="nb">when</span> <span class="nv">markdown-enable-prefix-prompts</span>
+    <span class="p">(</span><span class="nv">concat</span>
+     <span class="s">"Markdown: "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"bold"</span> <span class="ss">'face</span> <span class="ss">'markdown-bold-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"italic"</span> <span class="ss">'face</span> <span class="ss">'markdown-italic-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"code"</span> <span class="ss">'face</span> <span class="ss">'markdown-inline-code-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"C = GFM code"</span> <span class="ss">'face</span> <span class="ss">'markdown-code-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"pre"</span> <span class="ss">'face</span> <span class="ss">'markdown-pre-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"footnote"</span> <span class="ss">'face</span> <span class="ss">'markdown-footnote-text-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"F = foldable"</span> <span class="ss">'face</span> <span class="ss">'markdown-bold-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"q = blockquote"</span> <span class="ss">'face</span> <span class="ss">'markdown-blockquote-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"h &amp; 1-6 = heading"</span> <span class="ss">'face</span> <span class="ss">'markdown-header-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="p">(</span><span class="nv">propertize</span> <span class="s">"- = hr"</span> <span class="ss">'face</span> <span class="ss">'markdown-hr-face</span><span class="p">)</span> <span class="s">", "</span>
+     <span class="s">"C-h = more"</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>That could be adapted to my barebones modeline string that just says</p>
+
+<pre><code>"[b]old [i]talic [u]nderscore [v]erbatim [c]ode [s]trike-though"
+</code></pre>
+
+<p>I leave this as an exercise for the reader.</p>
+
+<p>…</p>
+
+<p>Really, please implement this, and share. I want it, but I don’t want to spend that time today :)</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

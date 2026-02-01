@@ -1,0 +1,47 @@
+<p>In my Emacs email setup (<code>notmuch.el</code> using <code>message-mode</code>), I had this for the longest time:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">message-default-mail-headers</span> <span class="s">"Cc: \nBcc: \n"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>It would insert Cc and Bcc headers into email composition buffers so that I could quickly edit these fields.</p>
+
+<p>However, the <code>message-default-mail-headers</code> insertion is done unconditionally, so when replying to mail with people receiving a carbon copy, I would end up with <em>two</em> such header lines:</p>
+
+<pre><code>To: ada@example.com
+Cc: bob@example.com
+Cc:
+Bcc:
+</code></pre>
+
+<p>The empty Cc/Bcc lines usually don’t cause trouble, unless there’s already a Cc/Bcc line – then some mail servers reject the email. Spam protection or something. It was not supposed to be this way, and multiple Cc header lines were permitted:</p>
+
+<blockquote>
+  <p>This specification permits multiple occurrences of most fields.
+—<a href="https://www.rfc-editor.org/rfc/rfc822#page-17">RFC 822, Section 4.1</a>, 1982</p>
+</blockquote>
+
+<p>See?</p>
+
+<p>But here we are, post-2001, when <a href="https://www.rfc-editor.org/rfc/rfc2822#section-3.6">RFC 2822 deviates with min/max occurrences</a>. I didn’t know! So how do we get there?</p>
+
+<p><a href="https://github.com/emacs-mirror/emacs/blob/cb1b65f3923d5dcb88767f6736603ffbc4272557/lisp/gnus/message.el#L1346-L1347">Looking at the variable’s origin in code,</a> it says this variable is intended to ease migration from mail-mode. That alerted me to look just above that declaration and <a href="https://github.com/emacs-mirror/emacs/blob/cb1b65f3923d5dcb88767f6736603ffbc4272557/lisp/gnus/message.el#L1333-L1344">find <code>message-default-headers</code>, which accepts a function.</a></p>
+
+<p>The <a href="https://www.gnu.org/software/emacs/manual/html_node/message/Message-Headers.html"><code>message-mode</code> manual on “Message Headers”</a> doesn’t offer any more detail on that, but my experiments show that when <code>message-default-headers</code> is called, the mail composition buffer only contains From, To, Subject, and that’s it. No <code>--</code> to separate header from content, no signature, yet. So I can check whether Cc/Bcc header lines exist:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">ct/message-insert-headers</span> <span class="p">()</span> 
+  <span class="s">"Inserts CC/BCC headers, but only if they aren't already present."</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">headers</span> <span class="p">(</span><span class="nv">buffer-substring-no-properties</span> <span class="p">(</span><span class="nv">point-min</span><span class="p">)</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">)))</span>
+         <span class="p">(</span><span class="nv">additions</span> <span class="p">(</span><span class="nb">list</span>
+                     <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">string-match</span> <span class="s">"^Cc:"</span> <span class="nv">headers</span><span class="p">)</span> <span class="s">"Cc: \n"</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">string-match</span> <span class="s">"^Bcc:"</span> <span class="nv">headers</span><span class="p">)</span> <span class="s">"Bcc: \n"</span><span class="p">))))</span>
+    <span class="p">(</span><span class="nv">string-join</span> <span class="nv">additions</span><span class="p">)))</span>
+    
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">message-default-headers</span> <span class="nf">#'</span><span class="nv">ct/message-insert-headers</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Well, “insert” is a lie, the function <em>returns</em> the headers, but for the intended use it’s fine with me.</p>
+
+<p>I can perceive a brief flash of changes when composing emails: the buffer appears, <em>then</em> something happens and is inserted immediately. That didn’t happen before – but the call site looks like it would run this (new to me) function before inserting the (previously used) string <code>message-default-mail-headers</code>. So that’s a mystery I can live with.</p>
+
+<p>During all of this, I noticed that <code>message.el</code> is nested in the <code>gnus/</code> directory. I didn’t realize that this originated in the Gnus newsreader project.</p>
+<hr><p><small><a href="https://christiantietze.de/hire-me/">Hire me</a> for freelance macOS/iOS work and consulting.</small></p><p><small><a href="https://christiantietze.de/apps/">Buy</a> my apps.</small></p><p><small><a href="https://christiantietze.de/newsletter/">Receive</a> new posts via email.</small></p>

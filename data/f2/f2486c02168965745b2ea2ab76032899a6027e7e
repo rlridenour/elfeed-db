@@ -1,0 +1,140 @@
+<p>A few people wrote to me after <a href="https://leancrew.com/all-this/2025/03/sql-help-from-chatgpt/">yesterday’s post</a> with gentle warnings about the potential danger of building an SQL query by concatenating strings, in particular when one or more of the strings comes from the user. Which is exactly how the shell scripts in that post worked. The “Bobby Tables” comic from <a href="https://xkcd.com/327/">XKCD</a> was mentioned.</p>
+<p>It’s not that the scripts in the post are dangerous—at least not now. They sit exclusively on my computer and are used only by me. But I mentioned in an update to the post that I intended to put the database on a server and access it from a web page. That’s what led to the warnings.</p>
+<p>I didn’t really plan to use the same scripts in the online system, but I figured I might as well convert the scripts to a more secure form now while they’re fresh in my mind. So that’s what I did last night, using Python’s <a href="https://docs.python.org/3/library/sqlite3.html"><code>sqlite3</code> module</a>—which I’ve used before—with <a href="https://docs.python.org/3/library/sqlite3.html#how-to-use-placeholders-to-bind-values-in-sql-queries">placeholders</a> to handle the user input. I don’t understand the behind-the-scenes workings of placeholders or what makes them secure. I assume they use the binding routines from the <a href="https://www.sqlite.org/c3ref/bind_blob.html">SQLite C interface</a>, but that only reduces my ignorance one tiny step.</p>
+<p>Anyway, here’s the new version of <code>bytitle</code>:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import sqlite3
+ 4:  import sys
+ 5:  
+ 6:  # Search string from command line
+ 7:  params = [f'%{sys.argv[1]}%']
+ 8:  
+ 9:  # Connect to database
+10:  con = sqlite3.connect('library.db')
+11:  cur = con.cursor()
+12:  
+13:  # Query with placeholder
+14:  q = '''SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+15:  FROM book_author ba
+16:  JOIN author a ON a.id = ba.author_id
+17:  JOIN book b ON b.id = ba.book_id
+18:  WHERE b.title LIKE ? GROUP BY b.id ORDER BY b.loc;'''
+19:  
+20:  # Execute the query
+21:  cur.execute(q, params)
+22:  
+23:  # Output
+24:  found = [ '\n'.join(b) for b in cur.fetchall() ]
+25:  print('\n\n'.join(found))
+26:  
+27:  # Disconnect
+28:  con.close()
+</code></pre>
+<p>Here’s the new version of <code>byauthor</code>:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import sqlite3
+ 4:  import sys
+ 5:  
+ 6:  # Search string from command line
+ 7:  params = [f'%{sys.argv[1]}%']
+ 8:  
+ 9:  # Connect to database
+10:  con = sqlite3.connect('library.db')
+11:  cur = con.cursor()
+12:  
+13:  # Query with placeholder
+14:  q = '''SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+15:  FROM book_author ba
+16:  JOIN author a ON a.id = ba.author_id
+17:  JOIN book b ON b.id = ba.book_id
+18:  WHERE b.id IN (
+19:    SELECT ba.book_id
+20:    FROM book_author ba
+21:    JOIN author a ON a.id = ba.author_id
+22:    WHERE a.name LIKE ?
+23:  )
+24:  GROUP BY b.id ORDER BY b.loc;'''
+25:  
+26:  # Execute the query with parameters
+27:  cur.execute(q, params)
+28:  
+29:  # Output
+30:  found = [ '\n'.join(b) for b in cur.fetchall() ]
+31:  print('\n\n'.join(found))
+32:  
+33:  # Disconnect
+34:  con.close()
+</code></pre>
+<p>And, finally, here’s the new version of <code>bytitleauthor</code>:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import sqlite3
+ 4:  import sys
+ 5:  
+ 6:  # Search strings (title, author) from command line
+ 7:  params = [f'%{sys.argv[1]}%', f'%{sys.argv[2]}%']
+ 8:  
+ 9:  # Connect to database
+10:  con = sqlite3.connect('library.db')
+11:  cur = con.cursor()
+12:  
+13:  # Query with placeholder
+14:  q = '''SELECT b.title, GROUP_CONCAT(a.name, '; '), b.loc
+15:  FROM book_author ba
+16:  JOIN author a ON a.id = ba.author_id
+17:  JOIN book b ON b.id = ba.book_id
+18:  WHERE b.title LIKE ?
+19:  AND b.id IN (
+20:    SELECT ba.book_id
+21:    FROM book_author ba
+22:    JOIN author a ON a.id = ba.author_id
+23:    WHERE a.name LIKE ?
+24:  )
+25:  GROUP BY b.id ORDER BY b.loc;'''
+26:  
+27:  # Execute the query
+28:  cur.execute(q, params)
+29:  
+30:  # Output
+31:  found = [ '\n'.join(b) for b in cur.fetchall() ]
+32:  print('\n\n'.join(found))
+33:  
+34:  # Disconnect
+35:  con.close()
+</code></pre>
+<p>As you can see, most of the code is a bunch of boilerplate that sets up the connection, runs the query, and prints out the results. The main difference between the scripts is the query itself. Most of what’s in the queries was covered yesterday, but these new queries have question marks where the title and name strings are supposed to go. Those are the placeholders that get filled with the search parameters when <code>cur.execute</code> is run.</p>
+<p>One thing that’s nice about doing this in Python is that <code>cur.fetchall()</code>, which you see in the output section of each script, returns a straightforward Python data structure. It’s a list of lists, where the “outer” list is the books that meet the search criteria, and the “inner” list is the title, concatenated authors, and Library of Congress classification of each of those books. That makes the <code>join</code>s easy to write to get the same output as yesterday’s shell scripts. So</p>
+<pre><code>byauthor gere
+</code></pre>
+<p>returns</p>
+<pre><code>Theory of elastic stability
+Timoshenko, Stephen; Gere, James M.
+QA931 .T54 1961
+
+Mechanics of materials
+Gere, James M.; Timoshenko, Stephen
+TA405 .G44 1984
+
+Matrix analysis of framed structures
+Weaver, William; Gere, James M.
+TA645 .W36 1980
+</code></pre>
+<p>just like yesterday’s script. The inner list items are separated by a single newline, and the outer list items are separated by two newlines.</p>
+<p>I tested both the old shell scripts and the new Python scripts against some simple SQL injection input. The shell scripts happily ran the bad code, while the Python scripts did essentially nothing. For example, I renamed the old <code>byauthor</code> shell script to <code>byauthor-insecure</code> and ran</p>
+<pre><code>byauthor-insecure "' or 1=1 --"
+</code></pre>
+<p>The script spit out info on all of the books.<sup id="fnref:injection"><a href="#fn:injection" rel="footnote">1</a></sup> By contrast, the new <code>byauthor</code> Python script returned just a blank line. So that was encouraging.</p>
+<p>To be clear, I think that whenever I move this system to a server, I’m going to put it behind some sort of authentication scheme. But there should be a second level of security.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:injection">
+<p>No, I didn’t try any SQL injection with <code>DROP TABLES</code>. <a href="#fnref:injection" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

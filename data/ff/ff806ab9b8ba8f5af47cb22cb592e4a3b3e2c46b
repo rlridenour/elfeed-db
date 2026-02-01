@@ -1,0 +1,584 @@
+<p>
+<b>Disclaimer:</b> I'm not a professional system administrator. I'm just
+worked as sysadmin for a few years, so I know something, but that's
+all. So this guide is not some professional-grade instruction and
+should be used <i>with caution</i>.
+</p>
+
+<hr />
+<div class="outline-2">
+<h2>TOC&#xa0;&#xa0;&#xa0;<span class="tag"></span></h2>
+<div class="outline-text-2">
+<ul class="org-ul">
+<li><a href="#preamble">Preamble</a></li>
+<li><a href="#install">Installing sandboxctl</a></li>
+<li><a href="#prerequisites">Sandboxctl prerequisites</a></li>
+<li><a href="#sandbox-description">Describing sandbox</a>
+<ul class="org-ul">
+<li><a href="#sandbox-description-netbsd-native">netbsd-native</a></li>
+<li><a href="#sandbox-description-netbsd-release">netbsd-release</a></li>
+<li><a href="#sandboxctl-hooks">Hooks</a></li>
+</ul></li>
+<li><a href="#sandbox-running">Running sandbox</a></li>
+<li><a href="#sandboxing-daemon">Using sandboxed program at system startup</a></li>
+<li><a href="#notes">Notes</a></li>
+</ul>
+</div>
+</div>
+<div id="outline-container-preamble" class="outline-2">
+<h2 id="preamble">Preamble</h2>
+<div class="outline-text-2" id="text-preamble">
+<p>
+NetBSD has some cool features for programs containerization. For
+example, there is a <a href="https://netbsd.org/docs/guide/en/chap-virt.html">NVMM</a><sup><a id="fnr.nvmm" class="footref" href="#fn.nvmm" role="doc-backlink">1</a></sup> module which can be used to speed up
+QEMU virtual machines.
+</p>
+
+<p>
+But what if your CPU doesn't has necessary virtualization
+extensions<sup><a id="fnr.intel_atom" class="footref" href="#fn.intel_atom" role="doc-backlink">2</a></sup>, so the NVMM could not be used?
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/images/stickers/d3shik_drgn-surprised.png" alt="d3shik_drgn-surprised.png" align="center" width="20%" />
+</p>
+<p class="fignum"><i>Author: D3shik (<a href="https://t.me/dashihome">https://t.me/dashihome</a>)</i></p>
+</div>
+
+<p>
+Then the good old <code>chroot</code> can be used. Some software in the NetBSD,
+like Bind9 DNS server, already able to use <code>chroot</code> to containerize
+itself — it's rc.d script just makes necessary symlinks, copies
+necessary configuration files to the directory <code>chroot</code>, etc, then
+starts <code>named</code> itself.
+</p>
+
+<p>
+But there are a lot of software, which doesn't have necessary knobs in
+the <code>/etc/rc.d/</code> startup scripts, to create a <code>chroot</code> for itself. Yes, it
+is possible to create necessary environment by bare hands but I'm too
+lazy to perform it to the each of my services.
+</p>
+
+<p>
+Fortunately, there is a special program named <code>sandboxctl</code> which
+performs all necessary actions to create <code>chroot</code>-based environment.
+</p>
+</div>
+</div>
+<div id="outline-container-install" class="outline-2">
+<h2 id="install">Installing sandboxctl</h2>
+<div class="outline-text-2" id="text-install">
+<p>
+I'm using <code>pkgin</code>, so the installation is quite simple:
+</p>
+<pre class="example">
+pkgin install sandboxctl
+</pre>
+
+<p>
+I didn't check this, but looks like in case of <code>pkg_add</code> the
+installation is simple too<sup><a id="fnr.pkg_add" class="footref" href="#fn.pkg_add" role="doc-backlink">3</a></sup>:
+</p>
+<pre class="example">
+PKG_PATH=https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All pkg_add sandboxctl
+</pre>
+</div>
+</div>
+<div id="outline-container-prerequisites" class="outline-2">
+<h2 id="prerequisites">Sandboxctl prerequisites</h2>
+<div class="outline-text-2" id="text-prerequisites">
+<p>
+In case of BSD all necessary documentation already exists inside the
+system.
+</p>
+
+<p>
+Basics of <code>sandboxctl</code> described in the <code>man 8 sandboxctl</code>. Configuration
+for various <code>chroot</code> environments described in the <code>man 5
+sandboxctl.conf</code>.
+</p>
+
+<p>
+Summing up the things. There are two types of <code>chroot</code> environments that
+could be created:
+</p>
+<dl class="org-dl">
+<dt><code>netbsd-native</code></dt><dd><p>
+Uses existing NetBSD installation to create
+sandbox — the <code>/bin</code>, <code>/lib</code> and other similar directories inside the
+<code>chroot</code> environment. The sandbox will also use the distribution sets,
+installed in the host system.
+</p>
+
+<p>
+This type of sandbox can be created fast enough, but if there are
+any distribution sets necessary, which are not installed in the host
+system, then the next type of sandbox should be used instead of this
+one.
+</p></dd>
+<dt><code>netbsd-release</code></dt><dd>This sandbox using NetBSD distribution files to
+create a sandbox, so it is independent from the host NetBSD system.
+Pros: the sandbox can be used with some distribution sets, which I
+don't want to have installed in my host system (for example, <code>comp</code>
+set for security). Cons: it uses more space<sup><a id="fnr.netbsd-release-size" class="footref" href="#fn.netbsd-release-size" role="doc-backlink">4</a></sup> and
+takes more time to create.</dd>
+</dl>
+
+<p>
+Both sandbox types using some files from NetBSD distribution during
+creation (less files for <code>netbsd-native</code> and full copy for
+<code>netbsd-release</code>). So the necessary files should be unpacked somewhere
+from NetBSD ISO and also the necessary distribution sets should be
+downloaded from Internet.
+</p>
+
+<p>
+I'm using <code>/root/netbsd-release/</code> directory to store all necessary
+files. To download and unpack ISO the next commands were used:
+</p>
+<pre class="example">
+mkdir /root/netbsd-release
+cd /root/netbsd-release
+
+curl --output NetBSD-10.1-amd64.iso https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/amd64/installation/cdrom/boot.iso
+vnconfig -c vnd0 ./NetBSD-10.1-amd64.iso
+mount -t cd9660 /dev/vnd0a /mnt
+cp -r /mnt/* .
+cp /mnt/.cshrc .
+cp /mnt/.profile .
+cp -r /.rr_moved .
+umount /mnt
+vnconfig -u vnd0
+rm -v NetBSD-10.1-amd64.iso
+</pre>
+
+<p>
+And to download distribution sets to the catalog necessary for
+<code>sandboxctl</code> (<code>binary/sets/</code>):
+</p>
+<pre class="example">
+mkdir -p /root/netbsd-release/binary/sets
+cd /root/netbsd-release/binary/sets
+curl --output base.tar.xz https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/amd64/binary/sets/base.tar.xz
+curl --output etc.tar.xz https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/amd64/binary/sets/etc.tar.xz
+curl --output comp.tar.xz https://cdn.netbsd.org/pub/NetBSD/NetBSD-10.1/amd64/binary/sets/comp.tar.xz
+</pre>
+
+<p>
+Also, the directory for sandboxes should be created:
+</p>
+<pre class="example">
+mkdir /var/chroot/sandboxctl
+</pre>
+</div>
+</div>
+<div id="outline-container-sandbox-description" class="outline-2">
+<h2 id="sandbox-description">Describing sandbox</h2>
+<div class="outline-text-2" id="text-sandbox-description">
+<p>
+Before creating and using sandbox it should be described. Each sandbox
+uses simple configuration file, which should be placed inside the
+<code>/usr/pkg/etc/sandboxctl/</code> directory. The configuration file name should
+has the next format: <code>&lt;sandbox_name&gt;.conf</code>.
+</p>
+
+<p>
+This <code>&lt;sandbox_name&gt;</code> should be used with the <code>sandbox -c</code> switch to
+operate with necessary sandbox. For example, if Nginx sandbox uses
+<code>/usr/pkg/etc/sandboxctl/nginx.conf</code> as a configuration file, then the
+<code>sandboxctl</code> command should start from:
+</p>
+<pre class="example">
+sandboxctl -c nginx ...
+</pre>
+
+<p>
+Basically, these configuration files are just a shell scripts with
+some restrictions on the variables and function names.
+</p>
+</div>
+<div id="outline-container-sandbox-description-netbsd-native" class="outline-3">
+<h3 id="sandbox-description-netbsd-native">netbsd-native</h3>
+<div class="outline-text-3" id="text-sandbox-description-netbsd-native">
+<p>
+Configuration file for <i>netbsd-native</i> type sandbox is quite simple:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #909995;"># </span><span style="color: #909995;">Configuration file for sandboxctl(8).</span>
+<span style="color: #909995;">#</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">This configuration file provides a sample setup to build a NetBSD sandbox.</span>
+
+<span style="color: #0072d4;">SANDBOX_TYPE</span>=netbsd-native
+<span style="color: #0072d4;">SANDBOX_ROOT</span>=/var/chroot/sandboxctl/default
+
+<span style="color: #909995;"># </span><span style="color: #909995;">Sample settings for the netbsd-native sandbox type.</span>
+<span style="color: #0072d4;">NETBSD_NATIVE_RELEASEDIR</span>=<span style="color: #009c8f;">"/root/netbsd-release"</span>
+</pre>
+</div>
+
+<p>
+Here the next variables should be specified properly:
+</p>
+<dl class="org-dl">
+<dt><code>SANDBOX_TYPE</code></dt><dd>Obviously it should be set to the <code>netbsd-native</code>.</dd>
+<dt><code>SANDBOX_ROOT</code></dt><dd>Should be pointed to the directory inside the
+previously created <code>/var/chroot/sandboxctl/</code>. This directory will be
+created by <code>sandboxctl</code> during the sandbox creation and will be
+deleted during the sandbox destroy.</dd>
+<dt><code>NETBSD_NATIVE_RELEASEDIR</code></dt><dd>Path to the previously downloaded and
+unpacked NetBSD distribution files.</dd>
+</dl>
+
+<p>
+For convenience, the directory for sandbox, specified in the
+<code>SANDBOX_ROOT</code>, should has the same as the name of sandbox (aka the name
+of sandbox configuration file).
+</p>
+</div>
+</div>
+<div id="outline-container-sandbox-description-netbsd-release" class="outline-3">
+<h3 id="sandbox-description-netbsd-release">netbsd-release</h3>
+<div class="outline-text-3" id="text-sandbox-description-netbsd-release">
+<p>
+Configuration file for <i>netbsd-release</i> type sandbox slightly differs:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #909995;"># </span><span style="color: #909995;">Configuration file for sandboxctl(8).</span>
+<span style="color: #909995;">#</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">This configuration file provides a sample setup to build a NetBSD sandbox.</span>
+
+<span style="color: #0072d4;">SANDBOX_TYPE</span>=netbsd-release
+<span style="color: #0072d4;">SANDBOX_ROOT</span>=/var/chroot/sandboxctl/default
+
+<span style="color: #909995;"># </span><span style="color: #909995;">Sample settings for the netbsd-native sandbox type.</span>
+<span style="color: #0072d4;">NETBSD_RELEASE_RELEASEDIR</span>=<span style="color: #009c8f;">"/root/netbsd-release"</span>
+<span style="color: #0072d4;">NETBSD_RELEASE_SETS</span>=<span style="color: #009c8f;">"base etc"</span>
+</pre>
+</div>
+
+<p>
+Here the next new variables are used:
+</p>
+<dl class="org-dl">
+<dt><code>NETBSD_RELEASE_RELEASEDIR</code></dt><dd>The meaning is the same as for
+<code>NETBSD_NATIVE_RELEASEDIR</code> above.</dd>
+<dt><code>NETBSD_RELEASE_SETS</code></dt><dd>Here should be the list of space-separated
+names for necessary release sets. The minimal necessary sets are
+<code>base</code> and <code>etc</code>.</dd>
+</dl>
+</div>
+</div>
+<div id="outline-container-sandboxctl-hooks" class="outline-3">
+<h3 id="sandboxctl-hooks">Hooks</h3>
+<div class="outline-text-3" id="text-sandboxctl-hooks">
+<p>
+Each sandbox can have some hooks, described in the <code>man 5
+sandboxctl.conf</code>:
+</p>
+<dl class="org-dl">
+<dt><code>post_create_hook</code></dt><dd>Will be called after sandbox creation.</dd>
+<dt><code>pre_destroy_hook</code></dt><dd>Will be called before sandbox destroy.</dd>
+<dt><code>post_mount_hook</code></dt><dd>Will be called after mounting all necessary
+filesystems inside the sandbox. Basically, it will be called each
+time after sandbox was launched.</dd>
+<dt><code>pre_mount_hook</code></dt><dd>This hook will be called <b>before</b> the sandbox
+starts.</dd>
+</dl>
+
+<p>
+Each of these hooks are just a simple shell functions without
+arguments, placed inside the corresponding configuration file.
+</p>
+
+<p>
+The most valuable hook for me is the <code>post_create_hook</code> — I use it to
+populate the new sandbox with necessary programs and configuration.
+For example, it may looks like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #0072d4;">post_create_hook</span>() {
+    <span style="color: #909995;"># </span><span style="color: #909995;">Setup timezone</span>
+    rm -v $<span style="color: #0072d4;">SANDBOX_ROOT</span>/etc/localtime
+    ln -s $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/share/zoneinfo/Europe/Moscow $<span style="color: #0072d4;">SANDBOX_ROOT</span>/etc/localtime
+
+    <span style="color: #909995;"># </span><span style="color: #909995;">Setup PKG_PATH to the current NetBSD distribution</span>
+    <span style="color: #0072d4;">PKG_PATH</span>=https://cdn.NetBSD.org/pub/pkgsrc/packages/NetBSD/$(uname -p)/$(uname -r | cut -d_ -f1)/All
+    <span style="color: #53676d; font-weight: bold;">export</span> PKG_PATH
+
+    <span style="color: #909995;"># </span><span style="color: #909995;">Install ca-certificates</span>
+    pkg_add -I -P $<span style="color: #0072d4;">SANDBOX_ROOT</span> ca-certificates
+    mkdir $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/
+    cp -v $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/share/examples/ca-certificates/ca-certificates.conf $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/
+    sed -r <span style="color: #009c8f;">'s/^#(ETCCERTSDIR=\/etc\/openssl\/certs)/\1/'</span> <span style="color: #ad8900; font-weight: bold;">\</span>
+        $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/share/examples/ca-certificates/ca-certificates-dir.conf &gt; <span style="color: #ad8900; font-weight: bold;">\</span>
+        $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/ca-certificates-dir.conf
+    sandboxctl -c prosody run update-ca-certificates
+
+    <span style="color: #909995;"># </span><span style="color: #909995;">Install pkgin</span>
+    sandboxctl -c prosody run sh -c <span style="color: #009c8f;">"PKG_PATH=$PKG_PATH pkg_add pkgin"</span>
+
+    <span style="color: #909995;"># </span><span style="color: #909995;">Install prosody</span>
+    sandboxctl -c prosody run pkgin -y install prosody
+    cp -v /usr/pkg/etc/sandboxctl/prosody/prosody.conf.lua $<span style="color: #0072d4;">SANDBOX_ROOT</span>/usr/pkg/etc/prosody/
+}
+</pre>
+</div>
+
+<p>
+Basically, it is simple enough — just use ordinary commands and
+remember that they should be non-interactive.
+</p>
+
+<p>
+The <code>pkg_add</code> and <code>pkgin</code> commands from the host system can be used to
+install some programs right inside the sandbox. There are <code>-P</code> switch
+for <code>pkg_add</code> and <code>-c</code> switch for <code>pkgin</code>, taking the path to the sandbox
+chroot directory. Sadly, the post-install scripts will be executed <b>not
+inside</b> chroot but inside the host system (don't know why it was
+realized like that)! So, to install some packages it is necessary to
+install <code>pkgin</code> inside the sandbox and use it, not the host's <code>pkgin</code>.
+</p>
+</div>
+</div>
+</div>
+<div id="outline-container-sandbox-running" class="outline-2">
+<h2 id="sandbox-running">Running sandbox</h2>
+<div class="outline-text-2" id="text-sandbox-running">
+<p>
+First, sandbox should be created with the next command:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; create
+</pre>
+
+<p>
+After this all necessary chroot environment should be created and the
+<code>post_create_hook</code> should be executed successfully.
+</p>
+
+<p>
+To make some changes <i>inside</i> the sandbox, the next command could be
+issued:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; shell
+</pre>
+
+<p>
+It will mount the necessary filesystems and drop right in the sandbox
+shell (<code>/bin/sh</code>).
+</p>
+
+<p>
+Then, if it is as simple sandbox, which should just execute one
+command and shutdown after that, the next command is enough:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; run shell-command
+</pre>
+
+<p>
+This command will spin up the sandbox, mount all necessary
+filesystems, execute the specified command, then unmount previously
+mounted filesystems and stop the sandbox. So, if there is a some
+daemonized process, then there are will be a lot of errors, because
+<code>sandboxctl run</code> unable to unmount filesystems.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/images/stickers/d3shik_drgn-thinking-blue-claws.png" alt="d3shik_drgn-thinking-blue-claws.png" align="center" width="20%" />
+</p>
+<p class="fignum"><i>Author: D3shik (<a href="https://t.me/dashihome">https://t.me/dashihome</a>)</i></p>
+</div>
+
+<p>
+It is possible to use <code>sandboxctl</code> to run the daemon inside the
+sandbox — this topic is covered in the next section.
+</p>
+
+<p>
+To completely delete unnecessary sandbox the next command is enough:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; destroy
+</pre>
+</div>
+</div>
+<div id="outline-container-sandboxing-daemon" class="outline-2">
+<h2 id="sandboxing-daemon">Using sandboxed program at system startup</h2>
+<div class="outline-text-2" id="text-sandboxing-daemon">
+<p>
+There are two sandbox commands, which will help with this task:
+</p>
+<dl class="org-dl">
+<dt><code>mount</code></dt><dd>mounts necessary filesystems, so sandbox will not stop
+automatically after running some command with <code>sandboxctl -c
+  &lt;sandbox_name&gt; run shell-command</code>.</dd>
+<dt><code>unmount</code></dt><dd>unmount necessary filesystem. Will fail if there is any
+daemonized program running in this sandbox.</dd>
+</dl>
+
+<p>
+So, to start some daemon:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; mount
+sandboxctl -c &lt;sandbox_name&gt; run some-daemon
+</pre>
+
+<p>
+And to stop it:
+</p>
+<pre class="example">
+sandboxctl -c &lt;sandbox_name&gt; command-to-stop-daemon
+sandboxctl -c &lt;sandbox_name&gt; unmount
+</pre>
+
+<p>
+Of course, this command could be placed somewhere in the <code>/etc/rc.local</code>
+and <code>/etc/rc.shutdown</code>. But it is more convenient to use <code>/etc/rc.d/</code>
+script for it. Fortunately, it is simple enough (see the <code>man 8
+rc.subr</code>):
+</p>
+
+<div class="org-src-container">
+<label class="org-src-name">Sample /etc/rc.d/someprogram</label><pre class="src src-shell"><span style="color: #909995;">#</span><span style="color: #909995;">!/bin/</span><span style="color: #489100; font-weight: bold;">sh</span>
+
+<span style="color: #909995;"># </span><span style="color: #909995;">PROVIDE: someprogram</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">REQUIRE: DAEMON NETWORKING mountall npfd</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">BEFORE: LOGIN</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">KEYWORD: nojail shutdown</span>
+
+$<span style="color: #0072d4;">_rc_subr_loaded</span> . /etc/rc.subr
+
+<span style="color: #0072d4;">name</span>=<span style="color: #009c8f;">"someprogram"</span>
+<span style="color: #0072d4;">rcvar</span>=$<span style="color: #0072d4;">name</span>
+<span style="color: #0072d4;">start_cmd</span>=<span style="color: #009c8f;">"someprogram_start"</span>
+<span style="color: #0072d4;">stop_cmd</span>=<span style="color: #009c8f;">"someprogram_stop"</span>
+<span style="color: #0072d4;">restart_cmd</span>=<span style="color: #009c8f;">"someprogram_restart"</span>
+<span style="color: #0072d4;">status_cmd</span>=<span style="color: #009c8f;">"someprogram_status"</span>
+<span style="color: #0072d4;">extra_commands</span>=<span style="color: #009c8f;">"status"</span>
+
+<span style="color: #0072d4;">SOMEPROGRAM_PID</span>=<span style="color: #009c8f;">"/var/chroot/sandboxctl/someprogram/var/run/someprogram/someprogram.pid"</span>
+
+<span style="color: #0072d4;">someprogram_start</span>()
+{
+    <span style="color: #489100; font-weight: bold;">if</span> [ -f <span style="color: #009c8f;">"SOMEPROGRAM_PID"</span> ]; <span style="color: #489100; font-weight: bold;">then</span>
+        rm -v <span style="color: #009c8f;">"SOMEPROGRAM_PID"</span>
+    <span style="color: #489100; font-weight: bold;">fi</span>
+    /usr/pkg/sbin/sandboxctl -c someprogram mount
+    /usr/pkg/sbin/sandboxctl -c someprogram run /usr/pkg/bin/someprogramctl start
+    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Someprogram started"</span>
+}
+
+<span style="color: #0072d4;">someprogram_stop</span>()
+{
+    /usr/pkg/sbin/sandboxctl -c someprogram run /usr/pkg/bin/someprogramctl stop
+    /usr/pkg/sbin/sandboxctl -c someprogram unmount
+    <span style="color: #489100; font-weight: bold;">if</span> [ -f <span style="color: #009c8f;">"SOMEPROGRAM_PID"</span> ]; <span style="color: #489100; font-weight: bold;">then</span>
+        rm -v <span style="color: #009c8f;">"SOMEPROGRAM_PID"</span>
+    <span style="color: #489100; font-weight: bold;">fi</span>
+    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Someprogram stopped"</span>
+}
+
+<span style="color: #0072d4;">someprogram_restart</span>()
+{
+    someprogram_stop
+    someprogram_start
+}
+
+<span style="color: #0072d4;">someprogram_status</span>()
+{
+    <span style="color: #489100; font-weight: bold;">if</span> [ <span style="color: #ad8900; font-weight: bold;">!</span> -f <span style="color: #009c8f;">"SOMEPROGRAM_PID"</span> ]; <span style="color: #489100; font-weight: bold;">then</span>
+        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Someprogram is stopped"</span>
+    <span style="color: #489100; font-weight: bold;">elif</span> [ -d <span style="color: #009c8f;">"/proc/"</span>$(cat $<span style="color: #0072d4;">SOMEPROGRAM_PID</span>) ]; <span style="color: #489100; font-weight: bold;">then</span>
+        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Someprogram is running"</span>
+    <span style="color: #489100; font-weight: bold;">else</span>
+        <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Someprogram is stopped"</span>
+    <span style="color: #489100; font-weight: bold;">fi</span>
+}
+
+load_rc_config $<span style="color: #0072d4;">name</span>
+run_rc_command <span style="color: #009c8f;">"$1"</span>
+</pre>
+</div>
+
+<p>
+Then just add this line to the <code>/etc/rc.conf</code> to run the newly created
+service on startup:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #0072d4;">someprogram</span>=YES
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-notes" class="outline-2">
+<h2 id="notes">Notes</h2>
+<div class="outline-text-2" id="text-notes">
+</div>
+</div>
+<div id="footnotes">
+
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.nvmm" class="footnum" href="#fnr.nvmm" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+NetBSD Virtual Machine Monitor
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.intel_atom" class="footnum" href="#fnr.intel_atom" role="doc-backlink">2</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+For example, Intel Atom N2800
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.pkg_add" class="footnum" href="#fnr.pkg_add" role="doc-backlink">3</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+<a href="https://netbsd.org/docs/misc/index.html#pkgin">https://netbsd.org/docs/misc/index.html#pkgin</a>
+</p></div></div>
+
+<div class="footdef"><sup><a id="fn.netbsd-release-size" class="footnum" href="#fnr.netbsd-release-size" role="doc-backlink">4</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
+For example, this is the size of <code>netbsd-native</code>
+empty sandbox:
+</p>
+<pre class="example">
+drag0n-server# cat /usr/pkg/etc/sandboxctl/default.conf
+# Configuration file for sandboxctl(8).
+#
+# This configuration file provides a sample setup to build a NetBSD sandbox.
+
+SANDBOX_TYPE=netbsd-native
+SANDBOX_ROOT=/var/chroot/sandboxctl/default
+
+# Sample settings for the netbsd-native sandbox type.
+NETBSD_NATIVE_RELEASEDIR="/root/netbsd-release"
+
+drag0n-server# sandboxctl -c default create
+drag0n-server# du -hs /var/chroot/sandboxctl/default/
+35M     /var/chroot/sandboxctl/default/
+</pre>
+
+<p class="footpara">
+And this is a size for <code>netbsd-release</code> sandbox:
+</p>
+<pre class="example">
+drag0n-server# cat default2.conf
+# Configuration file for sandboxctl(8).
+#
+# This configuration file provides a sample setup to build a NetBSD sandbox.
+
+SANDBOX_TYPE=netbsd-release
+SANDBOX_ROOT=/var/chroot/sandboxctl/default2
+
+# Sample settings for the netbsd-native sandbox type.
+NETBSD_RELEASE_RELEASEDIR="/root/netbsd-release"
+NETBSD_RELEASE_SETS="base etc"
+
+drag0n-server# sandboxctl -c default2 create
+drag0n-server# du -hs /var/chroot/sandboxctl/default2/
+272M    /var/chroot/sandboxctl/default2/
+</pre></div></div>
+
+
+</div>
+</div>

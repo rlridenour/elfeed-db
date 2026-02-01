@@ -1,0 +1,37 @@
+<p>A few weeks ago, I <a href="https://xenodium.com/emacs-open-with-macos-app/">added an &quot;open with&quot;</a> command to <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-commands.el">dwim-shell-commands.el</a>. It's pretty handy for opening files using an external app (ie. not Emacs) other than the default macOS one.</p>
+<p><code>dwim-shell-commands-macos-open-with</code> and <code>dwim-shell-commands-open-externally</code> are typically enough for me to handle opening files outside of Emacs. But every now and then I'd like to change the default macOS app associated with specific file types. Now this isn't particularly challenging in macOS, but it does require a little navigating to get to the right place to change this default setting.</p>
+<p>Back in March 2020, I <a href="https://twitter.com/xenodium/status/1242879439932923909">tweeted</a> about <a href="https://github.com/moretension/duti">duti</a>: a command-line utility capable of setting default applications for various document types on macOS. While I liked the ability to change default apps from the command-line, the habit never quite stuck.</p>
+<p>Fast forward to 2022. I've been revisiting lots of my command-line usages (specially those that never stuck) and making them more accessible from Emacs via <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a>. I seldom change default apps on macOS, so my brain forgets about <code>duti</code> itself, let alone its arguments, order, etc. But with a dwim shell command like <code>dwim-shell-commands-macos-set-default-app</code>, I can easily invoke the command via <a href="https://github.com/abo-abo/swiper">swiper</a>'s <code>counsel-M-x</code> fuzzy terms: <em>&quot;dwim set&quot;</em>.</p>
+<p><img src="https://xenodium.github.io/images/hey-emacs-change-the-default-macos-app-for/set-default_x1.3.webp" alt=""></p>
+<p>As an added bonus, I get to reuse <code>dwim-shell-commands--macos-apps</code> from &quot;open with&quot; to quickly pick the new default app, making the whole experience pretty snappy.</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-commands-macos-set-default-app ()
+  &quot;Set default app for file(s).&quot;
+  (interactive)
+  (let* ((apps (dwim-shell-commands-macos-apps))
+         (selection (progn
+                      (cl-assert apps nil &quot;No apps found&quot;)
+                      (completing-read &quot;Set default app: &quot; apps nil t))))
+    (dwim-shell-command-on-marked-files
+     &quot;Set default app&quot;
+     (format &quot;duti -s \&quot;%s\&quot; '&lt;&lt;e&gt;&gt;' all&quot;
+             (string-trim
+              (shell-command-to-string (format &quot;defaults read '%s/Contents/Info.plist' CFBundleIdentifier&quot;
+                                               (map-elt apps selection)))))
+     :silent-success t
+     :no-progress t
+     :utils &quot;duti&quot;)))
+
+(defun dwim-shell-commands--macos-apps ()
+  &quot;Return alist of macOS apps (\&quot;Emacs\&quot; . \&quot;/Applications/Emacs.app\&quot;).&quot;
+  (mapcar (lambda (path)
+            (cons (file-name-base path) path))
+          (seq-sort
+           #'string-lessp
+           (seq-mapcat (lambda (paths)
+                         (directory-files-recursively
+                          paths &quot;\\.app$&quot; t (lambda (path)
+                                             (not (string-suffix-p &quot;.app&quot; path)))))
+                       '(&quot;/Applications&quot; &quot;~/Applications&quot; &quot;/System/Applications&quot;)))))
+</code></pre>
+<p>As usual, I've added <code>dwim-shell-commands-macos-set-default-app</code> to <a href="https://github.com/xenodium/dwim-shell-command/blob/main/dwim-shell-commands.el">dwim-shell-commands.el</a>, which you can install via <a href="https://melpa.org/#/dwim-shell-command">MELPA</a>.</p>
+<p>Did you find this tiny integration useful? Check out <a href="https://xenodium.com/hey-emacs-where-did-i-take-that-photo/">Hey Emacs, where did I take that photo?</a></p>

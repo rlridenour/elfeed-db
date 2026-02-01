@@ -1,0 +1,245 @@
+<p>
+The <a href="https://www.emacswiki.org/emacs/Carnival">Emacs Carnival</a> theme for September is <a href="https://goritskov.com/posts/obscure_packages.html">obscure
+packages</a>, which made me think of how the
+<a href="https://github.com/lewang/backup-walker">backup-walker</a> package saved me from having to
+write some code all over again. Something went
+wrong when I was editing my config in Org Mode. I
+probably accidentally deleted a subtree due to
+over-enthusiastic speed commands. (&hellip; Maybe I
+should make my <code>k</code> shortcut for
+<a href="https://sachachua.com/dotemacs#org-mode-keyboard-shortcuts-speed-commands-org-mode-cutting-the-current-list-item-including-nested-lists-with-a-speed-command"><code>my-org-cut-subtree-or-list-item</code></a> only work in my
+Inbox.org and news.org files.) Chunks of my
+<a href="https://sachachua.com/dotemacs/index.html">literate Emacs configuration</a> were gone, including
+the code that defined <a href="https://sachachua.com/dotemacs#my-org-insert-link-dwim"><code>my-org-insert-link-dwim</code></a>.
+Before I noticed, I'd already exported my (now
+slightly shorter) Emacs configuration file with
+<code>org-babel-tangle</code> and restarted Emacs. I couldn't
+recover the definition from memory using
+<a href="https://sachachua.com/dotemacs#inserting-code"><code>symbol-function</code></a>. I couldn't use <a target="_blank" href="https://elpa.gnu.org/packages/vundo.html">vundo</a> to browse
+the Emacs undo tree. As usual, I'd been neglecting
+to commit my config changes to Git, so I couldn't
+restore a previous version. Oops.
+</p>
+
+<p>
+Well, not the first time I've needed to rewrite
+code from scratch because of a brain hiccup. I
+started to reimplement the function. Then I
+remembered that I had other backups. I have a 2 TB
+SSD in my laptop, and I had configured Emacs to
+neatly save numbered backups in a separate
+directory, keeping all the versions without
+deleting any of the old ones.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> backup-directory-alist <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"\\.env$"</span> . nil)
+                               (<span class="org-string">"."</span> . <span class="org-string">"~/.config/emacs/backups"</span>)))
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">tramp</span>
+  (<span class="org-keyword">setq</span> tramp-backup-directory-alist nil))
+(<span class="org-keyword">setq</span> delete-old-versions -1)
+(<span class="org-keyword">setq</span> version-control t)
+(<span class="org-keyword">setq</span> auto-save-file-name-transforms <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">".*"</span> <span class="org-string">"~/.config/emacs/auto-save-list/"</span> t)))
+</code></pre>
+</div>
+
+
+<p>
+At the moment, there are about 12,633 files adding
+up to 3 GB. Totally worth it for peace of
+mind. I could probably use grep to search for the
+function, but it wasn't easy to see what changed
+between versions.
+</p>
+
+<p>
+I had learned about backup-walker in the process
+of writing about <a href="https://sachachua.com/blog/2025/06/thinking-about-time-travel-with-the-emacs-text-editor-and-org-mode/">Thinking about time travel with
+the Emacs text editor, Org Mode, and backups</a>. So I
+used <a href="https://github.com/lewang/backup-walker">backup-walker</a> to flip through my file's
+numbered backups in much the same way that
+<a target="_blank" href="https://melpa.org/#/git-timemachine">git-timemachine</a> lets you flip through Git versions
+of a file. After <code>M-x backup-walker-start</code>, I
+tapped <code>p</code> to go through the previous backups. The
+diff it showed me made it easy to check with <code>C-s</code>
+(<code>isearch-forward</code>) if this was the version I was
+looking for. When I found the change, I pressed
+RET to load the version with the function in it.
+Once I found it, it was easy to restore that
+section. I also restored a couple of other
+sections that I'd accidentally deleted too, like
+the custom <a href="https://sachachua.com/dotemacs#org-mode-publishing-plain-text">plain text publishing backend</a> I use to
+export Emacs News with less punctuation. It took
+maybe 5 minutes to figure this out. Hooray for
+backup-walker!
+</p>
+
+<p>
+Note that the backup-walker diff was the other way
+around from what I expected. It goes "diff new
+old" instead of "diff old new", so the green
+regions marked with <code>+</code> indicate stuff that was
+<b>removed</b> by the newer version (compared to the
+one a little older than it) and the red regions
+marked with <code>-</code> indicate stuff that was added.
+This could be useful if you think backwards in
+time, kind of like the <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Antinews.html">Emacs Antinews</a> file, but my
+mind doesn't quite work that way. I wanted it to
+look like a regular diff, with the additions in
+newer versions marked with <code>+</code>. Emacs being Emacs,
+I changed it. Here's an example showing what it
+looks like now:
+</p>
+
+
+<figure id="orgc643e25">
+<img src="https://sachachua.com/blog/2025/09/obscure-emacs-package-appreciation-backup-walker/2025-09-17_13-46-12.png" alt="2025-09-17_13-46-12.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>backup-walker diffs going the direction I want them to: additions (+) marked in green, deletions (-) in red</figcaption>
+</figure>
+
+<p>
+The following code makes it behave the way I
+expect:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-backup-walker-refresh</span> ()
+  (<span class="org-keyword">let*</span> ((index (cdr (assq <span class="org-builtin">:index</span> backup-walker-data-alist)))
+         (suffixes (cdr (assq <span class="org-builtin">:backup-suffix-list</span> backup-walker-data-alist)))
+         (prefix (cdr (assq <span class="org-builtin">:backup-prefix</span> backup-walker-data-alist)))
+         (right-file (concat prefix (nth index suffixes)))
+         (right-version (format <span class="org-string">"%i"</span> (backup-walker-get-version right-file)))
+         diff-buff left-file left-version)
+    (<span class="org-keyword">if</span> (eq index 0)
+        (<span class="org-keyword">setq</span> left-file (cdr (assq <span class="org-builtin">:original-file</span> backup-walker-data-alist))
+              left-version <span class="org-string">"orig"</span>)
+      (<span class="org-keyword">setq</span> left-file (concat prefix (nth (1- index) suffixes))
+            left-version (format <span class="org-string">"%i"</span> (backup-walker-get-version left-file))))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">we change this to go the other way here</span>
+    (<span class="org-keyword">setq</span> diff-buf (diff-no-select right-file left-file nil <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">noasync</span>))
+    (<span class="org-keyword">setq</span> buffer-read-only nil)
+    (delete-region (point-min) (point-max))
+    (insert-buffer diff-buf)
+    (set-buffer-modified-p nil)
+    (<span class="org-keyword">setq</span> buffer-read-only t)
+    (force-mode-line-update)
+    (<span class="org-keyword">setq</span> header-line-format
+          (concat (format <span class="org-string">"{{ ~%s~ &#8594; ~%s~ }} "</span>
+                          (propertize left-version <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">font-lock-variable-name-face</span>)
+                          (propertize right-version <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">font-lock-variable-name-face</span>))
+                  (<span class="org-keyword">if</span> (nth (1+ index) suffixes)
+                      (concat (propertize <span class="org-string">"&lt;p&gt;"</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">italic</span>)
+                              <span class="org-string">" ~"</span>
+                              (propertize (int-to-string
+                                           (backup-walker-get-version (nth (1+ index) suffixes)))
+                                          <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">font-lock-keyword-face</span>)
+                              <span class="org-string">"~ "</span>)
+                    <span class="org-string">""</span>)
+                  (<span class="org-keyword">if</span> (eq index 0)
+                      <span class="org-string">""</span>
+                    (concat (propertize <span class="org-string">"&lt;n&gt;"</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">italic</span>)
+                            <span class="org-string">" ~"</span>
+                            (propertize (int-to-string (backup-walker-get-version (nth (1- index) suffixes)))
+                                        <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">font-lock-keyword-face</span>)
+                            <span class="org-string">"~ "</span>))
+                  (propertize <span class="org-string">"&lt;return&gt;"</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">italic</span>)
+                  <span class="org-string">" open ~"</span>
+                  (propertize (propertize (int-to-string (backup-walker-get-version right-file))
+                                          <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">font-lock-keyword-face</span>))
+                  <span class="org-string">"~"</span>))
+    (kill-buffer diff-buf)))
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">backup-walker</span>
+  (advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">backup-walker-refresh</span> <span class="org-builtin">:override</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-backup-walker-refresh</span>))
+</code></pre>
+</div>
+
+
+<p>
+<code>backup-walker</code> is not actually a real package in
+the sense of <code>M-x package-install</code>, but
+fortunately, recent Emacs makes it easier to
+install from a repository. I needed to
+install it from
+<a href="https://github.com/lewang/backup-walker">https://github.com/lewang/backup-walker</a>. It was
+written so long ago that I needed to
+<code>defalias</code> some functions that were removed in
+Emacs 26.1. Here's the use-package snippet from my
+configuration:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">use-package</span> backup-walker
+  <span class="org-builtin">:vc</span> (<span class="org-builtin">:url</span> <span class="org-string">"https://github.com/lewang/backup-walker"</span>)
+  <span class="org-builtin">:commands</span> backup-walker-start
+  <span class="org-builtin">:init</span>
+  (<span class="org-keyword">defalias</span> <span class="org-highlight-quoted-quote">'</span><span class="org-function-name">string-to-int</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string-to-number</span>)  <span class="org-comment-delimiter">; </span><span class="org-comment">removed in 26.1</span>
+  (<span class="org-keyword">defalias</span> <span class="org-highlight-quoted-quote">'</span><span class="org-function-name">display-buffer-other-window</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">display-buffer</span>))
+</code></pre>
+</div>
+
+
+<p>
+So there's an obscure package recommendation:
+<a href="https://github.com/lewang/backup-walker">backup-walker</a>. It hasn't been updated for more
+than a decade, and it's not even installable the
+regular way, but it's still handy.
+</p>
+
+<p>
+I can imagine all sorts of ways this workflow
+could be even better. It might be nice to dust off
+backup-walker off, switch out the obsolete
+functions, add an option for the diff direction,
+and maybe sort things out so that you can reverse
+the diff, split hunks, and apply hunks to your
+original file. And maybe a way to walk the backup
+history for changes in a specific region? I
+suppose someone could make a spiffy
+<a href="https://github.com/magit/transient">Transient</a>-based user interface to modernize it.
+But it's fine, it works. Maybe there's a more
+modern equivalent, but I didn't see anything in a
+quick search of <code>M-x list-packages</code> <code>/ N</code>
+(<code>package-menu-filter-by-name-or-description</code>) for
+"backup~, except maybe <a href="https://elpa.gnu.org/packages/vc-backup.html">vc-backup</a>.<sup><a id="fnr.vc-backup-repo" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.vc-backup-repo" role="doc-backlink">1</a></sup> Is there a general-purpose VC equivalent to
+git-timemachine? That might be useful.
+</p>
+
+<p>
+I should really be saving things in proper version
+control, but this was a good backup. That reminds
+me: I should backup my backup backups. I had
+initially excluded my <code>~/.config</code> directory from
+<a href="https://www.borgbackup.org/">borgbackup</a> because of the extra bits and bobs that
+I wouldn't need when restoring from backup (like
+all the Emacs packages I'd just re-download). But
+my file backups&hellip; Yeah, that's worth it. I
+changed my <code>&#45;&#45;exclude-from</code> to <code>&#45;&#45;patterns-from</code>
+and changing my <a href="https://manpages.debian.org/testing/borgbackup/borg-patterns.1.en.html">borg-patterns</a> file to look like
+this:
+</p>
+
+<pre class="example" id="orgf46491e">
++ /home/sacha/.config/emacs/backups
+- /home/sacha/.config/*
+# ... other rules
+</pre>
+
+<p>
+May backup-walker save you from a future oops!</p>
+<div id="blog-2025-09-obscure-emacs-package-appreciation-backup-walker-footnotes">
+<h3 class="footnotes">Footnotes</h3>
+<div id="blog-2025-09-obscure-emacs-package-appreciation-backup-walker-text-footnotes">
+
+<div class="footdef"><sup><a id="fn.vc-backup-repo" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.vc-backup-repo" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">vc-backup: The <a href="https://git.sr.ht/~pkal/vc-backup">original
+repo</a> is missing, but you can read it via <a href="https://gitweb.git.savannah.gnu.org/gitweb/?p=emacs/elpa.git;a=blob_plain;f=vc-backup.el;hb=refs/heads/externals/vc-backup">ELPA's
+copy</a>. Update: It's over on <a href="https://codeberg.org/pkal/vc-backup.el">Codeberg</a> now, and presumably the info on ELPA will be updated soon.</p></div></div>
+
+
+</div>
+</div>
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#backups">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2025/09/obscure-emacs-package-appreciation-backup-walker/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K5EHNVSHPHMAXFQPZYWJ1D1H" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F09%2Fobscure-emacs-package-appreciation-backup-walker%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

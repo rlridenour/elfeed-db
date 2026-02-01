@@ -1,0 +1,91 @@
+<p>It's been a little while since the last <a href="https://github.com/xenodium/agent-shell">agent-shell</a> blog post <a href="https://xenodium.com/agent-shell-016-improvements-melpa">detailing changes</a>, so we're naturally due another one detailing the latest features.</p>
+<h2>What's <code>agent-shell</code>?</h2>
+<p>A native <a href="https://www.gnu.org/software/emacs/">Emacs</a> shell to interact with any LLM agent powered by ACP (<a href="https://agentclientprotocol.com/">Agent Client Protocol</a>).</p>
+<center>✨ <a href="https://github.com/sponsors/xenodium">Sponsor agent-shell</a> ✨</center>
+<h2>So what's new?</h2>
+<p>Let's go through the latest changes…</p>
+<h3>Viewport/compose (experimental)</h3>
+<p>The biggest change is the new experimental viewport/compose mode. While agent-shell's <a href="https://www.masteringemacs.org/article/comint-writing-command-interpreter">comint</a> shell experience has its benefits, some folks may opt for a more familiar buffer experience, that is less shell-like.</p>
+<p>There are perhaps 3 defining characteristics in the new viewport/compose feature:</p>
+<p><strong>A dedicated compose buffer</strong>: You get a full, multiline buffer dedicated to crafting prompts. I personally find this mode of operation more natural (no need to watch out for accidental submissions via RET), but also opens up the possibility to enable your favourite minor modes that may not play nice with <code>comint</code>. You can launch compose buffers via <code>M-x agent-shell-prompt-compose</code>, edit your prompt, and when you're ready, submit with the familiar <code>C-c C-c</code> binding.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose.gif" alt=""></p>
+<p><strong>Viewport</strong>: I've <a href="https://xenodium.com/an-experimental-e-shell-pager">experimented with shell viewports before</a> and also added a <a href="https://xenodium.com/a-chatgpt-shell-compose-ux-experiment">similar experience to chatgpt-shell</a>. This compose/viewport UX quickly became my primary way of interacting with non-agent LLMs. This is a read-only buffer typically displaying the latest agent interaction. Use <code>n/p</code> to navigate through current interaction items. Use <code>f/b</code> to switch through pages/interactions.</p>
+<p><strong>Auto-modal</strong>: Compose and viewport modes complement each other and offer automatic transition between read-only and editable (compose) buffers. From a viewport, you can always press <code>r</code> to reply to the latest interaction. When replying, you automatically go into edit/compose mode. When submitting via <code>C-c C-c</code>, you automatically transition into viewport (read-only) mode.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-viewport-page.gif" alt=""></p>
+<p>While you can use <code>M-x agent-shell-prompt-compose</code> at any time to compose multi-line prompts and send from the shell, to get the <code>compose/viewport</code> hybrid experience, you need to enable with <code>(setq agent-shell-prefer-viewport-interaction t)</code>. From then on, <code>M-x agent-shell</code> will favor the <code>compose/viewport</code> experience. You can always jump between viewport and shell with <code>C-c C-o</code>.</p>
+<h3>Prompt queueing (experimental)</h3>
+<p><code>agent-shell</code> buffers now offer the ability to queue additional prompts if the agent is busy. Use <code>M-x agent-shell-queue-request</code> and <code>M-x agent-shell-remove-pending-request</code> to queue and remove requests.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/queue.gif" alt=""></p>
+<h3>Session model/mode</h3>
+<p>You can now change models via <code>M-x agent-shell-set-session-model</code> (<code>C-c C-v</code>), when supported by the agent.</p>
+<p>For Anthropic users, we now have <code>agent-shell-anthropic-default-model-id</code> and <code>agent-shell-anthropic-default-session-mode-id</code> to set default agent model and modes. You can view available values by expanding shell handshake items.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/models.png" alt=""></p>
+<p>If keen on using defaults for a different agent, <a href="https://github.com/xenodium/agent-shell/issues/new/choose">please file a feature request</a>.</p>
+<h3>Set preferred agent</h3>
+<p>By default, launching via <code>M-x agent-shell</code> prompts users to select one of the supported agents. You can now skip this by setting your preferred agent (<a href="https://github.com/xenodium/agent-shell/pull/129">thank you Jonathan</a>).</p>
+<pre><code class="language-{.commonlisp">(setq agent-shell-new-shell-config (agent-shell-anthropic-make-claude-code-config))
+</code></pre>
+<h3>Automatic transcripts</h3>
+<p>While <a href="https://github.com/xenodium/shell-maker">shell-maker</a> automatically prompts users to save content when killing <code>agent-shell</code> buffers, its integration was a little clunky with agents. Elle Najt's <code>agent-shell</code>-specific implementation is now enable by default, saving Markdown transcripts to <code>project/.agent-shell/transcripts</code>. When launching new shells, you should see a message like:</p>
+<pre><code>Created project/.agent-shell/transcripts/2025-12-17-22-07-38.md
+</code></pre>
+<p>You can always open the current transcript via <code>M-x agent-shell-open-transcript</code>.</p>
+<p>To disable the new transcript generation use:</p>
+<pre><code class="language-{.commonlisp">(setq agent-shell-transcript-file-path-function nil)
+</code></pre>
+<h3>MCP servers</h3>
+<p>Jonathan Jin introduced <code>agent-shell-mcp-servers</code>, enabling folks to add MCP servers to their agents.</p>
+<p>For example:</p>
+<pre><code class="language-{.commonlisp">(setq agent-shell-mcp-servers
+      '(((name . &quot;notion&quot;)
+         (type . &quot;http&quot;)
+         (headers . [])
+         (url . &quot;https://mcp.notion.com/mcp&quot;))))
+</code></pre>
+<h3>Buffer search</h3>
+<p>You can now search across shell nodes, including collapsed ones. When using <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Basic-Isearch.html">isearch</a> (<a href="https://github.com/abo-abo/swiper">swiper</a> too), matching nodes are now automatically expanded.</p>
+<h3>DWIM context</h3>
+<p>When invoking <code>M-x agent-shell</code>, active region, <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Flymake.html">flymake</a> errors, <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> and <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Image-Mode.html">image</a> buffers are now automatically considered and brought over to <code>agent-shell</code> buffers to be included while crafting prompts.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-region.gif" alt=""></p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-files.gif" alt=""></p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-flymake.gif" alt=""></p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-image.gif" alt=""></p>
+<p>There's one more. From a viewport buffer, selecting a region and pressing &quot;r&quot; (for reply) brings the selection over to the compose buffer as <a href="https://www.markdownlang.com/basic/blockquotes.html">blockquoted</a> text.</p>
+<p><img src="https://xenodium.github.io/images/agent-shell-0-25-updates/compose-reply.gif" alt=""></p>
+<h3>Cursor support (migrated to Mike Moore's adapter)</h3>
+<p>We've migrated Cursor agent support to use Mike Moore's <a href="https://github.com/blowmage/cursor-agent-acp-npm">ACP Adapter</a>.</p>
+<p>Install with:</p>
+<pre><code class="language-bash">npm install -g @blowmage/cursor-agent-acp
+</code></pre>
+<h3>New related packages</h3>
+<ul>
+<li><a href="https://github.com/ultronozm">Paul Nelson</a> built <a href="https://github.com/ultronozm/agent-shell-attention.el">agent-shell-attention.el</a> offering a mode line attention indicator.</li>
+<li><a href="https://github.com/nineluj">Julian Hirn</a> built <a href="https://github.com/nineluj/agent-review">agent-review</a> introducing a streamlined workflow.</li>
+</ul>
+<h3>Bug fixes</h3>
+<ul>
+<li><a href="https://github.com/xenodium/agent-shell/issues/106">#106</a>: Use replace-buffer-contents instead of erase-buffer/insert</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/127">#127</a>: No longer possible to select the Anthropic model used by Claude Code</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/142">#142</a>: [bug] Crash during message streaming: markdown overlay receives nil positions</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/143">#143</a>: gemini 0.17.1 requires authMethod to authenticate (fix by <a href="https://github.com/ag91">Andrea</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/144">#144</a>: Make collapsible indicator keymap customizable</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/145">#145</a>: Unable to enter Plan Mode until after first message is sent</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/150">#150</a>: Warning (undo): Buffer 'Codex Agent @ …' undo info was 25664948 bytes long</li>
+<li><a href="https://github.com/xenodium/agent-shell/issues/154">#154</a>: Gemini CLI doesn't need authorization if already logged in</li>
+</ul>
+<h3>Pull requests</h3>
+<p>Thank you to all contributors for these improvements!</p>
+<ul>
+<li><a href="https://github.com/xenodium/agent-shell/pull/125">#125</a>: Fix error when viewing proposed diffs (<a href="https://github.com/jdpage">Nat Page</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/129">#129</a>: Support setting a preferred agent config (<a href="https://github.com/jinnovation">Jonathan Jin</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/138">#138</a>: Enable specifying MCP server configurations via custom variable (<a href="https://github.com/jinnovation">Jonathan Jin</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/139">#139</a>: Document MCP server config functionality (<a href="https://github.com/jinnovation">Jonathan Jin</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/140">#140</a>: README: Add MELPA badge + expand install instructions (<a href="https://github.com/jinnovation">Jonathan Jin</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/141">#141</a>: Add keybindings to cycle/set session mode (<a href="https://github.com/jinnovation">Jonathan Jin</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/149">#149</a>: Use fixed-pitch for ascii art logos (<a href="https://github.com/hexmode">Mark A. Hershberger</a>)</li>
+<li><a href="https://github.com/xenodium/agent-shell/pull/155">#155</a>: Give the new custom flag to gemini for skipping the authorization (<a href="https://github.com/ccqpein">ccQpein</a>)</li>
+</ul>
+<h3>Lots of other work ❤️😅</h3>
+<p>Beyond what's showcased, much love and effort's been poured into polishing the <code>agent-shell</code> experience. Interested in the nitty-gritty? Have a look through the <a href="https://github.com/xenodium/agent-shell/compare/e874872...bd9deb5">122 commits</a> since the last blog post.</p>
+<h3>Make the work sustainable</h3>
+<p>If <a href="https://github.com/xenodium/agent-shell">agent-shell</a> or <a href="https://github.com/xenodium/acp.el">acp.el</a> are useful to you, please consider <a href="https://github.com/sponsors/xenodium">sponsoring</a> development. LLM tokens aren't free, and neither is the time dedicated to building this stuff ;-)</p>

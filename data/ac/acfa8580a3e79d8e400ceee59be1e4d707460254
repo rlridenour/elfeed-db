@@ -1,0 +1,34 @@
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20251101152419-emacs--The-Ping-Localhost-Hack-for-Emacs-Shell-on-Windows.jpg" width="100%">
+</figure>
+
+<p>For a little while now, I&rsquo;ve been developing software that needs to run on Windows (I know, I know!) and occasionally firing up batch scripts from within Emacs shell. Everything was working perfectly until I needed to add a simple delay between commands. That&rsquo;s when I discovered one of Windows batch scripting&rsquo;s more peculiar quirks.</p>
+<p>The obvious solution for adding a delay in a Windows batch script is the <code>timeout</code> command:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-batch" data-lang="batch"><span style="display:flex;"><span>timeout /T 5
+</span></span></code></pre></div><p>Simple enough, right? Well, it turns out that when you run this from Emacs shell (or any non-interactive environment), it just&hellip; doesn&rsquo;t work. The script either hangs indefinitely or skips the timeout entirely. Even adding the <code>/NOBREAK</code> flag doesn&rsquo;t reliably solve the issue.</p>
+<p>The <code>timeout</code> command is actually an interactive program that expects to interact with a proper Windows console. It&rsquo;s designed to wait for user input OR timeout, whichever comes first. When running from Emacs shell:</p>
+<ul>
+<li>There&rsquo;s no proper console attachment that <code>timeout</code> can latch onto</li>
+<li>Input redirection gets confused</li>
+<li>The TTY limitations of Emacs shell mean <code>timeout</code> can&rsquo;t find what it&rsquo;s looking for</li>
+</ul>
+<p>This is particularly frustrating when you&rsquo;ve got a perfectly good batch script that works fine from cmd.exe but fails spectacularly when launched from your beloved Emacs environment.</p>
+<p>Here&rsquo;s where things get interesting (and slightly ridiculous). The solution that the Windows community by all accounts has rallied around is the <code>ping</code> command:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-batch" data-lang="batch"><span style="display:flex;"><span>ping 127.0.0.1 -n 6 &gt; nul
+</span></span></code></pre></div><p>So here we are using a network diagnostic tool as a timer. But it works brilliantly! Here&rsquo;s why:</p>
+<ul>
+<li><code>ping</code> is completely non-interactive - it just runs and exits</li>
+<li>Each ping takes roughly 1 second by default</li>
+<li>The <code>-n</code> flag specifies the number of pings, so <code>-n 6</code> gives you approximately 5 seconds (n-1)</li>
+<li>It&rsquo;s available on every Windows system, no exceptions</li>
+<li>It doesn&rsquo;t care about console attachment, TTY setup, or any of that nonsense</li>
+</ul>
+<p>In my batch scripts that launch from Emacs, I&rsquo;ve settled on this pattern:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-batch" data-lang="batch"><span style="display:flex;"><span>@<span style="color:#66d9ef">echo</span> off
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">echo</span> Starting process...
+</span></span><span style="display:flex;"><span>ping 127.0.0.1 -n 3 &gt; nul
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">echo</span> Continuing after 2 second delay...
+</span></span></code></pre></div><p>The <code>&gt; nul</code> redirects all the ping output to nowhere, so you don&rsquo;t see the typical ping response spam in your output. Clean, simple, and most importantly - it actually works!</p>
+<p>This whole situation is a perfect example of the kind of head-scratching workarounds you encounter when working across different environments. Emacs shell on Windows is already operating in a slightly weird space - it&rsquo;s not quite a native Windows console, not quite a Unix-like shell, but something in between.</p>
+<p>After adding this to my batch scripts, everything now runs smoothly from Emacs shell on Windows. The software launches, pauses where it needs to, and continues without any console-related tantrums.</p>
+<p>Is it elegant? Not particularly. Is it a proper use of the ping command? Absolutely not. Does it work perfectly every single time? You bet it does!</p>
+<p>And really, isn&rsquo;t that the most important thing? Sometimes the best solution isn&rsquo;t the most theoretically pure one - it&rsquo;s the one that just works, regardless of how strange it might look to an outsider.</p>

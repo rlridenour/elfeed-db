@@ -1,0 +1,210 @@
+<p>
+I want to be able to talk out loud and have the ideas go into Emacs. I can do this in a number of different ways:
+</p>
+
+<ol class="org-ol">
+<li>I briefly demonstrated a step-by-step approach with <a href="https://sachachua.com/blog/2026/01/using-whisper-el-to-capture-text-to-speech-in-emacs/">natrys/whisper.el with a single file</a>. I press a keyboard shortcut to start the recording, another shortcut to stop the recording, and it transcribes it in the background. But the way whisper.el is set up is that if I press the keyboard shortcut to start recording again it will offer to interrupt the transcription process, which is not what I want. I want to just keep talking and have it process results as things come in.</li>
+<li>I'm also experimenting with <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-streaming-speech-recognition-into-emacs-using-google-chrome-web-speech-api">Google Chrome's web speech API to do continuous speech recognition</a>, which I can get into Emacs using a web socket.</li>
+<li>What I've just figured out is how to layer a semi-continuous interface for speech recognition on top of whisper.el so that while it's processing in the background, I can just press a keyboard shortcut (I'm using numpad 9 to call <code>my-whisper-continue</code>) to stop the previous recording, queue it for processing, and start the next recording. If I use this keyboard shortcut to separate my thoughts, then Whisper has a much easier time making sense of the whole sentence or paragraph or whatever, instead of trying to use the sliding 30 second context window that many streaming approaches to speech recognition try to use.</li>
+</ol>
+
+<p>
+Question: Did you fix the keyboard delay you've got while speech catches what you're saying?
+</p>
+
+<p>
+Sometimes, when the speed recognition kicks in, my computer gets busy. When my computer gets really busy, it doesn't process my keystrokes in the right order, which is very annoying because then I have to delete the previous word and retype it. I haven't sorted that out yet, but it seems like I probably have to lower the priority on different processes. On the plus side, as I mentioned, if I dictate things instead of typing them, then I don't run into that problem at all.
+</p>
+
+<p>
+Also, other notes on delays: The continuous speech recognition via Google Chrome shows up fairly quickly, but it's not very precise, and it doesn't have punctuation. Even if there's a little bit of a delay, as long as I press the my-whisper-continue shortcut after each thought, then I can get that text into my Emacs buffer using the nicer transcription from my selected model. There is going to be a bit of a delay for that one because it gets processed at the end of the thought. Also, I need to start thinking in complete sentences instead of just adding one cause after the other as my brain goes on all of these tangents. I think it's pretty promising. There's the continuous speech recognition via Google Chrome if I don't mind the lower accuracy and lack of punctuation, and I can still get the pretty version on the other side.
+</p>
+
+<p>
+Why talk out loud? I liked the <a href="https://emacsconf.org/2025/talks/bookclub-tapas">Bookclub Tapas</a> presentation that Maddie Sullivan did at EmacsConf 2025. Talking out loud helps me be a lot more verbose about what I'm saying, compared to typing things out or even like having to switch to my notes or interrupting my screen with an Org capture buffer. Of course I want to clean that up for  putting into a blog post, but given that my life still sometimes has random interruptions from a kiddo who must have my attention at that very minute, having that kind of record that I can at least try to reread afterwards to reconstruct what I was thinking about sounds like it might be helpful.
+</p>
+
+<p>
+Still, making sense out loud is hard. I'm not actually used to talking to people that much now. This is probably a good reason for me to experiment with streaming more. Then I get the practice in talking out loud, there are backup recordings, and people can ask questions when things are unclear.
+</p>
+
+<p>
+Of course, sometimes the text doesn't quite make sense because of the speech recognition errors. I can usually figure it out from the context. I save the audio as well so that I can go back and listen to it again if I really need to.
+</p>
+
+<p>
+Anyway, here's the code for sending the current recording to whisper in the background and starting another recording. It assumes a lot about how things are set up. For example, I'm only testing this with a local speaches server instead of whisper.cpp. You might need to look at my other speech related configuration blog posts and sections in order to make sense of it.
+</p>
+
+<details><summary>Code for queuing whisper.el requests to a local server</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-whisper&#45;&#45;queue</span> nil)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-continue</span> (<span class="org-type">&amp;optional</span> arg)
+  <span class="org-doc">"Send what we've got so far for transcription and then continue recording.</span>
+<span class="org-doc">Call with \\[</span><span class="org-doc"><span class="org-constant">universal-argument</span></span><span class="org-doc">] to signal that we can stop."</span>
+  (<span class="org-keyword">interactive</span> <span class="org-string">"P"</span>)
+  (<span class="org-keyword">require</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">whisper</span>)
+  (<span class="org-keyword">if</span> arg
+      (my-whisper-done)
+    (<span class="org-keyword">setq</span> whisper&#45;&#45;marker (point-marker) whisper&#45;&#45;point-buffer (current-buffer))
+    (<span class="org-keyword">when</span> (process-live-p whisper&#45;&#45;recording-process)
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">queue only if the last one is not asking for the same file</span>
+      (<span class="org-keyword">unless</span>
+          (string=
+           (plist-get
+            (car
+             (last my-whisper&#45;&#45;queue))
+            <span class="org-builtin">:file</span>)
+           whisper&#45;&#45;temp-file)
+        (add-to-list
+         <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-whisper&#45;&#45;queue</span>
+         (list <span class="org-builtin">:file</span> whisper&#45;&#45;temp-file
+               <span class="org-builtin">:buffer</span>
+               (format <span class="org-string">"*result: %s*"</span> (file-name-base whisper&#45;&#45;temp-file)))
+         t))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Remove the sentinel; handle results ourselves</span>
+      (set-process-sentinel whisper&#45;&#45;recording-process
+                            (<span class="org-keyword">lambda</span> (process event)
+                              (my-whisper-process-queue)))
+      (interrupt-process whisper&#45;&#45;recording-process))
+    (run-hooks <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-before-transcription-hook</span>)
+    (whisper&#45;&#45;setup-mode-line <span class="org-builtin">:show</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">recording</span>)
+    (whisper&#45;&#45;record-audio)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-discard</span> ()
+ <span class="org-doc">"Ignore the previous recording."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">when</span> (process-live-p whisper&#45;&#45;recording-process)
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">Remove the sentinel; handle results ourselves</span>
+    (set-process-sentinel whisper&#45;&#45;recording-process
+                          (<span class="org-keyword">lambda</span> (process event)
+                            (<span class="org-keyword">when</span> (file-exists-p whisper&#45;&#45;temp-file)
+                              (delete-file whisper&#45;&#45;temp-file))
+                            (my-whisper-process-queue)))
+    (interrupt-process whisper&#45;&#45;recording-process)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-discard-and-continue</span> ()
+ <span class="org-doc">"Ignore the previous recording and continue."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">if</span> (process-live-p whisper&#45;&#45;recording-process)
+      (<span class="org-keyword">progn</span>
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Remove the sentinel; handle results ourselves</span>
+        (set-process-sentinel whisper&#45;&#45;recording-process
+                              (<span class="org-keyword">lambda</span> (process event)
+                                (my-whisper-process-queue)
+                                (my-whisper-continue)))
+        (interrupt-process whisper&#45;&#45;recording-process))
+    (my-whisper-continue)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-done</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">when</span> (process-live-p whisper&#45;&#45;recording-process)
+    (add-to-list
+     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-whisper&#45;&#45;queue</span>
+     (list <span class="org-builtin">:file</span> whisper&#45;&#45;temp-file
+           <span class="org-builtin">:buffer</span>
+           (format <span class="org-string">"*result: %s*"</span> (file-name-base whisper&#45;&#45;temp-file)))
+     t)
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">Remove the sentinel; handle results ourselves</span>
+    (set-process-sentinel whisper&#45;&#45;recording-process
+                          (<span class="org-keyword">lambda</span> (process event)
+                            (my-whisper-process-queue)))
+    (whisper&#45;&#45;setup-mode-line <span class="org-builtin">:hide</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">recording</span>)
+    (interrupt-process whisper&#45;&#45;recording-process)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-process-queue-result</span> ()
+  <span class="org-doc">"Process the first part of the queue that already has results."</span>
+  (<span class="org-keyword">while</span> (plist-get (car my-whisper&#45;&#45;queue) <span class="org-builtin">:results</span>)
+    (<span class="org-keyword">let</span> ((o (<span class="org-keyword">pop</span> my-whisper&#45;&#45;queue)))
+      (<span class="org-keyword">unless</span> my-whisper-target-markers
+        (<span class="org-keyword">setq</span> whisper&#45;&#45;marker (point-marker)
+              whisper&#45;&#45;point-buffer (current-buffer)))
+      (<span class="org-keyword">with-current-buffer</span> (plist-get o <span class="org-builtin">:buffer</span>)
+        (erase-buffer)
+        (insert (plist-get o <span class="org-builtin">:results</span>)))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Only works with my fork: https://github.com/sachac/whisper.el/tree/whisper-insert-text-at-point-function</span>
+      (whisper&#45;&#45;handle-transcription-output nil (plist-get o <span class="org-builtin">:buffer</span>)))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-process-queue</span> ()
+  (<span class="org-keyword">let</span> (o)
+    (<span class="org-keyword">while</span> (<span class="org-keyword">setq</span> o (seq-find (<span class="org-keyword">lambda</span> (o) (<span class="org-keyword">and</span> (plist-get o <span class="org-builtin">:file</span>)
+                                              (not (plist-get o <span class="org-builtin">:process</span>))
+                                              (not (plist-get o <span class="org-builtin">:results</span>))))
+                             my-whisper&#45;&#45;queue))
+      (<span class="org-keyword">let*</span> ((headers (list <span class="org-string">"Content-Type: multipart/form-data"</span>))
+             (params (list (concat <span class="org-string">"file=@"</span>
+                                   (plist-get o <span class="org-builtin">:file</span>))
+                           <span class="org-string">"temperature=0.0"</span>
+                           <span class="org-string">"temperature_inc=0.2"</span>
+                           <span class="org-string">"response_format=json"</span>
+                           (concat <span class="org-string">"model="</span> whisper-model)
+                           (concat <span class="org-string">"language="</span> whisper-language)))
+             (url (format my-whisper-url-format whisper-server-host whisper-server-port))
+             (command <span class="org-highlight-quoted-quote">`</span>(<span class="org-string">"curl"</span> <span class="org-string">"-s"</span>
+                        ,url
+                        ,@(mapcan (<span class="org-keyword">lambda</span> (h) (list <span class="org-string">"-H"</span> h)) headers)
+                        ,@(mapcan (<span class="org-keyword">lambda</span> (p) (list <span class="org-string">"-F"</span> p)) params))))
+        (<span class="org-keyword">with-current-buffer</span> (get-buffer-create (plist-get o <span class="org-builtin">:buffer</span>))
+          (erase-buffer))
+        (plist-put
+         o <span class="org-builtin">:process</span>
+         (make-process
+          <span class="org-builtin">:name</span> <span class="org-string">"whisper-curl"</span>
+          <span class="org-builtin">:command</span> command
+          <span class="org-builtin">:buffer</span> (plist-get o <span class="org-builtin">:buffer</span>)
+          <span class="org-builtin">:coding</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">utf-8</span>
+          <span class="org-builtin">:sentinel</span>
+          (<span class="org-keyword">lambda</span> (process event)
+            (<span class="org-keyword">with-current-buffer</span> (process-buffer process)
+              (<span class="org-keyword">let</span> ((current my-whisper&#45;&#45;queue-item))
+                (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (get-buffer (plist-get current <span class="org-builtin">:buffer</span>))
+                           (string-equal <span class="org-string">"finished\n"</span> event))
+                  (<span class="org-keyword">with-current-buffer</span> (plist-get current <span class="org-builtin">:buffer</span>)
+                    (goto-char (point-min))
+                    (plist-put current <span class="org-builtin">:results</span>
+                               (<span class="org-keyword">or</span>
+                                (<span class="org-keyword">condition-case</span> nil
+                                    (gethash <span class="org-string">"text"</span> (json-parse-buffer))
+                                  (<span class="org-warning">error</span> <span class="org-string">""</span>))
+                                <span class="org-string">"(error)"</span>))))))
+            (my-whisper-process-queue-result))))
+        (plist-put o <span class="org-builtin">:command</span> (string-join command <span class="org-string">" "</span>))
+        (<span class="org-keyword">with-current-buffer</span> (process-buffer (plist-get o <span class="org-builtin">:process</span>))
+          (<span class="org-keyword">setq-local</span> my-whisper&#45;&#45;queue-item o))))))
+(<span class="org-keyword">defvar-local</span> <span class="org-variable-name">my-whisper&#45;&#45;queue-item</span> nil)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-reprocess-queue</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> whisper&#45;&#45;marker (point-marker) whisper&#45;&#45;point-buffer (current-buffer))
+  (mapc (<span class="org-keyword">lambda</span> (o)
+          (<span class="org-keyword">when</span> (process-live-p (plist-get o <span class="org-builtin">:process</span>))
+            (kill-process (plist-get o <span class="org-builtin">:process</span>)))
+          (<span class="org-keyword">when</span> (get-buffer (plist-get o <span class="org-builtin">:buffer</span>))
+            (kill-buffer (plist-get o <span class="org-builtin">:buffer</span>)))
+          (plist-put o <span class="org-builtin">:process</span> nil)
+          (plist-put o <span class="org-builtin">:results</span> nil))
+        my-whisper&#45;&#45;queue)
+  (my-whisper-process-queue))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-clear-queue</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (mapc (<span class="org-keyword">lambda</span> (o)
+          (<span class="org-keyword">when</span> (process-live-p (plist-get o <span class="org-builtin">:process</span>))
+            (kill-process (plist-get o <span class="org-builtin">:process</span>)))
+          (<span class="org-keyword">when</span> (get-buffer (plist-get o <span class="org-builtin">:buffer</span>))
+            (kill-buffer (plist-get o <span class="org-builtin">:buffer</span>)))
+          (plist-put o <span class="org-builtin">:process</span> nil)
+          (plist-put o <span class="org-builtin">:results</span> nil))
+        my-whisper&#45;&#45;queue)
+  (<span class="org-keyword">setq</span> my-whisper&#45;&#45;queue nil))
+
+(keymap-global-set <span class="org-string">"&lt;kp-9&gt;"</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-continue</span>)
+(keymap-global-set <span class="org-string">"&lt;kp-8&gt;"</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-discard-and-continue</span>)
+(keymap-global-set <span class="org-string">"C-&lt;kp-9&gt;"</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-whisper-done</span>)
+</code></pre>
+</div>
+
+</details>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-queue-multiple-transcriptions-with-whisper-el-speech-recognition">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/01/queue-multiple-transcriptions-with-whisper-el-speech-recognition/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KFP6RDJ52ERX664SPP6CN7S9" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F01%2Fqueue-multiple-transcriptions-with-whisper-el-speech-recognition%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

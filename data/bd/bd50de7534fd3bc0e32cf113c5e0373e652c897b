@@ -1,0 +1,139 @@
+<p><em>✨<a href="https://github.com/sponsors/xenodium">sponsor</a>✨ this content</em></p>
+<p>I've been toying with the idea of managing browser bookmarks from <a href="https://www.gnu.org/software/emacs/">you know where</a>. Maybe dump a bunch of links into an org file and use that as a quick and dirty bookmark manager. We'll start with a flat list plus fuzzy searching and see how far that gets us.</p>
+<p>The org file would look a little something like this:</p>
+<p>::: captioned-content
+::: caption
+bookmarks.org
+:::</p>
+<pre><code class="language-org">My bookmarks
+- [[https://lobste.rs/t/emacs][Emacs editor (Lobsters)]]
+- [[https://emacs.stackexchange.com][Emacs Stack Exchange]]
+- [[https://www.reddit.com/r/emacs][Emacs subreddit]]
+- [[https://emacs.ch][Emacs.ch (Mastodon)]]
+- [[https://www.emacswiki.org][EmacsWiki]]
+- [[https://planet.emacslife.com/][Planet Emacslife]]
+</code></pre>
+<p>:::</p>
+<p>Next we need fuzzy searching, but first let's write a little elisp to extract all links from the org file:</p>
+<pre><code class="language-{.commonlisp">(require 'org-element)
+(require 'seq)
+
+(defun browser-bookmarks (org-file)
+  &quot;Return all links from ORG-FILE.&quot;
+  (with-temp-buffer
+    (let (links)
+      (insert-file-contents org-file)
+      (org-mode)
+      (org-element-map (org-element-parse-buffer) 'link
+        (lambda (link)
+          (let* ((raw-link (org-element-property :raw-link link))
+                 (content (org-element-contents link))
+                 (title (substring-no-properties (or (seq-first content) raw-link))))
+            (push (concat title
+                          &quot;\n&quot;
+                          (propertize raw-link 'face 'whitespace-space)
+                          &quot;\n&quot;)
+                  links)))
+        nil nil 'link)
+      (seq-sort 'string-greaterp links))))
+</code></pre>
+<p>The snippet uses <code>org-element</code> to iterate over links to collect/return them in a list. We join both the title and url, so searching can match either of these values. We also add a little formatting (new lines/face) to spiff things up.</p>
+<pre><code class="language-{.commonlisp">(browser-bookmarks &quot;/private/tmp/bookmarks.org&quot;)
+</code></pre>
+<p>We can now feed our list to our preferred narrowing framework (ivy, helm, ido, vertico) and use it to quickly select a bookmark. In the past, I've <a href="https://xenodium.com/emacs-utilities-for-your-os/">used the likes of ivy-read</a> directly, though have since adopted the humble but mighty <code>completing-read</code> which hooks up to any of the above frameworks.</p>
+<p>With that in mind, let's use <code>completing-read</code> to make a selection and split the text to extract the corresponding URL. Feed it to <code>browse-url</code>, and you got your preferred browser opening your bookmark.</p>
+<pre><code class="language-{.commonlisp">(defun open-bookmark ()
+  (interactive)
+  (browse-url (seq-elt (split-string (completing-read &quot;Open: &quot; (browser-bookmarks &quot;/private/tmp/bookmarks.org&quot;)) &quot;\n&quot;) 1)))
+</code></pre>
+<p>I remain a happy ivy user, so we can see its fuzzy searching in action.</p>
+<p><img src="https://xenodium.github.io/images/building-your-own-bookmark-launcher/emacs-bookmark.gif" alt=""></p>
+<p>At this point, we now have our bookmark-launching Emacs utility. It's only an <code>M-x open-bookmark</code> command away, but we want to make it accessible from anywhere in our operating system, in my case macOS.</p>
+<p>Let's enable launching from the command line, though before we do that, let's craft a dedicated frame for this purpose.</p>
+<pre><code class="language-{.commonlisp">(defmacro present (&amp;rest body)
+  &quot;Create a buffer with BUFFER-NAME and eval BODY in a basic frame.&quot;
+  (declare (indent 1) (debug t))
+  `(let* ((buffer (get-buffer-create (generate-new-buffer-name &quot;*present*&quot;)))
+          (frame (make-frame '((auto-raise . t)
+                               (font . &quot;Menlo 15&quot;)
+                               (top . 200)
+                               (height . 20)
+                               (width . 110)
+                               (internal-border-width . 20)
+                               (left . 0.33)
+                               (left-fringe . 0)
+                               (line-spacing . 3)
+                               (menu-bar-lines . 0)
+                               (minibuffer . only)
+                               (right-fringe . 0)
+                               (tool-bar-lines . 0)
+                               (undecorated . t)
+                               (unsplittable . t)
+                               (vertical-scroll-bars . nil)))))
+     (set-face-attribute 'ivy-current-match frame
+                         :background &quot;#2a2a2a&quot;
+                         :foreground 'unspecified)
+     (select-frame frame)
+     (select-frame-set-input-focus frame)
+     (with-current-buffer buffer
+       (condition-case nil
+           (unwind-protect
+               ,@body
+             (delete-frame frame)
+             (kill-buffer buffer))
+         (quit (delete-frame frame)
+               (kill-buffer buffer))))))
+</code></pre>
+<p>Most of the snippet styles our new frame and invokes the body parameter. While I don't typically resort to macros, we get a little syntatic sugar here, so we can invoke like so:</p>
+<pre><code class="language-{.commonlisp">(defun present-open-bookmark-frame ()
+  (present (browse-url (seq-elt (split-string (completing-read &quot;Open: &quot; (browser-bookmarks &quot;/private/tmp/bookmarks.org&quot;)) &quot;\n&quot;) 1))))
+</code></pre>
+<p>Wrapping our one-liner with the <code>present-open-bookmark-frame</code> function enables us to easily invoke from the command line, with something like</p>
+<pre><code class="language-{.bash">emacsclient -ne &quot;(present-open-bookmark-frame)&quot;
+</code></pre>
+<p><img src="https://xenodium.github.io/images/building-your-own-bookmark-launcher/command.gif" alt=""></p>
+<p>Now that we can easily invoke from the command line, we have the flexibility to summon from anywhere. We can even bind to a key shortcut, available anywhere (not just Emacs). I typically do this via <a href="http://www.hammerspoon.org/">Hammerspoon</a>, with some helpers, though there are likely simpler options out there.</p>
+<pre><code class="language-lua">function emacsExecute(activate, elisp)
+   if activate then
+      activateFirstOf({
+            {
+               bundleID=&quot;org.gnu.Emacs&quot;,
+               name=&quot;Emacs&quot;
+            }
+      })
+   end
+
+   local socket, found = emacsSocketPath()
+   if not found then
+      hs.alert.show(&quot;Could not get emacs socket path&quot;)
+      return &quot;&quot;, false
+   end
+
+   local output,success = hs.execute(&quot;/opt/homebrew/bin/emacsclient -ne \&quot;&quot;..elisp..&quot;\&quot; -s &quot;..socket)
+   if not success then
+      hs.alert.show(&quot;Emacs did not execute: &quot;..elisp)
+      return &quot;&quot;, false
+   end
+
+   return output, success
+end
+
+function openBookmark()
+   appRequestingEmacs = hs.application.frontmostApplication()
+   emacsExecute(false, &quot;(present-open-bookmark-frame)&quot;)
+   activateFirstOf({
+         {
+            bundleID=&quot;org.gnu.Emacs&quot;,
+            name=&quot;Emacs&quot;
+         }
+   })
+end
+
+hs.hotkey.bind({&quot;alt&quot;}, &quot;W&quot;, openBookmark)
+</code></pre>
+<p>With that, we have our Emacs-powered bookmark launcher, available from anywhere.</p>
+<p><img src="https://xenodium.github.io/images/building-your-own-bookmark-launcher/launcher.gif" alt=""></p>
+<p>While we used our Emacs frame presenter to summon our universal bookmark launcher, we can likely the same mechanism for other purposes. Maybe a clipboard (kill ring) manager?</p>
+<p><img src="https://xenodium.github.io/images/building-your-own-bookmark-launcher/kill-ring.png" alt=""></p>
+<p>What would you use it for? Get in touch (<a href="https://indieweb.social/@xenodium">Mastodon</a> / <a href="https://twitter.com/xenodium">Twitter</a> / <a href="https://www.reddit.com/user/xenodium">Reddit</a> / <a href="mailto:me__AT__xenodium.com">Email</a>).</p>
+<p><em>Enjoying this content? Find it useful? Consider ✨<a href="https://github.com/sponsors/xenodium">sponsoring</a>✨.</em></p>

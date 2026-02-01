@@ -1,0 +1,78 @@
+<p>UPDATE: <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a> is now available on <a href="https://melpa.org/#/dwim-shell-command">melpa</a>.</p>
+<p>I've <a href="https://xenodium.com/emacs-dwim-do-what-i-mean/">talked about DWIM before</a>, where I bend Emacs to help me do what I mean. Emacs is also great for <a href="https://xenodium.com/emacs-password-protect-current-pdf/">wrapping command-line one-liners with elisp</a>, so I can quickly invoke commands without thinking too much about flags, arguments, etc.</p>
+<p>I keep thinking the <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Shell.html">shell-command</a> is ripe for plenty of enhancements using our DWIM fairydust.</p>
+<h2>Do what I mean how?</h2>
+<h3>Smart template instantiation</h3>
+<p>I've drawn inspiration from <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Shell-Commands-in-Dired.html">dired-do-shell-command</a>, which substitutes special characters like * and ? with marked files. I'm also drawing inspiration from <a href="https://orgmode.org/worg/org-contrib/babel/">org babel</a>'s <a href="https://orgmode.org/manual/Noweb-Reference-Syntax.html">noweb</a> syntax to substitute <code>&lt;&lt;f&gt;&gt;</code> (file path), <code>&lt;&lt;fne&gt;&gt;</code> (file path without extension), and <code>&lt;&lt;e&gt;&gt;</code> (extension). My initial preference was to use something like <code>$f</code>, <code>$fne</code>, and <code>$e</code>, but felt they clashed with shell variables.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/template.png" alt=""></p>
+<h3>Operate on dired marked files</h3>
+<p>This is DWIM, so if we're visiting a <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Dired.html">dired</a> buffer, the shell command should operate on all the marked files.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/diredmark.gif" alt=""></p>
+<h3>Operate on current buffer file</h3>
+<p>Similarly, if visiting a buffer with an associated file, operate on that file instead.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/blur.png" alt=""></p>
+<h3>Automatically take me to created files</h3>
+<p>Did the command create a new file in the current directory? Take me to it, right away.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/showme.png" alt=""></p>
+<h3>Show me output on error</h3>
+<p>I'm not usually interested in the command output when generating new files, unless there was an error of course. Offer to show it.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/couldnt.png" alt=""></p>
+<h3>Show me output if no new files</h3>
+<p>Not all commands generate new files, so automatically show me the output for these instances.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/apple.gif" alt=""></p>
+<h3>Make it easy to create utilities</h3>
+<p><a href="https://ffmpeg.org/">ffmpeg</a> is awesome, but man I can never remember all the flags and arguments. I may as well wrap commands like these in a convenient elisp function and invoke via <a href="https://www.gnu.org/software/emacs/manual/html_node/efaq/Extended-commands.html">execute-extended-command</a>, or my favorite <a href="http://oremacs.com/swiper/#minibuffer-key-bindings">counsel-M-x</a> (with completion), bound to the vital <code>M-x</code>.</p>
+<p>All those gifs you see in this post were created with <code>dwim-shell-command-convert-to-gif</code>, powered by the same elisp magic.</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-command-convert-to-gif ()
+  &quot;Convert all marked videos to optimized gif(s).&quot;
+  (interactive)
+  (dwim-shell-command--on-marked-files
+   &quot;Convert to gif&quot;
+   &quot;ffmpeg -loglevel quiet -stats -y -i &lt;&lt;f&gt;&gt; -pix_fmt rgb24 -r 15 &lt;&lt;fne&gt;&gt;.gif&quot;
+   :utils &quot;ffmpeg&quot;))
+</code></pre>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/togif_x1.5.gif" alt=""></p>
+<p>This makes wrapping one-liners a breeze, so let's do some more…</p>
+<pre><code class="language-{.commonlisp">(defun dwim-shell-command-convert-audio-to-mp3 ()
+  &quot;Convert all marked audio to mp3(s).&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Convert to mp3&quot;
+   &quot;ffmpeg -stats -n -i '&lt;&lt;f&gt;&gt;' -acodec libmp3lame '&lt;&lt;fne&gt;&gt;.mp3'&quot;
+   :utils &quot;ffmpeg&quot;))
+
+(defun dwim-shell-command-convert-image-to-jpg ()
+  &quot;Convert all marked images to jpg(s).&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Convert to jpg&quot;
+   &quot;convert -verbose '&lt;&lt;f&gt;&gt;' '&lt;&lt;fne&gt;&gt;.jpg'&quot;
+   :utils &quot;convert&quot;))
+
+(defun dwim-shell-command-drop-video-audio ()
+  &quot;Drop audio from all marked videos.&quot;
+  (interactive)
+  (dwim-shell-command-on-marked-files
+   &quot;Drop audio&quot; &quot;ffmpeg -i '&lt;&lt;f&gt;&gt;' -c copy -an '&lt;&lt;fne&gt;&gt;_no_audio.&lt;&lt;e&gt;&gt;'&quot;
+   :utils &quot;ffmpeg&quot;))
+</code></pre>
+<h3>Make it spin ;)</h3>
+<p>Ok, not quite, but use Emacs's <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Progress.html">progress-reporter</a> just for kicks.</p>
+<p><img src="https://xenodium.github.io/images/emacs-dwim-shell-command/progress.gif" alt=""></p>
+<h2>Use it everywhere</h2>
+<p><code>dwim-shell-command</code> covers my needs (so far anyway), so I'm binding it to existing bindings.</p>
+<pre><code class="language-{.commonlisp">(use-package dwim-shell-command
+  :bind
+  (&quot;M-!&quot; . dwim-shell-command))
+
+(use-package dired
+  :bind (:map dired-mode-map
+              ([remap dired-do-async-shell-command] . dwim-shell-command)
+              ([remap dired-do-shell-command] . dwim-shell-command)
+              ([remap dired-smart-shell-command] . dwim-shell-command)))
+</code></pre>
+<h2>Bring those command line utilities</h2>
+<p>On the whole, this really changes things for me. I'll be more inclined to bring command line utilities to seamless Emacs usage. Take this recent <a href="https://news.ycombinator.com/item?id=32028752">Hacker News post</a> on <a href="https://github.com/ocrmypdf/OCRmyPDF">ocrmypdf</a> as an example. Their <a href="https://ocrmypdf.readthedocs.io/en/latest/cookbook.html">cookbook</a> has lots of examples that can be easily used via <code>dwim-shell-command--on-marked-files</code>. What command line utilities would you bring?</p>
+<h2>Where's the code?</h2>
+<p>UPDATE: <a href="https://github.com/xenodium/dwim-shell-command">dwim-shell-command</a> is now available on <a href="https://melpa.org/#/dwim-shell-command">melpa</a>.</p>
+<p>The code for <a href="https://github.com/xenodium/dotsies/blob/main/emacs/ar/dwim-shell-command.el">dwim-shell-command.el</a> is likely a bit rough still, but you can take a peek if interested. Keep in mind this is DWIM, tailored for what ✨I✨ mean. Some of the current behavior may not be your cup of tea, but this is Emacs. You can bend it to do what ✨you✨ mean. Happy Emacsing.</p>

@@ -1,0 +1,119 @@
+
+         
+         <p>Raw link: <a href="https://www.youtube.com/watch?v=FMutOCOoFSQ">https://www.youtube.com/watch?v=FMutOCOoFSQ</a></p>
+         
+         <p>In this video, I demonstrate the custom code I have to generate Org
+clock reports for my coaching sessions. The idea is to use the
+<code class="language-plaintext highlighter-rouge">DEADLINE</code> and <code class="language-plaintext highlighter-rouge">CLOSED</code> timestamps of each task to calculate their
+elapsed time. This way, I do not need to manually clock in to the task
+and then clock out of it. It is easier to not have that overhead and
+not to duplicate the data that is already embedded in the
+aforementioned timestamps.</p>
+
+<p>The custom command I use will prompt me for the name of a person and
+the date since when to collect meetings. It will then put all the
+retrieved data in a new buffer and calcucate the results in a neat
+time table. This new buffer is not related to the underlying file I
+used to gather the data from: it is strictly used for reporting. My
+file stays free from all the extra noise.</p>
+
+<p>I thus use this method to do my billing and accounting.</p>
+
+<p>As I show in the video, my <code class="language-plaintext highlighter-rouge">coach.org</code> file is simple. Each meeting is
+a top-level heading. The text of the heading includes the name of the
+person and a description on what the meeting is about. It looks like
+this:</p>
+
+<pre><code class="language-org">#+todo: COACH(k) | DONE(d!) CANCEL(c@)
+
+* DONE Protesilaos Emacs deep dive
+CLOSED: [2024-12-10 Tue 14:45] DEADLINE: &lt;2024-12-10 Tue 13:00&gt;
+
+* COACH Protesilaos Org custom clock report
+DEADLINE: &lt;2024-12-15 Sun 17:00&gt;
+</code></pre>
+
+<p>My actual file has some more data, such as a link to the email I
+received for scheduling the given meeting, as well as relevant quotes,
+and the like. All that is irrelevant for the purposes of the clock
+reporting though. What I show in the above code block is enough.</p>
+
+<h2>My custom code (part of my dotfiles)</h2>
+
+<p>Below is the code I am using as of this writing (2024-12-15 16:38
++0200). It is an excerpt from my Emacs configuration. Note that if I
+make any changes to it, I will not put them back here. Check my
+dotemacs for the up-to-date setup (it also includes links to the Git
+sources): <a href="https://protesilaos.com/emacs/dotemacs">https://protesilaos.com/emacs/dotemacs</a>.</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">prot-org-clock--template-no-effort</span>
+  <span class="s">"#+BEGIN: clocktable :formula % :timestamp t :sort (1 . ?a) :link nil :scope nil :hidefiles t :maxlevel 8 :stepskip0 t
+#+END:"</span>
+  <span class="s">"Clock table to use for custom clock reports."</span><span class="p">)</span>
+
+<span class="c1">;; TODO 2024-12-15: This sort of thing must exist in Org, but I did</span>
+<span class="c1">;; not find it.</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-org--timestamp-to-time</span> <span class="p">(</span><span class="nb">string</span><span class="p">)</span>
+  <span class="s">"Return time object of STRING timestamp."</span>
+  <span class="p">(</span><span class="nv">org-timestamp-to-time</span> <span class="p">(</span><span class="nv">org-timestamp-from-string</span> <span class="nb">string</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-org-coach--get-entries</span> <span class="p">(</span><span class="nv">todo-keyword</span> <span class="nb">string</span> <span class="nv">since</span><span class="p">)</span>
+  <span class="s">"Get Org entries matching TODO-KEYWORD followed by STRING in the heading.
+Limit entries to those whole deadline/scheduled is equal or greater to
+SINCE date.
+
+Each entry is a plist of :heading, :contents, :started, :closed."</span>
+  <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">delq</span> <span class="no">nil</span>
+            <span class="p">(</span><span class="nv">org-map-entries</span>
+             <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+               <span class="p">(</span><span class="nv">when-let*</span> <span class="p">((</span><span class="nv">case-fold-search</span> <span class="no">t</span><span class="p">)</span>
+                           <span class="p">(</span><span class="nv">started</span> <span class="p">(</span><span class="nv">prot-org--timestamp-to-time</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">org-entry-get</span> <span class="no">nil</span> <span class="s">"DEADLINE"</span><span class="p">)</span> <span class="p">(</span><span class="nv">org-entry-get</span> <span class="no">nil</span> <span class="s">"SCHEDULED"</span><span class="p">))))</span>
+                           <span class="p">(</span><span class="nv">closed</span> <span class="p">(</span><span class="nv">prot-org--timestamp-to-time</span> <span class="p">(</span><span class="nv">org-entry-get</span> <span class="no">nil</span> <span class="s">"CLOSED"</span><span class="p">)))</span>
+                           <span class="p">((</span><span class="nv">re-search-forward</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"\\&lt;%s\\&gt;.*\\&lt;%s\\&gt;"</span> <span class="nv">todo-keyword</span> <span class="nb">string</span><span class="p">)</span> <span class="p">(</span><span class="nv">line-end-position</span><span class="p">)</span> <span class="no">t</span> <span class="mi">1</span><span class="p">))</span>
+                           <span class="p">((</span><span class="nv">org-time-less-p</span> <span class="nv">since</span> <span class="nv">started</span><span class="p">)))</span>
+                 <span class="p">(</span><span class="nb">list</span>
+                  <span class="ss">:heading</span> <span class="p">(</span><span class="nv">org-get-heading</span> <span class="ss">:no-tags</span> <span class="ss">:no-todo</span> <span class="ss">:no-priority</span> <span class="ss">:no-comment</span><span class="p">)</span>
+                  <span class="ss">:contents</span> <span class="p">(</span><span class="nv">org-get-entry</span><span class="p">)</span>
+                  <span class="ss">:started</span> <span class="nv">started</span>
+                  <span class="ss">:closed</span> <span class="nv">closed</span><span class="p">)))))</span>
+      <span class="p">(</span><span class="nv">user-error</span> <span class="s">"No entries with heading matching `\\&lt;%s\\&gt;.*\\&lt;%s\\&gt;'"</span> <span class="nv">todo-keyword</span> <span class="nb">string</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">prot-org-coach--name-history</span> <span class="no">nil</span>
+  <span class="s">"Minibuffer history of `prot-org-coach--name-prompt'."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-org-coach--name-prompt</span> <span class="p">()</span>
+  <span class="s">"Prompt for name of person."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">default</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">prot-org-coach--name-history</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">read-string</span>
+     <span class="p">(</span><span class="nv">format-prompt</span> <span class="s">"Name of person"</span> <span class="nv">default</span><span class="p">)</span>
+     <span class="no">nil</span> <span class="ss">'prot-org-coach--name-history</span> <span class="nv">default</span><span class="p">)))</span>
+
+<span class="c1">;;;###autoload</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-org-coach-report</span> <span class="p">(</span><span class="nv">name</span> <span class="nv">since</span><span class="p">)</span>
+  <span class="s">"Produce clock report for coaching with person of NAME.
+SINCE is the date (of time 00:00) to count from until now."</span>
+  <span class="p">(</span><span class="nv">interactive</span>
+   <span class="p">(</span><span class="nb">list</span>
+    <span class="p">(</span><span class="nv">prot-org-coach--name-prompt</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">format</span> <span class="s">"[%s]"</span> <span class="p">(</span><span class="nv">org-read-date</span><span class="p">))))</span>
+  <span class="p">(</span><span class="nv">if-let*</span> <span class="p">((</span><span class="nv">since-object</span> <span class="p">(</span><span class="nv">prot-org--timestamp-to-time</span> <span class="nv">since</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">entries</span> <span class="p">(</span><span class="nv">prot-org-coach--get-entries</span> <span class="s">"done"</span> <span class="nv">name</span> <span class="nv">since-object</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">buffer</span> <span class="p">(</span><span class="nv">get-buffer-create</span> <span class="s">"*prot-org-coach-entries*"</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">with-current-buffer</span> <span class="p">(</span><span class="nv">pop-to-buffer</span> <span class="nv">buffer</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">erase-buffer</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">org-mode</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">dolist</span> <span class="p">(</span><span class="nv">entry</span> <span class="nv">entries</span><span class="p">)</span>
+          <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"* %s\n%s\n\n"</span> <span class="p">(</span><span class="nv">plist-get</span> <span class="nv">entry</span> <span class="ss">:heading</span><span class="p">)</span> <span class="p">(</span><span class="nv">plist-get</span> <span class="nv">entry</span> <span class="ss">:contents</span><span class="p">)))</span>
+          <span class="p">(</span><span class="nv">org-clock-in</span> <span class="no">nil</span> <span class="p">(</span><span class="nv">plist-get</span> <span class="nv">entry</span> <span class="ss">:started</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">org-clock-out</span> <span class="no">nil</span> <span class="no">t</span> <span class="p">(</span><span class="nv">plist-get</span> <span class="nv">entry</span> <span class="ss">:closed</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">point-min</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">save-excursion</span>
+          <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"%s\n\n"</span> <span class="nv">prot-org-clock--template-no-effort</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">save-excursion</span>
+          <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nv">line-end-position</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">" :tstart %S"</span> <span class="nv">since</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">org-dblock-update</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">user-error</span> <span class="s">"No entries for name `%s'"</span> <span class="nv">name</span><span class="p">)))</span>
+</code></pre></div></div>
+        
+      

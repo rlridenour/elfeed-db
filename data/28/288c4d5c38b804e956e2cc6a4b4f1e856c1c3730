@@ -1,0 +1,42 @@
+<p>[Equations in this post may not look right (or appear at all) in your RSS reader. Go to <a href="https://leancrew.com/all-this/2025/12/equation-of-time/">the original article</a> to see them rendered properly.]</p>
+  <hr />
+  <p>Speaking of the <a href="https://en.wikipedia.org/wiki/Equation_of_time">equation of time</a>, which I was in <a href="https://leancrew.com/all-this/2025/12/latest-sunrise-and-earliest-sunset/">yesterday’s post</a>, I wanted to extend some of the work I did in that post to draw my own EoT plot and to be able to adjust it to show the difference between solar time and standard time anywhere on Earth.</p>
+<p>In Mathematica, solar time is best tackled with the <a href="http://reference.wolfram.com/language/ref/SunPosition.html"><code>SunPosition</code></a> function.<sup id="fnref:eotdoc"><a href="#fn:eotdoc" rel="footnote">1</a></sup> This function can be called in a variety of ways. We’ll focus initially on getting the Sun’s position at noon at a point on the Prime Meridian, and we want the position given as the <a href="https://en.wikipedia.org/wiki/Right_ascension">right ascension</a> and <a href="https://en.wikipedia.org/wiki/Declination">declination</a>. These are <a href="https://en.wikipedia.org/wiki/Equatorial_coordinate_system">equatorial coordinates</a> on the celestial sphere. Because we’re doing time calculations, only the right ascension—which is the longitudinal coordinate—matters to us. Luckily, right ascension is given not in degrees, but in time units: hours, minutes, and seconds. This is a useful unit in astronomy because the difference in right ascension between two celestial objects is the time gap between their passage over the observer’s local meridian. You can find a good explanation of celestial coordinates at <a href="https://skyandtelescope.org/astronomy-resources/right-ascension-declination-celestial-coordinates/">Sky &amp; Telescope</a>.</p>
+<p>For standard time, we have to be a little careful. Since we’re measuring the Sun in terms of right ascension, we should do the same for standard time. That means getting the <a href="https://en.wikipedia.org/wiki/Sidereal_time">sidereal time</a> of the location on Earth, which is the right ascension of the local meridian for a given time.</p>
+<div class="sidebar">
+<p><strong>Aside</strong><br/>
+I’ve found most definitions of sidereal time to be hard to follow because they use astronomical terms that go back to the geocentric days. A definition I like is on <a href="https://aa.usno.navy.mil/data/siderealtime#:~:text=An%20equivalent%20definition">this US Naval Observatory page</a>, which says that</p>
+<blockquote>
+<p>… sidereal time is the right ascension of celestial objects transiting (crossing) the meridian as the Earth rotates.</p>
+</blockquote>
+<p>This is essentially what the Mathematica docs for <a href="https://en.wikipedia.org/wiki/Sidereal_time"><code>SiderealTime</code></a> say.</p>
+</div>
+<p>In simplest terms, we have two right ascensions, one for the Sun’s position and one for the sidereal time. We take their difference to get the equation of time. Unfortunately, there’s a practical complication that messes up this seemingly simple calculation. Right ascension is never greater than 24 hours—it wraps around back around to zero. So we can have right ascension values that are close to one another but don’t seem to be close at all. For example 23:57:00 and 00:2:30 are only 5½ minutes apart, but you get -23:54:30 if you subtract the first from the second. We have to manipulate the right ascension values before subtraction to make sure we get the correct difference.</p>
+<p>The standard equation of time graph you’ll see on websites and in textbooks is plotted for a point on the Prime Meridian using UTC. Here’s what it looks like:</p>
+<p><img alt="Standard equation of time" class="ss" src="https://leancrew.com/all-this/images2025/20251209-Standard%20equation%20of%20time.png" title="Standard equation of time" width="100%"/></p>
+<p>It’s plotted so that positive values represent periods for which the solar time is ahead of standard time, e.g. solar noon, when the Sun is at its highest point, comes before 12:00:00 UTC. Here’s the Mathematica notebook that produced the plot:</p>
+<iframe height="800" src="https://www.wolframcloud.com/obj/mark80/Published/eot-prime.nb?_embed=iframe" width="100%"></iframe>
+<p>Some comments:</p>
+<ul>
+<li>The latitude of the point on the Prime Meridian doesn’t matter. I chose 51.5° because that’s about the latitude of the Royal Observatory in Greenwich.</li>
+<li>I chose local noon for the time at which to get the <code>SunPosition</code> and <code>SiderealTime</code>. The pure function used in the <a href="http://reference.wolfram.com/language/ref/Map.html"><code>Map</code></a> call to generate the list of Sun positions extracts only the first (right ascension) term of the position.</li>
+<li>The initial plots of <code>sunpos</code> and <code>stime</code> show the wraparounds, or jumps, in right ascension as it exceeds 24 hours. The expressions for <code>sunjump</code> and <code>timejump</code> return the lists, in reverse order, of the indices at which the jumps occur. The expressions are more complicated than they need to be for this particular problem because I wanted them to be able to handle longer date ranges in which there will be more than just one jump.</li>
+<li>The two <a href="http://reference.wolfram.com/language/ref/Do.html"><code>Do</code></a> loops—an expression I thought I’d given up when I stopped using Fortran—adjust <code>sunpos</code> and <code>stime</code> to get rid of the jumps. They, too, are built to handle longer date ranges with more jumps. The third graph shows <code>sunpos</code> and <code>stime</code> after the adjustments.</li>
+<li>The difference between <code>sunpos</code> and <code>stime</code> can now be calculated with a simple subtraction. The values are converted from hours to minutes because that’s a more convenient unit. The subtraction is done as <code>stime - sunpos</code> because that means we’ll get positive numbers when the Sun is ahead (west) of the Prime Meridian and negative numbers when the Sun is behind (east) of the Prime Meridian.</li>
+</ul>
+<p>You may recall from yesterday’s post that I said solar noon was currently about 15 minutes ahead of standard noon in Naperville, Illinois, where I live. That doesn’t match up with the equation of time because Naperville isn’t on the Prime Meridian, nor is it on the 90° W meridian, which would match up perfectly with the local UTC-6 timezone. I wanted to make an adjusted equation of time plot to account for that. Also, I wanted winter to be at the center of the graph, not split between the left and right edges.</p>
+<p>Here’s the adjusted graph:</p>
+<p><img alt="Adjusted equation of time" class="ss" src="https://leancrew.com/all-this/images2025/20251209-Adjusted%20equation%20of%20time.png" title="Adjusted equation of time" width="100%"/></p>
+<p>Apart from the six-month sideways shift, the graph is pushed up because Naperville is about 1.85° east of the 90° W meridian. With a four-minute difference for every degree, that means the whole graph is about <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mn>1.85</mn><mo>⋅</mo><mn>4</mn><mo>=</mo><mn>7.4</mn></mrow></math> minutes higher than standard equation of time.</p>
+<p>Here’s the notebook that made the graph:</p>
+<iframe height="800" src="https://www.wolframcloud.com/obj/mark80/Published/eot-nichols.nb?_embed=iframe" width="100%"></iframe>
+<p>The changes are all at the top of the notebook: different coordinates for the location, different start and end dates, and a different timezone. But the rest of the notebook is the same as before.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:eotdoc">
+<p>In the Applications section of the <code>SolarPosition</code> documentation, there’s an example calculation and graph of the equation of time, but I don’t like it. The calculations it goes through are both hard to follow and can’t be applied to locations off the Prime Meridian. <a href="#fnref:eotdoc" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>
+  

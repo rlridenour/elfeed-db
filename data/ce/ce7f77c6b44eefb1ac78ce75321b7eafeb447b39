@@ -1,0 +1,117 @@
+
+<p>When working with markdown files in Emacs (e.g., <code>README.md</code>), users may need to manually update the table of contents. Automating this process saves time and ensures that the table of contents remains consistent with the document structure. This article presents an Emacs Lisp code snippet that uses:</p>
+
+
+
+<ul class="wp-block-list">
+<li>The <code>markdown-toc</code> package to automatically generate or refresh a table of contents, </li>
+
+
+
+<li>A custom function (<code>my-markdown-toc-gen-if-present</code>) that runs before markdown files are saved. It performs the following actions:
+<ul class="wp-block-list">
+<li>Updates the table of contents if one is already present.</li>
+
+
+
+<li>Ensures that both the window start and cursor position remain unchanged, addressing a common issue with the <code>markdown-toc</code> package, which can disrupt the editing flow by moving the cursor and/or changing the window start. This behavior can be frustrating, as it interrupts the user’s focus and requires them to navigate back to their original position.</li>
+</ul>
+</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">The code snippet that updates the table of contents and ensures that the cursor and window start remain unchanged</h2>
+
+
+
+<p>The following code snippet updates the table of contents while ensuring that the cursor and window start remain unchanged:</p>
+
+
+
+<p class="has-small-font-size"><em>(The table of contents will be updated only if it is already present, so it is necessary to generate it at least once using the <code>(markdown-toc-generate-toc)</code> function. Additionally, ensure that the <strong>markdown-mode</strong> Emacs package is installed.)</em></p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Author: James Cherti</span>
+<span class="hljs-comment">;; URL: https://www.jamescherti.com/emacs-markdown-table-of-contents-update-before-save/</span>
+<span class="hljs-comment">;; License: MIT</span>
+
+<span class="hljs-comment">;; Configure the markdown-toc package</span>
+(<span class="hljs-name">use-package</span> markdown-toc
+  <span class="hljs-symbol">:ensure</span> <span class="hljs-literal">t</span>
+  <span class="hljs-symbol">:defer</span> <span class="hljs-literal">t</span>
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">markdown-toc-generate-toc</span>
+             markdown-toc-generate-or-refresh-toc
+             markdown-toc-delete-toc
+             markdown-toc--toc-already-present-p))
+
+<span class="hljs-comment">;; The following functions and hooks guarantee that any existing table of</span>
+<span class="hljs-comment">;; contents remains current whenever changes are made to the markdown file,</span>
+<span class="hljs-comment">;; while also ensuring that both the window start and cursor position remain</span>
+<span class="hljs-comment">;; unchanged.</span>
+(<span class="hljs-name">defun</span> my-markdown-toc-gen-if-present ()
+    (<span class="hljs-name">when</span> (<span class="hljs-name">markdown-toc--toc-already-present-p</span>)
+      (<span class="hljs-name">let*</span> ((<span class="hljs-name">window</span> (<span class="hljs-name">selected-window</span>))
+             (<span class="hljs-name">buffer-in-selected-window</span> (<span class="hljs-name">eq</span> (<span class="hljs-name">window-buffer</span> window)
+                                            (<span class="hljs-name">current-buffer</span>)))
+             (<span class="hljs-name">window-hscroll</span> <span class="hljs-literal">nil</span>)
+             (<span class="hljs-name">lines-before</span> <span class="hljs-literal">nil</span>))
+        (<span class="hljs-name">when</span> buffer-in-selected-window
+          (<span class="hljs-name">setq</span> window-hscroll (<span class="hljs-name">window-hscroll</span>))
+          (<span class="hljs-name">setq</span> lines-before (<span class="hljs-name">count-screen-lines</span>
+                              (<span class="hljs-name">save-excursion</span> (<span class="hljs-name">goto-char</span> (<span class="hljs-name">window-start</span>))
+                                              (<span class="hljs-name">vertical-motion</span> <span class="hljs-number">0</span>)
+                                              (<span class="hljs-name">point</span>))
+                              (<span class="hljs-name">save-excursion</span> (<span class="hljs-name">vertical-motion</span> <span class="hljs-number">0</span>)
+                                              (<span class="hljs-name">point</span>))
+                              <span class="hljs-literal">nil</span>
+                              window)))
+        (<span class="hljs-name">unwind-protect</span>
+            (<span class="hljs-name">markdown-toc-generate-toc</span>)
+          (<span class="hljs-name">when</span> buffer-in-selected-window
+            (<span class="hljs-name">set-window-start</span> window
+                              (<span class="hljs-name">save-excursion</span>
+                                (<span class="hljs-name">vertical-motion</span> <span class="hljs-number">0</span>)
+                                (<span class="hljs-name">line-move-visual</span> (<span class="hljs-name">*</span> <span class="hljs-number">-1</span> lines-before))
+                                (<span class="hljs-name">vertical-motion</span> <span class="hljs-number">0</span>)
+                                (<span class="hljs-name">point</span>)))
+            (<span class="hljs-name">set-window-hscroll</span> window window-hscroll))))))
+
+  (<span class="hljs-name">defun</span> my-setup-markdown-toc ()
+    <span class="hljs-string">"Setup the markdown-toc package."</span>
+    (<span class="hljs-name">add-hook</span> 'before-save-hook #'my-markdown-toc-gen-if-present <span class="hljs-number">-100</span> <span class="hljs-literal">t</span>))
+
+  (<span class="hljs-name">add-hook</span> 'markdown-mode-hook #'my-setup-markdown-toc)
+  (<span class="hljs-name">add-hook</span> 'markdown-ts-mode-hook #'my-setup-markdown-toc)
+  (<span class="hljs-name">add-hook</span> 'gfm-mode-hook #'my-setup-markdown-toc)</code></span></pre>
+
+
+<p>The above code snippet leverages the <strong>markdown-toc</strong> Emacs package to automate the generation of a table of contents within markdown documents. This package includes functions such as <code>markdown-toc-generate-toc</code> and <code>markdown-toc-generate-or-refresh-toc</code>, which facilitate the creation and updating of the table of contents as needed.</p>
+
+
+
+<p>I implemented the <code>my-setup-markdown-toc</code> function to establish a hook that triggers <code>my-markdown-toc-gen-if-present</code> each time a markdown buffer is saved. This function guarantees that any existing table of contents remains current whenever changes are made to the markdown file, while also ensuring that both the window start and cursor position remain unchanged.</p>
+
+
+
+<h2 class="wp-block-heading">Requirement: Markdown Mode Setup</h2>
+
+
+
+<p>The table of contents update code snippet above will only function correctly if the <strong>markdown-mode</strong> package is installed:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">use-package</span> markdown-mode
+  <span class="hljs-symbol">:ensure</span> <span class="hljs-literal">t</span>
+  <span class="hljs-symbol">:defer</span> <span class="hljs-literal">t</span>
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">gfm-mode</span> gfm-view-mode markdown-mode markdown-view-mode)
+  <span class="hljs-symbol">:mode</span> ((<span class="hljs-string">"\\.markdown\\'"</span> . markdown-mode)
+         (<span class="hljs-string">"\\.md\\'"</span>       . markdown-mode)
+         (<span class="hljs-string">"README\\.md\\'"</span> . gfm-mode))) </code></span></pre>
+
+
+<h2 class="wp-block-heading">Conclusion</h2>
+
+
+
+<p>The <code>my-markdown-toc-gen-if-present</code> function automates the generation of a table of contents, ensuring that markdown documents consistently remain up-to-date with minimal effort.</p>

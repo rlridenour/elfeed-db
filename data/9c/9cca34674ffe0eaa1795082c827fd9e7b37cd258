@@ -1,0 +1,53 @@
+<p><strong>Summary: </strong>
+Resolving a “[mu4e] Update process returned with non-zero exit code” error.
+</p>
+        <p>I use <a href="https://proton.me/mail">Proton Mail</a> as my email provider.  A while ago, I set out to read and send
+email from <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-EMACS">&#128214;</a></small>
+.  I explored using both <code>notmuch</code> and <code>mu</code>; I’ve settled on <code>mu</code> in
+part because it was the one that I could easily setup deleting a local email and
+seeing it deleted upstream.</p>
+<p>Things appeared to be working, but I kept noticing and ignoring the following
+message: <code>[mu4e] Update process returned with non-zero exit code</code>.</p>
+<p><time datetime="2025-04-15" title="2025-04-15">Today</time>, during my lunch, I decided to tackle fixing the problem.</p>
+<h2 id="first-the-hammer">First the Hammer</h2>
+<p>I nuked my <code>~/Maildir</code> directory and cache to hopefully “fix” the problem.  In
+this aggressive delete, I accidentally deleted the associated cert.</p>
+<p>I didn’t have notes on how to build that cert, so these are those notes:</p>
+<ul>
+<li>In <code>Keychain Access</code> app on MacOS select “System Roots” then select all roots
+and export a <code>cert.pem</code>; this is what I found in <a href="https://vhbelvadi.com/emacs-mu4e-on-macos">V.H. Belvadi — Setting up
+e-mail with Emacs and mu4e on macOS (Venkatram Harish Belvadi)</a> This was
+inadequate.</li>
+<li>I then needed to run <code>openssl s_client -starttls imap -connect 127.0.0.1:1143 -showcerts</code> and copy the region starting with <code>-----BEGIN CERTIFICATE-----</code>
+and ending with <code>-----END CERTIFICATE-----</code> pre-pending that to the
+<code>cert.pem</code>.  (as per <a href="https://stackoverflow.com/questions/57746821/getting-a-self-signed-certificate-error-with-protonbridge-and-mbsync">Getting a self-signed certificate error with ProtonBridge
+and mbsync - Stack Overflow</a>).</li>
+</ul>
+<h2 id="then-the-scalpel">Then the Scalpel</h2>
+<p>With a “clean slate”, I started anew, but continued to see <code>[mu4e] Update process returned with non-zero exit code</code> in my <code>*Messages*</code> buffer.  There wasn’t any more
+useful information.</p>
+<p>I shelled out and ran the underlying <code>mbsync &lt;account&gt;</code> command and saw the
+following:</p>
+<pre><code class="language-text">Error: far side refuses to store message 4775 from near side.
+IMAP command 'CLOSE' returned an error: operation not allowed
+IMAP error: malformed FETCH response from 127.0.0.1 (127.0.0.1:1143): unable to parse INTERNALDATE
+Channels: 1    Boxes: 5    Far: +1 *0 #0 -0    Near: +0 *0 #0 -0
+</code></pre>
+<p>I searched the web for <code>&quot;IMAP command 'CLOSE' returned an error: operation not allowed&quot;</code> and stumbled upon <a href="https://github.com/ProtonMail/gluon/issues/426">IMAP CLOSE command not allowed · Issue #426 ·
+ProtonMail/gluon</a>.  This looked to be my experienced problem.</p>
+<p>However, the solution was not immediately obvious.  So I searched for <code>mbsync skip expunge for a mail folder</code> and found <a href="https://unix.stackexchange.com/questions/748054/is-it-possible-to-ignore-inbox-folder-when-using-imap-mbsync">email - Is it possible to ignore
+&ldquo;Inbox&rdquo; folder when using IMAP (mbsync)? - Unix &amp; Linux Stack Exchange</a>.</p>
+<p>I changed my <code>~/.mbsync</code> file replacing <code>Patterns *</code> with <code>Patterns * !&quot;All Mail&quot;</code> and ran <code>mbsync &lt;account&gt;</code>.  No more errors.</p>
+<p>In summary, Proton’s “All Mail” folder is a virtual folder, and thus disallows
+directly deleting from it.  By changing the <code>Patterns</code> configuration value, I told
+<code>mbsync</code> to ignore that virtual folder.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p><a href="https://github.com/jeremyf/dotzshrc/blob/main/symlinks/dot.mbsyncrc">My ~./mbsyncrc file is available on Github</a>.  And I used <a href="https://shom.dev/posts/20220108_setting-up-protonmail-in-emacs/">Setting up Protonmail in
+Emacs</a> and <a href="https://vhbelvadi.com/emacs-mu4e-on-macos">V.H. Belvadi — Setting up e-mail with Emacs and mu4e on macOS
+(Venkatram Harish Belvadi)</a> to help get me started.</p>
+<p>I updated the Github issue that helped me work through the resolution, to
+provide a breadcrumb for other folks encountering the problem.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Fixing%20a%20mu4e%20and%20Proton%20Bridge%20Foible">Reply by Email</a></p>
+
+      

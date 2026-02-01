@@ -1,0 +1,151 @@
+<p>For several months I’ve been playing a “hangman” style game on
+Mastodon, HangTrek, where words and phrases are from the various Star
+Trek television shows and films. The game starts with a phrase like</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>_ _ _ / _ _ _ _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _
+
+Wrong guesses: none
+</code></pre></div></div>
+
+<p>The underscore (_) characters are unknown (to the players) letters,
+and the forward slashes (/) are word separators. For each round a poll
+with 4 choices is run for some amount of time, typically 24 hours. The
+poll winner is the guess for that round. If the winner matches one of
+the unknown letters, for the next round, that letter is filled in. The
+the winner isn’t one of the unknown letters, that’s noted below the
+puzzle in the following rounds, so it doesn’t get guessed again.</p>
+
+<p>For example, if ‘E’ is a valid guess, in the next round it will show
+up like this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>_ _ _ / _ _ E _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _
+
+Wrong guesses: none
+</code></pre></div></div>
+
+<p>In another example, if ‘Q’ was the poll winner but doesn’t match any
+letters, it’s noted in the wrong guesses.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>_ _ _ / _ _ _ _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _
+
+Wrong guesses: Q
+</code></pre></div></div>
+
+<p>Some number of Star Trek television and film scripts are available for
+download, so I took to searching them with regular expressions. For
+example, for a 10 letter word where none of the letters are known,
+I’d search for</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[[:alpha:]]\{10\}
+</code></pre></div></div>
+
+<p>in the scripts, using a tool like <code class="language-plaintext highlighter-rouge">grep</code>.</p>
+
+<p>Over time, I realized I could write a program to create these regular
+expressions, so I did. I have a long history of turning my
+non-programming homework into programming homework, back to my college
+days 😃</p>
+
+<p>For a whole phrase, there are some things we want to do:</p>
+
+<ul>
+  <li>anchor words with ‘\&lt;’ and ‘\&gt;’, so we don’t match words within
+larger words</li>
+  <li>allow for multiple spaces between words in a phrase, using
+‘\+’</li>
+  <li>shrink the original ‘[:alpha:]’ character class as letters are
+guessed. For correct answers, we see them in the phrase. For
+incorrect letters, add a way to specify them, so they’re also
+eliminated from the character class</li>
+</ul>
+
+<p>So, I wrote a Python program <code class="language-plaintext highlighter-rouge">hangman-regexp.py</code> to accomplish
+this. It takes the phrase as a command line argument, and you can
+optionally specify wrong guesses with a <code class="language-plaintext highlighter-rouge">-x Q</code> argument.</p>
+
+<h2 id="hangman-regexppy">hangman-regexp.py</h2>
+
+<p>For the first phrase above, the program runs like this:</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">hangman-regexp.py <span class="s1">'_ _ _ / _ _ _ _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _'</span></code></pre></figure>
+
+<p>which provides this output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>\&lt;[abcdefghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{7\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{2\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{6\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{4\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnopqrstuvwxyz]\{10\}\&gt;
+</code></pre></div></div>
+
+<p>For the second example, where we’ve successfully guessed ‘E’, here’s
+the command and the output:</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">hangman-regexp.py <span class="s1">'_ _ _ / _ _ E _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _'</span></code></pre></figure>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>\&lt;[abcdfghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{2\}e[abcdfghijklmnopqrstuvwxyz]\{4\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{2\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{6\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{4\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdfghijklmnopqrstuvwxyz]\{10\}\&gt;
+</code></pre></div></div>
+
+<p>You’ll note that the character class no longer contains ‘e’, and in
+the second word we have the actual ‘e’ embedded in the regular
+expression.</p>
+
+<p>For the third example, of ‘Q’ which is not in the phrase, the command
+and output are like this:</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">hangman-regexp.py <span class="nt">-x</span> q <span class="s1">'_ _ _ / _ _ _ _ _ _ _ / _ _ / _ _ _ / _ _ _ _ _ _ / _ _ _ _ / _ _ _ / _ _ _ _ _ _ _ _ _ _'</span></code></pre></figure>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>\&lt;[abcdefghijklmnoprstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{7\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{2\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{6\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{4\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{3\}\&gt;[[:space:]]\+\&lt;[abcdefghijklmnoprstuvwxyz]\{10\}\&gt;
+</code></pre></div></div>
+
+<h2 id="running-a-game-make-hangman-phrasepy">Running a game: make-hangman-phrase.py</h2>
+
+<p>On the other end of this game is the game runner. They think up the
+phrase and run the rounds. I thought it would be nice to have a tool
+that, given a phrase and zero or more guesses, output the phrase
+“hangman style”, along with the “wrong guesses” line. This tool is
+<code class="language-plaintext highlighter-rouge">make-hangman-phrase.py</code>.</p>
+
+<p>Let’s suppose you want to run a game with the phrase “There are four
+lights”. At the beginning of the game, you would run</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">make-hangman-phrase.py <span class="s1">'There are four lights'</span></code></pre></figure>
+
+<p>Here’s the output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Phrase:		_ _ _ _ _ / _ _ _ / _ _ _ _ / _ _ _ _ _ _
+Occurrences:	None
+Wrong guess:	None
+</code></pre></div></div>
+
+<p>This provides the phrase and wrong guesses that can be published on
+Mastodon. The “Occurrences” line here shows how many times a guess
+shows up in the phrase. We’ll see this below.</p>
+
+<p>Let’s suppose for the first round the letter ‘T’ is guessed. In this
+case, we run</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">make-hangman-phrase.py <span class="nt">-g</span> T <span class="s1">'There are four lights'</span></code></pre></figure>
+
+<p>We add <code class="language-plaintext highlighter-rouge">-g T</code> to specify that ‘T’ was guessed. The output is
+this:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Phrase:		T _ _ _ _ / _ _ _ / _ _ _ _ / _ _ _ _ T _
+Occurrences:	{'t': 2}
+Wrong guess:	None
+</code></pre></div></div>
+
+<p>So now the game runner can say “T was the guess, and there are 2 T’s
+in the phrase” in their next post.</p>
+
+<p>Let’s say the next poll winner is ‘V’. There’s no ‘V’ in the phrase.
+Let’s see what happens.</p>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell">make-hangman-phrase.py <span class="nt">-g</span> T <span class="nt">-g</span> V <span class="s1">'There are four lights'</span></code></pre></figure>
+
+<p>Here’s the output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Phrase:		T _ _ _ _ / _ _ _ / _ _ _ _ / _ _ _ _ T _
+Occurrences:	{'t': 2, 'v': 0}
+Wrong guesses:	V
+</code></pre></div></div>
+
+<h2 id="code-availability">Code availability</h2>
+
+<p>The code for these tools is at <a href="https://github.com/davemq/hangman-tools">https://github.com/davemq/hangman-tools</a>.</p>

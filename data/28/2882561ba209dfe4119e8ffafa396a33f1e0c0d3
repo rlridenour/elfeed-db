@@ -1,0 +1,464 @@
+
+        <p>Related Links :: <span class="label">Tags:</span> <span role="list" aria-label="Tags for “Mythic Bastionland Map Play Aid Emacs Package”">
+<span role="listitem" aria-label="&ldquo;emacs&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/10/extending-core-emacs-bookmark-package/" aria-label="Previous post tagged with &ldquo;emacs&rdquo; is &ldquo;Extending Core Emacs Bookmark Package&rdquo;" title="Older post tagged with &ldquo;emacs&rdquo; is &ldquo;Extending Core Emacs Bookmark Package&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/emacs/" class="p-category" aria-label="All posts tagged with &ldquo;emacs&rdquo;" title="All posts tagged with &ldquo;emacs&rdquo;">emacs</a> <a href="https://takeonrules.com/2025/12/23/serializing-somewhat-large-emacs-alists/" aria-label="Next post tagged with &ldquo;emacs&rdquo; is &ldquo;Serializing Somewhat Large Emacs Alists&rdquo;" title="Newer post tagged with &ldquo;emacs&rdquo; is &ldquo;Serializing Somewhat Large Emacs Alists&rdquo;"><small>&gt;</small></a>
+</span><span aria-hidden=true> &middot; </span>
+<span role="listitem" aria-label="&ldquo;rpgs&rdquo; tag navigation"><a href="https://takeonrules.com/2025/12/16/forged-from-the-worst-session-3/" aria-label="Previous post tagged with &ldquo;rpgs&rdquo; is &ldquo;Forged from the Worst: Session 3&rdquo;" title="Older post tagged with &ldquo;rpgs&rdquo; is &ldquo;Forged from the Worst: Session 3&rdquo;"><small>&lt;</small></a>
+<a href="https://takeonrules.com/tags/rpgs/" class="p-category" aria-label="All posts tagged with &ldquo;rpgs&rdquo;" title="All posts tagged with &ldquo;rpgs&rdquo;">rpgs</a> <a href="https://takeonrules.com/2025/12/19/forged-from-the-worst-session-4/" aria-label="Next post tagged with &ldquo;rpgs&rdquo; is &ldquo;Forged from the Worst: Session 4&rdquo;" title="Newer post tagged with &ldquo;rpgs&rdquo; is &ldquo;Forged from the Worst: Session 4&rdquo;"><small>&gt;</small></a>
+</span></span>
+
+</p/><p><strong>Summary: </strong>
+Generating the canonical game map while encapsulating its state and revealing information through functions that interrogate the map.  That is, I the player can ask Emacs to answer questions about the campaign map that a referee would know.
+</p>
+        <p>In the Forge from the Worst series, I’ve been writing about my solo play in
+<cite><a href="https://www.drivethrurpg.com/en/product/514996/mythic-bastionland?affiliate_id=318171">Mythic Bastionland</a></cite> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Mythic Bastionland”" title="Other site-wide references of “Mythic Bastionland”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-MYTHIC-BASTIONLAND">&#128214;</a></small>
+.  I had went into the game hoping to engage the map without
+referee knowledge of the map; no insight into where all the features are, but
+instead allowing the procedures of the game to reveal the locations of various
+features.</p>
+<p>Midway through my 3rd session, I found myself needing to reveal information of
+the map that was going to be more challenging to derive.  I chose that moment—a
+just in time moment—to set about loading the map into <span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-EMACS">&#128214;</a></small>
+ and then write
+commands to interrogate the map.</p>
+<p>I reviewed the questions I had already asked of the map, and wrote them down:</p>
+<ul>
+<li>What is the direction to a named Myth?</li>
+<li>What is the nearest Myth?</li>
+<li>What is a random Myth that is not the nearest?</li>
+<li>Is there a barrier when moving between these two hexes?</li>
+<li>Is there a Myth on this Hex?</li>
+<li>What is feature is there on this hex?</li>
+</ul>
+<p>I suspect I may also need to ask: “What is the direction to the nearest Myth?”</p>
+<p>I wasn’t going to type up the map and store it, but instead randomly generate
+the map.  Also, I wanted to make sure that I could generate a map that would
+conform to the player-discovered information from the sessions thus far session.</p>
+<h2 id="initial-research">Initial Research</h2>
+<p>Given that I was going to be working out distances, I read through the amazing
+and helpful <a href="https://www.redblobgames.com/grids/hexagons/">Hexagonal Grids</a>.</p>
+<p>I needed to settle on an appropriate coordinates systems.  With some reading, I
+chose to adopt the <a href="https://www.redblobgames.com/grids/hexagons/">double-height coordinates</a>.  Which was not the notation I had
+already written down in blog posts, but would be easy to map.</p>
+<h2 id="initial-work">Initial Work</h2>
+<p>I knew that once I created a map that conformed to Sir Weydlyn’s observations, I
+wouldn’t want to dig into the data nor debug functions using that map.  So, my
+approach was to work from a disposable map and test the functions.</p>
+<p>I used the <span><a href="https://en.wikipedia.org/wiki/Read%E2%80%93eval%E2%80%93print_loop">Read-eval-print loop</a></span> (<abbr title="Read-eval-print loop">REPL</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Read-eval-print loop”" title="Other site-wide references of “Read-eval-print loop”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-GLOSSARY-REPL">&#128214;</a></small>)
+ to test these functions.  One emergent foible is that I kept
+using the single-height coordinates; introducing a translating function for
+internal work.  As of <time datetime="2025-12-15" title="2025-12-15">today</time> this foible persists.  And creates a bit more
+chatter, which we’ll see in a bit.</p>
+<h2 id="encoding-the-known-world">Encoding the Known World</h2>
+<p>Once I had a solid set of functions that could answer questions, I set about
+encoding the Known World.  Let’s walk through this.</p>
+<p>First we have this <code>mbc</code> function.  It converts single-height coordinates to
+double-height such that <code>(mbc 8 1)</code> will be <code>(8 . 2)</code> and <code>(mbc 7 1)</code> will be <code>(7 . 3)</code>.</p>
+<pre><code class="language-emacs-lisp">(defalias 'mbc 'mythic-bastionland--random-coord)
+</code></pre>
+<p>Next let’s read over the code and comments.  I’ll meet you after the code block.</p>
+<pre><code class="language-emacs-lisp">(defalias 'mbc 'mythic-bastionland--random-coord)
+(mythic-bastion-land-map-write
+ (mythic-bastionland-map-generate
+  `((constraints .
+                 ((nearest . ((label . &quot;The Mountain&quot;)
+                              (feature . myths)
+                              (coord . ,(mbc 9 1))))
+                  (nearest . ((label . &quot;The Judge&quot;)
+                              (feature . myths)
+                              (coord . ,(mbc 7 2))))))
+    ;; This is where Sir Weydlyn encountered Seer Tompot.
+    (sanctums . ((&quot;Tompot (Tangled Seer)&quot; . ,(mbc 8 1))))
+    ;; With the chosen random scenario, we assign the Moutain, then
+    ;; pick a random one for the Beast
+    (myths . ((&quot;The Mountain&quot; .
+               (,(mbc 10 4) ,(mbc 8 4) ,(mbc 9 2)
+                ,(mbc 9 3) ,(mbc 9 4) ,(mbc 9 5)))
+              (&quot;The Beast&quot; .
+               (,(mbc 8 3) ,(mbc 9 3) ,(mbc 8 4)
+                ,(mbc 9 4) ,(mbc 8 5)))
+              (&quot;The Judge&quot; .
+               ,(mythic-bastionland-hexes-within-range
+                 (mbc 7 2) 3))))
+    ;; These have been converted to double height coordinates.
+    (holdings . ((&quot;Tower&quot; . (9 . 3)) (&quot;Castle&quot; . (5 . 7))
+                 (&quot;Fortress&quot; . (1 . 19)) (&quot;Town&quot; . (8 . 16))))
+    (omens-revealed . ((&quot;The Mountain&quot; . 1)))
+    (omit (
+           ;; Sir Wedylyn crossed between these two potential
+           ;; barriers.
+           (barriers .
+                     ((,(mbc 8 1) . ,(mbc 9 1))
+                      (,(mbc 9 1) . ,(mbc 8 2))
+                      (,(mbc 8 2) . ,(mbc 7 2)))))))))
+</code></pre>
+<p>The <code>mythic-bastionland-map-generate</code> function takes an <code>alist</code> with keys: <code>holdings</code>,
+<code>myths</code>, <code>landmarks</code>, <code>dwellings</code>, <code>sanctums</code>, <code>monuments</code>, <code>hazards</code>, <code>curses</code>, <code>ruins</code>,
+<code>barriers</code>, <code>constraints</code>, <code>omens-revealed</code>, and <code>omit</code>.</p>
+<p>This allows me to specify where to place specific already known landmarks as
+well as to omit placing landmarks at a given coordinate.</p>
+<p>Of those: <code>holdings</code>, <code>myths</code>, <code>landmarks</code>, <code>dwellings</code>, <code>sanctums</code>, <code>monuments</code>, <code>hazards</code>,
+<code>curses</code>, and <code>ruins</code> are nameable feature types; a function I wanted as I managed
+the map.</p>
+<p>The <code>omit</code> option allows me to specify coordinates that I will not place the
+named feature.</p>
+<p>The <code>constraints</code> option are tests that must be true with the completed map.  When
+all of them are not true, I discard that generated map and create another one.
+By default this will be attempted 10 times; but you can also pass <code>max-retries</code> to
+the generation to modify that amount.</p>
+<p>And <code>omens-revealed</code> allows for tracking of each omen’s present state.</p>
+<h2 id="generating-the-world-from-that-which-is-known">Generating the World from that Which is Known</h2>
+<p>With the <code>mythic-bastionland-features</code>, I define the feature types (that are
+renamable), how many there should be, and optionally a minimum distance.</p>
+<pre><code class="language-emacs-lisp"> (defvar mythic-bastionland-features
+  '((myths . ((how-many . (6))))
+     (holdings . ((how-many . (4)) (min-distance . 5)))
+     (sanctums . ((how-many . (3 4))))
+     (monuments . ((how-many . (3 4))))
+     (dwellings . ((how-many . (3 4))))
+     (hazards . ((how-many . (3 4))))
+     (curses . ((how-many . (3 4))))
+     (ruins . ((how-many . (3 4)))))
+  &quot;Feature types that are labeled, and thus renameable.  Also we want
+to consider how many of these we might place as well as the minimum
+distance (if any).&quot;)
+</code></pre>
+<p>For <code>holdings</code>, there are 4 at a minimum distance of 5.  For <code>myths</code> there are
+always 6.  And for the others, there is either 3 or 4.</p>
+<p>And now we have the code that generates the map based on the given
+configuration.</p>
+<p>In short:</p>
+<ol>
+<li>We place the given features; when a feature has more than one coordinate, we
+randomly pick a coordinate that does not have something in it.</li>
+<li>Build a list of the remaining features to place.</li>
+<li>Looping through the locations to place, attempt to place them on the map;
+honoring minimum distance, omitted coordinates, as well as only allowing one
+feature per hex.</li>
+<li>Randomly place known barriers, skipping over omitted ones.  (As of
+<time datetime="2025-12-15">&lt;2025-12-15 Mon&gt;</time>, I don’t have a means of placing known barriers, but that
+feature is trivial to add).</li>
+<li>Validate that all constraints are true; if not, try again.</li>
+<li>The record any <code>omens-revealed</code>.</li>
+</ol>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland-map-generate (config)
+  &quot;Generate and store `mythic-bastionland-map' via CONFIG.
+
+See `mythic-bastionland-features' for some of the `car' values of
+CONFIG.  Another is `barriers' (which are unamed).  Another is `omit',
+itself an alist, with the same `car' values as those in CONFIG (except
+`omit').
+
+When providing existing locations to place, you may provide either a
+single coordinate or a list of coordinates (from which the function will
+randomly pick a candidate of coordinates not already placed).  The logic
+enforces that only one feature may be placed in each hex.
+
+Given this placement logic, ensure that the config places features with
+less candidate spaces earlier.&quot;
+  (let ((max-retries
+          (or (alist-get 'max-retries config) 10))
+         (keep-mapping t)
+         (the-map nil))
+    (while (and keep-mapping (&gt; max-retries 0))
+      ;; Assume that we don't need to keep trying to build the map
+      (setq keep-mapping nil)
+      (setq the-map nil)
+      (setq max-retries (- max-retries 1))
+
+      ;; Now, let's see if our assumption is correct.
+      (let ((barriers nil)
+             (locations nil)
+             (locations-to-place nil))
+        ;; First put the locations on the map...no effort is taken to
+        ;; avoid location collisions.  Also, queue up further locations
+        ;; to place.
+        (cl-loop for (feature . fconfig) in mythic-bastionland-features do
+          (let* ((feat-locations
+                   (alist-get feature config))
+                  (how-many
+                    (alist-get 'how-many fconfig))
+                  ;; TODO: allow for multiple feature entries.
+                  (placed-features '()))
+
+            ;; When we are given location qs for this feature type, add
+            ;; it to the placed list.
+            (when feat-locations
+              (cl-loop for (label . list-or-one-coord) in feat-locations do
+                (let ((placed-coordinates
+                        (mapcar #'car locations)))
+                  (if (consp (car list-or-one-coord))
+                    ;; We have a list of coordinates
+                    (let ((coord
+                            (seq-random-elt
+                              (seq-filter
+                                (lambda (c)
+                                  (not (member c placed-coordinates)))
+                                list-or-one-coord))))
+                      (unless coord
+                        (user-error &quot;Location %s with coordinate options %s cannot be placed due to collisoin with all other placed locations.&quot;
+                          (label list-or-one-coord)))
+                      (cl-pushnew (cons coord label) locations)
+                      (cl-pushnew (cons label coord) placed-features))
+                    ;; We have one coordinate
+                    (let ((coord list-or-one-coord))
+                      (when (member coord placed-coordinates)
+                        (user-error &quot;Location %s with coord %s cannot be placed due to existing placed location&quot;
+                          label coord))
+                      (cl-pushnew (cons coord label) locations)
+                      (cl-pushnew (cons label coord) placed-features))))))
+            (cl-pushnew (cons feature placed-features) the-map)
+
+            ;; Next queue up placing the remainder of locations for the
+            ;; feature type (accounting for what was already given).
+            (dotimes (i (- (seq-random-elt how-many)
+                          (length feat-locations)))
+              (cl-pushnew (cons feature
+                            (format &quot;%s %s&quot; feature (+ i 1)))
+                locations-to-place))))
+
+        ;; Now that we have our task list of what all needs adding.
+        ;;
+        ;; This involves avoiding collisions with other placed features
+        ;; as well as heading the guidance of an omit coordinates for
+        ;; the given feature.
+        (cl-loop for (feature . label) in locations-to-place do
+          (let ((keep-trying t)
+                 (min-distance
+                   (alist-get 'min-distance
+                     (alist-get feature mythic-bastionland-features)))
+                 (omitted-feature-coordinates
+                   (alist-get feature (alist-get 'omit the-map))))
+            (while keep-trying
+              (let* ((coord
+                       (mythic-bastionland--random-coord)))
+                (when (and
+                        ;; Verify that what we're placing is place at
+                        ;; the minimum distance.
+                        (if min-distance
+                          (&lt;= min-distance
+                            (min
+                              (mapcar
+                                (lambda (label-coord)
+                                  (mythic-bastionland--hex-distance
+                                    coord (cdr label-coord)))
+                                (alist-get feature the-map))))
+                          t)
+                        (not (or
+                               (assoc coord locations)
+                               (member coord
+                                 omitted-feature-coordinates))))
+                  (progn
+                    (setq keep-trying nil)
+                    ;; For locations we favor storing the (coord . label)
+                    ;; This makes later comparisons easier.n
+                    (cl-pushnew (cons coord label) locations)
+                    ;; For a named feature favor storing (label . coord)
+                    ;; as this makes prompts easier.
+                    (cl-pushnew (cons label coord)
+                      (alist-get feature the-map))))))))
+
+        ;; Nex, we handle the barriers as they are a bit of a different
+        ;; creature.  We generate them by placing them between two
+        ;; neighboring hexes.
+        ;;
+        ;; I have given special consideration for hexes on the edge of
+        ;; the map; Namely don't create barriers on the edges.  And
+        ;; proportionally reduce the chance of adding a barrier on those
+        ;; edges proportional to the number sides that the hex has
+        ;; on-map neighbors.&quot;
+        (let ((omitted-barriers
+                (mapcar
+                  (lambda (b)
+                    (mythic-bastionland--make-ordered-pair
+                      (car b) (cdr b)))
+                  (alist-get 'barriers (alist-get 'omit config)))))
+          (dotimes (i (+ 23 (random 3)))
+            (let ((keep-trying t))
+              (while keep-trying
+                (let* ((coord
+                         (mythic-bastionland--random-coord))
+                        (in-6-chance
+                          (cond
+                            ((member coord '((0 . 0) (11 . 22)))
+                              ;; top-left, bottom-right
+                              2)
+                            ((member coord '((11 . 0) (0 . 22)))
+                              ;; top-right, bottom-right
+                              3)
+                            ((member (car coord) '(0 11))
+                              ;; from or to
+                              4)
+                            ((member (cdr coord) '(0 23))
+                              ;; top of col that is taller; bottom of
+                              ;; col that is shorter
+                              3)
+                            ((member (cdr coord) '(1 22))
+                              ;; top of col that is shorter; bottom of
+                              ;; col that is taller
+                              5)
+                            (t 6))))
+                  (when (&lt;= (+ 1 (random 6)) in-6-chance)
+                    (progn
+                      (let* ((neighbor
+                               (seq-random-elt
+                                 (mythic-bastionland--neighbors coord)))
+                              (pair
+                                (mythic-bastionland--make-ordered-pair
+                                  coord neighbor)))
+                        ;; Don't repeat barriers
+                        (when
+                          (not (or (member pair barriers)
+                                 (member pair omitted-barriers)))
+                          (progn
+                            (cl-pushnew pair barriers)
+                            (setq keep-trying nil)))))))))))
+
+        ;; PS...make sure we add the locations and barriers to the map.
+        (cl-pushnew `(locations . ,locations) the-map)
+        (cl-pushnew `(barriers . ,barriers) the-map)
+
+        ;; Next, see if we have a conformant map
+        (cl-loop
+          for (constraint . info)
+          in (alist-get 'constraints config) do
+          (pcase constraint
+            ('nearest
+              (unless (mythic-bastionland--test-constraint-nearest info the-map)
+                (setq keep-mapping t)))
+            (_ (user-error &quot;Unknow constraint %s&quot; constraint))))))
+
+    ;; TODO: Consider generalizations but for now this is adequate.
+    (when-let ((omens-revealed (assoc 'omens-revealed config)))
+      (push omens-revealed the-map))
+    the-map))
+</code></pre>
+<h2 id="its-all-a-mapping-problem">It’s All a Mapping Problem</h2>
+<p>I once read that all computer science problems are mapping problems.  There were
+two that I needed to consider.</p>
+<p>First, when rolling up a barrier, it is placed along the shared side of two
+adjacent hexes.  This meant creating a “unique key” for those pairs, so that I
+don’t accidentally pix Hex <code>0,0</code> then its neighbor Hex <code>0,1</code> to place a barrier, and
+then pick Hex <code>0,1</code> and its neighbor Hex <code>0,0</code> to place a hex.</p>
+<p>Enter the <code>mythic-bastionland--make-ordered-pair</code> function:</p>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland--make-ordered-pair (from to)
+  &quot;Provide a consistent sort order FROM and TO coordinates.&quot;
+  (let ((from
+          (or from
+            (mythic-bastionland--text-to-coord nil &quot;Left &quot;)))
+         (to
+           (or to
+             (mythic-bastionland--text-to-coord nil &quot;Right &quot;))))
+    (if (&gt; (car from) (car to))
+      `(,from . ,to)
+      (if (&gt; (cdr from) (cdr to))
+        `(,from . ,to)
+        `(,to . ,from)))))
+</code></pre>
+<p>It normalizes a pair of coordinates so that we can have consistent interaction
+when referencing those two coordinates.</p>
+<p>Second, one of the questions was direction from one coordinate to another.
+And here we have <code>mythic-bastionland--direction</code>:</p>
+<pre><code class="language-emacs-lisp">(defun mythic-bastionland--direction (&amp;optional from to)
+  &quot;Get human-readable direction FROM TO.&quot;
+  (let ((from
+          (or from
+            (mythic-bastionland--text-to-coord nil &quot;From &quot;)))
+         (to
+           (or to
+             (mythic-bastionland--text-to-coord nil &quot;To &quot;))))
+      (cond
+        ((equal to from)
+          &quot;Under your nose&quot;)
+        ((= (car from) (car to))
+          (if (&gt; (cdr from) (cdr to))
+            &quot;North&quot; &quot;South&quot;))
+        (t (let ((slope (/
+                          (float (- (cdr to) (cdr from)))
+                          (float (- (car to) (car from))))))
+             (cond
+               ;; After compass, protractor, marker, and spreadsheet
+               ;; work, I'm happy with the direction calculations.
+               ;; Remember, hex maps starting from top-left instead
+               ;; of bottom right like Geometry means things get a
+               ;; mind bending (at least for this old guy).
+               ((or (&gt; slope 4) (&lt; slope -4))
+                 (if (&gt; (cdr from) (cdr to))
+                   &quot;North&quot; &quot;South&quot;))
+               ((&lt;= 0.8 slope) (&lt;= slope 4)
+                 (if (&gt; (cdr from) (cdr to))
+                   &quot;Northwest&quot; &quot;Southeast&quot;))
+               ((&lt; -0.8 slope 0.8)
+                 (if (&gt; (car from) (car to))
+                   &quot;West&quot; &quot;East&quot;))
+               ((&lt;= -4 slope -0.8)
+                 (if (&gt; (cdr from) (cdr to))
+                   &quot;Northeast&quot; &quot;Southwest&quot;))))))))
+</code></pre>
+<p>Using geometry of Rise over Run to determine slope, I can enter the from and to
+coordinate to get the named direction.  As the comments indicate, this involved
+some protractor work to make sure I got the algorithm correct.</p>
+<p>When I had set out, I had first thought of saying the two adjacent hexes to the
+right of a given hex were to the given hex’s east.  But the geometry suggested
+breaking this apart.</p>
+<p>So for a given Hex, and looking at Hexes one space away and starting at the Hex
+directly above the given Hex and working clockwise we have: north, north east,
+south east, south, south west, and north west.  Stepping to the next ring out,
+we have: north, north east, north east, west, south east, south east, south,
+south west, south west, west, north west, north west.</p>
+<p>I felt that having the algorithm well understood by me would make for consistent
+solo play.</p>
+<h2 id="testing-this-thing">Testing This Thing</h2>
+<p>When you look at the code, you might notice that the <code>interactive</code> functions will
+take a coordinate or prompt you for one.  You might also note that some
+non-<code>interactive</code> functions take optional coordinates, and prompt if none are
+given.</p>
+<p>All of this was in service of attempting to test functions.  Verifying the
+correctness of distance and direction required no knowledge of the map, but
+instead relied on two coordinates.  So I could bombard these functions in the
+<abbr title="Read-eval-print loop">REPL</abbr>
+ and prompt for the inputs.</p>
+<p>I also made a decision not to codify Sir Weydlyn’s map until I’d test driven
+things a few times.  Hence I write the map to disk and then read it back when I
+want to use it.  This also serves to clobber the variable’s value, preventing
+accidental peaking.  I am considering further measures, but am holding off.</p>
+<p>I found that once it was all tested, and I started playing, I realized I wanted
+to adjust some functionality.  Namely, determining the nearest myth.  I
+refactored that section.  And to test, used a bit of dependency injection, to
+pass in the map I wanted to test (so as to not peak).</p>
+<p>Once I verified behavior, I loaded the game map and made sure the question I had
+previously asked of the map returned the same result.  And it didn’t so I set
+about further refactoring (which added the <code>constraints</code> option).  I adjusted the
+initial config, adding <code>constraints</code> and allowing for features to be placed from a
+subset of coordinates.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>I’ve had two significant refactors of the base functionality.</p>
+<p>From the initial state to the next state, I needed to consider that I was
+changing the logic for what was nearest, going from randomly picking hexes that
+had the same distance to now consistently picking hexes.</p>
+<p>I performed the refactor then tested my map.  The answer I got conflicted with
+established facts (e.g. “The Judge” was the closest myth to <code>9,1</code>).  So I needed
+to refactor again.  This is when I introduced <code>constraints</code>.  Which was relatively
+easy to introduce.</p>
+<p>I did the second refactor in two parts.  Part 1 was wrapping the existing body in the following then re-indenting:</p>
+<pre><code class="language-emacs-lisp">(let ((max-retries
+       (or (alist-get 'max-retries config) 10))
+      (keep-mapping t)
+      (the-map nil))
+  (while (and keep-mapping (&gt; max-retries 0))
+    ;; Assume that we don't need to keep trying to build the map
+    (setq keep-mapping nil)
+    (setq the-map nil)
+    (setq max-retries (- max-retries 1))
+
+    …EXISTING BODY…
+    ))
+</code></pre>
+<p>This change was a noop change, that I committed.  Then I set about implementing
+the <code>constraints</code> logic.  This way I would have smaller second commit that didn’t
+interweave with indentation changes.</p>
+<p>You can find the <a href="https://git.sr.ht/~jeremyf/mythic-bastionland.el">“mythic-bastionland” package on Sourcehut</a>.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Mythic%20Bastionland%20Map%20Play%20Aid%20Emacs%20Package">Reply by Email</a></p>
+
+      

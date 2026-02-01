@@ -1,0 +1,131 @@
+
+	
+<p>
+I have been lucky to fly to a few countries around the world. Like any other bored traveller, I thumb through the airline magazines and look at the <a href="http://www.airlineroutemaps.com/">air travel route maps</a>. These maps are beautifully stylised depictions of the world with gently curved lines between the destinations serviced by the airline. I always wanted such a map for my own travel adventures. This article explains how to create air travel route maps with  ggplot2 in the style of the Emirates Airlines route map.</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Create Air Travel Route Maps using ggplot2
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>The first step was to create a list of all the places I have flown between at least once. Paging through my travel photos and diaries, I managed to create a pretty complete list. The structure of this document is simply a list of all routes (From, To) and every flight only gets counted once. The next step finds the spatial coordinates for each airport by searching Google Maps using the geocode function from the <a href="https://cran.r-project.org/web/packages/ggmap/index.html">ggmap</a> package. You will need a Google API to enable the <a href="https://lucidmanager.org/data-science/geocoding-with-ggmap/">geocoding function</a>.</p>
+<p>
+In some instances, I had to add the country name to avoid confusion between places. To prevent errors from the Google maps API, I have added a while loop that runs until all destinations have been geocoded. We now we have a data frame of airports with their coordinates and can create air travel route maps. The data frames are merged so that we can create air travel route maps using the <a href="http://ggplot2.tidyverse.org/reference/geom_segment.html">curve geom</a>. The <a href="http://ggplot2.tidyverse.org/reference/borders.html">borders</a> function of ggplot2 creates the map data. The <a href="https://github.com/slowkow/ggrepel">ggrepel</a> package helps to prevent overplotting of text. This code also removes any return flights and splits flights that crossed the date line.</p>
+<figure>
+<img src="https://lucidmanager.org/images/geography/travel-diary.png" alt="My personal Air Travel Route Maps in ggplot" title="My personal Air Travel Route Maps in ggplot"/>
+<figcaption>
+My personal Air Travel Route Maps in ggplot: A Visual Travel Diary
+</figcaption>
+</figure>
+<p>
+In another article, I have used the same principle to create a route map of flights between islands in the <a href="https://lucidmanager.org/data-science/pacific-island-hopping/">Pacific Ocean</a> using the schedules from several international airlines and to show demonstrate the nonsense of <a href="https://lucidmanager.org/data-science/flat-earth-mathematics/">Flat Earth</a> theories.</p>
+<p>
+<a href = "https://github.com/pprevos/geography/" target="_blank"
+   title="Download geography from GitHub"
+   alt="Download geography from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">geography</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Flightpath map</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## https://lucidmanager.org/create-air-travel-route-map</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Init</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggmap)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggrepel)
+</span></span><span style="display:flex;"><span>  
+</span></span><span style="display:flex;"><span>  api <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">readLines</span>(<span style="background-color:#fff0f0">&#34;../google-maps.api&#34;</span>) <span style="color:#888"># Text file with the API key</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">register_google</span>(key <span style="color:#333">=</span> api)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Read flight and airports lists </span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">#flights &lt;- read_csv(&#34;flights.csv&#34;)</span>
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read_csv</span>(<span style="background-color:#fff0f0">&#34;flight-map/flights.csv&#34;</span>)
+</span></span><span style="display:flex;"><span>  airports_file <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;flight-map/airports.csv&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">if</span> (<span style="color:#06b;font-weight:bold">file.exists</span>(airports_file)) {
+</span></span><span style="display:flex;"><span>    airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read_csv</span>(airports_file)
+</span></span><span style="display:flex;"><span>    } <span style="color:#080;font-weight:bold">else</span> {
+</span></span><span style="display:flex;"><span>    airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(airport <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>, lon <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>, lat<span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>)
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Lookup coordinates</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Some airports need country names to ensure Google finds the correct location</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## The geocoding keeps looping till all coordinates have been found</span>
+</span></span><span style="display:flex;"><span>  destinations <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unique</span>(<span style="color:#06b;font-weight:bold">c</span>(flights<span style="color:#333">$</span>From, flights<span style="color:#333">$</span>To))
+</span></span><span style="display:flex;"><span>  new_destinations <span style="color:#333">&lt;-</span> destinations[<span style="color:#333">!</span>destinations <span style="color:#333">%in%</span> airports<span style="color:#333">$</span>airport]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">while</span> (<span style="color:#06b;font-weight:bold">length</span>(new_destinations) <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">0</span>) {
+</span></span><span style="display:flex;"><span>      new_airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">geocode</span>(new_destinations) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#06b;font-weight:bold">mutate</span>(airport <span style="color:#333">=</span> new_destinations) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#06b;font-weight:bold">select</span>(airport, lon, lat)
+</span></span><span style="display:flex;"><span>      airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rbind</span>(airports, new_airports) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>        <span style="color:#06b;font-weight:bold">filter</span>(<span style="color:#333">!</span><span style="color:#06b;font-weight:bold">is.na</span>(lon) <span style="color:#333">|</span> <span style="color:#333">!</span><span style="color:#06b;font-weight:bold">is.na</span>(lat))
+</span></span><span style="display:flex;"><span>      new_destinations <span style="color:#333">&lt;-</span> destinations[<span style="color:#333">!</span>destinations <span style="color:#333">%in%</span> airports<span style="color:#333">$</span>airport]
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">write_csv</span>(airports, <span style="background-color:#fff0f0">&#34;flight-map/airports.csv&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Remove country names</span>
+</span></span><span style="display:flex;"><span>  airports<span style="color:#333">$</span>airport <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">as.character</span>(airports<span style="color:#333">$</span>airport)
+</span></span><span style="display:flex;"><span>  comma <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">regexpr</span>(<span style="background-color:#fff0f0">&#34;,&#34;</span>, airports<span style="color:#333">$</span>airport)
+</span></span><span style="display:flex;"><span>  airports<span style="color:#333">$</span>airport<span style="color:#06b;font-weight:bold">[which</span>(comma <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">0</span>)] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">substr</span>(airports<span style="color:#333">$</span>airport<span style="color:#06b;font-weight:bold">[which</span>(comma <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">0</span>)], <span style="color:#60e;font-weight:bold">1</span>, comma[comma <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Remove return flights</span>
+</span></span><span style="display:flex;"><span>  d <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">vector</span>()
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">for</span> (i <span style="color:#080;font-weight:bold">in</span> <span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span><span style="color:#06b;font-weight:bold">nrow</span>(flights)) {
+</span></span><span style="display:flex;"><span>      d <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">which</span>(<span style="color:#06b;font-weight:bold">paste</span>(flights<span style="color:#333">$</span>From, flights<span style="color:#333">$</span>To) <span style="color:#333">%in%</span>
+</span></span><span style="display:flex;"><span>                 <span style="color:#06b;font-weight:bold">paste</span>(flights<span style="color:#333">$</span>To[i], flights<span style="color:#333">$</span>From[i]))
+</span></span><span style="display:flex;"><span>      flights<span style="color:#333">$</span>From[d] <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;R&#34;</span>
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>  flights2 <span style="color:#333">&lt;-</span> flights <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(From <span style="color:#333">!=</span> <span style="background-color:#fff0f0">&#34;R&#34;</span>) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(From, To)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Add coordinates to flight list</span>
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">merge</span>(flights, airports, by.x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;From&#34;</span>, by.y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;airport&#34;</span>)
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">merge</span>(flights, airports, by.x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;To&#34;</span>, by.y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;airport&#34;</span>)
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> flights <span style="color:#333">%&gt;%</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(From, To, lon.x, lat.x, lon.y, lat.y) <span style="color:#333">%&gt;%</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">as_tibble</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Split Circumnaviation Flights at -180/180 degrees</span>
+</span></span><span style="display:flex;"><span>  circ <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">which</span>(<span style="color:#06b;font-weight:bold">abs</span>(flights<span style="color:#333">$</span>lon.y <span style="color:#333">-</span> flights<span style="color:#333">$</span>lon.x) <span style="color:#333">&gt;</span> <span style="color:#60e;font-weight:bold">180</span>)
+</span></span><span style="display:flex;"><span>  flights[circ,]
+</span></span><span style="display:flex;"><span>  flights<span style="color:#333">$</span>lon.y[circ] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ifelse</span>(flights<span style="color:#333">$</span>lon.y[circ] <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">180</span>, <span style="color:#60e;font-weight:bold">-180</span>)
+</span></span><span style="display:flex;"><span>  flights<span style="color:#333">$</span>lat.y[circ] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rowSums</span>(flights[circ, <span style="color:#06b;font-weight:bold">c</span>(<span style="background-color:#fff0f0">&#34;lat.x&#34;</span>, <span style="background-color:#fff0f0">&#34;lat.y&#34;</span>)]) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">2</span>
+</span></span><span style="display:flex;"><span>  leg2 <span style="color:#333">&lt;-</span> airports <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">filter</span>(airport <span style="color:#333">%in%</span> flights<span style="color:#333">$</span>To[circ]) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(From <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(<span style="background-color:#fff0f0">&#34;&#34;</span>, <span style="color:#06b;font-weight:bold">length</span>(circ))) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(lon.x <span style="color:#333">=</span> <span style="color:#333">-</span>flights<span style="color:#333">$</span>lon.y[circ], lat.x <span style="color:#333">=</span> flights<span style="color:#333">$</span>lat.y[circ]) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(From, To <span style="color:#333">=</span> airport, lon.x, lat.x, lon.y <span style="color:#333">=</span> lon, lat.y <span style="color:#333">=</span> lat)
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rbind</span>(flights, leg2)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Plot flight routes</span>
+</span></span><span style="display:flex;"><span>  worldmap <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">borders</span>(<span style="background-color:#fff0f0">&#34;world2&#34;</span>, colour<span style="color:#333">=</span><span style="background-color:#fff0f0">&#34;#efede1&#34;</span>, fill<span style="color:#333">=</span><span style="background-color:#fff0f0">&#34;#efede1&#34;</span>) 
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>() <span style="color:#333">+</span> worldmap <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> airports, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon, y <span style="color:#333">=</span> lat), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;#970027&#34;</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_text_repel</span>(data<span style="color:#333">=</span>airports, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon, y <span style="color:#333">=</span> lat, label <span style="color:#333">=</span> airport), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;black&#34;</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>, segment.color <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">geom_curve</span>(data <span style="color:#333">=</span> flights, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon.x, y <span style="color:#333">=</span> lat.x, xend <span style="color:#333">=</span> lon.y, yend <span style="color:#333">=</span> lat.y), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;#b29e7d&#34;</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.4</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">theme_void</span>()
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggsave</span>(<span style="background-color:#fff0f0">&#34;flights_map.png&#34;</span>, dpi <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">300</span>)</span></span></code></pre></div>
+</div>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

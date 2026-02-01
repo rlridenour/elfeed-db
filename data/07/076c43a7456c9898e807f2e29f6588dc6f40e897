@@ -1,0 +1,45 @@
+<p><img src="https://xenodium.github.io/images/emacs-fuzzy-search-apples-online-docs/color_search.gif" alt=""></p>
+<p>When building software for the Apple ecosystem, Xcode is often the editor of choice. With <a href="https://www.gnu.org/software/emacs/">Emacs</a> being my personal preference, I rarely find other iOS devs with a similar mindset.</p>
+<p>When I saw <a href="https://twitter.com/konrad1977">Mikael Konradsson</a>'s post describing <a href="https://www.reddit.com/r/emacs/comments/sndriv/i_finally_got_full_autocompetion_in_swift_with/">his Emacs Swift development setup</a>, I reached out to say hello. While exchanging tips and tricks, the topic of searching Apple's docs came up. It had been a while since I looked into this, so it was a great reminder to revisit the space.</p>
+<p>Back in June 2020, I wrote a snippet to <a href="https://xenodium.com/emacs-search-hackingwithswiftcom/">fuzzy search hackingwithswift.com</a>, using Emacs's <a href="https://github.com/abo-abo/swiper">ivy</a> completion framework. With a similar online API, we could also search Apple's docs. Turns out, there is and we can we can use it to search <a href="https://developer.apple.com/search">developer.apple.com</a> from our beloved editor.</p>
+<pre><code class="language-{.commonlisp">;;; counsel-apple-search.el -*- lexical-binding: t; -*-
+
+(defun ar/counsel-apple-search ()
+  &quot;Ivy interface for dynamically querying apple.com docs.&quot;
+  (interactive)
+  (require 'request)
+  (require 'json)
+  (require 'url-http)
+  (ivy-read &quot;apple docs: &quot;
+            (lambda (input)
+              (let* ((url (url-encode-url (format &quot;https://developer.apple.com/search/search_data.php?q=%s&quot; input)))
+                     (c1-width (round (* (- (window-width) 9) 0.3)))
+                     (c2-width (round (* (- (window-width) 9) 0.5)))
+                     (c3-width (- (window-width) 9 c1-width c2-width)))
+                (or
+                 (ivy-more-chars)
+                 (let ((request-curl-options (list &quot;-H&quot; (string-trim (url-http-user-agent-string)))))
+                   (request url
+                     :type &quot;GET&quot;
+                     :parser 'json-read
+                     :success (cl-function
+                               (lambda (&amp;key data &amp;allow-other-keys)
+                                 (ivy-update-candidates
+                                  (mapcar (lambda (item)
+                                            (let-alist item
+                                              (propertize
+                                               (format &quot;%s   %s   %s&quot;
+                                                       (truncate-string-to-width (propertize (or .title &quot;&quot;)
+                                                                                             'face '(:foreground &quot;yellow&quot;)) c1-width nil ?\s &quot;…&quot;)
+                                                       (truncate-string-to-width (or .description &quot;&quot;) c2-width nil ?\s &quot;…&quot;)
+                                                       (truncate-string-to-width (propertize (string-join (or .api_ref_data.languages &quot;&quot;) &quot;/&quot;)
+                                                                                             'face '(:foreground &quot;cyan1&quot;)) c3-width nil ?\s &quot;…&quot;))
+                                               'url .url)))
+                                          (cdr (car data)))))))
+                   0))))
+            :action (lambda (selection)
+                      (browse-url (concat &quot;https://developer.apple.com&quot;
+                                          (get-text-property 0 'url selection))))
+            :dynamic-collection t
+            :caller 'ar/counsel-apple-search))
+</code></pre>

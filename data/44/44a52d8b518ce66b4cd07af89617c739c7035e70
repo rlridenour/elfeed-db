@@ -1,0 +1,159 @@
+
+	
+<p>
+Last month I enjoyed a relaxing holiday in the <a href="https://horizonofreason.com/culture/vanuatu-sand-drawings-sandroing/">tropical paradise of Vanuatu</a>. One rainy day I contemplated how to go island hopping across the Pacific ocean visiting as many island nations as possible. The Pacific ocean is a massive body of water between, Asia and the Americas, which covers almost half the surface of the earth. The southern Pacific is strewn with island nations from Australia to Chile. In this post, I describe how to use R to plan your next Pacific island
+hopping journey.</p>
+<figure>
+<img src="https://lucidmanager.org/images/geography/pacific-ocean.png" alt="The Pacific Ocean" title="The Pacific Ocean"/>
+<figcaption>
+The Pacific Ocean with UN Geoscheme regions (source: Oceania_ISO_3166-1.svg: User:Tintazulderivative work: Cruickshanks / <a href="https://creativecommons.org/licenses/by-sa/3.0">CC BY-SA</a>).
+</figcaption>
+</figure>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Geocoding the airports
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>My first step was to create a list of flight connections between each of the island nations in the Pacific ocean. I am not aware of a publicly available data set of international flights so unfortunately, I created the list manually by collecting route maps on <em>Pinterest</em> (if you do know of a fomal data set with international flights, then please leave a comment).</p>
+<p>
+My manual research resulted in a list of international flights from or to island airports. This list might not be complete, but it is a start. My <a href="https://www.pinterest.com.au/HorizonOfReason/pacific-island-hopping/">Pinterest board with Pacific island airline route maps</a> was the information source for this list.</p>
+<p>
+The first code section reads the list of airline routes and uses the ggmap package to extract their coordinates from Google maps. You will need a Google API to enable the <a href="https://lucidmanager.org/data-science/geocoding-with-ggmap/">geocoding function</a>. The data frame with airport coordinates is saved for future reference to avoid repeatedly pinging Google for the same information.</p>
+<p>
+<a href = "https://github.com/pprevos/geography/" target="_blank"
+   title="Download geography from GitHub"
+   alt="Download geography from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">geography</span>
+  </button>
+</a>
+
+</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggmap)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggplot2)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggrepel)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(geosphere)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(tidyverse)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(stringr)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Google maps api</span>
+</span></span><span style="display:flex;"><span>  api <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">readLines</span>(<span style="background-color:#fff0f0">&#34;google.api&#34;</span>) <span style="color:#888"># Text file with the API key</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">register_google</span>(key <span style="color:#333">=</span> api)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Read flight list and airport list</span>
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read_csv</span>(<span style="background-color:#fff0f0">&#34;pacific/pacific-flights.csv&#34;</span>)
+</span></span><span style="display:flex;"><span>  f <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;pacific/pacific-airports.csv&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">if</span> (<span style="color:#06b;font-weight:bold">file.exists</span>(f)) {
+</span></span><span style="display:flex;"><span>    airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">read.csv</span>(f)
+</span></span><span style="display:flex;"><span>  } <span style="color:#080;font-weight:bold">else</span>
+</span></span><span style="display:flex;"><span>    airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data.frame</span>(airport <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>, lat <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>, lon <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Lookup coordinates for new airports</span>
+</span></span><span style="display:flex;"><span>  all_airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unique</span>(<span style="color:#06b;font-weight:bold">c</span>(<span style="color:#06b;font-weight:bold">paste</span>(flights<span style="color:#333">$</span>From, flights<span style="color:#333">$</span>From.Country, sep <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;, &#34;</span>),
+</span></span><span style="display:flex;"><span>                           <span style="color:#06b;font-weight:bold">paste</span>(flights<span style="color:#333">$</span>To, flights<span style="color:#333">$</span>To.Country, sep <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;, &#34;</span>)))
+</span></span><span style="display:flex;"><span>  new_airports <span style="color:#333">&lt;-</span> all_airports[<span style="color:#333">!</span>(all_airports <span style="color:#333">%in%</span> airports<span style="color:#333">$</span>airport)]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">while</span> (<span style="color:#06b;font-weight:bold">length</span>(new_airports) <span style="color:#333">!=</span> <span style="color:#60e;font-weight:bold">0</span>) {
+</span></span><span style="display:flex;"><span>    coords <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">geocode</span>(new_airports)
+</span></span><span style="display:flex;"><span>    temp_airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">data.frame</span>(airport <span style="color:#333">=</span> new_airports, coords)
+</span></span><span style="display:flex;"><span>    airports <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">rbind</span>(airports, temp_airports) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#06b;font-weight:bold">filter</span>(<span style="color:#333">!</span><span style="color:#06b;font-weight:bold">is.na</span>(lat), <span style="color:#333">!</span><span style="color:#06b;font-weight:bold">is.na</span>(lon))
+</span></span><span style="display:flex;"><span>    new_airports <span style="color:#333">&lt;-</span> all_airports[<span style="color:#333">!</span>(all_airports <span style="color:#333">%in%</span> airports<span style="color:#333">$</span>airport)]
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Remove countries and save</span>
+</span></span><span style="display:flex;"><span>  airports<span style="color:#333">$</span>airport <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_remove_all</span>(airports<span style="color:#333">$</span>airport, <span style="background-color:#fff0f0">&#34;,.*&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">write_csv</span>(airports, f)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Add coordinates to flight list</span>
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">merge</span>(flights, airports, by.x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;From&#34;</span>, by.y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;airport&#34;</span>)
+</span></span><span style="display:flex;"><span>  flights <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">merge</span>(flights, airports, by.x <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;To&#34;</span>, by.y <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;airport&#34;</span>)</span></span></code></pre></div>
+</div>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Create the map
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>To create a map, I modified the code to create <a href="https://lucidmanager.org/data-science/create-air-travel-route-maps/">flight maps</a> I published in an earlier article. This code had to be changed to centre the map on the Pacific.</p>
+<p>
+Mapping the Pacific ocean is problematic because the -180 and +180 degree meridians meet around the dateline. Longitudes west of the antemeridian are positive, while longitudes east are negative. The <code class="verbatim">world2</code> data set in the borders function of the ggplot2 package is centred on the Pacific ocean. To enable plotting on this map, all negative longitudes are made positive by adding 360 degrees to them and <a href="https://lucidmanager.org/data-science/mapping-antipodes/">defining</a> the antipode.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888">## Pacific centric</span>
+</span></span><span style="display:flex;"><span>  flights<span style="color:#333">$</span>lon.x[flights<span style="color:#333">$</span>lon.x <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">&lt;-</span> flights<span style="color:#333">$</span>lon.x[flights<span style="color:#333">$</span>lon.x <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">360</span>
+</span></span><span style="display:flex;"><span>  flights<span style="color:#333">$</span>lon.y[flights<span style="color:#333">$</span>lon.y <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">&lt;-</span> flights<span style="color:#333">$</span>lon.y[flights<span style="color:#333">$</span>lon.y <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">360</span>
+</span></span><span style="display:flex;"><span>  airports<span style="color:#333">$</span>lon[airports<span style="color:#333">$</span>lon <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">&lt;-</span> airports<span style="color:#333">$</span>lon[airports<span style="color:#333">$</span>lon <span style="color:#333">&lt;</span> <span style="color:#60e;font-weight:bold">0</span>] <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">360</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">## Plot flight routes</span>
+</span></span><span style="display:flex;"><span>  worldmap <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">borders</span>(<span style="background-color:#fff0f0">&#34;world2&#34;</span>, fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;grey&#34;</span>, col <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggplot</span>() <span style="color:#333">+</span> worldmap <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> airports, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon, y <span style="color:#333">=</span> lat), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;#970027&#34;</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_text_repel</span>(data <span style="color:#333">=</span> airports, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon, y <span style="color:#333">=</span> lat, label <span style="color:#333">=</span> airport), col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;black&#34;</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>,
+</span></span><span style="display:flex;"><span>                    segment.color <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_curve</span>(data <span style="color:#333">=</span> flights, <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> lon.x, y <span style="color:#333">=</span> lat.x, xend <span style="color:#333">=</span> lon.y, yend <span style="color:#333">=</span> lat.y, col <span style="color:#333">=</span> Airline), size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1</span>,
+</span></span><span style="display:flex;"><span>               curvature <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.2</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">xlim</span>(<span style="color:#60e;font-weight:bold">90</span>, <span style="color:#60e;font-weight:bold">300</span>) <span style="color:#333">+</span> <span style="color:#06b;font-weight:bold">ylim</span>(<span style="color:#60e;font-weight:bold">-50</span>, <span style="color:#60e;font-weight:bold">50</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_void</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Pacific Island Hopping&#34;</span>, subtitle <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;lucidmanager.org&#34;</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">ggsave</span>(<span style="background-color:#fff0f0">&#34;pacific-flights.png&#34;</span>, width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">6</span>, height <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">4</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/geography/pacific-flights.png" alt="Pacific island hopping flight route map" title="Pacific island hopping flight route map"/>
+<figcaption>
+Pacific island hopping - flight route map.
+</figcaption>
+</figure>
+</div>
+</div>
+<div id="outline-container-headline-3" class="outline-2">
+<h2 id="headline-3">
+Pacific Island Hopping
+</h2>
+<div id="outline-text-headline-3" class="outline-text-2">
+<p>This visualisation is aesthetic and full of context, but it is not the best visualisation to solve the travel problem. This map can also be expressed as a graph with nodes (airports) and edges (routes). Once the map is represented mathematically, we can generate travel routes and begin our Pacific Island hopping.</p>
+<p>
+The igraph package converts the flight list to a graph that can be analysed and plotted. The <code class="verbatim">shortest_path</code> function can then be used to plan routes. If I would want to travel from Auckland to Saipan in the Northern Mariana Islands, I have to go through Port Vila, Honiara, Port Moresby, Chuuk, Guam and then to Saipan. I am pretty sure there are quicker ways to get there, but this would be an exciting journey through the Pacific.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(igraph)
+</span></span><span style="display:flex;"><span>  g <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">graph_from_edgelist</span>(<span style="color:#06b;font-weight:bold">as.matrix</span>(flights[,<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">2</span>]), directed <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">FALSE</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">png</span>(<span style="background-color:#fff0f0">&#34;pacific-network.png&#34;</span>, width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">600</span>, height <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">600</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">par</span>(mar <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">rep</span>(<span style="color:#60e;font-weight:bold">0</span>, <span style="color:#60e;font-weight:bold">4</span>))
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">plot</span>(g, layout <span style="color:#333">=</span> layout.fruchterman.reingold,
+</span></span><span style="display:flex;"><span>       vertex.size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0</span>,
+</span></span><span style="display:flex;"><span>       vertex.label.cex <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">1.2</span>,
+</span></span><span style="display:flex;"><span>       edge.width <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">2</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">dev.off</span>()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">shortest_paths</span>(g, <span style="background-color:#fff0f0">&#34;Auckland&#34;</span>, <span style="background-color:#fff0f0">&#34;Saipan&#34;</span>)</span></span></code></pre></div>
+</div>
+<figure>
+<img src="https://lucidmanager.org/images/geography/pacific-network.png" alt="Pacific island hopping - network model" title="Pacific island hopping - network model"/>
+<figcaption>
+Pacific island hopping - network model.
+</figcaption>
+</figure>
+<p>
+This diagram looks a lot like a <a href="http://www.thenonist.com/index.php/thenonist/permalink/stick_charts/">Polynesian stick chart</a>. These are maps made from sticks bound together with strings. These maps allowed the per-colonial Polynesians to navigate between their islands. The maps are not mathematical projections of the earth, like our first map, but a logical model.</p>
+<p>
+Stick charts indicate the local swell patterns that allowed the ancient mariners to find their way across the vast distances in the pacific. All we have to do is hop on a plane and we get to wherever we want withing a few hours.</p>
+<p>
+Happy island hopping!</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

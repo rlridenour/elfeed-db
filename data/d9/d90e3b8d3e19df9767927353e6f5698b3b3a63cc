@@ -1,0 +1,42 @@
+ 
+          <p>After the last week&rsquo;s <a href="/post/2025/10/the-internet-is-no-longer-a-safe-haven">Gitea attack debacle</a>, moving all things Git off the VPS became a top priority. In 2022, like many of you, I <a href="/post/2022/07/give-up-github">gave up GitHub</a> and spun up two Gitea instances myself: a private one safely behind bars on the NAS and a public one where all my public GitHub projects were moved to. Three years later, I think it&rsquo;s time to move again.</p>
+<p>Gitea was forked into Forgejo a few years ago because of yet another licensing drama but I just couldn&rsquo;t be bothered by keeping everything up to date. So I didn&rsquo;t. And then Gitea started acting annoying: artifact folders weren&rsquo;t properly cleaned up even though I encouraged it to do so in the configuration up to the point that the files clogged up the entire disk. The result was crashes of nearly everything as there wasn&rsquo;t even a few bytes space left to append to logs in <code>/var/logs</code>. And then bots started scraping the hell out of the commit endpoints.</p>
+<p>Anyway, I liked Gitea/Forgejo&rsquo;s ease of use, so migrating everything off-site to Codeberg seemed like the most obvious solution. I&rsquo;ve been wanting to go back to a coding <em>community</em> for a while now. if you host your own Gitea instance, you isolate yourself from the rest of the open source world. Collaboration still is the easiest on GitHub as simply everyone is hanging out there but I&rsquo;d rather stop coding entirely than feed Microsoft&rsquo;s AI. Give Up GitHub, folks.</p>
+<p>The steps involving the migration were surprisingly easy and fast to execute:</p>
+<ol>
+<li>Create a Codeberg account.</li>
+<li>Generate a temporary access token on your to-be-defunct Gitea instance: see <a href="https://docs.gitea.com/development/api-usage">https://docs.gitea.com/development/api-usage</a> for the exact <code>curl</code> command.</li>
+<li>For each repository to migrate: click on your profile, and instead of creating a new blank repository, select &ldquo;from migration&rdquo; or go to URL <a href="https://codeberg.org/repo/migrate">https://codeberg.org/repo/migrate</a>. Select Gitea, fill in the Git endpoint and access token and press <em>migrate</em>. Optionally, also migrate LFS/Wikis/issues/whatever by checking the appropriate boxes.</li>
+<li>Re-archive the repositories that were publicly archived.</li>
+</ol>
+<p>Congratulations, you&rsquo;re now the proud owner of Codeberg repositories. From here, we now have to decide what to do with the old Gitea instance. Do you want to simply kill it? Do you want to mirror your repositories? Or temporarily forward using the same URLs?</p>
+<p>Since I don&rsquo;t want to keep it around forever and wanted to stop it immediately, but not yet break all URLs, I rewrote the Nginx location to a <code>301</code> redirect:</p>
+<pre tabindex="0"><code>server {
+    listen 443 ssl http2;
+    server_name git.brainbaking.com;
+
+    ssl_certificate     /etc/letsencrypt/live/git.brainbaking.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/git.brainbaking.com/privkey.pem;
+
+    # I changed usernames!
+    location ~ ^/wgroeneveld(/.*)?$ {
+        return 301 https://codeberg.org/wouterg$1;
+    }
+
+    location / {
+        return 301 https://codeberg.org$request_uri;
+    }
+}
+</code></pre><p>This does redirect <a href="https://codeberg.org/wouterg/brainbaking">https://codeberg.org/wouterg/brainbaking</a> to the new correct location <a href="https://codeberg.org/wouterg/brainbaking">https://codeberg.org/wouterg/brainbaking</a>, but it does not fix <code>git pull</code> that will not follow redirects by default. You can proxy the entire thing and add more headers to fix that, or tell Git to follow redirects instead, or just change the remote URL and be done with it: <code>git remote set-url origin [newurl]</code>. I figured not a lot of folks have cloned copies of my repositories on their hard drives&mdash;and if you do, you&rsquo;d probably go looking online for the correct version and remove/reclone the entire thing.</p>
+<p>Next, it is time to kill the Gitea instance: <code>sudo systemctl stop gitea</code> (and <code>disable</code>). Set a reminder in your calender to remove the redirect and clean up your VPS in a month or two, just to be sure. I should have enough backups in case things go wrong but you never know.</p>
+<p>The final piece of the puzzle is a financial one. Codeberg is a non-profit organisation that relies entirely on donations to keep things spinning, and I reckon they also need resources to fight those pesky AI crawlers (they&rsquo;re also using Anubis, by the way). Consider donating or even becoming an active member that also allows you to vote when strategic decisions are being made.</p>
+<p>Go library programmers, don&rsquo;t forget to double-check your import paths. So-called &ldquo;vanity imports&rdquo; ease friction here as you can set up a redirect from there. <code>go get brainbaking.com/go-jamming</code> should still work. I rely on <a href="https://github.com/leighmcculloch/vangen">vangen</a> to generate simple HTML pages for import paths. In the future, I&rsquo;d rather move these paths to <code>brainbaking.com/go/[project]</code> to avoid cluttering up Hugo&rsquo;s <code>/static</code> folder.</p>
+
+
+          
+          <p>
+            By <a href="/about">Wouter Groeneveld</a> on 13 November 2025.&nbsp;
+            <a href="mailto:hifromrss@brainbaking.com?subject=Re: Migrating%20From%20Gitea%20To%20Codeberg">Reply via email</a>.
+          </p>
+          
+      

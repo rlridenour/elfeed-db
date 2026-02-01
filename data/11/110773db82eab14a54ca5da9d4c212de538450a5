@@ -1,0 +1,224 @@
+
+<h3 class="wp-block-heading" id="org5dd6c7d">Mission Update</h3>
+
+
+
+<p>Now we automate.</p>
+
+
+
+<p><em>The pod.</em><br><em>The proxy.</em><br><em>The secrets.</em></p>
+
+
+
+<p>One playbook to conjure the setup, one command to repeat the ritual.</p>
+
+
+
+<span id="more-7804"></span>
+
+
+
+<h3 class="wp-block-heading" id="org3d173fe">Requirements</h3>
+
+
+
+<ul class="wp-block-list">
+<li>Ansible (core + <code>community.containers</code>)</li>
+
+
+
+<li>Podman configured for rootless ops</li>
+
+
+
+<li>X509 certs or automation for Let&#8217;s Encrypt</li>
+
+
+
+<li>Directory structure with:
+<ul class="wp-block-list">
+<li><code>roles/semaphore/tasks/main.yml</code></li>
+
+
+
+<li><code>files/nginx.conf</code></li>
+
+
+
+<li><code>files/cert.pem, key.pem</code> (or auto-gen task)</li>
+</ul>
+</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading" id="org528cdc5">Playbook Strategy</h3>
+
+
+
+<ul class="wp-block-list">
+<li>Create Podman pod</li>
+
+
+
+<li>Deploy MySQL container</li>
+
+
+
+<li>Deploy Semaphore UI container</li>
+
+
+
+<li>Deploy NginX container with volumes mounted</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading" id="org28f3683">Secret Externalization</h3>
+
+
+
+<p>Store credentials in&nbsp;<code>group_vars/containers.yml</code>&nbsp;and encrypt with Ansible Vault.</p>
+
+
+
+<h3 class="wp-block-heading" id="orgda1f5a4">Step 1: Create The Pod</h3>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+- name: Create the pod
+  containers.podman.podman_pod:
+    name: p_semaphore
+    state: created
+    ports:
+      - "4430:443"
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="org946d281">Step 2: Activate the MySQL Container</h3>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+- name: Create the MySQL container
+  containers.podman.podman_container:
+    name: semaphore_mysql
+    pod: p_semaphore
+    state: started
+    rm: true
+    detach: true
+    image: docker.io/mysql:lts
+    volumes:
+      - semaphore_mysql:/var/lib/mysql
+    env:
+      MYSQL_RANDOM_ROOT_PASSWORD: 'yes'
+      MYSQL_DATABASE: semaphore
+      MYSQL_USER: semaphore
+      MYSQL_PASSWORD: "{{ semaphore_mysql_pw }}"
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="orgec710c5">Step 3: Initiate the Semaphore container</h3>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+- name: Create the Semaphore container
+  containers.podman.podman_container:
+    name: semaphore
+    pod: p_semaphore
+    state: started
+    rm: true
+    detach: true
+    image: docker.io/semaphoreui/semaphore:latest
+    env:
+      SEMAPHORE_DB_USER: semaphore
+      SEMAPHORE_DB_PASS: "{{ semaphore_mysql_pw }}"
+      SEMAPHORE_DB_HOST: 127.0.0.1
+      SEMAPHORE_DB_PORT: 3306
+      SEMAPHORE_DB_DIALECT: mysql
+      SEMAPHORE_DB: semaphore
+      SEMAPHORE_PLAYBOOK_PATH: /tmp/semaphore/
+      SEMAPHORE_ADMIN_PASSWORD: "{{ semaphore_admin_pw }}"
+      SEMAPHORE_ADMIN_NAME: admin
+      SEMAPHORE_ADMIN_EMAIL: admin@localhost
+      SEMAPHORE_ADMIN: admin
+      SEMAPHORE_ACCESS_KEY_ENCRYPTION: gs72mPntFATGJs9qK0pQ0rKtfidlexiMjYCH9gWKhTU=
+      SEMAPHORE_LDAP_ACTIVATED: 'no'
+      TZ: UTC
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="org7d804da">Step 4: The NginX Reverse Proxy</h3>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: yaml; title: ; notranslate">
+- name: Create the NginX container
+  containers.podman.podman_container:
+    name: semaphore_proxy
+    pod: p_semaphore
+    state: started
+    rm: true
+    detach: true
+    image: docker.io/library/nginx
+    volumes:
+      - "{{ role_path }}/files/nginx.conf:/etc/nginx/conf.d/default.conf:ro"
+      - "{{ role_path }}/files/cert.pem:/etc/nginx/cert.pem:ro"
+      - "{{ role_path }}/files/key.pem:/etc/nginx/key.pem:ro"
+</pre></div>
+
+
+<h3 class="wp-block-heading" id="orgff86412">Step 5: Verify</h3>
+
+
+
+<p>Log in.<br>Verify the configuration.<br>Monitor the logs with&nbsp;<code>podman pod logs p_semaphore</code>.</p>
+
+
+
+<h3 class="wp-block-heading" id="orgbc93f07">Final Signal</h3>
+
+
+
+<p>The stronghold stands.<br>Provisioned in silence. Hardened by code.</p>
+
+
+
+<p>But this is just the surface. A faint signal.<br>There is much to do for a strong signal.</p>
+
+
+
+<p>Need the full Ansible role?</p>
+
+
+
+<ul class="wp-block-list">
+<li>Variables ready</li>
+
+
+
+<li>Templates in place</li>
+
+
+
+<li>Handlers sharpened</li>
+
+
+
+<li>Deploy once, repeat forever</li>
+</ul>
+
+
+
+<p><strong>Buy the hardened role + full guide &#8211; forged in the silence.</strong></p>
+
+
+
+<p><strong>Whisper to DeadSwitch on Matrix:</strong>&nbsp;<code>@deadswitch:matrix.org</code><br><em>Maybe the Ghost signals back.</em></p>
+
+
+
+<p><strong>DeadSwitch | The Silent Architect</strong><br><em>In silence, I rise. In structure, I endure.</em></p>
+
+
+
+<p></p>

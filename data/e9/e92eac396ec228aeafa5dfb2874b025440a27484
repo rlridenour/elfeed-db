@@ -1,0 +1,62 @@
+<p>I&rsquo;m having issues with <code>isearch</code>!</p>
+<p>I&rsquo;ve been using <code>fido-mode</code> for a while now (I&rsquo;m one of those weirdos who transitioned from the Vertico/Marginalia/Orderless stack back to an Emacs built-in) and have become accustomed to the flexible matching that <code>fido</code> offers. For example, I often shorten commands to find them, such as:</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20250415150114-emacs--Flex-Matching-With-Isearch.jpg" width="100%">
+</figure>
+
+<p>It is very common for me to search in a buffer for strings that contain a dash (especially now I am doing a lot more elisp programming), and I keep instinctively fido-shortening the search (so searching without the dash). Each time, <code>isearch</code> says no (or fails), so I have to awkwardly reach out for the &ldquo;-&rdquo; and go back and perform the search again.</p>
+<p>What if there was a more flexible way to perform an in-buffer search? Well, of course, there is, and that is the <code>isearch-regexp</code> variants. I have seen some people just binding this to their main <code>isearch</code> because, why not? Most of the time, the search will be identical, and there is always the opportunity for a more flexible search using &ldquo;.*&rdquo;.</p>
+<p>Let&rsquo;s run an example. I would like to search for the first occurrence of <code>use-package</code> in my config. Let&rsquo;s see how many keys we can get down to for an efficient search and how easy ergonomically they are to get to (excluding the possibility of some annoyingly similar matching lines in the config)</p>
+<p>Firstly, let&rsquo;s try <code>isearch</code> - you would have to type up to at least &ldquo;use-pa&rdquo; (probably).</p>
+<p>Now for <code>isearch-regex</code> - you would type &ldquo;us.*p&rdquo; (probably) or of course just the same as <code>isearch</code>, so &ldquo;use-pa&rdquo;. This is better but a bit awkward to access the &ldquo;*&rdquo; and you would have to be quite aware of what you were searching for and the rough split of words.</p>
+<p>If this were translated into a form of <code>fido</code> search, you would type at least &ldquo;usep&rdquo; (probably), a similar number of characters, but no awkward punctuation (so faster to type) and the find is more flexible and for me now, more familiar.</p>
+<p>As far as I&rsquo;m aware, by default <code>fido</code> uses some form of flex matching (but not quite flex), which has been good enough for me for a while now. So, how do I get this form of matching using <code>isearch</code> and it being in-buffer?</p>
+<p>After a little investigation, there are packages out there in Emacs-land for some fuzzy searching, and the most relevant seemed to be <code>flex-isearch</code>. I&rsquo;m not sure I quite got it working for me, but looking through the code, I thought I could distil some concepts into simple defuns. I learned that you can actually slot any search function at the backend of isearch, so let&rsquo;s transform a normal search into something on steroids that would give us a flexible search, <code>fido</code> style!</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defvar flex-isearch-group-size <span style="color:#ae81ff">3</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Number of initial characters to group together for more accurate flex searching.&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun flex-isearch-regexp-compile (<span style="color:#a6e22e">string</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Convert a search string to a more intelligent flex-matching regexp.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">The first `flex-isearch-group-size` characters are grouped together for more accurate matching.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let* ((parts (split-string <span style="color:#a6e22e">string</span> <span style="color:#e6db74">&#34; &#34;</span> <span style="color:#66d9ef">t</span>))
+</span></span><span style="display:flex;"><span>         (compile-part
+</span></span><span style="display:flex;"><span>          (lambda (part)
+</span></span><span style="display:flex;"><span>            (let ((grouped (<span style="color:#a6e22e">substring</span> part <span style="color:#ae81ff">0</span> (<span style="color:#a6e22e">min</span> flex-isearch-group-size (<span style="color:#a6e22e">length</span> part))))
+</span></span><span style="display:flex;"><span>                  (rest (<span style="color:#a6e22e">substring</span> part (<span style="color:#a6e22e">min</span> flex-isearch-group-size (<span style="color:#a6e22e">length</span> part)))))
+</span></span><span style="display:flex;"><span>              (<span style="color:#a6e22e">concat</span>
+</span></span><span style="display:flex;"><span>               (<span style="color:#a6e22e">regexp-quote</span> grouped)
+</span></span><span style="display:flex;"><span>               (<span style="color:#a6e22e">mapconcat</span>
+</span></span><span style="display:flex;"><span>                (lambda (char)
+</span></span><span style="display:flex;"><span>                  (let ((c (<span style="color:#a6e22e">char-to-string</span> char)))
+</span></span><span style="display:flex;"><span>                    (cond
+</span></span><span style="display:flex;"><span>                     ((and (<span style="color:#a6e22e">&gt;=</span> char <span style="color:#e6db74">?A</span>) (<span style="color:#a6e22e">&lt;=</span> char <span style="color:#e6db74">?Z</span>))
+</span></span><span style="display:flex;"><span>                      (<span style="color:#a6e22e">concat</span> <span style="color:#e6db74">&#34;[^&#34;</span> c <span style="color:#e6db74">&#34;\n]*&#34;</span> c))
+</span></span><span style="display:flex;"><span>                     ((and (<span style="color:#a6e22e">&gt;=</span> char <span style="color:#e6db74">?a</span>) (<span style="color:#a6e22e">&lt;=</span> char <span style="color:#e6db74">?z</span>))
+</span></span><span style="display:flex;"><span>                      (<span style="color:#a6e22e">concat</span> <span style="color:#e6db74">&#34;[^&#34;</span> c (<span style="color:#a6e22e">upcase</span> c) <span style="color:#e6db74">&#34;\n]*[&#34;</span> c (<span style="color:#a6e22e">upcase</span> c) <span style="color:#e6db74">&#34;]&#34;</span>))
+</span></span><span style="display:flex;"><span>                     (<span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>                      (<span style="color:#a6e22e">concat</span> <span style="color:#e6db74">&#34;[^&#34;</span> (<span style="color:#a6e22e">regexp-quote</span> c) <span style="color:#e6db74">&#34;\n]*&#34;</span> (<span style="color:#a6e22e">regexp-quote</span> c))))))
+</span></span><span style="display:flex;"><span>                rest
+</span></span><span style="display:flex;"><span>                <span style="color:#e6db74">&#34;&#34;</span>)
+</span></span><span style="display:flex;"><span>               <span style="color:#e6db74">&#34;[^-_[:alnum:]\n]*&#34;</span>)))))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">concat</span>
+</span></span><span style="display:flex;"><span>     <span style="color:#e6db74">&#34;\\b&#34;</span>
+</span></span><span style="display:flex;"><span>     (<span style="color:#a6e22e">mapconcat</span> compile-part parts <span style="color:#e6db74">&#34;[^-_[:alnum:]\n]+&#34;</span>))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun flex-isearch-search-fun ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Return the appropriate search function for flex searching.&#34;</span>
+</span></span><span style="display:flex;"><span>  (if isearch-forward <span style="color:#e6db74">&#39;flex-isearch-forward</span> <span style="color:#e6db74">&#39;flex-isearch-backward</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun flex-isearch-forward (<span style="color:#a6e22e">string</span> <span style="color:#66d9ef">&amp;optional</span> bound noerror count)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Flex search forward for STRING.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let ((regexp (flex-isearch-regexp-compile <span style="color:#a6e22e">string</span>)))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">re-search-forward</span> regexp bound <span style="color:#66d9ef">t</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun flex-isearch-backward (<span style="color:#a6e22e">string</span> <span style="color:#66d9ef">&amp;optional</span> bound noerror count)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Flex search backward for STRING.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let ((regexp (flex-isearch-regexp-compile <span style="color:#a6e22e">string</span>)))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">re-search-backward</span> regexp bound <span style="color:#66d9ef">t</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(setq isearch-search-fun-function <span style="color:#e6db74">&#39;flex-isearch-search-fun</span>)
+</span></span></code></pre></div><p>With my first attempt at this, the search at times seemed to settle on more candidates than I would have liked, but I thought, &ldquo;I generally always know at least the first 2 or 3 characters that I&rsquo;m searching for, at which point things get a little fuzzy&rdquo; (pun intended). So, can I group the first few letters as part of the search, thus narrowing down the candidate list?</p>
+<p>The answer is yes, yes I can.</p>
+<p>The code above is a first attempt and with all these things, I shall play around with it and see if it works for me. At the moment, this seems to give me a more <code>fido-iish</code> feel when searching in-buffer with <code>isearch</code>, and no awkward search punctuation in sight!. So, using the examples above I can now find &ldquo;use-package&rdquo; in my config with a simple &ldquo;usep&rdquo;.</p>
+<p>I shall report back in a later post to see if it has settled into my workflow, or whether there is an annoyance that I just cannot put up with so it will have to be discarded, along with my other myriad of Emacs experiments!</p>

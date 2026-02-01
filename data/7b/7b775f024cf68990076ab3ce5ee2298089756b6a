@@ -1,0 +1,160 @@
+<p>
+<i>Published: [2025-07-03 Thu]. Comments <a href="https://mathstodon.xyz/@oantolin/114790627152642356">on Mastodon</a>.</i>
+</p>
+
+<p>
+Nowadays <code>M-o</code> is unbound in Emacs by default, but it used to be used
+for changing fonts in enriched text mode buffers. Enriched text is
+what I consider an obscure format that Emacs supports pretty well for
+some reason. I think rms had hopes of basing some Emacs word
+processing functionality on enriched text, but I'm a little hazy on
+the history ―which I'd love more knowledgeable people to educate me
+on. Enriched text (not to be confused with Microsoft's Rich Text
+Format) is the MIME text/enriched type defined by <a href="https://www.rfc-editor.org/rfc/rfc1563.html">internet RFC 1563</a>.
+In Emacs its supported by the built-in <code>enriched</code> library ―see
+<code>(finder-commentary "enriched")</code>.
+</p>
+
+<p>
+Now that <code>M-o</code> is unbound by default, I recommend binding it to
+<code>other-window</code> and turning off <code>repeat-mode</code> for that command with <code>(put
+'other-window 'repeat-map nil)</code> so you can switch to another window and
+type a word starting with "o" without trouble ―therwise you wind up
+with an o-less word in the next window! In fact, I already used that
+binding back when <code>M-o</code> was used for enriched text fonts.
+</p>
+
+<p>
+But enough rambling, the reason I'm talking about this is that back
+when <code>M-o</code> was bound to <code>facemenu-keymap</code>, pressing it would show this
+message in the echo area:
+</p>
+
+<blockquote>
+<p>
+Set face: default, bold, italic, l = bold-italic, underline, Other...
+</p>
+</blockquote>
+
+<p>
+That's right: <code>M-o</code> was bound not to a command, but to a keymap, and
+pressing it would show a message in the echo area!
+</p>
+
+<p>
+One day redditor sebhoagie, asked <a href="https://www.reddit.com/r/emacs/comments/ch016m/how_to_tell_if_a_keymap_is_active/">how to display a dynamic message
+when a keymap is active</a>, and I had that curiosity about <code>M-o</code> filed away
+in my brain. I didn't know what exactly <code>M-o</code> was bound to at that point
+in time, but I did now it was a keymap, because I had attempted to use
+<code>C-h c M-o</code> only to have <code>describe-key-briefly</code> wait for more input. So I
+set out to find out how that keymap did its magic. I ran <code>emacs -q</code>,
+found out what <code>M-o</code> was bound to by default (recall that I was using it
+for <code>other-window</code>), and here's the result (this is mostly what I wrote
+on reddit back then, with the code modernized a bit):
+</p>
+
+<p>
+You can add a prompt for the prefix keymap when you create it, and
+also prompts for the individual keys bound in the keymap! For example,
+the following code defines a keymap for package-related operations:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defvar-keymap</span> pkg-ops-map
+  <span style="color: #8f0075;">:name</span> <span style="color: #3548cf;">"Packages"</span>
+  <span style="color: #3548cf;">"h"</span> '(<span style="color: #3548cf;">"describe"</span> . describe-package)
+  <span style="color: #3548cf;">"r"</span> '(<span style="color: #3548cf;">"reinstall"</span> . package-reinstall)
+  <span style="color: #3548cf;">"a"</span> '(<span style="color: #3548cf;">"autoremove"</span> . package-autoremove)
+  <span style="color: #3548cf;">"d"</span> '(<span style="color: #3548cf;">"delete"</span> . package-delete)
+  <span style="color: #3548cf;">"i"</span> '(<span style="color: #3548cf;">"install"</span> . package-install)
+  <span style="color: #3548cf;">"l"</span> '(<span style="color: #3548cf;">"list"</span> . list-packages))
+
+(keymap-global-set <span style="color: #3548cf;">"C-c p"</span> pkg-ops-map)
+</pre>
+</div>
+
+<p>
+(Here I'm using the recent family of commands, macros and functions
+for dealing with keymaps, <code>keymap-set</code> and friends from <code>keymap-el</code>, which
+only accept the key description strings that <code>kbd</code> uses; I recommend
+these above the older <code>define-key</code> and friends.)
+</p>
+
+<p>
+Now, as soon as you press <code>C-c p</code> the following message appears in the
+echo area:
+</p>
+
+<blockquote>
+<p>
+Packages: list, install, delete, autoremove, reinstall, h = describe
+</p>
+</blockquote>
+
+<p>
+Notice that Emacs cleverly noticed that for the key <code>h</code> you gave the
+prompt "describe", which does not start with <code>h</code>, so it actually prints
+<code>h = describe</code>. The other prompts do start with the letter they are
+bound to, so Emacs just lists the prompt you gave.
+</p>
+
+<p>
+Of course, if you don't give a prompt for a binding, it's not
+mentioned in the overall prompt for the keymap, but the key is still
+bound. For example, if you replace <code>'("reinstall" . package-reinstall)</code>
+with a simple <code>'package-reinstall</code> in the above code, then the prompt
+will change to:
+</p>
+
+<blockquote>
+<p>
+Packages: list, install, delete, autoremove, h = describe
+</p>
+</blockquote>
+
+<p>
+but <code>r</code> will still be bound to <code>reinstall-package</code>.
+</p>
+
+<p>
+Now, sebhoagie said that they had an application in mind for which
+they wanted the prompt to change dynamically, so this trick wasn't
+good enough. And I remember thinking: "Emacs Lisp is super imperative,
+I bet keymaps are mutable!". I was right and as a proof of concept I
+cooked up this little example:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defvar</span> <span style="color: #005e8b;">count</span> 0)
+
+(<span style="color: #531ab6;">defvar-keymap</span> counter-map
+  <span style="color: #8f0075;">:name</span> <span style="color: #3548cf;">"Dynamic counter!"</span>
+  <span style="color: #3548cf;">"i"</span> '(<span style="color: #3548cf;">"increment"</span> . inc-counter)
+  <span style="color: #3548cf;">"r"</span> '(<span style="color: #3548cf;">"reset"</span> . reset-counter))
+
+(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">update-counter-map-prompt</span> ()
+  (rplaca (last counter-map) (format <span style="color: #3548cf;">"Counter is at %d!"</span> count)))
+
+(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">inc-counter</span> ()
+  (<span style="color: #531ab6;">interactive</span>)
+  (<span style="color: #531ab6;">setq</span> count (1+ count))
+  (update-counter-map-prompt))
+
+(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">reset-counter</span> ()
+  (<span style="color: #531ab6;">interactive</span>)
+  (<span style="color: #531ab6;">setq</span> count 0)
+  (update-counter-map-prompt))
+
+(keymap-global-set <span style="color: #3548cf;">"&lt;f5&gt;"</span> counter-map)
+</pre>
+</div>
+
+<p>
+After running that code, try <code>&lt;f5&gt; i</code> a few times to watch the counter
+increment or <code>&lt;f5&gt; r</code> to reset it back to zero.
+</p>
+
+<p>
+If you are a keymap description you might think you are set for life and
+just kick back and relax, but you are as <code>rplaca</code>-ble as anyone else.
+</p>

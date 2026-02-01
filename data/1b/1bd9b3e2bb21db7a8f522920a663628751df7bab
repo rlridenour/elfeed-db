@@ -1,0 +1,370 @@
+<p><strong>Summary: </strong>
+This post describes an #Emacs workflow I designed and developed around scanning books into my book-tracking #OrgMode document.  It has, what I consider, a not-oftend-detailed use of <code>org-capture</code>.
+</p>
+        <h2 id="the-problem">The “Problem”</h2>
+<p>I have a lot of books and I want to keep track of what I “own.”  I also have an
+<span><a href="https://orgmode.org/">Org-Mode</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Org-Mode”" title="Other site-wide references of “Org-Mode”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-ORG-MODE">&#128214;</a></small>
+ document that has a set of books that I:</p>
+<ul>
+<li>have highlighted one or more quotes</li>
+<li>are on my shopping list</li>
+<li>are books I’ve read or am reading</li>
+</ul>
+<p>However, I didn’t really have a concept of “and I <em>own</em> this book.”  To address
+that issue, I set about the process of using a mobile application to track books
+I owned.</p>
+<p>However, that meant I had two conceptual sources of data.  Ownership and “a book
+of interest” if you will.</p>
+<h2 id="the-spark">The Spark</h2>
+<p><time datetime="2025-04-16" title="2025-04-16">Yesterday</time> I saw <a href="https://lars.ingebrigtsen.no/2025/04/15/a-book-tracking-package-for-emacs/">A Book Tracking Package for Emacs</a> by <a href="https://lars.ingebrigtsen.no/about/">Lars Ingebrigtsen</a>.  In that
+post Lars shares his book tracking solution.  It involves a bar code scanner and
+<span><a href="https://en.wikipedia.org/wiki/Emacs">Emacs</a></span> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Emacs”" title="Other site-wide references of “Emacs”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-EMACS">&#128214;</a></small>
+.</p>
+<p>Curious, I set about getting that code working.  And with a few adjustments,
+namely ignoring playing audio files during workflow steps, I was able to get it
+working.</p>
+<h2 id="the-pivot">The Pivot</h2>
+<p>I spent a bit of time hacking on it, but paused as I considered that what I
+wanted was a different.</p>
+<p>Namely, given an <span><a href="https://en.wikipedia.org/wiki/International_Standard_Book_Number">International Standard Book Number</a></span> (<abbr title="International Standard Book Number">ISBN</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “International Standard Book Number”" title="Other site-wide references of “International Standard Book Number”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-ISBN">&#128214;</a></small>)
+, I wanted to get the associated book information and
+either add the book to my <span>Org-Mode</span>
+ document or update the entry in that
+document.</p>
+<p>Also, I myself had a bar-code scanner, and wanted to use that as the thing that
+typed the <abbr title="International Standard Book Number">ISBN</abbr>
+ into the buffer.  I also considered that I wanted to intervene
+during the workflow; namely once I had retrieved the book information from the
+<abbr title="International Standard Book Number">ISBN</abbr>
+, I needed to decide if I added the book or updated an existing entry.</p>
+<h2 id="establishing-a-workflow">Establishing a Workflow</h2>
+<p>Given that I needed to make a decision, I reconsidered my workflow.  Namely, I
+would grab a pile of ten or so books, and scan their <abbr title="International Standard Book Numbers">ISBNs</abbr>
+ into a buffer.  Then,
+with that pile, I would reconcile each book.</p>
+<p>The idea being two-fold:</p>
+<ul>
+<li>It is a lot of fun to rapidly point and shoot a bar-code scanner.</li>
+<li>Looking at a list of <abbr title="International Standard Book Numbers">ISBNs</abbr>
+ with no other context doesn’t tell me much.</li>
+</ul>
+<p>Therefore, build a manageable list of <abbr title="International Standard Book Numbers">ISBNs</abbr>
+ then flip to the other task.  Namely
+reconciling the remote information with what I have.</p>
+<h2 id="implementation">Implementation</h2>
+<p>I drew some inspiration from Lars’s isbn.el; but ultimately set about my own
+implementation.  Let’s walk through that.</p>
+<h3 id="defining-the-structure">Defining the Structure</h3>
+<p>I defined the <code>jf/book</code> structure.  I would use this to create a common mapping
+for the data retrieved via <abbr title="International Standard Book Number">ISBN</abbr>
+ process and my bibliography.</p>
+<pre><code class="language-emacs-lisp">(require 'request)
+(require 's)
+
+(cl-defstruct jf/book
+  &quot;A basic representation of a book as it relates to my personal
+bibliography.
+
+Slots:
+- label:     Used for comparing to labels from my bibliography; expected
+             to conform to `jf/book-make-label' function.
+- title:     The ubiquitous human readable identifier of a work.
+- author:    The author(s) of the book; separated by \&quot; and \&quot;.
+- subtitle:  Usually the words after the colon of a title.
+- tags:      A list of tags for the book; these are internal values.
+- isbn:      The ISBN for the given book.  One of the unique
+             identifiers.
+- custom_id: The `org-mode' headline CUSTOM_ID property, used for
+             helping find the headline.&quot;
+  label
+  label
+  title
+  author
+  subtitle
+  tags
+  isbn
+  custom_id)
+</code></pre>
+<h3 id="caching-that-which-i-already-have">Caching That Which I Already Have</h3>
+<p>Given that I had an existing set of books already stored locally, I wanted to
+cache that information for processing multiple <abbr title="International Standard Book Numbers">ISBNs</abbr>
+.  I use <code>my-cache-of-books</code>
+to store that information.</p>
+<pre><code class="language-emacs-lisp">(defvar my-cache-of-books
+  (make-hash-table :test 'equal)
+  &quot;We use this as a cache of my bibliography entries that are books,
+reprsented as an alist, and for each pair the `car' is a
+`jf/book-label' (as formated by `jf/book-make-label') and the `cdr'
+being an instance of `jf/book'.
+
+See `my-cache-of-books/populate' for details on populating
+this structure.
+
+Normally I'd prefix this kind thing with \&quot;jf/\&quot;, however I like how
+this variable reads.&quot;)
+</code></pre>
+<h3 id="avoiding-magic-strings">Avoiding Magic Strings</h3>
+<p>As a matter of practice, I tend to avoid using “magic strings”, instead favoring
+defined values.</p>
+<pre><code class="language-emacs-lisp">(defconst jf/bibliography/tag-own
+  &quot;own&quot;
+  &quot;The tag used to indicate ownership of a work.&quot;)
+
+(defconst jf/bibliography/tag-books
+  &quot;books&quot;
+  &quot;The tag used to indicate that a work is book.&quot;)
+
+</code></pre>
+<h3 id="populating-the-cache">Populating the Cache</h3>
+<p>As I was working through adding a book via <abbr title="International Standard Book Number">ISBN</abbr>
+, I didn’t want to rebuild a list
+of all of my books.  The <code>my-cache-of-books/populate</code> function handles this logic.</p>
+<pre><code class="language-emacs-lisp">  (defun my-cache-of-books/populate (&amp;optional clear-cache)
+  &quot;Populates `my-cache-of-books' with my current books.
+
+When CLEAR-CACHE is non-nil, clobber the cache and rebuild.&quot;
+  (when clear-cache (clrhash my-cache-of-books))
+  (when (hash-table-empty-p my-cache-of-books)
+    (save-excursion
+      (with-current-buffer
+          (find-file-noselect jf/filename/bibliography)
+        (org-map-entries
+         (lambda ()
+           ;; For some reason the org-map-entries is not filtering
+           ;; on only items tagged as books.  Hence the
+           ;; conditional.
+           (when-let* ((tags
+                        (org-element-property
+                         :tags (org-element-at-point)))
+                       (_
+                        (member jf/bibliography/tag-books tags)))
+             (let* ((title
+                     (org-element-property
+                      :title (org-element-at-point)))
+                    (author
+                     (org-entry-get
+                      (org-element-at-point) &quot;AUTHOR&quot;))
+                    (subtitle
+                     (org-entry-get
+                      (org-element-at-point) &quot;SUBTITLE&quot;))
+                    (label (jf/book-make-label
+                            title subtitle author)))
+               (puthash label
+                        (make-jf/book
+                         :label label
+                         :tags tags
+                         :title title
+                         :subtitle subtitle
+                         :author author
+                         :custom_id (org-entry-get
+                                     (org-element-at-point)
+                                     &quot;CUSTOM_ID&quot;)
+                         :isbn (org-entry-get
+                                (org-element-at-point)
+                                &quot;ISBN&quot;))
+                        my-cache-of-books))))
+         (concat &quot;+level=2+&quot; jf/bibliography/tag-books) 'file))))
+  my-cache-of-books)
+</code></pre>
+<h3 id="fetch-a-book-from-an-isbn">Fetch a Book from an ISBN</h3>
+<p>In <code>jf/book-from-isbn</code> I convert the <abbr title="International Standard Book Number">ISBN</abbr>
+ into a <code>jf/book</code> data structure.</p>
+<pre><code class="language-emacs-lisp">(defun jf/book-from-isbn (isbn)
+  &quot;Fetch the associated ISBN from Google API and return a `jf/book'.
+
+  TODO: Instead of returning the book, consider taking a function that
+  operates on the book.  There would need to be an inversion of behavior.&quot;
+  (let ((book nil))
+    (request &quot;https://www.googleapis.com/books/v1/volumes&quot;
+      :params (list (cons &quot;q&quot; (concat &quot;isbn:&quot; isbn)))
+      :parser (lambda ()
+                (let ((json-object-type 'plist))
+                  (json-read)))
+      :sync t
+      :success (cl-function
+                (lambda (&amp;key data &amp;allow-other-keys)
+                  (let* ((item
+                          (aref (plist-get data :items) 0))
+                         (volumeInfo
+                          (plist-get item :volumeInfo)))
+                    (setq book
+                          (let ((title
+                                 (plist-get volumeInfo :title))
+                                (subtitle
+                                 (plist-get volumeInfo :subtitle))
+                                (author
+                                 (s-join &quot; and &quot;
+                                         (plist-get
+                                          volumeInfo :authors))))
+                            (make-jf/book
+                             :isbn isbn
+                             :label (jf/book-make-label
+                                     title subtitle author)
+                             :tags (list
+                                    jf/bibliography/tag-own
+                                    jf/bibliography/tag-books)
+                             :subtitle subtitle
+                             :author author
+                             :title title)))))))
+    book))
+</code></pre>
+<h3 id="here-i-enter-the-isbn">Here I Enter the ISBN</h3>
+<p>In <code>jf/add-to-bibliography</code> function is the entry point into this workflow.  As
+the docstring states, I use the function to: “Append or amend to my bibliography
+the book associated with the ISBN.”</p>
+<p>It is also the function where I intervene, namely determining if the given book
+is already in my bibliography or not.</p>
+<pre><code class="language-emacs-lisp">(defun jf/add-to-bibliography (isbn &amp;optional clear-cache force)
+  &quot;Append or amend to my bibliography the book associated with the ISBN.
+
+When CLEAR-CACHE is non-nil, clobber and rebuild `my-cache-of-books'.
+
+When FORCE ignore already existing ISBN; a bit of a refresh.&quot;
+  (interactive (list (read-string &quot;ISBN: &quot;)))
+  (let ((books
+         (my-cache-of-books/populate clear-cache)))
+    (when (or force (not (my-cache-of-books/contains-isbn-p isbn)))
+      (let* ((book-from-isbn
+              (jf/book-from-isbn isbn))
+             (completed-value
+              (completing-read
+               (format &quot;Match %s: &quot; (jf/book-label book-from-isbn))
+               books nil nil
+               ;; Maybe we'll get a direct hit?
+               (jf/book-label book-from-isbn))))
+        (if-let ((book-from-bibliography
+                  (gethash completed-value books)))
+            (jf/bibliography/update-book-via-merge
+             book-from-bibliography
+             book-from-isbn)
+          (jf/bibliography/insert-book
+           book-from-isbn))))))
+</code></pre>
+<h3 id="insert-a-book">Insert a Book</h3>
+<p>When the book I fetched via an <abbr title="International Standard Book Number">ISBN</abbr>
+ is not in my <span>Org-Mode</span>
+ file, the
+<code>jf/bibliography/insert-book</code> function inserts a record.  The inline comments
+describe some false starts and the why of the solution.</p>
+<p>Restating the comments, I use the <span>Org-Mode</span>
+ capture ecosystem to perform the
+heavy lifting of adding a book entry to the document.  Namely by using variable
+binding and then calling <code>org-capture</code>; an approach that felt as though I
+leveled-up in my understanding of what was possible.</p>
+<pre><code class="language-emacs-lisp">(defun jf/bibliography/insert-book (book)
+  &quot;Insert BOOK into bibliography.
+
+Where BOOK is a `jf/book' struct.&quot;
+  ;; NOTE: My first incarnation was to use `org-capture-string' which
+  ;; meant adding to `org-capture-templates' a conceptually \&quot;private\&quot;
+  ;; capture template.  That incarnation used \&quot;?\&quot; as the template
+  ;; body.  However, when I'd test the behavior, I was getting an empty
+  ;; entry.
+  ;;
+  ;; Instead I deconstructed the concise `org-capture-string' and
+  ;; shifted towards binding `kill-ring' and using the \&quot;%c\&quot; capture
+  ;; variable.  I like this approach as it eschews adding a useless
+  ;; capture template while leveraging the power of the `org-capture'
+  ;; ecosystem.
+  (let* ((kill-ring
+          (list
+           (concat (jf/book-title book)
+                   &quot; :&quot; (s-join &quot;:&quot; (jf/book-tags book)) &quot;:\n&quot;
+                   &quot;:PROPERTIES:\n&quot;
+                   &quot;:CUSTOM_ID: &quot;
+                   (jf/denote-sluggify-title (jf/book-label book)) &quot;\n&quot;
+                   (when (s-present? (jf/book-subtitle book))
+                     (concat &quot;:SUBTITLE: &quot;
+                             (jf/book-subtitle book) &quot;\n&quot;))
+                   (when (s-present? (jf/book-author book))
+                     (concat &quot;:AUTHOR: &quot; (jf/book-author book) &quot;\n&quot;))
+                   &quot;:ISBN: &quot; (jf/book-isbn book) &quot;\n&quot;
+                   &quot;:END:\n&quot;)))
+         (org-capture-entry
+          '(&quot;B&quot; &quot;Book from ISBN Lookup&quot;
+            entry (file+headline jf/filename/bibliography &quot;Works&quot;)
+            &quot;%c&quot;
+            :immediate-finish t)))
+    (org-capture)
+    (puthash (jf/book-label book) book my-cache-of-books)
+    (message &quot;Appended %s to bibliography&quot; (jf/book-label book))))
+</code></pre>
+<h3 id="update-a-book">Update a Book</h3>
+<p>When the book I fetched via an <abbr title="International Standard Book Number">ISBN</abbr>
+ is in my <span>Org-Mode</span>
+ file, the
+<code>jf/bibliography/update-via-merge</code> function merges and updates the document.</p>
+<p>In essence, this is about finding the <code>CUSTOM_ID</code> and adding the <code>own</code> tag and <abbr title="International Standard Book Number">ISBN</abbr>
+
+to the book.</p>
+<pre><code class="language-emacs-lisp">(defun jf/bibliography/update-via-merge (from-bibliography from-isbn)
+  &quot;Update a book FROM-BIBLIOGRAPHY with FROM-ISBN information.
+
+Where both FROM-BIBLIOGRAPHY and FROM-ISBN are `jf/book' structs.&quot;
+  (setf (jf/book-isbn from-bibliography) (jf/book-isbn from-isbn))
+  (setf (jf/book-tags from-bibliography)
+        (sort (seq-union
+               (jf/book-tags from-bibliography)
+               (jf/book-tags from-isbn)
+               #'string=)))
+  (save-restriction
+    (widen)
+    (save-excursion
+      (with-current-buffer
+          (find-file-noselect jf/filename/bibliography)
+        (org-map-entries
+         (lambda ()
+           (let ((hl (org-element-at-point)))
+             (when (string=
+                    (org-entry-get hl &quot;CUSTOM_ID&quot;)
+                    (jf/book-custom_id from-bibliography))
+               (progn
+                 (org-set-property &quot;ISBN&quot;
+                                   (jf/book-isbn from-bibliography))
+                 (org-set-tags
+                  (jf/book-tags from-bibliography))
+                 (save-buffer)))))
+         (concat &quot;+&quot; jf/bibliography/tag-books 'file))
+        (message &quot;Updated %s with ISBN %s&quot;
+                 (jf/book-label from-bibliography)
+                 (jf/book-isbn from-bibliography))))))
+</code></pre>
+<h2 id="next-steps">Next Steps</h2>
+<p>In writing this, I’m thinking of a few next steps.  There’s a <code>TODO</code> item in my
+docstring.  Namely to refactor <code>jf/book-from-isbn</code>.  Instead of returning a
+<code>jf/book</code>, I would pass a function which would receive a <code>jf/book</code>.  I’d call that
+function on success.</p>
+<p>Why consider that refactor?  It touches back on that mobile application.  I have
+already scanned 80 or so books.  And I can export that application’s data and
+feed that into my process.  I wouldn’t need to call the Google function but
+instead develop the method for creating a <code>jf/book</code> structure from that exported
+data.</p>
+<p>And you may ask, where’s the code?  It is a bit in flux.  In part because I
+realized how trivial these next steps were.  And I have this bar code scanner
+that demands I start “shooting books.”</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>With this new functionality, I’ve been able to add more functionality into my
+“bibliography.”  It now serves as:</p>
+<ul>
+<li>A repository of quotes associated with their source</li>
+<li>A shopping list</li>
+<li>A reading tracker</li>
+<li>An inventory of my currently owned books</li>
+</ul>
+<p>All in a rich, yet structured, format.</p>
+<p>Further, the resulting workflow and functions helps me “chunk my work”, making
+it easier to review without simply mashing “accept.”</p>
+<h2 id="postscript">Postscript</h2>
+<p>I used the <span>Emacs</span>
+ <span><a href="https://en.wikipedia.org/wiki/Read%E2%80%93eval%E2%80%93print_loop">Read-eval-print loop</a></span> (<abbr title="Read-eval-print loop">REPL</abbr> <small><a class="ref" rel="tag opener" aria-label="Other site-wide references of “Read-eval-print loop”" title="Other site-wide references of “Read-eval-print loop”" href="https://takeonrules.com/site-map/glossary/#abbr-dfn-REPL">&#128214;</a></small>)
+ to iterate on the solution.  And all of the code was in my
+Bibliography file; usable via <span>Org-Mode</span>
+’s tangle process.</p>
+<p>Why do I mention this?</p>
+<p>I found myself first writing prose, and thinking through Lars’ solution and how
+I might modify or extend that implementation in relation to the problem as I
+understood it.</p>
+
+	<p><a class="reply-by-email" href="mailto:reply-to@takeonrules.com?subject=RE:Automating%20Adding%20Books%20to%20My%20Org-Mode%20Document">Reply by Email</a></p>
+
+      

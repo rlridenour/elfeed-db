@@ -1,0 +1,184 @@
+<p>Or: less boilerplate.</p>
+<!-- more-->
+
+<p>Common Lisp (CL) has a general notion of a <a href="https://www.lispworks.com/documentation/HyperSpec/Body/05_a.htm" title="Generalized reference"><em>place</em></a>, which is a form which has a value or values and into which a value or values can be stored. Variables are places, but so are forms like <code>(car c)</code>: <code>(setf (car c) 2)</code> will store 2 into the car of the cons bound to <code>c</code>. Places can even store multiple values:</p>
+
+<pre class="brush: lisp"><code>(let ((a 1) (b 3))
+  (setf (values a b) (values 3 4))
+  (values a b))</code></pre>
+
+<p>for instance. Here the place is <code>(values a b)</code> which is a place composed of two other places.</p>
+
+<p>This is a really useful notion, not only because places mean the language no longer needs all sorts of special-purpose mutation functions &mdash; <code>rplaca</code> still exists for compatibility but there is no <code>sethash</code> or <code>aset</code> &mdash; but because you can implement your own places which behave just like the ones the language provides.</p>
+
+<p>Here&rsquo;s an example of a place called a &lsquo;wrapped alist&rsquo;: it&rsquo;s just a cons whose cdr is an alist. It&rsquo;s done like this so storing works in general (think about empty alists).</p>
+
+<pre class="brush: lisp"><code>(defun make-wrapped-alist (&amp;optional (for-alist '()))
+  (cons nil for-alist))
+
+(defun wrapped-alist-alist (wa)
+  (cdr wa))
+
+(defun wav (item wrapped-alist &amp;key (test nil testp) (default nil))
+  (let ((found (if testp
+                   (assoc item (cdr wrapped-alist) :test test)
+                 (assoc item (cdr wrapped-alist)))))
+    (if found
+        (values (cdr found) t)
+      (values default nil))))
+
+(defun (setf wav) (new item wrapped-alist &amp;key (test nil testp) default)
+  (declare (ignore default))
+  (let ((found (if testp
+                   (assoc item (cdr wrapped-alist) :test test)
+                 (assoc item (cdr wrapped-alist)))))
+    (if found
+        (setf (cdr found) new)
+      (progn
+        (push (cons item new) (cdr wrapped-alist))
+        new))))</code></pre>
+
+<p>I will use these wrapped alist places in the examples below.</p>
+
+<h2 id="defaulting-places">Defaulting places</h2>
+
+<p>Quite often, a place has a default value or a way of indicating that there is no value in it, and you want to be able to say &lsquo;if this place has not been stored into, then store this into it&rsquo;. In the case of hash tables, the indicator is that <code>gethash</code> returns a second value of <code>nil</code>, and that is the same for <code>av</code> and my wrapped alists.</p>
+
+<p>Sometimes this is not a problem, especially when the accessor for a place lets you provide a default:</p>
+
+<pre class="brush: lisp"><code>(defun symbol-counts (l)
+  (let ((table (make-hash-table)))
+    (dolist (e l)
+      (when (symbolp e)
+        (incf (gethash e table 0))))
+    (collecting
+      (maphash (lambda (k v)
+                 (collect (cons k v)))
+               table))))</code></pre>
+
+<p>Or</p>
+
+<pre class="brush: lisp"><code>(defun symbol-counts/probably-slower (l)
+  (let ((wa (make-wrapped-alist)))
+    (dolist (e l)
+      (when (symbolp e)
+        (incf (av e wa :default 0))))
+    (wrapped-alist-alist wa)))</code></pre>
+
+<p>But sometimes it is a problem. Consider the case where the fallback thing you want to store is expensive, or has side-effects. Now you need to write some boilerplate code:</p>
+
+<pre class="brush: lisp"><code>(unless (nth-value 1 (wav item wa)
+    (setf (wav item wa) (compute-complicated-thing))))</code></pre>
+
+<h2 id="the-wrong-way">The wrong way</h2>
+
+<p>Well, boilerplate is bad. So you might want to replace this by a macro:</p>
+
+<pre class="brush: lisp"><code>(defmacro defaulting/wrong (place-form value-form)
+  ;; This just assumes that PLACE-FORM returns NIL if it has no value:
+  ;; in real life you need to be cleverer.
+  `(or ,place-form
+       (setf ,place-form ,value-form)))</code></pre>
+
+<p>This is not only limited, but incorrect. It&rsquo;s incorrect because it multiply evaluates subforms to <code>place-form</code>. Consider this:</p>
+
+<pre class="brush: lisp"><code>(let ((i 0) (table (make-hash-table)))
+  (defaulting/wrong (gethash (incf i) table) 3))</code></pre>
+
+<p>Well, using wrapped alists it&rsquo;s easy to see what this is doing wrong:</p>
+
+<pre class="brush: lisp"><code>&gt; (let ((i 0) (wa (make-wrapped-alist)))
+    (defaulting/wrong (wav (incf i) wa) 3)
+    (wrapped-alist-alist wa))
+((2 . 3))</code></pre>
+
+<p>So, not great. The boilerplate you&rsquo;d need to write is:</p>
+
+<pre class="brush: lisp"><code>&gt; (let ((i 0) (wa (make-wrapped-alist)))
+    (let ((k (incf i)))
+      (unless (wav k wa)
+        (setf (wav k wa) 3)))
+    (wrapped-alist-alist wa))
+((1 . 3))</code></pre>
+
+<h2 id="the-right-way">The right way</h2>
+
+<p>The problem is that any such <code>defaulting</code> macro doesn&rsquo;t know anything about the place it&rsquo;s defaulting. So it can&rsquo;t know which subforms of the place it needs to stash values for.</p>
+
+<p>Well, it turns out that the designers of CL thought of this, and they provided the tool you need, which is <a href="https://www.lispworks.com/documentation/HyperSpec/Body/f_get_se.htm" title="get-setf-expansion"><code>get-setf-expansion</code></a>. Given a place and optionally an environment, this will tell you exactly what you need to know to both read from that place and write to it, and to do so multiple times if need be.</p>
+
+<p><code>get-setf-expansion</code> is what you need to be able to write your own <code>setf</code>:</p>
+
+<pre class="brush: lisp"><code>(defmacro assign (&amp;rest pairs &amp;environment e)
+  ;; This should be SETF give or take
+  `(progn
+     ,@(collecting
+         (for ((tail (on-list pairs :by #'cddr)))
+           (destructuring-bind (place-form value-form . _) tail
+             (declare (ignore _))
+             (multiple-value-bind (vars vals store-vars writer-form reader-form)
+                 (get-setf-expansion place-form e)
+               (declare (ignore reader-form))
+               (collect
+                `(let* ,(mapcar #'list vars vals)
+                   (multiple-value-bind ,store-vars ,value-form
+                     ,writer-form)))))))))</code></pre>
+
+<p>But you can also use it to write <code>defaulting</code> properly. Here is a much fancier version of it, which is now correct (I hope):</p>
+
+<pre class="brush: lisp"><code>(defmacro defaulting (place value-form
+                            &amp;body options
+                            &amp;key test default-value nth-value &amp;environment e)
+  (declare (ignore options))            ;just for indent
+  (multiple-value-bind (tvars tforms store-variables storing-form accessing-form)
+      (get-setf-expansion place e)
+    `(let* ,(mapcar #'list tvars tforms)
+         (when ,(cond
+                 ((and test nth-value)
+                  `(not (funcall ,test ,default-value (nth-value ,nth-value ,accessing-form))))
+                 (test
+                  `(not (multiple-value-call ,test ,default-value ,accessing-form)))
+                 ((and default-value nth-value)
+                  `(eql ,default-value (nth-value ,nth-value ,accessing-form)))
+                 (default-value
+                  `(eql ,default-value ,accessing-form))
+                 (nth-value
+                  `(not (nth-value ,nth-value ,accessing-form)))
+                 (t
+                  `(not ,accessing-form)))
+           (multiple-value-bind ,store-variables ,value-form
+             ,storing-form))
+         ,accessing-form)))</code></pre>
+
+<p>So now:</p>
+
+<pre class="brush: lisp"><code>&gt; (let ((i 0) (wa (make-wrapped-alist)))
+    (defaulting (wav (incf i) wa) 3)
+    (wrapped-alist-alist wa))</code></pre>
+
+<p>Or, using options to this <code>defaulting</code> to tell it the value to be checked:</p>
+
+<pre class="brush: lisp"><code>&gt; (let ((i 0) (wa (make-wrapped-alist)))
+    (defaulting (wav (incf i) wa) 3 :nth-value 1)
+    (wrapped-alist-alist wa))
+((1 . 3))</code></pre>
+
+<p>Finally, you can see the expansion using <a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html#tracing-macroexpansion-trace-macroexpand"><code>trace-macroexpand</code></a>:</p>
+
+<pre class="brush: lisp"><code>&gt; (let ((a (make-wrapped-alist)))
+    (defaulting (wav 'k a) 3 :nth-value 1))
+(defaulting (wav 'k a)
+    3
+  :nth-value 1)
+ -&gt; (let* ((#:a1 a))
+      (when (not (nth-value 1 (wav 'k #:a1)))
+        (multiple-value-bind (#:new0) 3 (funcall #'(setf wav) #:new0 'k #:a1)))
+      (wav 'k #:a1))
+3
+t</code></pre>
+
+<p>and this is obviously correct.</p>
+
+<p>This macro exists in <a href="https://tfeb.org/fragments/documentation/tfeb-lisp-hax.html#small-utilities-utilities" title="Small utilities"><code>org.tfeb.hax.utilities</code></a>, the git repo for which is <a href="https://tfeb.org/computer/repos/tfeb-lisp-hax.git" title="TFEB Lisp hax"><code>tfeb.org/computer/repos/tfeb-lisp-hax.git</code></a>. Note it is <em>not</em> in the archived GitHub repo.</p>
+
+<p>This is version 10.7.0 of the TFEB.ORG Lisp hax.</p>

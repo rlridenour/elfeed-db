@@ -1,0 +1,58 @@
+ 
+          <p>Yes but it depends on how you define the verb &ldquo;to optimize&rdquo;. For any image conversion heavy lifting I rely on the trusty ImageMagick yet I&rsquo;ve been wondering whether my argument preset is correct: should it be more or less optimized?</p>
+<p>The problem with questions is that they lead to other questions, such as: how much assets is this blog actually generating each year? Is my image optimization technique sustainable enough or will I end up with terabytes full of nonsense in ten or twenty years?</p>
+<p>When it comes to size, opening up the handy <a href="https://github.com/dundee/gdu">gdu</a> disk analyser in the <code>assets/post</code> folder is enough to get a first impression:</p>
+<p>
+<figure><a href="https://brainbaking.com/post/2025/10/is-it-worth-it-to-optimize-images-for-your-site/gdu.png" class="lbox">
+		<img src="https://brainbaking.com/post/2025/10/is-it-worth-it-to-optimize-images-for-your-site/gdu.png" loading="lazy" title="Gdu summarizing how much disk usage the assets on this blog are for each year in MiB." data-pagefind-index-attrs="title">
+	</a>
+	
+		<figcaption>Gdu summarizing how much disk usage the assets on this blog are for each year in MiB.</figcaption></figure>
+</p>
+<p>As I maintain the same folder structure for both <code>content/post</code> and <code>assets/post</code>&mdash;this post lives under <code>/post/2025/10/is-it-worth-it-to-optimize-images-for-your-site/</code>, for example&mdash;generating an overview of asset sizes per year becomes trivial. Not taking the earlier Brain Baking years into account, the total amount of data that gets added each year is on average <code>12.5 MiB</code>. Let&rsquo;s make that between thirteen and fourteen as 2025 isn&rsquo;t finished yet.</p>
+<p>That means in twenty years, I&rsquo;ll have accumulated an extra <code>260 MiB</code>. That&rsquo;s not even half a classic CD-ROM. Is it really worth it then, to think twice about every MiB that gets checked in? Well, yes, since all those bytes need to leave one server and make an appearance at another in order to serve these pretty images to your visitor. Besides, as a proud member of <a href="https://512kb.club/">The 512KB Club</a>, I should keep my promise in reducing file sizes as much as possible.</p>
+<p>Of course, not all posts have assets attached to them: the average amount of assets linked to a post here is <code>1.038</code> with each post having about <code>147.24 KiB</code> on data. That&rsquo;s quite optimized! Yet can I do better? Or should I stop over-compressing those images up to the point that they&rsquo;re losing their vivid shine? More questions! No wait, those were the same.</p>
+<p>Here&rsquo;s the default ImageMagick command I rely on:</p>
+<pre tabindex="0"><code>mogrify -sampling-factor 4:2:0 +profile &#39;!icc,*&#39; -quality 80 -interlace JPEG -format jpg -colorspace sRGB screenshot.png
+</code></pre><p>What exactly does this do?</p>
+<ul>
+<li><code>-sampling-factor 4:2:0</code>: the sampling factor used for the JPEG encoder. If <a href="https://calendar.perfplanet.com/2015/why-arent-your-images-using-chroma-subsampling/">Colin Bendell</a> tells me to use <code>4:2:0</code> claiming a +/- 17% image size reduction, then I believe him.</li>
+<li><code>+profile '!icc,*'</code>: Removes all profiles except for the ICC colour profile; gets rid of EXIF data. See <a href="/post/2025/08/what-exif-data-reveals-about-your-site/">What Exif Data Reveals About Your Site</a>.</li>
+<li><code>-quality 80</code>: The compression quality of the image. With 90 or less, <a href="https://imagemagick.org/script/command-line-options.php#quality">chroma channels are downsampled</a> (which I instruct it to do anyway with the sampling factor argument).</li>
+<li><code>-interlace JPEG</code>: explicitly tasks ImageMagick to create a progressive JPEG allowing for the browser to show a lower-resolution version of the image whilst data is still being transferred. Perceived download speed is also important!</li>
+<li><code>-format jpg</code>: Why on earth would you want to export JPEG files when the era of WebP is here? That&rsquo;s an easy one to answer: because my retro hardware knows JPEG. Because I believe we should build websites that last.</li>
+<li><code>-colorspace sRGB</code>: the default and recommended option for the WWW for image that do not contain any extra colorspace information such as JPEG. Other options provide slightly <a href="https://usage.imagemagick.org/color_basics/#other">better compression</a>.</li>
+</ul>
+<p>I urge you to read Colin&rsquo;s old but relevant post on chroma (colour detail) and luma (lightness and darkness) and how to optimize for the web/mobile. It even includes a regression analysis, concluding that:</p>
+<blockquote>
+<p>Resizing images matters most. It multiplies the size a little more than the square root of the total pixels. More pixels, many more bytes. Compression matters somewhat. For quality=80 the bytes are x23; for quality=100 bytes multiply x50. Subsampling of 4:2:0 could further reduce the bytes by 17%.</p></blockquote>
+<p>What I did not realize until now by testing an comparing images is that <code>-strip</code> does something else besides stripping GPS Exif data. I noticed the export became washed out, as if a portion of the colour profile information was lost. Take a close look at the macOS dock screenshots re-rendered in Firefox:</p>
+<p>
+<figure><a href="https://brainbaking.com/post/2025/10/is-it-worth-it-to-optimize-images-for-your-site/with-without-profiles.jpg" class="lbox">
+		<img src="https://brainbaking.com/post/2025/10/is-it-worth-it-to-optimize-images-for-your-site/with-without-profiles.jpg" loading="lazy" title="Above: using -strip; without ICC. Below: using &#43;profile &#39;!icc,*&#39;; with ICC." data-pagefind-index-attrs="title">
+	</a>
+	
+		<figcaption>Above: using -strip; without ICC. Below: using &#43;profile &#39;!icc,*&#39;; with ICC.</figcaption></figure>
+</p>
+<p>Can you find the difference by inspecting the saturation of the red Firefox fox or the yellow wings of the NetNewsWire satellite? The difference is very subtle&mdash;and very difficult to showcase in a screenshot&mdash;but very annoying.</p>
+<p>Inspecting the images using ImageMagick&rsquo;s <code>identify</code> reveals that the ICC profile is removed in the process:</p>
+<pre tabindex="0"><code>identify -verbose original.jpg | grep Profile
+  Profiles:
+    Profile-exif: 62 bytes
+    Profile-icc: 4032 bytes
+identify -verbose stripped.jpg | grep Profile
+???? (no output)
+</code></pre><p>The embedded ICC profile is there to make sure the image looks the same on any computer and any piece of software; without it browsers can render it like they want. The result is a flat looking image as you can see in the above screenshot (which <em>does</em> have an embedded profile). The <code>-colorspace</code> option does not solve this: it tells ImageMagick to <em>convert</em> the colorspace, not to attach it. Instead of using <code>-strip</code>, use <code>+profile '!icc,*'</code> to throw away all profiles but the ICC one.</p>
+<p>Also, so be sure to add a <code>-resize</code> as this obviously has the highest impact on file sizes. But wait, what about providing a higher resolution image to desktop browsers and reducing the resolution to lower versions for mobile browsers? For me, that&rsquo;s a hassle I don&rsquo;t want to bother with at all. It requires saving the assets in their original format and providing a couple of alternatives, greatly increasing the total size of the source repository, the total size of the deployable folder, and the total bandwidth for my humble server.</p>
+<p>For mobile users, that&rsquo;s not a problem as downloading <code>147.24 KiB</code> of data is less then the copious amounts of megabytes that will get slurped in when you visit your average newspaper site. For ultra widescreen 4K nerds, the max width on the container wrapping this <code>&lt;article/&gt;</code> will keep things somewhat in check.</p>
+<p>The biggest takeaway for me is that in twenty years I&rsquo;ll have filled half a CD-ROM which is significantly less than I expected. Should this incentivize me to bump the quality to <code>90%</code>, reduce downsampling, or instead increase the usage of assets in general?</p>
+<p>Maybe I should be less worried about the file size and more about the content.</p>
+
+
+          
+          <p>
+            By <a href="/about">Wouter Groeneveld</a> on 23 October 2025.&nbsp;
+            <a href="mailto:hifromrss@brainbaking.com?subject=Re: Is%20It%20Worth%20It%20To%20Optimize%20Images%20For%20Your%20Site%3f">Reply via email</a>.
+          </p>
+          
+      

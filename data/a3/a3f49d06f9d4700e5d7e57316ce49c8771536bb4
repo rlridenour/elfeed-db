@@ -1,0 +1,179 @@
+
+	
+<p>
+In the chronicles of cartographic history, few works have captivated the imagination, such as Claudius Ptolemy&#39;s &#34;<a href="https://en.wikipedia.org/wiki/Geography_(Ptolemy)">Geography</a>&#34;. This monumental second-century creation is the oldest fully preserved theoretical treatise on cartography, written almost 2000 years ago. This article discusses Mapping Ptolemy&#39;s Geography with <em>ggplot2</em>.</p>
+<p>
+His cartography is not just a collection of maps of the known world in Hellenic times. Ptolemy also provides latitudes and longitudes with fantastic accuracy. Interestingly, he wrote that the best way to store geographic information is as a collection of numbers because copying maps leads to distortions over time. Thus, he created one of the world&#39;s first geographic information systems. His book contains the locations of thousands of towns, rivers, mountains and other points of interest.</p>
+<p>
+Unfortunately, no freely available database of these coordinates exists in electronic format, but there are some <a href="https://babel.hathitrust.org/cgi/pt?id=mdp.39015022717592&amp;seq=7">textual versions</a>, such as the example below.</p>
+<figure>
+<img src="https://lucidmanager.org/images/geography/ptolemy-extract.jpg" alt="Extract from Ptolemy&#39;s Geography (Nobbe edition, 1843)" title="Extract from Ptolemy&#39;s Geography (Nobbe edition, 1843)" width="600"/>
+<figcaption>
+Extract from Ptolemy&#39;s Geography (Nobbe edition, 1843).
+</figcaption>
+</figure>
+<p>
+I thus set forth to scrape these sources and create a Ptolemaic geographic database. The code and data for this project are available on GitHub.</p>
+<p>
+<a href = "https://github.com/pprevos/geography/" target="_blank"
+   title="Download geography from GitHub"
+   alt="Download geography from GitHub">
+  <button class="button is-medium is-primary">
+    <span class="icon is-large">
+      <i class="fab fa-github"></i>
+    </span>
+    <span style="font-family: monospace">geography</span>
+  </button>
+</a>
+
+</p>
+<div id="outline-container-headline-1" class="outline-2">
+<h2 id="headline-1">
+Obtaining the Data
+</h2>
+<div id="outline-text-headline-1" class="outline-text-2">
+<p>The process begins with the scraping of Ptolemy’s text from <a href="https://topostext.org/work/209">ToposText</a>, which is a treasure trove of classical literature. This website contains an almost complete transcription of Ptolemy&#39;s tome. I saved the webpage to disk to prevent hitting the ToposText server too often. The source data is available on the Github repo in RDS format.</p>
+<p>
+The website provides an accurate transcription of a large portion of Ptolemy&#39;s work. Some typographical quirks and curious coordinates were standardised using regular expressions.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(stringr)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(dplyr)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">library</span>(ggplot2)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># library(rvest)</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Scrape the website and save it to disk</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">#</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># url &lt;- &#34;https://topostext.org/work/209&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">#</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># raw_html &lt;- read_html(url) %&gt;%</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">#     html_nodes(&#34;p&#34;) %&gt;%</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888">#     html_text()</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># saveRDS(raw_html, &#34;topostext.org-work-209.rds&#34;)</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">readRDS</span>(<span style="background-color:#fff0f0">&#34;topostext.org-work-209.rds&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#888"># Fix issues and typos</span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;\\. equator&#34;</span>, <span style="background-color:#fff0f0">&#34;0°0&#34;</span>) <span style="color:#888"># Equator</span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;0°0 and&#34;</span>, <span style="background-color:#fff0f0">&#34;0°0&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(\\d+.\\d+&#39;) S &#34;</span>, <span style="background-color:#fff0f0">&#34;-\\1&#34;</span>) <span style="color:#888"># Southern hemisphere</span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(\\d) c&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(\\d) d&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1&#39; \\.&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(\\d) e&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1&#39; \\.&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;5°00&#39; . 3°00&#34;</span>, <span style="background-color:#fff0f0">&#34;45°15&#34;</span>) <span style="color:#888"># Estimated lat</span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;4°00&#39; . 3°00&#34;</span>, <span style="background-color:#fff0f0">&#34;43°00&#34;</span>) <span style="color:#888"># Estimated lat</span>
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(\\d+)&#39;(\\d+)&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1°\\2&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(Elateia . 51°38&#39; )&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1. 38°15&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(Kambyses)&#39;&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1&#34;</span>)
+</span></span><span style="display:flex;"><span>  raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_replace_all</span>(raw, <span style="background-color:#fff0f0">&#34;(Libison)&#39;&#34;</span>, <span style="background-color:#fff0f0">&#34;\\1&#34;</span>)</span></span></code></pre></div>
+</div>
+<p>
+The script then loops through all paragraphs that include coordinates and extracts the place names, longitude and latitude in degrees and minutes.</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Detect place names and coordinates</span>
+</span></span><span style="display:flex;"><span>  locs <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_split</span>(raw<span style="color:#06b;font-weight:bold">[str_detect</span>(raw, <span style="background-color:#fff0f0">&#34;°|º&#34;</span>)], <span style="background-color:#fff0f0">&#34;&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  p_regex <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;\\b[A-Za-z ,:\\-]+\\b&#34;</span>
+</span></span><span style="display:flex;"><span>  c_regex <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;(-?[0-9]{1,3}[°|º][0-9]{1,3})&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  place <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">vector</span>()
+</span></span><span style="display:flex;"><span>  lon_raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">vector</span>()
+</span></span><span style="display:flex;"><span>  lat_raw <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">vector</span>()
+</span></span><span style="display:flex;"><span>  i <span style="color:#333">&lt;-</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  <span style="color:#080;font-weight:bold">for</span> (j <span style="color:#080;font-weight:bold">in</span> <span style="color:#06b;font-weight:bold">seq_along</span>(locs)) {
+</span></span><span style="display:flex;"><span>    t <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unlist</span>(locs[j])
+</span></span><span style="display:flex;"><span>    n <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">ceiling</span>(<span style="color:#06b;font-weight:bold">sum</span>(<span style="color:#06b;font-weight:bold">str_detect</span>(t,  <span style="background-color:#fff0f0">&#34;°|º&#34;</span>)) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">2</span>)
+</span></span><span style="display:flex;"><span>    k <span style="color:#333">&lt;-</span> i <span style="color:#333">+</span> (n <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>)
+</span></span><span style="display:flex;"><span>    place[i<span style="color:#333">:</span>k] <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">str_extract</span>(t, p_regex)<span style="color:#06b;font-weight:bold">[</span>(<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>n) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">+</span> <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>]
+</span></span><span style="display:flex;"><span>    lon_txt <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unlist</span>(<span style="color:#06b;font-weight:bold">str_extract_all</span>(t<span style="color:#06b;font-weight:bold">[</span>(<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>n) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">2</span> <span style="color:#333">+</span> <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">1</span>], c_regex))
+</span></span><span style="display:flex;"><span>    lat_txt <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">unlist</span>(<span style="color:#06b;font-weight:bold">str_extract_all</span>(t<span style="color:#06b;font-weight:bold">[</span>(<span style="color:#60e;font-weight:bold">1</span><span style="color:#333">:</span>n) <span style="color:#333">*</span> <span style="color:#60e;font-weight:bold">2</span>], c_regex))
+</span></span><span style="display:flex;"><span>    <span style="color:#080;font-weight:bold">if</span> (<span style="color:#06b;font-weight:bold">length</span>(lat_txt) <span style="color:#333">==</span> <span style="color:#60e;font-weight:bold">0</span>) lat_txt <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">NA</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#080;font-weight:bold">if</span> (<span style="color:#06b;font-weight:bold">length</span>(lon_txt) <span style="color:#333">!=</span> n) <span style="color:#06b;font-weight:bold">stop</span>(j)
+</span></span><span style="display:flex;"><span>    lon_raw[i<span style="color:#333">:</span>k] <span style="color:#333">&lt;-</span> lon_txt
+</span></span><span style="display:flex;"><span>    lat_raw[i<span style="color:#333">:</span>k] <span style="color:#333">&lt;-</span> lat_txt
+</span></span><span style="display:flex;"><span>    i <span style="color:#333">&lt;-</span> i <span style="color:#333">+</span> n
+</span></span><span style="display:flex;"><span>    j <span style="color:#333">&lt;-</span> j <span style="color:#333">+</span> <span style="color:#60e;font-weight:bold">1</span>
+</span></span><span style="display:flex;"><span>  }</span></span></code></pre></div>
+</div>
+<p>
+The next phase creates a table of coordinates by converting the coordinates into numeric values and cleaning the place names. The degrees and minutes of longitude and latitude are stored in separate variables. Regular expressions split the geographic coordinates (e.g. 14°20&#39; . 54°30&#39;) into four numbers (14, 20, 54, 30).</p>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span>  <span style="color:#888"># Generate data frame</span>
+</span></span><span style="display:flex;"><span>  extract_nums <span style="color:#333">&lt;-</span> <span style="color:#080;font-weight:bold">function</span>(x, regex) {
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">as.numeric</span>(<span style="color:#06b;font-weight:bold">unlist</span>(<span style="color:#06b;font-weight:bold">str_extract_all</span>(x, regex)))
+</span></span><span style="display:flex;"><span>  }
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  d_regex <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;(-?[0-9]+)(?=°|º)&#34;</span>
+</span></span><span style="display:flex;"><span>  m_regex <span style="color:#333">&lt;-</span> <span style="background-color:#fff0f0">&#34;(?&lt;=°|º)([0-9]+)&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>  locations <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">tibble</span>(place, lon_raw, lat_raw) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">mutate</span>(lon <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">extract_nums</span>(lon_raw, d_regex),
+</span></span><span style="display:flex;"><span>           lon_min <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">extract_nums</span>(lon_raw, m_regex),
+</span></span><span style="display:flex;"><span>           lat <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">extract_nums</span>(lat_raw, d_regex),
+</span></span><span style="display:flex;"><span>           lat_min <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">extract_nums</span>(lat_raw, m_regex),
+</span></span><span style="display:flex;"><span>           place <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">str_squish</span>(place),
+</span></span><span style="display:flex;"><span>           place <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">str_to_sentence</span>(place)) <span style="color:#333">%&gt;%</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">select</span>(placename <span style="color:#333">=</span> place, <span style="color:#60e;font-weight:bold">4</span><span style="color:#333">:</span><span style="color:#60e;font-weight:bold">7</span>)</span></span></code></pre></div>
+</div>
+<p>
+The table of place names and their coordinates is available on the GitHub repository.</p>
+</div>
+</div>
+<div id="outline-container-headline-2" class="outline-2">
+<h2 id="headline-2">
+Mapping Ptolemy&#39;s Geography
+</h2>
+<div id="outline-text-headline-2" class="outline-text-2">
+<p>The visualisation was realised through the <a href="https://ggplot2.tidyverse.org/reference/geom_map.html">ggplot2 mapping geometry</a>. Ptolemy&#39;s ancient world is reborn; its cities and landmarks emerge from the mists of time on this digital canvas.</p>
+<p>
+This map uses the Conic projection, similar to one of the projections used by Ptolemy himself. This projection distorts the southern part of Africa slightly.</p>
+<p>
+The longitudes are corrected to better match them with modern coordinates. Ptolemy used the Canary Islands as the zero meridian of his coordinate system, which is 18 degrees west of the Greenwich meridian. Research also shows that Ptolemy&#39;s longitudes are stretched by a factor of 1.428.</p>
+<p>
+Ptolemy&#39;s work might seem full of mistakes from our modern perspective, but in fact, <a href="https://www.openculture.com/2021/03/why-every-world-map-is-wrong.html">every world map we have ever produced is essentially wrong</a>. Turning a globe into a two-dimensional object always results in distortions, no matter how hard you try.</p>
+<figure>
+<img src="https://lucidmanager.org/images/geography/ptolemaeus-geography-ii-vi.png" alt="Mapping Ptolemaic coordinates on a modern map" title="Mapping Ptolemaic coordinates on a modern map"/>
+<figcaption>
+Mapping Ptolemaic coordinates on a modern map.
+</figcaption>
+</figure>
+<div class="src src-r">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-r" data-lang="r"><span style="display:flex;"><span><span style="color:#888"># Visualise</span>
+</span></span><span style="display:flex;"><span>world <span style="color:#333">&lt;-</span> <span style="color:#06b;font-weight:bold">map_data</span>(<span style="background-color:#fff0f0">&#34;world&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#06b;font-weight:bold">ggplot</span>() <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_map</span>(data <span style="color:#333">=</span> world, map <span style="color:#333">=</span> world,
+</span></span><span style="display:flex;"><span>             <span style="color:#06b;font-weight:bold">aes</span>(long, lat, map_id <span style="color:#333">=</span> region),
+</span></span><span style="display:flex;"><span>            fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;darkgreen&#34;</span>, colour <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;lightgrey&#34;</span>, linewidth <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">geom_point</span>(data <span style="color:#333">=</span> locations,
+</span></span><span style="display:flex;"><span>               <span style="color:#06b;font-weight:bold">aes</span>(x <span style="color:#333">=</span> (lon <span style="color:#333">+</span> lon_min <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">60</span> <span style="color:#333">-</span> <span style="color:#60e;font-weight:bold">18</span>) <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">1.428</span>,
+</span></span><span style="display:flex;"><span>                   y <span style="color:#333">=</span> (lat <span style="color:#333">+</span> lat_min <span style="color:#333">/</span> <span style="color:#60e;font-weight:bold">60</span>)),
+</span></span><span style="display:flex;"><span>               col <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;orange&#34;</span>, alpha <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">0.7</span>, size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">.1</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_x_continuous</span>(limits <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">-15</span>, <span style="color:#60e;font-weight:bold">70</span>)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">scale_y_continuous</span>(limits <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">c</span>(<span style="color:#60e;font-weight:bold">-10</span>, <span style="color:#60e;font-weight:bold">60</span>)) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">coord_map</span>(projection <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;conic&#34;</span>, lat0 <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">37</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">labs</span>(title <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Ptolemaeus, Geography (II-VI)&#34;</span>,
+</span></span><span style="display:flex;"><span>         subtitle <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Longitude correction: 0.7(lon - 18)&#34;</span>,
+</span></span><span style="display:flex;"><span>         caption <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;Source: topostext.org/work/209&#34;</span>,
+</span></span><span style="display:flex;"><span>         x <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NULL</span>, y <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NULL</span>) <span style="color:#333">+</span> 
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme_minimal</span>(base_size <span style="color:#333">=</span> <span style="color:#60e;font-weight:bold">8</span>) <span style="color:#333">+</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#06b;font-weight:bold">theme</span>(panel.background <span style="color:#333">=</span> <span style="color:#06b;font-weight:bold">element_rect</span>(fill <span style="color:#333">=</span> <span style="background-color:#fff0f0">&#34;lightblue&#34;</span>, colour <span style="color:#333">=</span> <span style="color:#080;font-weight:bold">NA</span>))</span></span></code></pre></div>
+</div>
+<p>
+Ptolemy knew the Earth was spherical – a fact established by Greek philosophers well before his time. In his <em>Geographic</em>, Ptolemy provides a cornucopia of coordinates, illustrating the known world from Britain to Southeast Asia and from the northern reaches of Scandinavia to below the equator. But their knowledge only covered a small part of the whole globe. </p>
+<p>
+The Greeks blended mythology, philosophy, and early scientific speculation to theorise what lies beyond the world they mapped. They imagined a vast, unending ocean encircling the world. Beyond Oceanus, some thought, might be other worlds or unknown lands. The concept of &#34;<a href="https://lucidmanager.org/data-science/mapping-antipodes/">antipodes</a>&#34; was also bandied about - these are  places where people&#39;s feet are directly opposite to ours. Though the existence of such lands or peoples was often debated or outright denied.</p>
+<p>
+<a href = "https://www.r-bloggers.com/" target="_blank" title="Proudly associated with R-Bloggers">
+  <button class="button is-link is-medium">
+    <span class="icon is-large">
+      <i class="fab fa-r-project"></i>
+    </span>
+    <span>As seen on R Bloggers</span>
+  </button>
+</a>
+</p>
+</div>
+</div>
+
+      

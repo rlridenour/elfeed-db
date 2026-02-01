@@ -1,0 +1,246 @@
+
+<p>This week I pushed a set of focused improvements to <a href="https://brettterpstra.com/projects/na">NA</a> that make interactive workflows a lot smoother and the codebase a little more robust — including first‑class time tracking.</p>
+
+<p>If you run <code class="language-plaintext highlighter-rouge">na update</code> without arguments you&rsquo;ll now get an interactive menu that helps you pick the file(s) and actions to operate on, and I&rsquo;ve added a flexible plugin architecture and time tracking features.</p>
+
+<h2 id="tldr">TL;DR</h2>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">na update</code> (no args) now launches an interactive, consistent selection flow for files and actions.</li>
+  <li>The update submenu supports multi-select, edit, move, and direct action modes more reliably.</li>
+  <li>Fixed many edge cases: nil-safe string helpers, clearer YARD docs, and better tests for helper code.</li>
+  <li>Time tracking</li>
+  <li>Plugin architecture</li>
+  <li>Under-the-hood improvements to file selection, action movement, and tagging logic.</li>
+</ul>
+
+<h3 id="new-time-tracking">New: Time tracking</h3>
+
+<ul>
+  <li>Add start/finish times right from the CLI:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">--started TIME</code> on <code class="language-plaintext highlighter-rouge">add</code>, <code class="language-plaintext highlighter-rouge">complete</code>/<code class="language-plaintext highlighter-rouge">finish</code>, and <code class="language-plaintext highlighter-rouge">update</code></li>
+      <li><code class="language-plaintext highlighter-rouge">--end TIME</code> (alias <code class="language-plaintext highlighter-rouge">--finished</code>) on <code class="language-plaintext highlighter-rouge">add</code>, <code class="language-plaintext highlighter-rouge">complete</code>/<code class="language-plaintext highlighter-rouge">finish</code>, and <code class="language-plaintext highlighter-rouge">update</code></li>
+      <li><code class="language-plaintext highlighter-rouge">--duration DURATION</code> to backfill a start time from the finish</li>
+    </ul>
+  </li>
+  <li>Natural language and shorthand supported everywhere: <code class="language-plaintext highlighter-rouge">30m ago</code>, <code class="language-plaintext highlighter-rouge">-2h</code>, <code class="language-plaintext highlighter-rouge">2h30m</code>, <code class="language-plaintext highlighter-rouge">2:30 ago</code>, <code class="language-plaintext highlighter-rouge">yesterday 5pm</code></li>
+  <li>Durations aren’t stored; they’re computed from <code class="language-plaintext highlighter-rouge">@started(...)</code> and <code class="language-plaintext highlighter-rouge">@done(...)</code> when displayed.</li>
+  <li>Display enhancements in <code class="language-plaintext highlighter-rouge">next</code>/<code class="language-plaintext highlighter-rouge">tagged</code>:
+    <ul>
+      <li><code class="language-plaintext highlighter-rouge">--times</code> shows per‑action durations and a grand total (implies <code class="language-plaintext highlighter-rouge">--done</code>)</li>
+      <li><code class="language-plaintext highlighter-rouge">--human</code> switches durations to friendly text</li>
+      <li><code class="language-plaintext highlighter-rouge">--only_timed</code> filters to actions with both <code class="language-plaintext highlighter-rouge">@started</code> and <code class="language-plaintext highlighter-rouge">@done</code> (implies <code class="language-plaintext highlighter-rouge">--times --done</code>)</li>
+      <li><code class="language-plaintext highlighter-rouge">--only_times</code> outputs only the totals (no action list; implies <code class="language-plaintext highlighter-rouge">--times --done</code>)</li>
+      <li><code class="language-plaintext highlighter-rouge">--json_times</code> emits a JSON object with timed actions, per‑tag totals, and overall totals (implies <code class="language-plaintext highlighter-rouge">--times --done</code>)</li>
+      <li>Per‑tag totals are shown as a Markdown table with aligned columns and a footer row for the grand total</li>
+      <li>Duration color is theme‑configurable via a <code class="language-plaintext highlighter-rouge">duration</code> key (default <code class="language-plaintext highlighter-rouge">{y}</code>)</li>
+    </ul>
+  </li>
+</ul>
+
+<p>Example:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>na add <span class="nt">--started</span> <span class="s2">"30 minutes ago"</span> <span class="s2">"Investigate bug"</span>
+na <span class="nb">complete</span> <span class="nt">--finished</span> now <span class="nt">--duration</span> 2h30m <span class="s2">"Investigate bug"</span>
+na next <span class="nt">--times</span> <span class="nt">--human</span>
+na next <span class="nt">--only_times</span>
+na tagged bug <span class="nt">--json_times</span> | jq</code></pre></div></div>
+
+<h3 id="new-plugin-architecture">New: Plugin architecture</h3>
+
+<p>You can now extend NA with small scripts placed in <code class="language-plaintext highlighter-rouge">~/.local/share/na/plugins</code>. Each plugin is a script with a shebang; NA feeds it actions on STDIN and reads transformed actions from STDOUT.</p>
+
+<ul>
+  <li>Run: <code class="language-plaintext highlighter-rouge">na plugin run NAME</code></li>
+  <li>Shortcut: <code class="language-plaintext highlighter-rouge">na plugin NAME</code> (defaults to run, but doesn’t accept run‑flags)</li>
+  <li>From update: <code class="language-plaintext highlighter-rouge">na update --plugin NAME</code> (also appears in the interactive menu)</li>
+  <li>From display: <code class="language-plaintext highlighter-rouge">na next --plugin NAME</code> (STDOUT‑only transform; no file writes)</li>
+  <li>IO formats: <code class="language-plaintext highlighter-rouge">json</code>, <code class="language-plaintext highlighter-rouge">yaml</code>, <code class="language-plaintext highlighter-rouge">csv</code>, <code class="language-plaintext highlighter-rouge">text</code> (<code class="language-plaintext highlighter-rouge">--input/--output/--divider</code> supported)</li>
+  <li>Plugins may modify <code class="language-plaintext highlighter-rouge">text</code>, <code class="language-plaintext highlighter-rouge">note</code>, <code class="language-plaintext highlighter-rouge">tags</code>, and <code class="language-plaintext highlighter-rouge">parents</code>; NA applies moves if parents change</li>
+  <li>Optional ACTIONs supported in plugin output: <code class="language-plaintext highlighter-rouge">UPDATE</code> (default), <code class="language-plaintext highlighter-rouge">DELETE</code>, <code class="language-plaintext highlighter-rouge">COMPLETE/FINISH</code>, <code class="language-plaintext highlighter-rouge">RESTORE/UNFINISH</code>, <code class="language-plaintext highlighter-rouge">ARCHIVE</code>, <code class="language-plaintext highlighter-rouge">ADD_TAG</code>, <code class="language-plaintext highlighter-rouge">DELETE_TAG/REMOVE_TAG</code>, <code class="language-plaintext highlighter-rouge">MOVE</code></li>
+</ul>
+
+<h4 id="plugin-subcommands">Plugin subcommands</h4>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">na plugin new NAME</code> (alias <code class="language-plaintext highlighter-rouge">n</code>): Create a plugin in <code class="language-plaintext highlighter-rouge">~/.local/share/na/plugins</code>. If no extension is provided, NA prompts for a language (or pass <code class="language-plaintext highlighter-rouge">--language rb|py|/usr/bin/env bash</code>). Shebang and extension are inferred.</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin edit NAME</code>: Open a plugin in your system editor. If no name is given, you’ll be prompted to pick from available plugins (enabled and disabled).</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin run NAME</code> (alias <code class="language-plaintext highlighter-rouge">x</code>): Execute a plugin against selected actions. With no arguments, NA prompts for the plugin and actions. Supports <code class="language-plaintext highlighter-rouge">--input</code>, <code class="language-plaintext highlighter-rouge">--output</code>, <code class="language-plaintext highlighter-rouge">--divider</code>, plus usual filters like <code class="language-plaintext highlighter-rouge">--file</code>, <code class="language-plaintext highlighter-rouge">--depth</code>, <code class="language-plaintext highlighter-rouge">--search</code>, <code class="language-plaintext highlighter-rouge">--tagged</code>, <code class="language-plaintext highlighter-rouge">--done</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin enable NAME</code> (alias <code class="language-plaintext highlighter-rouge">e</code>): Move a plugin from <code class="language-plaintext highlighter-rouge">plugins_disabled</code> into <code class="language-plaintext highlighter-rouge">plugins</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin disable NAME</code> (alias <code class="language-plaintext highlighter-rouge">d</code>): Move a plugin from <code class="language-plaintext highlighter-rouge">plugins</code> into <code class="language-plaintext highlighter-rouge">plugins_disabled</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin ls</code> (alias <code class="language-plaintext highlighter-rouge">list</code>): List plugins. Use <code class="language-plaintext highlighter-rouge">--type enabled|disabled</code> (or <code class="language-plaintext highlighter-rouge">e|d</code>) to output plain names only.</li>
+</ul>
+
+<p>Quick examples:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># Transform a filtered list without writing files</span>
+na tagged bug <span class="nt">--plugin</span> AddFoo <span class="nt">--output</span> text
+
+<span class="c"># Modify selected actions in place</span>
+na update <span class="nt">--plugin</span> AddFoo <span class="nt">--input</span> json <span class="nt">--output</span> json</code></pre></div></div>
+
+<p>On first run NA creates the plugins folder with a README and two sample plugins (<code class="language-plaintext highlighter-rouge">Add Foo.py</code>, <code class="language-plaintext highlighter-rouge">Add Bar.sh</code>) you can use as starting points.</p>
+
+<h2 id="interactive-na-update-flow">Interactive <code class="language-plaintext highlighter-rouge">na update</code> flow</h2>
+
+<p>Run <code class="language-plaintext highlighter-rouge">na update</code> with no arguments and you&rsquo;ll see a consistent selection flow:</p>
+
+<ul>
+  <li>Choose one or more todo files (fuzzy search / <a href="https://github.com/junegunn/fzf">fzf</a> / <a href="https://github.com/charmbracelet/gum">gum</a> used when available).</li>
+  <li>Pick which actions to update (multi-selection supported).</li>
+  <li>Choose an operation: edit, move, add tag, remove tag, mark done, delete.</li>
+</ul>
+
+<p>Examples:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nv">$ </span>na update
+Select files: <span class="o">(</span>interactive list<span class="o">)</span>
+Select actions <span class="o">(</span>multi<span class="o">)</span>:
+  <span class="o">[</span>x] 23 % Inbox/Work : - Fix X
+  <span class="o">[</span>x] 45 % Inbox/Personal : - Call Y
+Choose operation: <span class="o">(</span>edit / move / <span class="k">done</span> / delete / tag<span class="o">)</span></code></pre></div></div>
+
+<p>The menu now behaves consistently whether you pick a single file or multiple files; if you choose multi-select the update command applies as you&rsquo;d expect to the set of chosen actions.</p>
+
+<p>There&rsquo;s a direct action mode when you know the file and action: <code class="language-plaintext highlighter-rouge">na update PATH -l 23</code> still works as before. The interactive flow only kicks in when no explicit target is provided.</p>
+
+<h2 id="notable-fixes">Notable fixes</h2>
+
+<p>A lot of the work was small but important:</p>
+
+<ul>
+  <li>Nil-safe string helpers: <code class="language-plaintext highlighter-rouge">trunc_middle</code>, <code class="language-plaintext highlighter-rouge">highlight_filename</code>, and friends were guarded against <code class="language-plaintext highlighter-rouge">nil</code> inputs so tests and UI code don&rsquo;t explode when a file is missing or the database contains a stray blank line.</li>
+  <li>Action move/edit correctness: moving an action to a different project now updates parent indexes and project line numbers properly, avoiding off-by-one bugs that could leave the file in a strange state.</li>
+  <li><code class="language-plaintext highlighter-rouge">select_file</code> and fuzzy matching: the fuzzy and database-driven file selection was made more robust — the code handles directories that have a <code class="language-plaintext highlighter-rouge">file.na</code> or <code class="language-plaintext highlighter-rouge">file/file.na</code> pattern and falls back to a clear error instead of failing silently.</li>
+  <li>YARD docs: cleaned up a number of <code class="language-plaintext highlighter-rouge">@!method</code> directives and added top-level <code class="language-plaintext highlighter-rouge">@example</code> blocks for the main classes and helpers so the docs are friendlier and generate without warnings.</li>
+  <li>Tests: added and fixed unit tests for <code class="language-plaintext highlighter-rouge">Array</code>, <code class="language-plaintext highlighter-rouge">Hash</code>, and <code class="language-plaintext highlighter-rouge">String</code> helpers. TTY screen and color-related test stubs were improved for reliability on CI.
+    <ul>
+      <li>New tests for time features: JSON output, totals‑only output, timed‑only filtering.</li>
+    </ul>
+  </li>
+</ul>
+
+<h2 id="try-it">Try it</h2>
+
+<p>You can update to the latest version with:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>gem <span class="nb">install </span>na</code></pre></div></div>
+
+<div class="iterm-command"><a href="https://brettterpstra.comiterm2:/command?c=gem%20install%20na" class="iterm-run-button">Run in iTerm</a></div>
+
+<p>That should give you v1.2.85 or higher.</p>
+
+<p>If you&rsquo;re on a recent development build or want to try the updates locally:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># From the gem checkout</span>
+bundle <span class="nb">exec </span>bin/na update
+
+<span class="c"># Or after building the gem and installing</span>
+na update</code></pre></div></div>
+
+<p>If you run into anything odd, please open an issue with the command you ran and a short description of what you expected vs what happened. Small, reproducible steps are the fastest way to a fix.</p>
+
+<p>If you hit an error and want to include a backtrace, run the command with debug enabled and paste the output:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nv">GLI_DEBUG</span><span class="o">=</span><span class="nb">true </span>na <span class="o">[</span>COMMAND]</code></pre></div></div>
+
+<h2 id="other-updates">Other updates</h2>
+
+<p>I last wrote about 1.2.80. Here are a changes since then:</p>
+
+<h3 id="changed">CHANGED</h3>
+
+<ul>
+  <li>Default theme/templates include <code class="language-plaintext highlighter-rouge">%line</code>; users with custom theme may need to regenerate to see line numbers</li>
+  <li>Update command interactive menu lists available plugins</li>
+  <li>README: add detailed Plugins section with examples and schema</li>
+  <li>CHANGELOG: add 1.2.88 entry for plugins feature</li>
+  <li>Completed plugin subcommand sections with aliases and context</li>
+  <li>Plugins section updated with management workflow and notes</li>
+  <li>Sample plugins can be regenerated with &ndash;generate-examples when deleted</li>
+  <li>Shortcut <code class="language-plaintext highlighter-rouge">na plugin NAME</code> works without run command flags (use <code class="language-plaintext highlighter-rouge">na plugin run NAME</code> for flags)</li>
+</ul>
+
+<h3 id="new">NEW</h3>
+
+<ul>
+  <li>Display line numbers with actions across <code class="language-plaintext highlighter-rouge">na next</code> and selection</li>
+  <li>Support <code class="language-plaintext highlighter-rouge">PATH:LINE</code> targeting in <code class="language-plaintext highlighter-rouge">na update</code> and <code class="language-plaintext highlighter-rouge">na edit</code></li>
+  <li>Multi-action editing in external editor using <code class="language-plaintext highlighter-rouge"># ------ PATH:LINE</code> markers; notes supported beneath each action</li>
+  <li>Add &ndash;started flag on add/complete(update) to set @started</li>
+  <li>Add &ndash;finished alias to &ndash;end on add/complete/update to set @done</li>
+  <li>Add &ndash;duration (add/complete/update); backfills @started from &ndash;end</li>
+  <li>Add &ndash;times (next/tagged) to show per-action durations and totals</li>
+  <li>Add &ndash;human (next/tagged) for human-friendly duration format</li>
+  <li>Add &ndash;only_timed (next/tagged) to show only items with @started/@done</li>
+  <li>Add &ndash;json_times to next/tagged (JSON of timed actions, tags, total)</li>
+  <li>Add &ndash;only_times to next/tagged (show only totals, no action list)</li>
+  <li>Plugin system with scripts in ~/.local/share/na/plugins</li>
+  <li>Na plugin command to run plugins on selected actions</li>
+  <li>&ndash;plugin/&ndash;input/&ndash;output/&ndash;divider flags on update/next/tagged/find</li>
+  <li>Plugin IO supports json, yaml, csv, and text formats</li>
+  <li>ACTION support in plugin IO (UPDATE/DELETE/COMPLETE/RESTORE/ARCHIVE/ADD_TAG/DELETE_TAG/MOVE)</li>
+  <li>Auto-create plugins dir with README and sample plugins (Add Foo.py, Add Bar.sh)</li>
+  <li>Display commands can pipe through plugins (STDOUT-only, no writes)</li>
+  <li>Add &ndash;json_times to next/tagged (JSON of timed actions, tags, total)</li>
+  <li>Add &ndash;only_times to next/tagged (show only totals, no action list)</li>
+  <li>Added plugin enable/disable and flow tests (update/move behaviors)</li>
+  <li>Document plugin subcommands (new/edit/run/enable/disable)</li>
+  <li><code class="language-plaintext highlighter-rouge">--generate-examples</code> flag regenerates sample plugins and README</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin NAME</code> shortcut defaults to <code class="language-plaintext highlighter-rouge">na plugin run NAME</code></li>
+</ul>
+
+<h3 id="improved">IMPROVED</h3>
+
+<ul>
+  <li>&ndash;times and &ndash;only_timed imply &ndash;done for next/tagged</li>
+  <li>Duration annotations render with theme colors in output</li>
+  <li>Natural-language dates for @started/@done normalized automatically</li>
+  <li>Support shorthand: 2h30m, 30m ago, -2:30, 2:05 ago</li>
+  <li>&ndash;only_timed, &ndash;times, and &ndash;json_times imply &ndash;done automatically</li>
+  <li>Per-tag duration totals rendered as aligned Markdown table with footer</li>
+  <li>Duration color configurable via theme key <code class="language-plaintext highlighter-rouge">duration</code> (default {y})</li>
+  <li>Duration/time docs and output clarifications in README</li>
+  <li>Internal plugin README with metadata, IO, and examples</li>
+  <li>&ndash;only_timed, &ndash;times, and &ndash;json_times imply &ndash;done automatically</li>
+  <li>Per-tag duration totals rendered as aligned Markdown table with footer</li>
+  <li>Duration color configurable via theme key <code class="language-plaintext highlighter-rouge">duration</code> (default {y})</li>
+  <li><code class="language-plaintext highlighter-rouge">na plugin run</code> prompts for plugin and action selection when no filters</li>
+  <li>README: brief descriptions for <code class="language-plaintext highlighter-rouge">plugin</code> subcommands</li>
+  <li>README plugin command docs with brief descriptions</li>
+  <li>Sample plugins only generated once (tracked via .samples_generated flag)</li>
+</ul>
+
+<h3 id="fixed">FIXED</h3>
+
+<ul>
+  <li>Incorrect colorization (unexpected bright green) in action output</li>
+  <li>Search highlighting no longer corrupts ANSI color codes or numbers in escape sequences</li>
+  <li>Multi-action editor now only includes the specifically selected lines (no duplicates)</li>
+  <li>Delete in update menu removes the correct lines</li>
+  <li>Multi-select updates process bottom-to-top to avoid line shifts</li>
+  <li>String wrapping now wraps at requested widths (e.g., 60 cols) and indents</li>
+  <li>Plugin update path writing duplicate actions; now in-place by line</li>
+  <li>Plugin apply finds action via target_line, avoids Symbol-&gt;Integer error</li>
+  <li>String#wrap indentation and width handling for multi-line wrapping</li>
+  <li>Lint/DuplicateBranch in plugin parse_actions</li>
+  <li>Style/MapToHash in apply_plugin_result</li>
+  <li>String wrapping now wraps at requested widths (e.g., 60 cols) and indents</li>
+  <li>Plugin-applied updates now modify in place (no duplicate actions)</li>
+  <li>Suppressed Y/N prompts during plugin operations and non-interactive runs</li>
+  <li><code class="language-plaintext highlighter-rouge">--only_timed</code> filtering (case-insensitive tag keys) in output</li>
+  <li>Stabilized wrapping by removing test override of String#wrap</li>
+</ul>
+
+<p>Thanks for playing with it and for the helpful feedback you&rsquo;ve been sending. Check out the <a href="https://brettterpstra.com/projects/na">NA project page</a> for more info.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/115457616147015647">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=One+more+na+update%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F29%2Fone-more-na-update%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F29%2Fone-more-na-update%2F&text=One+more+na+update&url=https%3A%2F%2Fbrettterpstra.com%2F2025%2F10%2F29%2Fone-more-na-update%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17199025.gif" height="1" width="1"/>

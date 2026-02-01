@@ -1,0 +1,76 @@
+<p>Something has been nagging at me for a while now, I seem to spend a lot of time moving the cursor to the next or previous line within a window, spamming <code>C-n</code> and <code>C-p</code> to get where I want to within a file.</p>
+<figure class="emacs-img"><img src="https://emacs.dyerdwelling.family/ox-hugo/emacs--centering-cursor-after-scroll__emacs_linux.jpg">
+</figure>
+
+<p>Why is this?</p>
+<p>Well I am scrolling quite often using <code>C-v</code> and <code>M-v</code> and this has a side effect on the cursor by pushing it to the top or bottom of the window. After I scroll eyeball a file to the desired location I would like my cursor to be vaguely in the center of the window as this is naturally where my eye would have been to identify the file location.</p>
+<p>Although I have upgraded the default emacs scrolling to smooth scrolling by using good-scroll I am still having this issue.</p>
+<p>One solution is to use <code>M-r</code></p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(move-to-window-line-top-bottom <span style="color:#66d9ef">&amp;optional</span> ARG)
+</span></span><span style="display:flex;"><span>Position <span style="color:#a6e22e">point</span> relative to window.
+</span></span></code></pre></div><p>which moves the cursor first to the middle then the top and then to the bottom of the window. So after a scroll I can just muscle memory <code>M-r</code>?  Well I am scrolling quite a lot and the key combination is a little awkward to get to and I want to limit my key presses as much as possible.</p>
+<p>Another possible solution is to use <strong>recenter-top-bottom</strong> but this will just add an extra scroll and the cursor position will be in the wrong place anyway.</p>
+<p>There may also be packages out there that will help but I am choosing to ignore this option for the moment due to wanting to keep vanilla emacs as much as possible (yes I know I keep banging on about this!)</p>
+<p>Lets see what I can do with some elisp.</p>
+<p>Before I discovered the wonder of emacs smooth scrolling using good-scroll I was using some elisp to have greater control over the number of lines the basic <strong>scroll-</strong>-command* would scroll, so I had something like this:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun window-some-height () (<span style="color:#a6e22e">max</span> <span style="color:#ae81ff">1</span> <span style="color:#a6e22e">/</span> (<span style="color:#a6e22e">1-</span> (window-height
+</span></span><span style="display:flex;"><span>                                            (<span style="color:#a6e22e">selected-window</span>))) <span style="color:#ae81ff">4</span>)))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun scroll-up-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (scroll-up-command (window-some-height))
+</span></span><span style="display:flex;"><span>  )
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun scroll-down-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (scroll-down-command (window-some-height))
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><p>with the scroll-some functions bound to the standard scroll bindings.</p>
+<p>Now good-scroll is enabled it morphed into the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun scroll-up-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (good-scroll-up)
+</span></span><span style="display:flex;"><span>  )
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun scroll-down-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (good-scroll-down)
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><p>as the scroll amount is defined by good-scroll.</p>
+<p>My idea here is to modify the scroll functions to add some post scroll cursor centering commands.  Maybe I could use (move-to-window-line-top-bottom)!. Well I tried it, but it just didn&rsquo;t seem to make any difference, I tried some delays, e.t.c.  I suspect that the problem here is that good-scroll has a certain method to achieve its smooth scrolling which is incompatible with the function calls I am initially trying.</p>
+<p>Well I decided to keep throwing ideas at the scroll functions to see if I could somehow accidentally force a roughly consistent cursor centering after a scroll and see if something sticks (there may be a better term for this!)</p>
+<p>Scroll lock didn&rsquo;t work!, margins didn&rsquo;t work!</p>
+<p>Eventually I managed to find a function call that seemed to make a difference to the cursor position after a scroll but didn&rsquo;t seem to position the cursor where I thought it should do given the documentation. The function is:</p>
+<pre tabindex="0"><code class="language-nil" data-lang="nil">(move-to-window-Line ARG)
+
+Position point relative to window.
+ARG nil means position point at center of window.
+Else, ARG specifies vertical position within the window;
+zero means top of window, negative means relative to bottom
+of window, -1 meaning the last fully visible display line
+of the window.
+
+Value is the screen line of the window point moved to, counting
+from the top of the window.
+</code></pre><p>Passing in a &rsquo;nil parameter was close but the cursor was too skewed to either end (but at least had a consistent effect on the position of the cursor), however it had little or no effect for half height windows after a horizontal split.</p>
+<p>However, passing in different arguments to the <strong>move-to-window-line</strong> function have me differing post scroll cursor locations giving me a licence to that well known tried and tested foolproof method of trial and error!</p>
+<p>Of course for a full height window I now had the perfect setup but what about those pesky half height and maybe smaller windows?. There is a valid argument that might say that smaller windows are generally so small that even if the cursor gets pushed to the top or bottom then it won&rsquo;t take too much effort to reposition the cursor. I would say to an extent that is true but for a half height window I would still want to have a centering cursor option after a scroll.</p>
+<p>So again elisp to the rescue!, I modified my scroll functions as thus:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun scroll-up-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (good-scroll-up)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">&lt;</span> <span style="color:#ae81ff">50</span> (<span style="color:#a6e22e">window-body-height</span>))
+</span></span><span style="display:flex;"><span>    (move-to-window-Line <span style="color:#ae81ff">-14</span>)
+</span></span><span style="display:flex;"><span>    (move-to-window-Line <span style="color:#ae81ff">-3</span>)
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  )
+</span></span><span style="display:flex;"><span>(defun scroll-down-some ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (good-scroll-down)
+</span></span><span style="display:flex;"><span>  (if (&lt;50 (<span style="color:#a6e22e">window-body-height</span>))
+</span></span><span style="display:flex;"><span>    (move-to-window-Line <span style="color:#ae81ff">14</span>)
+</span></span><span style="display:flex;"><span>    (move-to-window-Line <span style="color:#ae81ff">8</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#a6e22e">&gt;</span>
+</span></span></code></pre></div><p>The value of 50 was a window line height less than a full window height with a little taken off, but not too much to make it smaller than half height!</p>
+<p>Once I have the move-to-window-line values tweaked accordingly for my setup then in theory I have a decent functioning cursor centering solution. Of course there are some foibles, like what happens if I go full-screen with emacs, e.t.c but this seems to work well for me for the moment and I am now moving the cursor around less often within a buffer.</p>
+<p>As with all these things and especially emacs I&rsquo;m sure a better simpler, probably built-in solution will present itself, but that may be for another day&hellip;</p>

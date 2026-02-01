@@ -1,0 +1,71 @@
+<p>I have been evolving my way through many differing ways of grepping recently from standard built-in greps to a few ripgrep front ends until I finally settled on <code>deadgrep</code></p>
+<figure class="emacs-img"><img src="https://emacs.dyerdwelling.family/ox-hugo/20230225134207-emacs--Trying-out-consult-ripgrep-to-replace-deadgrep.jpg">
+</figure>
+
+<p>I am currently an <strong>ivy</strong> user but as everyone seems to be talking about
+<strong>vertico</strong> and the associated completion stack I thought I would give it a
+try and therefore <code>consult-ripgrep</code> to see it can improve on my <code>deadgrep</code>
+setup.</p>
+<p>Previously I have created a couple of wrappers around deadgrep:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/deadgrep ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">equal</span> major-mode <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span>))
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span> (thing-at-point <span style="color:#e6db74">&#39;symbol</span>)))
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  (deadgrep search-term home-dir)
+</span></span><span style="display:flex;"><span>  )
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/grep ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">equal</span> major-mode <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span>))
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span> (thing-at-point <span style="color:#e6db74">&#39;symbol</span>)))
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  (deadgrep search-term)
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><p>As a universal argument was passed to deadgrep which had a side effect of initially pausing the search, this meant I split my grepping between <code>S-f12</code> and <code>M-f12</code> one for a project grep and one for a local directory grep.</p>
+<p>As part of trying out <code>consult-ripgrep</code> I think I would like to rewrite the functions above and I would want a quick and simple method to revert back to using deadgrep.</p>
+<p>I settled on the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/project-root ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Guess the project root of the given FILE-PATH.&#34;</span>
+</span></span><span style="display:flex;"><span>  (let ((root default-directory)
+</span></span><span style="display:flex;"><span>         (project (project-current)))
+</span></span><span style="display:flex;"><span>    (when project
+</span></span><span style="display:flex;"><span>      (cond ((<span style="color:#a6e22e">fboundp</span> <span style="color:#e6db74">&#39;project-root</span>)
+</span></span><span style="display:flex;"><span>              (setq root (project-root project)))))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(defun my/grep (arg)
+</span></span><span style="display:flex;"><span>  (interactive <span style="color:#e6db74">&#34;p&#34;</span>)
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">equal</span> major-mode <span style="color:#e6db74">&#39;dired-mode</span>)
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span>))
+</span></span><span style="display:flex;"><span>    (setq search-term
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">read-from-minibuffer</span> <span style="color:#e6db74">&#34;Search : &#34;</span> (thing-at-point <span style="color:#e6db74">&#39;symbol</span>)))
+</span></span><span style="display:flex;"><span>    )
+</span></span><span style="display:flex;"><span>  (if (<span style="color:#a6e22e">&gt;</span> arg <span style="color:#ae81ff">1</span>) <span style="color:#75715e">;; if C-u has been activated</span>
+</span></span><span style="display:flex;"><span>    (consult-ripgrep default-directory search-term)
+</span></span><span style="display:flex;"><span>    (consult-ripgrep (my/project-root) search-term)))
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;;   (progn</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;;     (setq current-prefix-arg nil)</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;;     (deadgrep search-term default-directory)</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;;     )</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; (deadgrep search-term (my/project-root))))</span>
+</span></span></code></pre></div><p>To switch between deadgrep / consult-ripgrep I just need to uncomment / comment in and out the relevant bits and then re-evaluate.</p>
+<p>As you can see I created a local function to find the project root directory if one exists and to then pass the result to the deadgrep / consult-ripgrep command meaning that they will both perform identically from a search directory perspective.</p>
+<p>Note how I overcame the pass-through of the universal argument to deadgrep by just resetting the <code>current-prefix-arg</code> after I had already used the universal argument logic within the function.</p>
+<p>I can now free up my original <code>M-f12</code> binding which searched from the local <code>default-directory</code> as I can <code>C-u</code> to the <code>S-f12</code> binding.</p>
+<p>I&rsquo;m not too sure about consult-ripgrep yet but the setup above gives me the following benefits:</p>
+<ol>
+<li>A common local find project root function that might become useful for future functions</li>
+<li>Flexibility with the universal argument meaning I could pass in multiple
+universal arguments or maybe even a numeric argument for enhanced
+functionality</li>
+<li>Able to quickly switch between ripgrep implementations by commenting / un-commenting</li>
+<li>Frees up a keybinding</li>
+</ol>

@@ -1,0 +1,67 @@
+<p>I’ve added experimental support for Claude AI, aligning its implementation with my support for ChatGPT, to pave the way for external AI templating which should make it easier to integrate new models in the future. Like the ChatGPT implementation, it doesn’t stream tokens in real time but instead outputs the final result all at once. However, after testing it further, I’m actually starting to prefer it. The response speed is so fast that not seeing a real-time “Typing” indicator isn’t a big deal. I think that streaming feels more relevant for local LLMs running through <code>ollama</code>, where token generation is slower, making real-time output more useful.</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20250325093201-emacs--Ollama-Buddy-0-9-11-Experimental-ChatGPT-Integration-Customizable-AI-Streaming-and-Texinfo-documentation.jpg" width="100%">
+</figure>
+
+<p>Secondly, the Texinfo manual for this package now magically installs itself when pulling from MELPA. I fluked this!, I just thought it was sensible to create a <code>docs</code> directory and then plonked an info file there. After looking into it, I found that MELPA performs some extra processing when handling Emacs documentation. It automatically scans common documentation directories like <code>docs</code> and grabs the <code>.info</code> file, pretty neat! This means you can now browse <code>ollama-buddy</code>&rsquo;s functionality directly through <code>info</code>.</p>
+<p>Next up, I realized I wasn’t efficiently handling <code>ollama</code> model operations like delete, pull, and copy. I was currently process-calling <code>ollama</code> and passing through arguments as if I was on the command line.  This was functional, but wasn’t ideal and wasn&rsquo;t stimulating the <code>ollama</code> API for these operations correctly, or even at all.  After reassessing my design, I came to the realization that I was in fact using four different methods to communicate with <code>ollama</code>:</p>
+<ol>
+<li><code>curl</code></li>
+<li>Direct process calls</li>
+<li><code>url.el</code></li>
+<li><code>make-network-process</code></li>
+</ol>
+<p>At first, I leaned on <code>curl</code> since it was straightforward and matched the official <code>ollama</code> examples. My approach with a project such as this is generally to get things working quickly and then refine/iterate later. However, once I had a solid design (and design principles!), I wanted to eliminate external dependencies like <code>curl</code>. This lead me to explore <code>url.el</code>, but initially I couldn&rsquo;t seem to get my head round it / get it working - and I decided to go for the nuclear option of <code>make-network-process</code> for network-level flexibility.  Later, I revisited <code>url.el</code> for Claude and ChatGPT support, rewriting the implementation to use <code>url-retrieve</code>, but decided generally to keep <code>make-network-process</code> for <code>ollama</code> interactions as it was still Emacs built-in and actually I&rsquo;m more familiar with the lower level network concepts as having wrestled with them over many years at work.</p>
+<p>Anyway, back to the stimulating of the <code>ollama</code> API for model operations.</p>
+<p>I considered leveraging my existing <code>url.el</code> based <code>ollama-buddy--make-request</code> function, but quickly realized it used <code>url-request-data</code>, which blocks execution. This wasn&rsquo;t an issue for quick requests like model info or tags (although could be), but for long-running tasks like model pulls and general model operations it risked freezing Emacs!</p>
+<p>Switching to <code>url-retrieve</code> solved this, as it runs asynchronously, however, <code>url-retrieve</code> only triggers its callback at the end of the request, making real-time progress tracking difficult. To address this, I implemented <code>run-with-timer</code>, ensuring persistent status updates in the header-line which now allows for multiple operations, including pull, copy, delete, even simultaneously.</p>
+<p>Now that I’m using <code>ollama-buddy</code> as my primary Emacs AI assistant, I’m refining my AI workflow. Since my design is centered around the chat buffer, all interactions and outputs end up there. But what about quick tasks like proofreading text or refactoring code? Ideally, I want a workflow that aligns with <code>ollama-buddy</code>&rsquo;s principles, meaning no direct in-buffer edits (though future me might change their mind!).</p>
+<p>For example, if I want to tighten a rambling paragraph (is this one? :), I currently send it via the custom menu to the chat buffer with a proofreading tag. However, retrieving the output requires jumping to the chat buffer, copying it, switching back, deleting the original, and then pasting the revision - too many steps.</p>
+<p>To streamline this, I’ve now implemented a feature that writes the latest response to a customizable register, this way, I can simply delete the original text and insert the improved version without extra navigation.</p>
+<p>Note: I have remapped the <code>insert-register</code> default keybinding of <code>C-x r i</code> to <code>M-a</code>, as by default I am writing to register ?a and <code>M-a a</code> seems more comfortable.</p>
+<h2 id="0-dot-9-dot-17"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-04-01 Tue&gt; </span></span> <strong>0.9.17</strong></h2>
+<ul>
+<li>Added link to <code>ollama-buddy</code> info manual from the chat buffer and transient menu as MELPA has now picked it up and installed it!</li>
+</ul>
+<h2 id="0-dot-9-dot-16"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-03-28 Fri&gt; </span></span> <strong>0.9.16</strong></h2>
+<ul>
+<li>Added <code>ollama-buddy-fix-encoding-issues</code> to handle text encoding problems.</li>
+<li>Refactored and streamline fabric pattern description handling.</li>
+<li>Removed unused fabric pattern categories to enhance maintainability.</li>
+</ul>
+<h2 id="0-dot-9-dot-15"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-03-28 Fri&gt; </span></span> <strong>0.9.15</strong></h2>
+<ul>
+<li>Implement asynchronous operations for model management
+<ul>
+<li>Introduce non-blocking API requests for fetching, copying, and deleting models</li>
+</ul>
+</li>
+<li>Add caching mechanisms to improve efficiency
+<ul>
+<li>Cache model data to reduce redundant API calls</li>
+<li>Manage cache expiration with timestamps and time-to-live settings</li>
+</ul>
+</li>
+<li>Update status line to reflect ongoing background operations</li>
+<li>Ensure smooth user interaction by minimizing wait times and enhancing performance</li>
+</ul>
+<h2 id="0-dot-9-dot-13"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-03-26 Wed&gt; </span></span> <strong>0.9.13</strong></h2>
+<ul>
+<li>Added automatic writing of last response to a register</li>
+<li>Added M-r to search through prompt history</li>
+</ul>
+<p>I was just thinking about a general workflow aspect and that is getting responses out of the <code>ollama-buddy</code> chat buffer.  Of course if you are already there then it will be easier, but even then the latest prompt, which is probably the one you are interested in will still have to be copied to the kill ring.</p>
+<p>This issue is even more pronounced when you are sending text from other buffers to the chat.</p>
+<p>So, the solution I have put in place is to always write the last response to a register of your choice.  I always think registers are an underused part of Emacs, I already have repurposed them for the multishot, so why not always make the last response available.</p>
+<p>For example, you want to proofread a sentence, you can mark the text, send to the chat using the custom menu to proofread then the response will be available in maybe register &ldquo;a&rdquo;.  The chat buffer will be brought up if not already visible so you can validate the output, then pop back to your buffer, delete the paragraph and insert the register &ldquo;a&rdquo;?, maybe.  I am going to put this in as I suspect no-one uses registers anyway and if they do, they can push the response writing register away using <code>ollama-buddy-default-register</code>, I don&rsquo;t think this will do any harm, and actually it is something I may starting using more often.</p>
+<p>As a side note, I also need to think about popping into the chat buffer with a buffer text push to the chat, should I do it?, not sure yet, still getting to grips with the whole workflow aspect, so will need a little more time to see what works.</p>
+<p>Also as a side note to this ramble, the general register prefix is annoyingly long <code>C-x r i &lt;register&gt;</code> so I have rebound in my config to <code>M-a</code>, as I never want to go back a sentence and also if I just write to the default &ldquo;a&rdquo; register then it feels ergonomically fast.</p>
+<h2 id="0-dot-9-dot-12"><span class="timestamp-wrapper"><span class="timestamp">&lt;2025-03-25 Tue&gt; </span></span> <strong>0.9.12</strong></h2>
+<ul>
+<li>Added experimental Claude AI support!</li>
+<li>removed curl and replaced with url.el for online AI integration</li>
+</ul>
+<p>A very similar implementation as for ChatGPT.</p>
+<p>To activate, set the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;ollama-buddy-claude</span> <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>(ollama-buddy-claude-api-key <span style="color:#e6db74">&#34;&lt;extremely long key&gt;&#34;</span>)
+</span></span></code></pre></div>

@@ -1,0 +1,599 @@
+<h2 id="contents">Contents</h2>
+
+<ul>
+  <li><a href="https://nmunro.github.io/2024/12/29/ningle-1.html">Part 1 (Hello World)</a></li>
+  <li><a href="https://nmunro.github.io/2024/12/30/ningle-2.html">Part 2 (Basic Templates)</a></li>
+  <li><a href="https://nmunro.github.io/2025/01/30/ningle-3.html">Part 3 (Introduction to middleware and Static File management)</a></li>
+  <li><a href="https://nmunro.github.io/2025/02/28/ningle-4.html">Part 4 (Forms)</a></li>
+  <li><a href="https://nmunro.github.io/2025/03/31/ningle-5.html">Part 5 (Environmental Variables)</a></li>
+  <li><a href="https://nmunro.github.io/2025/04/30/ningle-6.html">Part 6 (Database Connections)</a></li>
+  <li><a href="https://nmunro.github.io/2025/05/31/ningle-7.html">Part 7 (Envy Configuation Switching)</a></li>
+  <li><a href="https://nmunro.github.io/2025/06/29/ningle-8.html">Part 8 (Mounting Middleware)</a></li>
+  <li><a href="https://nmunro.github.io/2025/07/31/ningle-9.html">Part 9 (Authentication System)</a></li>
+  <li><a href="https://nmunro.github.io/2025/08/28/ningle-10.html">Part 10 (Email)</a></li>
+  <li><a href="https://nmunro.github.io/2025/09/30/ningle-11.html">Part 11 (Posting Tweets &amp; Advanced Database Queries)</a></li>
+  <li>Part 12 (Clean Up &amp; Bug Fix)</li>
+  <li><a href="https://nmunro.github.io/2025/11/20/ningle-13.html">Part 13 (Adding Comments)</a></li>
+</ul>
+
+<h2 id="introduction">Introduction</h2>
+
+<p>Hello, and welcome back! We have done some pretty hefy work lately, so as we are drawing towards the end of the year we will be taking it a <em>bit</em> easier, we will be looking, at better organising and structuring our project. There is also a small bug we shall fix, which is in fact where we will start!</p>
+
+<h3 id="fixing-a-bug">Fixing a bug</h3>
+
+<p>An oversight on my part last month was that a change stopped the username from appearing on posts. The solution is quite simple, little more than another join on our query.</p>
+
+<p>In our <code class="language-plaintext highlighter-rouge">logged-in-posts</code> and <code class="language-plaintext highlighter-rouge">not-logged-in-posts</code> controllers, we need to make a small change, they're basically the same two line change in both.</p>
+
+<p>I will be testing out the ability to simulate the output of git diff here, so if you have feedback on this change, let me know!</p>
+
+<h4 id="logged-in-posts">logged-in-posts</h4>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defmethod</span> logged-in-posts ((user user))
+  (let ((uid (slot-value user 'mito.dao.mixin::id)))
+    (mito:retrieve-by-sql
+        (sxql:yield
+            (sxql:select
+                (:post.*
+<span class="gi">+                 (:as :user.username :username)                        ;; Add this line
+</span>                  (:as (:count :likes.id) :like_count)
+                  (:as (:count :user_likes.id) :liked_by_user))
+                (sxql:from :post)
+<span class="gi">+               (sxql:left-join :user :on (:= :post.user_id :user.id))  ;; Add this line
+</span>                (sxql:left-join :likes :on (:= :post.id :likes.post_id))
+                (sxql:left-join (:as :likes :user_likes)
+                                :on (:and (:= :post.id :user_likes.post_id)
+                                          (:= :user_likes.user_id :?)))
+                (sxql:group-by :post.id)
+                (sxql:order-by (:desc :post.created_at))
+                (sxql:limit 50)))
+            :binds (list uid))))
+</code></pre></div></div>
+
+<h4 id="not-logged-in-posts">not-logged-in-posts</h4>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">(defun</span> not-logged-in-posts ()
+    (mito:retrieve-by-sql
+        (sxql:yield
+        (sxql:select
+            (:post.*
+<span class="gi">+             (:as :user.username :username)                        ;; Add this line
+</span>              (:as (:count :likes.id) :like_count))
+            (sxql:from :post)
+<span class="gi">+           (sxql:left-join :user :on (:= :post.user_id :user.id))  ;; Add this line
+</span>            (sxql:left-join :likes :on (:= :post.id :likes.post_id))
+            (sxql:group-by :post.id)
+            (sxql:order-by (:desc :post.created_at))
+            (sxql:limit 50)))))
+</code></pre></div></div>
+
+<p>This should now allow the usernames to come through. The reason for this is that although the "user" column would come back, it only contains a number, since it is a foreign key, so to get the rest of the actual information we must perform an sql <code class="language-plaintext highlighter-rouge">join</code>, so we can "join" information from different tables together.</p>
+
+<p>As a result of this change though, we do need to change two template.</p>
+
+<h4 id="srctemplatesmainindexhtml">src/templates/main/index.html</h4>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">- &lt;p class="card-subtitle text-muted mb-0"&gt;@{{ post.user.username }}&lt;/p&gt;
+</span><span class="gi">+ &lt;p class="card-subtitle text-muted mb-0"&gt;@{{ post.username }}&lt;/p&gt;
+</span></code></pre></div></div>
+
+<h4 id="srctemplatesmainposthtml">src/templates/main/post.html</h4>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">- &lt;h2&gt;{{ post.user.username }}
+</span><span class="gi">+ &lt;h2&gt;{{ post.username }}
+</span></code></pre></div></div>
+
+<p>That should be everything we need, so onto cleaning up our project!</p>
+
+<h3 id="cleaning-up-project">Cleaning up project</h3>
+
+<p>The clean up process is rather simple, but I find it helps. Our <code class="language-plaintext highlighter-rouge">main.lisp</code> file has gotten quite large and busy and it contains conceptually two things, our routing, and our controllers and while it's certainly possible to have both in the same file, it can perhaps make the routing difficult to see, so we will be creating a new <code class="language-plaintext highlighter-rouge">controllers.lisp</code> file and putting our functions in there, and simply attaching the function name to the route.</p>
+
+<h4 id="srccontrollerslisp">src/controllers.lisp</h4>
+
+<p>We will be taking each of the functions from our <code class="language-plaintext highlighter-rouge">main.lisp</code> and declaring them as real functions here, of course remembering to export them from this package so that they can be accessed externally.</p>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+64
+65
+66
+67
+68
+69
+70
+71
+72
+73
+74
+75
+76
+77
+78
+79
+80
+81
+82
+83
+84
+85
+86
+87
+88
+89
+90
+91
+92
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/controllers</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:sxql</span> <span class="ss">:ningle-tutorial-project/forms</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:logged-in-index</span>
+           <span class="ss">#:index</span>
+           <span class="ss">#:post-likes</span>
+           <span class="ss">#:single-post</span>
+           <span class="ss">#:post-content</span>
+           <span class="ss">#:logged-in-profile</span>
+           <span class="ss">#:unauthorized-profile</span>
+           <span class="ss">#:people</span>
+           <span class="ss">#:person</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/controllers</span><span class="p">)</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">logged-in-index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">posts</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:logged-in-posts</span> <span class="nv">user</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/index.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Home"</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:posts</span> <span class="nv">posts</span> <span class="ss">:form</span> <span class="nv">form</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">posts</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:not-logged-in-posts</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/index.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Home"</span> <span class="ss">:user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)</span> <span class="ss">:posts</span> <span class="nv">posts</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-likes</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))))</span>
+           <span class="p">(</span><span class="nv">res</span> <span class="p">(</span><span class="nb">make-hash-table</span> <span class="ss">:test</span> <span class="ss">'equal</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:post</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))</span>
+        <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:likes</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:likes</span> <span class="nv">post</span><span class="p">))</span>
+        <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:liked</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:toggle-like</span> <span class="nv">user</span> <span class="nv">post</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">com.inuoe.jzon:stringify</span> <span class="nv">res</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">single-post</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">handler-case</span>
+        <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">)))))</span>
+            <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/post.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Post"</span> <span class="ss">:post</span> <span class="nv">post</span><span class="p">))</span>
+
+        <span class="p">(</span><span class="kt">parse-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+            <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-content</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">handler-case</span>
+            <span class="p">(</span><span class="k">progn</span>
+                <span class="p">(</span><span class="nv">cl-forms:handle-request</span> <span class="nv">form</span><span class="p">)</span> <span class="c1">; Can throw an error if CSRF fails</span>
+
+                <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">valid</span> <span class="nv">errors</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">cl-forms:validate-form</span> <span class="nv">form</span><span class="p">)</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">errors</span>
+                        <span class="p">(</span><span class="nb">format</span> <span class="no">t</span> <span class="s">"Errors: ~A~%"</span> <span class="nv">errors</span><span class="p">))</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">valid</span>
+                        <span class="p">(</span><span class="nv">cl-forms:with-form-field-values</span> <span class="p">(</span><span class="nv">content</span><span class="p">)</span> <span class="nv">form</span>
+                            <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:content</span> <span class="nv">content</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">ingle:redirect</span> <span class="s">"/"</span><span class="p">)))))</span>
+
+            <span class="p">(</span><span class="kt">simple-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+                <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">)))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">logged-in-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/profile.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Profile"</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">unauthorized-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="s">"Unauthorized"</span><span class="p">))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">people</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">users</span> <span class="p">(</span><span class="nv">mito:retrieve-dao</span> <span class="ss">'ningle-auth/models:user</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/people.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"People"</span> <span class="ss">:users</span> <span class="nv">users</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">person</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">username-or-email</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:person</span> <span class="nv">params</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">person</span> <span class="p">(</span><span class="nb">first</span> <span class="p">(</span><span class="nv">mito:select-dao</span>
+                            <span class="ss">'ningle-auth/models:user</span>
+                            <span class="p">(</span><span class="nv">where</span> <span class="p">(</span><span class="ss">:or</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:username</span> <span class="nv">username-or-email</span><span class="p">)</span>
+                                        <span class="p">(</span><span class="ss">:=</span> <span class="ss">:email</span> <span class="nv">username-or-email</span><span class="p">)))))))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/person.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Person"</span> <span class="ss">:person</span> <span class="nv">person</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<p>With the exception of the <code class="language-plaintext highlighter-rouge">defpackage</code> and <code class="language-plaintext highlighter-rouge">in-package</code>, the only thing that changes here is that we are giving these functions a name, the params is unchanged from when there were in <code class="language-plaintext highlighter-rouge">main.lisp</code>.</p>
+
+<h4 id="srcmainlisp">src/main.lisp</h4>
+
+<p>This allows <code class="language-plaintext highlighter-rouge">main.lisp</code> to be flattened down.</p>
+
+<figure class="highlight"><pre><code class="language-common_lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:ningle-tutorial-project/controllers</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:start</span>
+           <span class="ss">#:stop</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defvar</span> <span class="vg">*app*</span> <span class="p">(</span><span class="nb">make-instance</span> <span class="ss">'ningle:app</span><span class="p">))</span>
+
+<span class="c1">;; requirements</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:requirement</span> <span class="vg">*app*</span> <span class="ss">:logged-in-p</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="nv">value</span><span class="p">)</span>
+        <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">)</span> <span class="nv">value</span><span class="p">)))</span>
+
+<span class="c1">;; routes</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/"</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">logged-in-index</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">index</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post/:id/likes"</span> <span class="ss">:method</span> <span class="ss">:POST</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">post-likes</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post/:id"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">single-post</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/post"</span> <span class="ss">:method</span> <span class="ss">:POST</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">post-content</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/profile"</span> <span class="ss">:logged-in-p</span> <span class="no">t</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">logged-in-profile</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/profile"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">unauthorized-profile</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/people"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">people</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">ningle:route</span> <span class="vg">*app*</span> <span class="s">"/people/:person"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">person</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">ningle:not-found</span> <span class="p">((</span><span class="nv">app</span> <span class="nv">ningle:&lt;app&gt;</span><span class="p">))</span>
+    <span class="p">(</span><span class="k">declare</span> <span class="p">(</span><span class="k">ignore</span> <span class="nv">app</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="s">"Not Found"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">start</span> <span class="p">(</span><span class="k">&amp;key</span> <span class="p">(</span><span class="nv">server</span> <span class="ss">:woo</span><span class="p">)</span> <span class="p">(</span><span class="nv">address</span> <span class="s">"127.0.0.1"</span><span class="p">)</span> <span class="p">(</span><span class="nv">port</span> <span class="mi">8000</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">djula:add-template-directory</span> <span class="p">(</span><span class="nv">asdf:system-relative-pathname</span> <span class="ss">:ningle-tutorial-project</span> <span class="s">"src/templates/"</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">djula:set-static-url</span> <span class="s">"/public/"</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">clack:clackup</span>
+     <span class="p">(</span><span class="nv">lack.builder:builder</span> <span class="p">(</span><span class="nv">envy-ningle:build-middleware</span> <span class="ss">:ningle-tutorial-project/config</span> <span class="vg">*app*</span><span class="p">))</span>
+     <span class="ss">:server</span> <span class="nv">server</span>
+     <span class="ss">:address</span> <span class="nv">address</span>
+     <span class="ss">:port</span> <span class="nv">port</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">stop</span> <span class="p">(</span><span class="nv">instance</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">clack:stop</span> <span class="nv">instance</span><span class="p">))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<p>I hope you agree that seeing <code class="language-plaintext highlighter-rouge">main.lisp</code> like this helps us focus principally on the routing without worrying about the exact implementation.</p>
+
+<h4 id="ningle-tutorial-projectasd">ningle-tutorial-project.asd</h4>
+
+<p>As always, since we have added a new file to our project we must ensure it gets included and compiled into our project.asd file.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">:components</span> ((:module "src"
+              :components
+              ((:file "contrib")
+               (:file "middleware")
+               (:file "config")
+               (:file "models")
+               (:file "forms")
+               (:file "migrations")
+<span class="gi">+              (:file "controllers")
+</span>               (:file "main"))))
+</code></pre></div></div>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>I appreciate that this is a very short lesson this time, but after the last few lessons (and next times lesson) I think we might both appreciate a small break. It is also important to look at refactoring projects and structuring them correctly before they get <em>too</em> unwieldily. There isn't a lot of information out there about style guides or best practice so it was best to introduce some in our own project while we had a chance.</p>
+
+<p>Next time we will be looking at adding comments to our system, I had thought perhaps the application was good enough as an example, but there's still some areas we might want to look at, such as self referential models, which is where comments come in, cos a comment is technically a post after all!</p>
+
+<p>As always, I hope you found this helpful, and thanks for reading.</p>
+
+<h3 id="learning-outcomes">Learning Outcomes</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Learning Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Understand</strong></td>
+      <td>Explain how separating routing and controller logic improves readability and maintainability. Describe how <code class="language-plaintext highlighter-rouge">defpackage</code> and symbol exports control what functions are visible across modules. Summarize why refactoring helps prevent future complexity in growing projects.</td>
+    </tr>
+    <tr>
+      <td><strong>Apply</strong></td>
+      <td>Move controller functions from <code class="language-plaintext highlighter-rouge">main.lisp</code> into a new package file, update <code class="language-plaintext highlighter-rouge">main.lisp</code> to call them via route bindings, and modify the <code class="language-plaintext highlighter-rouge">.asd</code> file to include the new component. Implement a small bug fix involving SQL joins and template references.</td>
+    </tr>
+    <tr>
+      <td><strong>Analyse</strong></td>
+      <td>Compare a monolithic <code class="language-plaintext highlighter-rouge">main.lisp</code> file with a modular project layout in terms of structure and debugging clarity. Identify how exported symbols, package imports, and route bindings interact across files. Evaluate the trade-offs of consolidating or splitting functions by purpose.</td>
+    </tr>
+    <tr>
+      <td><strong>Evaluate</strong></td>
+      <td>Assess the maintainability and clarity of the refactored code. Recommend naming or packaging conventions that could further streamline the project.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="github">Github</h2>
+
+<ul>
+  <li>The link for this tutorials code is available <a href="https://github.com/nmunro/ningle-tutorial-project/releases/tag/tutorial-12">here</a>.</li>
+</ul>
+
+<h2 id="resources">Resources</h2>
+
+<h3 id="common-lisp-hyperspec">Common Lisp HyperSpec</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Type</th>
+      <th>Why it appears in this lesson</th>
+      <th>CLHS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defpackage</code></td>
+      <td>Macro</td>
+      <td>Define <code class="language-plaintext highlighter-rouge">ningle-tutorial-project/controllers</code> and <code class="language-plaintext highlighter-rouge">ningle-tutorial-project</code> packages with <code class="language-plaintext highlighter-rouge">:export</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">in-package</code></td>
+      <td>Macro</td>
+      <td>Enter the package before definitions.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defvar</code></td>
+      <td>Special Operator</td>
+      <td>Define <code class="language-plaintext highlighter-rouge">*app*</code> as a global.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_defvar.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_defvar.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defun</code></td>
+      <td>Macro</td>
+      <td>Define controller functions like <code class="language-plaintext highlighter-rouge">index</code>, <code class="language-plaintext highlighter-rouge">post-content</code>, etc.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defun.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defun.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defmethod</code></td>
+      <td>Macro</td>
+      <td>Specialize <code class="language-plaintext highlighter-rouge">ningle:not-found</code> and <code class="language-plaintext highlighter-rouge">logged-in-posts</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">make-instance</code></td>
+      <td>Generic Function</td>
+      <td>Create the Ningle app object: <code class="language-plaintext highlighter-rouge">(make-instance 'ningle:app)</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_ins.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_ins.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">let</code> / <code class="language-plaintext highlighter-rouge">let*</code></td>
+      <td>Special Operator</td>
+      <td>Local bindings for <code class="language-plaintext highlighter-rouge">user</code>, <code class="language-plaintext highlighter-rouge">form</code>, <code class="language-plaintext highlighter-rouge">posts</code>, etc.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">lambda</code></td>
+      <td>Special Operator</td>
+      <td>Inline route requirement: <code class="language-plaintext highlighter-rouge">(lambda (value) ...)</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_fn_lam.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_fn_lam.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">setf</code></td>
+      <td>Macro</td>
+      <td>Assign route table entries and response status; generalized places.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_setf.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_setf.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">gethash</code></td>
+      <td>Function</td>
+      <td>Pull <code class="language-plaintext highlighter-rouge">:user</code> from <code class="language-plaintext highlighter-rouge">ningle:*session*</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_gethas.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_gethas.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">make-hash-table</code></td>
+      <td>Function</td>
+      <td>Build JSON-ish response map in <code class="language-plaintext highlighter-rouge">post-likes</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_has.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_mk_has.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">equal</code></td>
+      <td>Function</td>
+      <td>Hash table <code class="language-plaintext highlighter-rouge">:test 'equal</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_equal.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_equal.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">list</code></td>
+      <td>Function</td>
+      <td>Build <code class="language-plaintext highlighter-rouge">:binds</code> list for SQL and other lists.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_list.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_list.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">first</code></td>
+      <td>Accessor</td>
+      <td>Take first result from <code class="language-plaintext highlighter-rouge">select-dao</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_firstc.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_firstc.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">slot-value</code></td>
+      <td>Function</td>
+      <td>Access <code class="language-plaintext highlighter-rouge">user</code> id (<code class="language-plaintext highlighter-rouge">(slot-value user '...:id)</code> in the bug-fix snippet).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_slot__.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_slot__.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-integer</code></td>
+      <td>Function</td>
+      <td>Convert <code class="language-plaintext highlighter-rouge">:id</code> param to integer.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">format</code></td>
+      <td>Function</td>
+      <td>Debug-print validation errors.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_format.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_format.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">handler-case</code></td>
+      <td>Macro</td>
+      <td>Trap <code class="language-plaintext highlighter-rouge">parse-error</code>/<code class="language-plaintext highlighter-rouge">simple-error</code> for 404/403 pages.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_hand_1.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_hand_1.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-error</code></td>
+      <td>Condition Type</td>
+      <td>Caught when parsing route params fails.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/e_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/e_parse_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">simple-error</code></td>
+      <td>Condition Type</td>
+      <td>Used for CSRF or general failures.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/e_smp_er.htm">http://www.lispworks.com/documentation/HyperSpec/Body/e_smp_er.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">multiple-value-bind</code></td>
+      <td>Macro</td>
+      <td>Unpack <code class="language-plaintext highlighter-rouge">(valid errors)</code> from <code class="language-plaintext highlighter-rouge">validate-form</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_mpv_bn.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_mpv_bn.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">progn</code></td>
+      <td>Special Operator</td>
+      <td>Group side effects before error handling.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_progn.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_progn.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">when</code></td>
+      <td>Macro</td>
+      <td>Conditional steps after validation (<code class="language-plaintext highlighter-rouge">when errors</code> / <code class="language-plaintext highlighter-rouge">when valid</code>).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">declare</code></td>
+      <td>Special Operator</td>
+      <td><code class="language-plaintext highlighter-rouge">(declare (ignore app))</code> inside <code class="language-plaintext highlighter-rouge">not-found</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_declar.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_declar.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">and</code> / <code class="language-plaintext highlighter-rouge">or</code></td>
+      <td>Macro</td>
+      <td>Logical composition in route requirements and user lookup.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/a_and.htm">http://www.lispworks.com/documentation/HyperSpec/Body/a_and.htm</a></td>
+    </tr>
+  </tbody>
+</table>

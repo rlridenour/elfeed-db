@@ -1,0 +1,56 @@
+<p>Needed to diff two directories, but only interested in file size changes. diff, find, sort, and stat seem to do the job:</p>
+<pre><code class="language-{.bash">diff &lt;(find dir1 -type f -exec stat -f '%N %z' '{}' \; | sort) &lt;(find dir2 -type f -exec stat -f '%N %z' '{}' \; | sort)
+</code></pre>
+<pre><code class="language-example">1,3c1,2
+&lt; dir1/one.txt 14
+&lt; dir1/subdir/file.txt 5
+&lt; dir1/three.txt 7
+---
+&gt; dir2/one.txt 19
+&gt; dir2/two.txt 0
+</code></pre>
+<p><em>Note: Using diff, find, sort, and stat on macOS.</em></p>
+<h2>Update 1</h2>
+<p>I've since learned about mtree (thanks <a href="https://twitter.com/romanzolotarev/status/1070249301815771137">Roman</a>!). A nice utility to add to the toolbox.</p>
+<pre><code class="language-{.bash">mtree -p emacs-25.1 -c -k size -d
+</code></pre>
+<pre><code class="language-example">#    user: me
+# machine: my-machine
+#    tree: /path/to/emacs-25.1
+#    date: Wed Dec  5 22:21:07 2018
+# .
+/set type=dir
+.               size=1152
+# ./admin
+admin           size=960
+# ./admin/charsets
+charsets        size=544
+# ./admin/charsets/glibc
+glibc           size=3392
+# ./admin/charsets/glibc
+..
+# ./admin/charsets/mapfiles
+mapfiles        size=640
+# ./admin/charsets/mapfiles
+..
+</code></pre>
+<h2>Update 2</h2>
+<p>I've added Emacs ediff to the mix:</p>
+<pre><code class="language-{.commonlisp">(require 'f)
+
+(defun ar/ediff-dir-content-size ()
+    &quot;Diff all subdirectories (sizes only) in two directories.&quot;
+    (interactive)
+    (let* ((dir1-path (read-directory-name &quot;Dir 1: &quot;))
+           (dir2-path (read-directory-name &quot;Dir 2: &quot;))
+           (buf1 (get-buffer-create (format &quot;*Dir 1 (%s)*&quot; (f-base dir1-path))))
+           (buf2 (get-buffer-create (format &quot;*Dir 2 (%s)*&quot; (f-base dir2-path)))))
+      (with-current-buffer buf1
+        (erase-buffer))
+      (with-current-buffer buf2
+        (erase-buffer))
+      (shell-command (format &quot;cd %s; find . -type d | sort | du -h&quot; dir1-path) buf1)
+      (shell-command (format &quot;cd %s; find . -type d | sort | du -h&quot; dir2-path) buf2)
+      (ediff-buffers buf1 buf2)))
+</code></pre>
+<p><img src="https://xenodium.github.io/images/diffing-directories-content-size/ediff-dir-content-size.png" alt=""></p>

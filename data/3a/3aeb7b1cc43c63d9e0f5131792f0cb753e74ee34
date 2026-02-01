@@ -1,0 +1,219 @@
+<p>We are in the thick of summer. That’s for sure. That means I’m spending afternoons strategically in the shade—and writing.</p>
+<p>As I’ve mentioned—probably—in other posts, most of the work of writing gets done in the head while doing other things. But at some point, all those notes and thoughts will get collected into the text editor and chopped up and re-arranged and eventually exported to the world.</p>
+<p>That inevitable process of creative typing should be as painless as possible. Unless you like pain, which is fine too. Here I’ve collected some of my favorite Emacs configurations for streamlining, simplifying, or otherwise <i>sweetening</i> my workflow.</p>
+<p><a href="https://youtu.be/0NtVetja5_I?si=hGZWptcTV3IHpgQN">&#8220;Old painless is waiting.&#8221;</a></p>
+<p>My blog explores writing techniques, especially how Emacs boosts your productivity and performance. Sign up for my newsletter to unlock the real cheat codes and some DRM-free reading material:</p>
+<div class="convertkit-form wp-block-convertkit-form" style=""><script async data-uid="8037f54b78" src="https://chris-maiorana.kit.com/8037f54b78/index.js" data-jetpack-boost="ignore" data-no-defer="1" nowprocket></script></div>
+<div id="table-of-contents" role="doc-toc">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="#punc">Replace punctuation at point</a></li>
+<li><a href="#org-friendly-word-counter">A more Org-friendly word counter</a></li>
+<li><a href="#completion">Completion frameworks</a></li>
+<li><a href="#pick-theme">Pick a theme</a></li>
+<li><a href="#dictionary">Integrated dictionary</a></li>
+<li><a href="#org-default-mode">Org Mode scratch buffer</a></li>
+<li><a href="#spacious-padding">Spacious padding</a></li>
+<li><a href="#export-options">Simplify Org export options</a></li>
+<li><a href="#back-forward">Back and forward buttons</a></li>
+<li><a href="#wrap-region">Wrap region</a></li>
+</ul>
+</div>
+</div>
+<div id="outline-container-punc" class="outline-2">
+<h2 id="punc">Replace punctuation at point</h2>
+<div id="text-punc" class="outline-text-2">
+<p>How many times have you been editing a sentence, decide to change the punctuation, type a period, question mark, or exclamation point, and then have to delete the punctuation you just replaced? It happens to me all the time. It happened so frequently, I demanded a little Emacs magic to save me the extra step of deleting the unwanted punctuation. I wanted to just keep writing right on through!</p>
+<p>So this little function here does just that. If Emacs detects your point on a punctuation mark, and you type a punctuation mark, the inserted mark will write over the existing mark.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">defun</span> <span style="color: #ca3e54;">csm/replace-punctuation-at-point</span> ()
+  <span style="color: #9a625a; font-style: italic;">"Replace punctuation at point (., !, ?) with the character typed by the user."</span>
+  (<span style="color: #a45a22; font-weight: bold;">interactive</span>)
+  (<span style="color: #a45a22; font-weight: bold;">let</span> ((char (this-command-keys))) <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Get the key pressed by the user</span>
+    (<span style="color: #a45a22; font-weight: bold;">if</span> (<span style="color: #a45a22; font-weight: bold;">and</span> (member (char-after) '(?. ?! ??)) <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Check if current char is ., !, or ?</span>
+             (member (string-to-char char) '(?. ?! ??))) <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Check if typed char is ., !, or ?</span>
+        (<span style="color: #a45a22; font-weight: bold;">progn</span>
+          (delete-char 1) <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Delete existing punctuation</span>
+          (insert char))  <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Insert new punctuation</span>
+      (self-insert-command 1)))) <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Default behavior: insert character</span>
+
+<span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">Bind this function to punctuation keys</span>
+(define-key global-map <span style="color: #5a7400;">"."</span> 'csm/replace-punctuation-at-point)
+(define-key global-map <span style="color: #5a7400;">"!"</span> 'csm/replace-punctuation-at-point)
+(define-key global-map <span style="color: #5a7400;">"?"</span> 'csm/replace-punctuation-at-point)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-org-friendly-word-counter" class="outline-2">
+<h2 id="org-friendly-word-counter">A more Org-friendly word counter</h2>
+<div id="text-org-friendly-word-counter" class="outline-text-2">
+<p>As I’ve mentioned ad nauseam, word counts are important for writers. The more accurate the better. Word counts help us plan, stay sharp, on point, and provide important data to editors. But what if your document is full of Org comments, cold (unexported, or ignored) headings?</p>
+<p>This modified word counter function gives you a more accurate count by ignoring lines start with ’*’ or ’#’.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">defun</span> <span style="color: #ca3e54;">csm/org-word-count</span> ()
+  <span style="color: #9a625a; font-style: italic;">"Count words in region/buffer, estimate pages, and reading time.</span>
+<span style="color: #9a625a; font-style: italic;">Excludes lines beginning with * or #. Prints result in echo area."</span>
+  (<span style="color: #a45a22; font-weight: bold;">interactive</span>)
+  (<span style="color: #a45a22; font-weight: bold;">let*</span> ((start (<span style="color: #a45a22; font-weight: bold;">if</span> (use-region-p) (region-beginning) (point-min)))
+         (end (<span style="color: #a45a22; font-weight: bold;">if</span> (use-region-p) (region-end) (point-max)))
+         (word-count
+          (<span style="color: #a45a22; font-weight: bold;">save-excursion</span>
+            (goto-char start)
+            (<span style="color: #a45a22; font-weight: bold;">let</span> ((count 0)
+                  (inhibit-field-text-motion t))
+              (<span style="color: #a45a22; font-weight: bold;">while</span> (&lt; (point) end)
+                (beginning-of-line)
+                (<span style="color: #a45a22; font-weight: bold;">unless</span> (looking-at-p <span style="color: #5a7400;">"^[*#&lt;]"</span>)
+                  (<span style="color: #a45a22; font-weight: bold;">let</span> ((line-end (line-end-position)))
+                    (<span style="color: #a45a22; font-weight: bold;">while</span> (re-search-forward <span style="color: #5a7400;">"\\w+\\W*"</span> line-end t)
+                      (<span style="color: #a45a22; font-weight: bold;">setq</span> count (1+ count)))))
+                (forward-line 1))
+              count)))
+         (words-per-page 400)
+         (reading-speed 215)
+         (page-count (/ (+ word-count words-per-page -1) words-per-page))
+         (reading-time (/ (+ word-count reading-speed -1) reading-speed)))
+    (message <span style="color: #5a7400;">"%d words, ~%d pages, ~%d min read"</span>
+             word-count page-count reading-time)))
+</pre>
+</div>
+<p>It seems like a lot of code just to count some words, but it’s worth it. I mapped it to <code>M-+</code>.</p>
+</div>
+</div>
+<div id="outline-container-completion" class="outline-2">
+<h2 id="completion">Completion frameworks</h2>
+<div id="text-completion" class="outline-text-2">
+<p>As I mentioned in my video on “<a href="https://www.youtube.com/watch?v=fbiSFlykolg">your first config</a>”, having a solid completion framework will change your game. These packages are essential for how I work in Emacs now; I could not get by without them. They are critical for note-taking and make it a helluva lot easier to find files and search text.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">use-package</span> <span style="color: #ce3f00;">vertico</span>
+  <span style="color: #cf2f4f; font-weight: bold;">:ensure</span> t
+  <span style="color: #cf2f4f; font-weight: bold;">:init</span> (vertico-mode))
+
+(<span style="color: #a45a22; font-weight: bold;">use-package</span> <span style="color: #ce3f00;">orderless</span>
+<span style="color: #cf2f4f; font-weight: bold;">:ensure</span> t
+<span style="color: #cf2f4f; font-weight: bold;">:custom</span>
+(completion-styles '(orderless basic))
+(completion-category-overrides '((file (styles basic partial-completion)))))
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-pick-theme" class="outline-2">
+<h2 id="pick-theme">Pick a theme</h2>
+<div id="text-pick-theme" class="outline-text-2">
+<p>Get yourself a theme, or set of themes, that are easier on the eyes. I like Prot’s <a href="https://github.com/protesilaos/ef-themes">ef-themes</a>.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">use-package</span> <span style="color: #ce3f00;">ef-themes</span>
+  <span style="color: #cf2f4f; font-weight: bold;">:ensure</span> t
+  <span style="color: #cf2f4f; font-weight: bold;">:config</span>
+  (load-theme 'ef-day t))
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-dictionary" class="outline-2">
+<h2 id="dictionary">Integrated dictionary</h2>
+<div id="text-dictionary" class="outline-text-2">
+<p>That’s right. Emacs has a built-in dictionary. That should come as no surprise. By default, the dictionary reaches out to a server, so you need an Internet connection. But it can be configured to hit a local server. I just haven’t got that far with it yet.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">require</span> '<span style="color: #ce3f00;">dictionary</span>)
+(global-set-key <span style="color: #5a7400;">"\C-cs"</span> 'dictionary-search)
+(global-set-key <span style="color: #5a7400;">"\C-cm"</span> 'dictionary-match-words)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-org-default-mode" class="outline-2">
+<h2 id="org-default-mode">Org Mode scratch buffer</h2>
+<div id="text-org-default-mode" class="outline-text-2">
+<p>For many years, I bypassed the scratch buffer entirely and loaded something else on startup. But then I started liking the scratch buffer when I had it load up Org instead of a lisp mode.</p>
+<p>Make Org your default mode:</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">setq</span> initial-major-mode 'org-mode)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-spacious-padding" class="outline-2">
+<h2 id="spacious-padding">Spacious padding</h2>
+<div id="text-spacious-padding" class="outline-text-2">
+<p>Writers generally like to see less clutter in their workspace. (Not always true, certainly.) But if you want to get some nice open space in your editor, Prot’s “<a href="https://github.com/protesilaos/spacious-padding">spacious padding</a>” mode accomplishes this nicely.</p>
+<p>Here is how I have it configured:</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">setq</span> spacious-padding-widths
+      '( <span style="color: #cf2f4f; font-weight: bold;">:internal-border-width</span> 20
+         <span style="color: #cf2f4f; font-weight: bold;">:header-line-width</span> 4
+         <span style="color: #cf2f4f; font-weight: bold;">:mode-line-width</span> 1
+         <span style="color: #cf2f4f; font-weight: bold;">:tab-width</span> 4
+         <span style="color: #cf2f4f; font-weight: bold;">:right-divider-width</span> 15
+         <span style="color: #cf2f4f; font-weight: bold;">:scroll-bar-width</span> 8))
+(spacious-padding-mode 1)
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-export-options" class="outline-2">
+<h2 id="export-options">Simplify Org export options</h2>
+<div id="text-export-options" class="outline-text-2">
+<p>For years I wrote my favorite options into the header section of my Org documents. After writing these out a few hundred times I figured there must be a better way. So I hard-coded these options into the config and never looked back.</p>
+<p>All of these settings can be overridden in an individual file, of course:</p>
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">org export options</span>
+(<span style="color: #a45a22; font-weight: bold;">setq</span> org-export-with-toc nil)  <span style="color: #617540; font-style: italic;">; </span><span style="color: #617540; font-style: italic;">No table of contents</span>
+(<span style="color: #a45a22; font-weight: bold;">setq</span> org-export-with-section-numbers nil)  <span style="color: #617540; font-style: italic;">; </span><span style="color: #617540; font-style: italic;">No section numbers</span>
+(<span style="color: #a45a22; font-weight: bold;">setq</span> org-export-with-smart-quotes t)  <span style="color: #617540; font-style: italic;">; </span><span style="color: #617540; font-style: italic;">Use smart quotes</span>
+(<span style="color: #a45a22; font-weight: bold;">setq</span> org-export-with-sub-superscripts nil)  <span style="color: #617540; font-style: italic;">; </span><span style="color: #617540; font-style: italic;">No superscripts</span>
+</pre>
+</div>
+<p>I love the Org table of contents as much as a the next guy, but I don’t wanted it inserted arbitrarily at the top. I’d like to insert myself using <code>#+toc: headlines 2</code>. The no-toc option above allows for this.</p>
+<p>Likewise, I rarely find section numbers helpful in an export. But when I do, I can enable it manually.</p>
+<p>I use smart quotes for the HTML exports, because those will end up on my website, where smart quotes are acceptable. I used to disable those for standard manuscript formatting, but that’s a convention of the past that doesn’t seem to matter anymore. Smart quotes are welcome now.</p>
+<p>Superscripts and subscripts were annoying for technical writing. For example, if I wanted to write “public_html” without turning “html” into a subscript, I had to jump through some additional hoops. Then I realized this was something that could be turned on or off. Saved me a lot of time.</p>
+</div>
+</div>
+<div id="outline-container-back-forward" class="outline-2">
+<h2 id="back-forward">Back and forward buttons</h2>
+<div id="text-back-forward" class="outline-text-2">
+<p>I did a <a href="https://chrismaiorana.com/emacs-back-button/">whole post</a> on the magic of the backward and forward functionality. But for completeness, I wanted to reiterate it here. If you accidentally fat-finger a command or go on a long excursion and want to get right back to where you were before, this:</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">use-package</span> <span style="color: #ce3f00;">backward-forward</span>
+  <span style="color: #cf2f4f; font-weight: bold;">:ensure</span> t
+  <span style="color: #cf2f4f; font-weight: bold;">:demand</span> t
+  <span style="color: #cf2f4f; font-weight: bold;">:config</span>
+  (backward-forward-mode t)
+  <span style="color: #cf2f4f; font-weight: bold;">:bind</span>
+  (<span style="color: #cf2f4f; font-weight: bold;">:map</span> backward-forward-mode-map
+        (<span style="color: #5a7400;">"&lt;left&gt;"</span> . backward-forward-previous-location)
+        (<span style="color: #5a7400;">"&lt;right&gt;"</span> . backward-forward-next-location)))
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-wrap-region" class="outline-2">
+<h2 id="wrap-region">Wrap region</h2>
+<div id="text-wrap-region" class="outline-text-2">
+<p>Highlight a region and put something around it. Helpful if you wanted to put a larger section in parenthesis or formatting marks and save yourself a step.</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #a45a22; font-weight: bold;">defun</span> <span style="color: #ca3e54;">csm/wrap-region</span> (start end)
+  <span style="color: #9a625a; font-style: italic;">"Prompt for a string and wrap the selected region with it."</span>
+  (<span style="color: #a45a22; font-weight: bold;">interactive</span> <span style="color: #5a7400;">"r"</span>)  <span style="color: #617540; font-style: italic;">;; </span><span style="color: #617540; font-style: italic;">'</span><span style="color: #ce3f00; font-style: italic;">r</span><span style="color: #617540; font-style: italic;">' ensures the function operates on the selected region</span>
+  (<span style="color: #a45a22; font-weight: bold;">let</span> ((input (read-string <span style="color: #5a7400;">"Enter the surrounding character or string: "</span>)))
+    (<span style="color: #a45a22; font-weight: bold;">save-excursion</span>
+      (goto-char end)
+      (insert input)
+      (goto-char start)
+      (insert input))))
+</pre>
+</div>
+</div>
+</div>
+<hr />
+<p>Thanks for reading. I hope these functions provide you some nice options for Emacs-sweetening or at the very least some inspiration for own custom functions.</p>
+<p>Reminders:</p>
+<ul class="org-ul">
+<li><a href="https://chris-maiorana.kit.com/products/emacs-for-writers">My Emacs For Writer handbook is available here</a></li>
+<li>You can also subscribe to <a href="https://chris-maiorana.kit.com/f9e94a7435">my newsletter here</a> for extended digressions on certain topics and exclusive snippets from writing projects I’m working on.</li>
+</ul>
+<p>The post <a href="https://chrismaiorana.com/summer-productivity-reset-emacs-functions/">Summer Productivity Reset: Emacs functions to streamline your writing workflow</a> appeared first on <a href="https://chrismaiorana.com">Chris Maiorana</a>.</p>

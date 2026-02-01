@@ -1,0 +1,413 @@
+<div class="update" id="orgbe0a687">
+<p>
+<span class="timestamp-wrapper"><time class="timestamp" datetime="2025-10-29">[2025-10-29 Wed]</time></span>: Sort <code>my-org-db-v3-to-emacs-rag-search</code> by similarity score.
+</p>
+
+</div>
+<div class="sticky-toc" id="org3c0bfac">
+<div class="text-table-of-contents toc-id" role="doc-toc">
+<ul>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-demo">Demo</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-background">Background</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-my-org-files">Indexing my Org files</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-blog-posts-via-exported-org-files">Indexing blog posts via exported Org files</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-searching-my-blog-posts">Searching my blog posts</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-quick-thoughts-and-next-steps">Quick thoughts and next steps</a></li>
+</ul>
+</div>
+
+</div>
+
+<p>
+I tend to use different words even when I'm writing about the same ideas.
+When I use traditional search tools like <code>grep</code>, it can be hard to look up old blog posts or sketches if I can't think of the exact words I used.
+When I write a blog post, I want to automatically remind myself of possibly relevant notes without requiring words to exactly match what I'm looking for.
+</p>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-demo" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-demo">Demo</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-demo">
+<p>
+Here's a super quick demo of what I've been hacking together so far, doing vector search on some of my blog posts using the .org files I indexed with <a href="https://github.com/jkitchin/org-db-v3">org-db-v3</a>:
+</p>
+
+<div class="media-post" id="org4513128">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2025/10/playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews/2025-10-28_20.39.30.webm" type="video/webm"><a href="https://sachachua.com/blog/2025/10/playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews/2025-10-28_20.39.30.webm">Download the video</a></video><figcaption><div>Screencast of my-blog-similar-link</div></figcaption></figure>
+<p></p>
+
+<p>
+Play by play:
+</p>
+
+<ul class="org-ul">
+<li><span class="media-time" data-start="0.000">0:00:00</span> Use <code>M-x my-blog-similar-link</code> to look for "forgetting things", flip through results, and use RET to select one.</li>
+<li><span class="media-time" data-start="25.000">0:00:25</span> Select "convert the text into a link" and use <code>M-x my-blog-similar-link</code> to change it into a link.</li>
+<li><span class="media-time" data-start="44.000">0:00:44</span> I can call it with <code>C-u M-x my-blog-similar-link</code> and it will do the vector search using all of the post's text. This is pretty long, so I don't show it in the prompt.</li>
+<li><span class="media-time" data-start="56.000">0:00:56</span> I can use Embark to select and insert multiple links. <code>C-SPC</code> selects them from the completion buffer, and <code>C-. A</code> acts on all of them.</li>
+<li><span class="media-time" data-start="77.000">0:01:17</span> I can also use Embark's <code>C-. S</code> (<code>embark-collect</code>) to keep a snapshot that I can act on, and I can use <code>RET</code> in that buffer to insert the links.</li>
+</ul>
+
+</div>
+</div>
+</div>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-background" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-background">Background</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-background">
+<p>
+A few weeks ago, John Kitchin demonstrated a vector search server
+in his video <a href="https://www.youtube.com/watch?v=FwP3HQkrP28">Emacs RAG with LibSQL - Enabling
+semantic search of org-mode headings with Claude
+Code - YouTube</a>. I checked out
+<a href="https://github.com/jkitchin/emacs-rag-libsql">jkitchin/emacs-rag-libsql</a> and got the server
+running. My system's a little slow (no GPU), so
+<code>(setq emacs-rag-http-timeout nil)</code> was helpful.
+It feels like a lighter-weight version of <a href="https://github.com/khoj-ai/khoj">Khoj</a>
+(which also supports Org Mode
+files) and maybe more focused on Org than <a href="https://github.com/jwiegley/rag-client">jwiegley/rag-client</a>. At the moment,
+I'm more interested in embeddings and
+vector/hybrid search than generating summaries or
+using a conversational interface, so something
+simple is fine. I just want a list of
+possibly-related items that I can re-read myself.
+</p>
+
+<p>
+Of course, while these notes were languishing in
+my draft file, John Kitchin had already moved on
+to something else.
+He posted <a href="https://www.youtube.com/watch?v=t879-fipgtg">Fulltext, semantic text and image search
+in Emacs - YouTube</a>, linking to a new vibe-coded
+project called <a href="https://github.com/jkitchin/org-db-v3">org-db-v3</a> that promises to offer
+semantic, full-text, image, and headline search.
+The interface is ever so slightly different: POST
+instead of GET, a different data structure for
+results.
+Fortunately, it was easy enough to adapt my code.
+I just needed a small adapter function to make the
+output of <code>org-db-v3</code> look like the output from
+<code>emacs-rag-search</code>.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org744748e"><code>(<span class="org-keyword">use-package</span> org-db-v3
+  <span class="org-builtin">:load-path</span> <span class="org-string">"~/vendor/org-db-v3/elisp"</span>
+  <span class="org-builtin">:init</span>
+  (<span class="org-keyword">setq</span> org-db-v3-auto-enable nil))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-db-v3-to-emacs-rag-search</span> (query <span class="org-type">&amp;optional</span> limit filename-pattern)
+  <span class="org-doc">"Search org-db-v3 and transform the data to look like emacs-rag-search's output."</span>
+  (org-db-v3-ensure-server)
+  (<span class="org-keyword">setq</span> limit (<span class="org-keyword">or</span> limit 100))
+  (mapcar (<span class="org-keyword">lambda</span> (o)
+            <span class="org-highlight-quoted-quote">`</span>((source_path . ,(assoc-default <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">filename</span> o))
+              (line_number . ,(assoc-default <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">begin_line</span> o))
+              ,@o))
+          (sort
+           (assoc-default <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">results</span>
+                          (plz <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">post</span> (concat (org-db-v3-server-url) <span class="org-string">"/api/search/semantic"</span>)
+                            <span class="org-builtin">:headers</span> <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"Content-Type"</span> . <span class="org-string">"application/json"</span>))
+                            <span class="org-builtin">:body</span> (json-encode <span class="org-highlight-quoted-quote">`</span>((query . ,query)
+                                                 (limit . ,limit)
+                                                 (filename_pattern . ,filename-pattern)))
+                            <span class="org-builtin">:as</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>))
+           <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">similarity_score</span> o))
+           <span class="org-builtin">:reverse</span> t)))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+I'm assuming that <code>org-db-v3</code> is what John's going
+to focus on instead of <code>emacs-rag-search</code> (for
+now, at least). I'll focus on that for the rest of
+this post, although I'll include some of the
+<code>emacs-rag-search</code> stuff just in case.
+</p>
+</div>
+</div>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-my-org-files" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-my-org-files">Indexing my Org files</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-my-org-files">
+<p>
+Both <code>emacs-rag</code> and <code>org-db-v3</code> index Org files by
+submitting them to a local web server. Here are the key files I want to index:
+</p>
+
+<ul class="org-ul">
+<li>organizer.org: my personal projects and reference notes</li>
+<li>reading.org: snippets from books and webpages</li>
+<li>resources.org: bookmarks and frequently-linked sites</li>
+<li>posts.org: draft posts</li>
+</ul>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">dolist</span> (file <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"~/sync/orgzly/organizer.org"</span>
+                <span class="org-string">"~/sync/orgzly/posts.org"</span>
+                <span class="org-string">"~/sync/orgzly/reading.org"</span>
+                <span class="org-string">"~/sync/orgzly/resources.org"</span>))
+  (org-db-v3-index-file-async file))
+</code></pre>
+</div>
+
+
+<p>
+(<code>emacs-rag</code> uses <code>emacs-rag-index-file</code> instead.)
+</p>
+</div>
+</div>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-blog-posts-via-exported-org-files" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-blog-posts-via-exported-org-files">Indexing blog posts via exported Org files</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-indexing-blog-posts-via-exported-org-files">
+<p>
+Then I figured I'd index my recent blog posts,
+except for the ones that are mostly lists of
+links, like Emacs News or my weekly/monthly/yearly
+reviews. I write my posts in Org Mode before
+exporting them with ox-11ty and converting them
+with the 11ty static site generator. I'd
+previously written some code to <a href="https://sachachua.com/dotemacs#moving-my-org-post-subtree-to-the-11ty-directory">automatically
+export a copy of my Org draft</a> in case people
+wanted to look at the source of a blog post, or in
+case I wanted to tweak the post in the future.
+(Handy for things like Org Babel.) This was
+generally exported as an <code>index.org</code> file in the
+post's directory. I can think of a few uses for a
+list of these files, so I'll make a function for
+it.
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org9d3ee5b"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-blog-org-files-except-reviews</span> (after-date)
+  <span class="org-doc">"Return a list of recent .org files except for Emacs News and weekly/monthly/yearly reviews.</span>
+<span class="org-doc">AFTER-DATE is in the form yyyy, yyyy-mm, or yyyy-mm-dd."</span>
+  (<span class="org-keyword">setq</span> after-date (<span class="org-keyword">or</span> after-date <span class="org-string">"2020"</span>))
+  (<span class="org-keyword">let</span> ((after-month (substring after-date 0 7))
+        (posts (my-blog-posts)))
+    (seq-keep
+     (<span class="org-keyword">lambda</span> (filename)
+       (<span class="org-keyword">when</span> (not (string-match <span class="org-string">"[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-emacs-news"</span> filename))
+         (<span class="org-keyword">when</span> (string-match <span class="org-string">"/blog/</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[0-9]+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">/</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[0-9]+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">/"</span> filename)
+           (<span class="org-keyword">let</span> ((month (match-string 2 filename))
+                 (year (match-string 1 filename)))
+             (<span class="org-keyword">unless</span> (string&gt; after-month
+                              (concat year <span class="org-string">"-"</span> month))
+               (<span class="org-keyword">let</span> ((info (my-blog-post-info-for-url (replace-regexp-in-string <span class="org-string">"~/proj/static-blog</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">index\\.org$</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">\\.org$"</span> <span class="org-string">""</span> filename) posts)))
+                 (<span class="org-keyword">let-alist</span> info
+
+                   (<span class="org-keyword">when</span> (<span class="org-keyword">and</span>
+                          info
+                          (string&gt; .date after-date)
+                          (not (seq-intersection .categories
+                                                 <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"emacs-news"</span> <span class="org-string">"weekly"</span> <span class="org-string">"monthly"</span> <span class="org-string">"yearly"</span>)
+                                                 <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>)))
+                     filename))))))))
+     (sort
+      (directory-files-recursively <span class="org-string">"~/proj/static-blog/blog"</span> <span class="org-string">"\\.org$"</span>)
+      <span class="org-builtin">:lessp</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string&lt;</span>
+      <span class="org-builtin">:reverse</span> t))))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+This is in the <a href="https://sachachua.com/dotemacs#org-mode-publishing-11ty-static-site-generation-listing-exported-org-posts">Listing exported Org posts</a> section of my config. I have a <a href="https://sachachua.com/dotemacs#org-mode-publishing-11ty-static-site-generation-linking-to-blog-posts-making-it-easier-to-add-a-category-to-a-blog-post">my-blog-post-info-for-url</a> function that helps me look up the categories. I get the data out of the <a href="https://sachachua.com/blog/all/index.json">JSON that has all of my blog posts in it</a>.
+</p>
+
+<p>
+Then it's easy to index those files:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(mapc <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">org-db-v3-index-file-async</span> (my-blog-org-files-except-reviews))
+</code></pre>
+</div>
+
+</div>
+</div>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-searching-my-blog-posts" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-searching-my-blog-posts">Searching my blog posts</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-searching-my-blog-posts">
+<p>
+Now that my files are indexed, I want to be able to turn up things that might be related to whatever I'm currently writing about.
+This might help me <a href="https://sachachua.com//blog/2025/03/playing-with-chunk-size-when-writing/">build up thoughts</a> better, especially if a long time has passed in between posts.
+</p>
+
+<p>
+<code>org-db-v3-semantic-search-ivy</code> didn't quite work for me out of the box, but I'd written an <a href="https://github.com/minad/consult">Consult</a>-based interface for <code>emacs-rag-search-vector</code> that was easy to adapt. This is how I put it together.
+</p>
+
+<p>
+First I started by looking at <code>emacs-rag-search-vector</code>. That shows the full chunks, which feels a little unwieldy.
+</p>
+
+
+<figure id="org76e97cb">
+<img src="https://sachachua.com/blog/2025/10/playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews/2025-10-09_10-05-58.png" alt="2025-10-09_10-05-58.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot showing the chunks returned by a search for "semantic search"</figcaption>
+</figure>
+
+<p>
+Instead, I wanted to see the years and titles of the
+blog posts as a quick summary, with the ability to
+page through them for a quick preview. consult.el
+lets me define a custom completion command with
+that behavior. <a href="https://sachachua.com/dotemacs#my-blog-similar-link">Here's the code</a>:
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orgad8fafe"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-blog-similar-link</span> (link)
+  <span class="org-doc">"Vector-search blog posts using `</span><span class="org-doc"><span class="org-constant">emacs-rag-search</span></span><span class="org-doc">' and insert a link.</span>
+<span class="org-doc">If called with \\[universal-argument</span><span class="org-doc"><span class="org-warning">\</span></span><span class="org-doc">], use the current post's text.</span>
+<span class="org-doc">If a region is selected, use that as the default QUERY.</span>
+<span class="org-doc">HIDE-INITIAL means hide the initial query, which is handy if the query is very long."</span>
+  (<span class="org-keyword">interactive</span> (list
+                (<span class="org-keyword">if</span> embark&#45;&#45;command
+                    (read-string <span class="org-string">"Link: "</span>)
+                  (my-blog-similar
+                   (<span class="org-keyword">cond</span>
+                    (current-prefix-arg (my-11ty-post-text))
+                    ((region-active-p)
+                     (buffer-substring (region-beginning)
+                                       (region-end))))
+                   current-prefix-arg))))
+  (my-embark-blog-insert-link link))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-embark-blog&#45;&#45;inject-target-url</span> (<span class="org-type">&amp;rest</span> args)
+  <span class="org-doc">"Replace the completion text with the URL."</span>
+  (delete-minibuffer-contents)
+  (insert (my-blog-url (get-text-property 0 <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">consult&#45;&#45;candidate</span> (plist-get args <span class="org-builtin">:target</span>)))))
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">embark</span>
+  (add-to-list <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">embark-target-injection-hooks</span> <span class="org-highlight-quoted-quote">'</span>(my-blog-similar-link my-embark-blog&#45;&#45;inject-target-url)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-11ty-interactive-context</span> (use-post)
+  <span class="org-doc">"Returns (query hide-initial) for use in interactive arguments.</span>
+<span class="org-doc">If USE-POST is non-nil, query is the current post text and hide-initial is t.</span>
+<span class="org-doc">If the region is active, returns that as the query."</span>
+  (list (<span class="org-keyword">cond</span>
+         (embark&#45;&#45;command (read-string <span class="org-string">"Input: "</span>))
+         (use-post (my-11ty-post-text))
+         ((region-active-p)
+          (buffer-substring (region-beginning)
+                            (region-end))))
+        use-post))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-blog-similar</span> (<span class="org-type">&amp;optional</span> query hide-initial)
+  <span class="org-doc">"Vector-search blog posts using org-db-v3 and present results via Consult.</span>
+<span class="org-doc">If called with \\[universal-argument</span><span class="org-doc"><span class="org-warning">\</span></span><span class="org-doc">], use the current post's text.</span>
+<span class="org-doc">If a region is selected, use that as the default QUERY.</span>
+<span class="org-doc">HIDE-INITIAL means hide the initial query, which is handy if the query is very long."</span>
+  (<span class="org-keyword">interactive</span> (my-11ty-interactive-context current-prefix-arg))
+  (consult&#45;&#45;read
+   (<span class="org-keyword">if</span> hide-initial
+       (my-org-db-v3-blog-post&#45;&#45;collection query)
+     (consult&#45;&#45;dynamic-collection
+         <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-org-db-v3-blog-post&#45;&#45;collection</span>
+       <span class="org-builtin">:min-input</span> 3 <span class="org-builtin">:debounce</span> 1))
+   <span class="org-builtin">:lookup</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult&#45;&#45;lookup-cdr</span>
+   <span class="org-builtin">:prompt</span> <span class="org-string">"Search blog posts (approx): "</span>
+   <span class="org-builtin">:category</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-blog</span>
+   <span class="org-builtin">:sort</span> nil
+   <span class="org-builtin">:require-match</span> t
+   <span class="org-builtin">:state</span> (my-blog-post&#45;&#45;state)
+   <span class="org-builtin">:initial</span> (<span class="org-keyword">unless</span> hide-initial query)))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-blog-semantic-search-source</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-db-v3</span>)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-db-v3-blog-post&#45;&#45;collection</span> (input)
+  <span class="org-doc">"Perform the RAG search and format the results for Consult.</span>
+<span class="org-doc">Returns a list of cons cells (DISPLAY-STRING . PLIST)."</span>
+  (<span class="org-keyword">let</span> ((posts (my-blog-posts)))
+    (mapcar (<span class="org-keyword">lambda</span> (o)
+              (my-blog-format-for-completion
+               (append o
+                       (my-blog-post-info-for-url (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> o)
+                                                  posts))))
+            (seq-uniq
+               (my-org-db-v3-to-emacs-rag-search input 100 <span class="org-string">"%static-blog%"</span>)
+               (<span class="org-keyword">lambda</span> (a b) (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> a)
+                                      (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">source_path</span> b)))))))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+It uses some functions I defined in other parts of my config:
+</p>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/dotemacs#org-mode-publishing-11ty-static-site-generation-linking-to-blog-posts-making-it-easier-to-add-a-category-to-a-blog-post">Making it easier to add a category to a blog post</a>
+<ul class="org-ul">
+<li><code>my-embark-blog-insert-link</code></li>
+<li><code>my-blog-format-for-completion</code></li>
+</ul></li>
+<li><a href="https://sachachua.com/dotemacs#mastodon-tooting-a-link-to-the-current-post">Tooting a link to the current post</a>
+<ul class="org-ul">
+<li><code>my-11ty-post-text</code></li>
+</ul></li>
+</ul>
+
+<p>
+When I explored <code>emacs-rag-search</code>, I also tried
+hybrid search (vector + full text). At first, I
+got "database disk image is malformed". I fixed
+this by <a href="https://stackoverflow.com/questions/5274202/sqlite3-database-or-disk-is-full-the-database-disk-image-is-malformed">dumping the SQLite3 database</a>. Using hybrid
+search, I tended to get less-relevant results
+based on the repetition of common words, though,
+so that might be something for future exploration.
+Anyway, <code>my-emacs-rag-search</code> and
+<code>my-emacs-rag-search-hybrid</code> are in <a href="https://sachachua.com/dotemacs#org-mode-vector-search-emacs-rag-search">the
+emacs-rag-search part of my config</a> just in case.
+</p>
+
+<p>
+Along the way, I contributed some notes to
+<a href="https://github.com/minad/consult?tab=readme-ov-file#creating-simple-commands">consult.el's README.org</a> so that it'll be easier to
+figure this stuff out in the future. In
+particular, it took me a while to figure out how
+to use <code>:lookup #'consult&#45;&#45;lookup-cdr</code> to get
+richer information after selecting a completion
+candidate, and also how to use
+<code>consult&#45;&#45;dynamic-collection</code> to work with slower
+dynamic sources.
+</p>
+</div>
+</div>
+<div id="outline-container-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-quick-thoughts-and-next-steps" class="outline-3">
+<h3 id="playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-quick-thoughts-and-next-steps">Quick thoughts and next steps</h3>
+<div class="outline-text-3" id="text-playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-post-org-files-with-previews-quick-thoughts-and-next-steps">
+<p>
+It <i>is</i> kinda nice being able to look up posts without using the exact words.
+</p>
+
+<p>
+Now I can display a list of blog posts that are somewhat similar to what I'm currently working on. It should be pretty straightforward to filter the list to show only posts I haven't linked to yet.
+</p>
+
+<p>
+I can probably get this to index the text versions of my sketches, too.
+</p>
+
+<p>
+It might also be interesting to have a multi-source Consult command that starts off with fast sources (exact title or headline match) and then adds the slower sources (<a href="https://sachachua.com//blog/2025/07/finding-unlinked-text/">Google web search</a>, semantic blog post search via org-db-v3) as the results become available.
+</p>
+
+<p>
+I'll save that for another post, though!</p>
+</div>
+</div>
+<div><a href="https://sachachua.com/blog/2025/10/playing-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01K8PPYM3GW5R5KE2X8KCA9GNV" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F10%2Fplaying-around-with-org-db-v3-and-consult-vector-search-of-my-blog-posts-with-previews%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

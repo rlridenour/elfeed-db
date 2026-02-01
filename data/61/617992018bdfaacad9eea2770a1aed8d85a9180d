@@ -1,0 +1,31 @@
+<p><a href="https://twitter.com/camdez">Cameron Desautel</a> has a great post on <a href="https://engineering.collbox.co/post/working-faster-in-emacs-by-reading-the-future/">Working Faster in Emacs by Reading the &quot;Future&quot;</a>, highlighting <em>M-n</em>'s usefulness for inserting minibuffer default values.</p>
+<p>Invoking <em>M-n</em> in <em>shell-command</em>'s prompt is handy for quickly getting the current buffer's file name. This works great for one-off shell commands like <em>&quot;chmod +x script.sh&quot;</em> or <em>&quot;tidy -xml -i -m data.xml&quot;</em>. Unfortunately, these commands aren't easily reusable from <em>shell-command</em>'s minibuffer history, since it'll keep hardcoded file names.</p>
+<p>There's likely existing built-in functionality or a more elaborate package for this, but advising <em>read-shell-command</em> enables us to write more reusable commands like <em>&quot;chmod +x $f&quot;</em> or <em>&quot;tidy -xml -i -m $f&quot;.</em> We merely replace <em>$f</em> with <em>(buffer-file-name)</em>, and let everything else continue as usual.</p>
+<p><img src="https://xenodium.github.io/images/more-reusable-emacs-shell-command-history/expanded-shell-command.png" alt=""></p>
+<pre><code class="language-{.commonlisp">(defun ar/adviced-read-shell-command (orig-fun &amp;rest r)
+  &quot;Advice around `read-shell-command' to replace $f with buffer file name.&quot;
+  (let ((command (apply orig-fun r)))
+    (if (string-match-p &quot;\\$f&quot; command)
+        (replace-regexp-in-string &quot;\\$f&quot;
+                                  (or (buffer-file-name)
+                                      (user-error &quot;No file file visited to replace $f&quot;))
+                                  command)
+      command)))
+
+(advice-add 'read-shell-command
+            :around
+            'ar/adviced-read-shell-command)
+</code></pre>
+<p>It's worth mentioning that searching minibuffer history is pretty simple when leveraging <a href="https://github.com/abo-abo/swiper">counsel</a> to fuzzy search (via <em>counsel-minibuffer-history</em>, bound to <em>C-r</em> by default).</p>
+<p><img src="https://xenodium.github.io/images/more-reusable-emacs-shell-command-history/richer-shell-command-history.gif" alt=""></p>
+<p>On a final note, searching minibuffer history for cache hits is way more useful with richer history content. Be sure to save minibuffer history across Emacs sessions and increase <em>shell-command-history</em> using the built-in <a href="https://www.emacswiki.org/emacs/SaveHist">savehist-mode</a>.</p>
+<pre><code class="language-{.commonlisp">(use-package savehist
+  :custom
+  (savehist-file &quot;~/.emacs.d/savehist&quot;)
+  (savehist-save-minibuffer-history t)
+  (history-length 10000)
+  (savehist-additional-variables
+   '(shell-command-history))
+  :config
+  (savehist-mode +1))
+</code></pre>

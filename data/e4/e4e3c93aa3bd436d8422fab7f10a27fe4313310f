@@ -1,0 +1,42 @@
+<p>Emacs is subsuming me!  I have managed to get email up and running using <strong>mu4e</strong> and rss using <strong>elfeed</strong> and image viewing with <strong>image-dired</strong></p>
+<p>Next up is some form of calendar integration!</p>
+<p>Although I use Google Calendar I don&rsquo;t rely on any google apps directly; an android app called <strong>Simple Calendar</strong> is adequate for my needs and enables the thing I cherish most of all (except emacs of course!)  and that is the ability to produce an offline copy.  It can export to an <code>ics</code> file, and I have developed a habit of exporting to an offline file every time I update my calendar.  This means that I have some exported calendar files lying around, including of course the most recent one.</p>
+<p>Initially I attempted to use <strong>org-gcal</strong> which potentially enables a two way communication with Google Calendar through their API, but I got lost in the setup and of course this is Google, at some stage it is likely they will either change their API / remove it / or charge for it.</p>
+<p>Anyway, do I really need to modify my calendar from within emacs?, I am quite comfortable using <strong>Simple Calendar</strong> on my phone and if I really need to add calendar entries from my laptop then I always have <strong>Thunderbird</strong> as a backup.</p>
+<p>So I may just be in a very fortunate position regarding an adequate level of emacs calendar integration :</p>
+<ol>
+<li>I only require read only</li>
+<li>I have an up-to-date <code>ics</code> file available</li>
+</ol>
+<p>I created the following function which opens up a nicely formatted calendar using the packages <strong>calfw</strong> and <strong>calfw-cal</strong> (and they didn&rsquo;t require any additional setup).</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun my/calendar ()
+</span></span><span style="display:flex;"><span>  (interactive)
+</span></span><span style="display:flex;"><span>  (setq tmp-file (<span style="color:#a6e22e">concat</span> home-dir <span style="color:#e6db74">&#34;/DCIM/Backup/tmp.org&#34;</span>))
+</span></span><span style="display:flex;"><span>  (<span style="color:#a6e22e">delete-file</span> tmp-file)
+</span></span><span style="display:flex;"><span>  (when (<span style="color:#a6e22e">get-buffer</span> (<span style="color:#a6e22e">file-name-nondirectory</span> tmp-file))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">kill-buffer</span> (<span style="color:#a6e22e">file-name-nondirectory</span> tmp-file)))
+</span></span><span style="display:flex;"><span>  (setq last-ics
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">car</span> (<span style="color:#a6e22e">directory-files</span>
+</span></span><span style="display:flex;"><span>           (<span style="color:#a6e22e">concat</span> home-dir <span style="color:#e6db74">&#34;/DCIM/Backup&#34;</span>)
+</span></span><span style="display:flex;"><span>           <span style="color:#e6db74">&#39;full</span> <span style="color:#e6db74">&#34;\.ics$&#34;</span> <span style="color:#a6e22e">#&#39;file-newer-than-file-p</span>)))
+</span></span><span style="display:flex;"><span>  (icalendar-import-file last-ics tmp-file)
+</span></span><span style="display:flex;"><span>  (cfw:open-diary-calendar)
+</span></span><span style="display:flex;"><span>  (when (<span style="color:#a6e22e">get-buffer</span> (<span style="color:#a6e22e">file-name-nondirectory</span> last-ics))
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">kill-buffer</span> (<span style="color:#a6e22e">file-name-nondirectory</span> last-ics))))
+</span></span></code></pre></div><p>and produces a calendar of the form:</p>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/2023-02-03_12-59.jpg" width="300px">
+</figure>
+
+<p>I could import everything directly into my <code>diary-file</code> but I decided to be a little more flexible and potentially allow for multiple calendars by setting an <code>include</code> directive in my diary file as thus:</p>
+<pre tabindex="0"><code class="language-nil" data-lang="nil">#include &#34;~/DCIM/Backup/tmp.org&#34;
+</code></pre><p>The key to the <code>my/calendar</code> function is to pull in the most recent <code>ics</code> file and call the built in <code>icalendar-import-file</code> to convert / import the <code>ics</code> data into my diary file.  The <strong>cfw</strong> packages will then take care of the rest.  The other parts of the function are just tidying up various buffers and files to make things a little cleaner.</p>
+<p>One little wrinkle I discovered and didn&rsquo;t necessary solve to a satisfactory level was when I first call up <code>cfw:open-diary-calendar</code> the calendar didn&rsquo;t resize correctly to fit the window, a second call however seemed to fix this and with no overhead.</p>
+<p>One final addition was the following:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(add-to-list <span style="color:#e6db74">&#39;display-buffer-alist</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#f92672">`</span>(<span style="color:#f92672">,</span>(rx(or <span style="color:#e6db74">&#34;Calendar&#34;</span>))
+</span></span><span style="display:flex;"><span>     display-buffer-in-direction
+</span></span><span style="display:flex;"><span>     (direction <span style="color:#f92672">.</span> right)
+</span></span><span style="display:flex;"><span>     (dedicated <span style="color:#f92672">.</span> <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>     (window <span style="color:#f92672">.</span> root)
+</span></span><span style="display:flex;"><span>     (window-width <span style="color:#f92672">.</span> <span style="color:#ae81ff">80</span>)))
+</span></span></code></pre></div><p>Which gives me greater control of where the calendar window is opened</p>

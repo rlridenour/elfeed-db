@@ -1,0 +1,228 @@
+
+<p class="wp-block-paragraph">Want your blog reachable by anyone &#8211; both Tor users and regular browsers &#8211; without running two separate installations?<br>The trick is one code-base, two reverse proxies, and a single database. Below is a quick 400-500 word guide for Ubuntu/Debian that shows the minimal steps.</p>
+
+
+
+<span id="more-8406"></span>
+
+
+
+<h2 class="wp-block-heading" id="orgcfbfc85">1. Prep the Server</h2>
+
+
+
+<p class="wp-block-paragraph">Start with a clean VPS or local virtul server:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo apt update &amp;&amp; sudo apt upgrade -y
+sudo apt install tor nginx mariadb-server php-fpm php-mysql php-curl php-gd php-xml php-zip -y
+</code></pre>
+
+
+
+<p class="wp-block-paragraph"><em>Why?</em>&nbsp;A clean server keeps the attack surface small and makes troubleshooting easier.</p>
+
+
+
+<h2 class="wp-block-heading" id="org725845b">2. Install WordPress</h2>
+
+
+
+<p class="wp-block-paragraph">Download the latest WordPress release:</p>
+
+
+
+<pre class="wp-block-code"><code>cd /var/www
+sudo wget https://wordpress.org/latest.tar.gz
+sudo tar -xzf latest.tar.gz
+sudo mv wordpress wp_site
+sudo chown -R www-data:www-data wp_site
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Create a DB:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo mysql -u root -p &lt;&lt;'SQL'<strong>
+CREATE DATABASE wp;
+GRANT ALL PRIVILEGES ON wp.* TO 'wp_user'@'localhost' IDENTIFIED BY 'StrongPass!23';
+FLUSH PRIVILEGES;
+EXIT;
+SQL</strong>
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Edit&nbsp;<code>wp-config.php</code>&nbsp;with the DB details.</p>
+
+
+
+<h2 class="wp-block-heading" id="org838d4da">3. Set Up Tor Hidden Service</h2>
+
+
+
+<pre class="wp-block-code"><code>sudo nano /etc/tor/torrc
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Add:</p>
+
+
+
+<pre id="org31452ed" class="wp-block-code"><code>HiddenServiceDir /var/lib/tor/wp/
+HiddenServicePort 80 127.0.0.1:8080
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Restart Tor and grab the address:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo systemctl restart tor
+sudo cat /var/lib/tor/wp/hostname   # e.g., abcdefghijklmnop.onion
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Secure the directory:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo chown -R debian-tor:debian-tor /var/lib/tor/wp
+sudo chmod 700 /var/lib/tor/wp
+</code></pre>
+
+
+
+<h2 class="wp-block-heading" id="org7422b97">4. Configure Nginx for Two Front-Ends</h2>
+
+
+
+<p class="wp-block-paragraph">Create a single server block that listens on both ports:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; title: ; notranslate">
+server {
+    listen 127.0.0.1:8080;
+    listen 80;           # clear-net HTTP
+    listen &#91;::]:80;
+
+    server_name example.org www.example.org;   # replace with your domain
+
+    root /var/www/wp_site;
+    index index.php index.html;
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.2-fpm.sock;
+    }
+
+    location ~ /\.ht { deny all; }
+}
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">Enable the site:</p>
+
+
+
+<pre class="wp-block-code"><code>sudo ln -s /etc/nginx/sites-available/wp_site /etc/nginx/sites-enabled/
+sudo nginx -t &amp;&amp; sudo systemctl reload nginx
+</code></pre>
+
+
+
+<p class="wp-block-paragraph"><strong>Why?</strong>&nbsp;The same WordPress install is served from two addresses:</p>
+
+
+
+<ul class="wp-block-list">
+<li><code>http://example.org</code>&nbsp;(clear-net) and</li>
+
+
+
+<li><code>http://&lt;onion&gt;.onion</code>&nbsp;(Tor).</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgdb709fe">5. Secure the Site</h2>
+
+
+
+<ul class="wp-block-list">
+<li>Keep WordPress, plugins, and themes up to date (<code>wp-cli core update</code>, etc.).</li>
+
+
+
+<li>Enable two-factor authentication on the admin panel.</li>
+
+
+
+<li>Add in&nbsp;<code>wp-config.php</code>:</li>
+</ul>
+
+
+
+<pre id="org4f8d077" class="wp-block-code"><code>define('DISALLOW_FILE_EDIT', true);
+</code></pre>
+
+
+
+<ul class="wp-block-list">
+<li>Consider a security plugin (Wordfence, iThemes Security) for extra hardening.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading" id="orgce645f2">6. Verify</h2>
+
+
+
+<ol class="wp-block-list">
+<li><strong>Clear-net</strong>&nbsp;– Open&nbsp;<code>https://example.org</code>.<br><em>If you want HTTPS, set up Let&#8217;s Encrypt with Certbot.</em></li>
+
+
+
+<li><strong>Tor</strong>&nbsp;– In the Tor Browser, enter&nbsp;<code>http://&lt;onion&gt;.onion</code>.<br>The same content should appear.</li>
+</ol>
+
+
+
+<h4 class="wp-block-heading" id="orgfc50157">Final Checklist</h4>
+
+
+
+<ul class="wp-block-list">
+<li><code>[&nbsp;]</code>&nbsp;Tor hidden service running (check&nbsp;<code>/var/lib/tor/wp/hostname</code>).</li>
+
+
+
+<li><code>[&nbsp;]</code>&nbsp;Nginx listening on both 127.0.0.1:8080 and your public port.</li>
+
+
+
+<li><code>[&nbsp;]</code>&nbsp;WordPress installed once, shared between fronts.</li>
+
+
+
+<li><code>[&nbsp;]</code>&nbsp;Security hardening applied.</li>
+
+
+
+<li><code>[&nbsp;]</code>&nbsp;Backup database and the hidden-service key (<code>/var/lib/tor/wp</code>).</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">That&#8217;s it! You now have a single WordPress site that anyone can reach—whether they&#8217;re on the Tor network or the open web.</p>
+
+
+
+<p class="wp-block-paragraph">Happy blogging, both in the shadows and out in the light!</p>

@@ -1,0 +1,178 @@
+<p>A week or so ago, <a href="https://sixcolors.com/">Jason Snell</a> asked if I could help with a problem he was having using the <a href="https://pillow.readthedocs.io/en/stable/index.html">Python Imaging Library</a> (PIL)<sup id="fnref:pil"><a href="#fn:pil" rel="footnote">1</a></sup>. He wanted to update <a href="https://sixcolors.com/post/2022/09/a-smart-e-ink-calendar-comes-to-my-kitchen/">his e-ink status board</a> with color images, as he now has the color e-ink display that <a href="https://sixcolors.com/post/2022/11/creating-a-smart-on-air-sign-with-an-e-ink-display/">Dan Moren uses</a>. But he couldn’t get consistent results as he tried to use PIL to change the color of black pixels to different colors in a set of GIF images that were overlaid on his calendar background.</p>
+<p>The problem Jason was having seemed similar to something I had solved before. <a href="https://leancrew.com/all-this/2017/02/screenshots-with-snapclip/">My old screenshot utility</a> used PIL to put images of Mac windows on top of a background that mimicked my Desktop. But the combination of transparency, recoloring, and different file formats made it considerably more difficult than I expected. This post is essentially me explaining to myself what I learned as I thrashed around. You’re welcome to listen in.</p>
+<p>Here’s a sample image I made in <a href="https://flyingmeat.com/acorn/">Acorn</a>. It’s a very small image, just 8 pixels wide and 12 pixels high, blown up greatly so you can see what’s going on.</p>
+<p><img alt="Englarged rectangle in Acorn" class="ss" src="https://leancrew.com/all-this/images2025/20250209-Englarged%20rectangle%20in%20Acorn.png" title="Englarged rectangle in Acorn" width="240px"/></p>
+<p>The white rectangle with a one-pixel black border is offset from the center of the image and is surrounded by transparent pixels, which Acorn shows as a checkerboard. The transparent border is one pixel wide along the top and left sides and two pixels wide along the bottom and right sides. I exported it as a GIF named <code>rect.gif</code>.</p>
+<p>Let’s see how PIL treats this image. First, we open it, and do some inquiries:</p>
+<pre><code>python:
+from PIL import Image
+import numpy as np
+
+rect = Image.new('rect.gif')
+print(rect.size)
+print(rect.mode)
+print(rect.info)
+</code></pre>
+<p>The output is</p>
+<pre><code>(8, 12)
+P
+{'version': b'GIF87a', 'background': 0, 'transparency': 2, 'duration': 0}
+</code></pre>
+<p>The <code>size</code> is obvious. The <a href="https://pillow.readthedocs.io/en/stable/handbook/concepts.html#modes"><code>mode</code></a> value of <code>P</code> stands for “palette,” which is PIL’s way of saying that there’s an 8-bit color map, and each pixel is assigned one of the 256 colors in the map. That makes sense because that’s how GIFs work. Finally, the <code>info</code> is a dictionary that tells us the file was saved in <code>GIF87a</code> format (there’s also a <code>GIF89a</code> format), that its background color has index 0, and that the transparent pixels have index 2. The <code>duration</code> is about how long to display the image if the GIF is animated; we don’t need to worry about that for a static image.</p>
+<div class="update">
+<p><strong>Update 11 Feb 2025 11:50 AM</strong><br/>
+Among all you nerds, only Brian Ashe thought to email me that <a href="https://docstore.mik.ua/orelly/web2/wdesign/ch19_01.htm">transparency was introduced to GIFs </a>in the <code>GIF89a</code> version; <code>GIF87a</code> didn’t have it. So the <code>version</code> above is wrong. PIL isn’t wrong. The first six bytes of the file are indeed <code>GIF87a</code>. I confirmed that by running <code>xxd rect.gif</code> and got this output:</p>
+<pre><code>00000000: 4749 4638 3761 0800 0c00 9100 0000 0000  GIF87a..........
+00000010: ffff ff00 0000 0000 0021 f904 0900 0002  .........!......
+00000020: 002c 0000 0000 0800 0c00 0002 1694 7fa0  .,..............
+00000030: 9ae1 d05e 0cd0 0047 6715 575a bc2d 0c42  ...^...Gg.WZ.-.B
+00000040: 9646 0100 3b0a                           .F..;.
+</code></pre>
+<p>Changing the 7 to a 9 in the signature and resaving <code>rect.gif</code> doesn’t affect any of my code—in particular, the <code>recolor</code> function still works—but now I’m curious why the file had the signature of a format that didn’t support transparency. Since the GIF was built in Acorn, I may ask Gus Mueller about this. In any event, thanks to Brian for bringing this to my attention.</p>
+</div>
+<p>There are at least a couple of ways to get the index values of all the pixels. I like to do it by assigning the image to a <a href="https://numpy.org/doc/stable/reference/generated/numpy.array.html">NumPy array</a>, like this:</p>
+<pre><code>python:
+pdata = np.array(rect)
+</code></pre>
+<p><code>pdata</code> is now a 12×8 matrix of 8-bit integers:</p>
+<pre><code>[[2, 2, 2, 2, 2, 2, 2, 2],
+ [2, 0, 0, 0, 0, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 1, 1, 1, 0, 2, 2],
+ [2, 0, 0, 0, 0, 0, 2, 2],
+ [2, 2, 2, 2, 2, 2, 2, 2],
+ [2, 2, 2, 2, 2, 2, 2, 2]]
+</code></pre>
+<p>(I hope you can see now why I started with such a small image. Larger images are unwieldy to display, especially later in the post when we start looking at their RGB values.)</p>
+<p>Laid out like this, the matrix sort of looks like the image. The transparent pixels around the border have a value of 2, just as <code>info</code> told us; the black pixels have a value of 0, which is also the background; and the white pixels have a value of 1.</p>
+<p>The interpretation in the previous paragraph was possible because we’d seen the image. If we hadn’t, we could use the <a href="https://pillow.readthedocs.io/en/stable/reference/Image.html#getpalette"><code>getpalette</code> function</a></p>
+<pre><code>python:
+print(rect.getpalette())
+</code></pre>
+<p>to return</p>
+<pre><code>[0, 0, 0, 255, 255, 255, 0, 0, 0, 0, 0, 0]
+</code></pre>
+<p>This is not a great format, but we can see that the first three values are the RGB values for black and the second three are the RGB values for white. The third set of three are also the RGB values for black, but because they’re transparent we don’t see them. There’s an unused fourth set because the number of colors in a GIF has to be a power of two.</p>
+<p>Although we could deal with colors using the palette, it’s considerably more work to do it that way, and it’s not 1987 anymore—we have the space to use a whopping four bytes per pixel. So we’ll convert the image to <code>RGBA</code> mode and work with colors directly instead via an index.</p>
+<pre><code>python:
+rect = Image.open('rect.gif').convert('RGBA')
+rgbadata = np.array(rect)
+</code></pre>
+<p>This new array, <code>rgbadata</code>, is 12×8×4, which makes it harder to display, but I think you can see what’s going on. I’ll reduce the font size so you don’t have to scroll horizontally as much.</p>
+<pre><code style="font-size:.75em">[[[  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,255], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0]],
+ [[  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0], [  0,  0,  0,  0]]]
+</code></pre>
+<p>The first row and first column are black, but because the A (alpha channel) value is 0, those pixels are transparent. The same goes for the last two rows and columns. The <code>[0, 0, 0, 255]</code> pixels are black and opaque. The <code>[255, 255, 255, 255]</code> pixels are white and opaque.</p>
+<p>So if we want to change a particular color, say black, to another color, say blue, we go through this array and change all the elements that have <code>[0, 0, 0]</code> as their first three values to <code>[0, 0, 255]</code>. In doing so, we’ll be changing the “color” of the transparent pixels, too, but that’s OK as long as we honor the transparency in any other manipulations we do.</p>
+<p>Here’s the <code>recolor</code> function I came up with. I learned a lot from <a href="https://stackoverflow.com/questions/6483489/change-specific-rgb-color-pixels-to-another-color-in-image-file">this Stack Overflow discussion</a>, but I generalized the code and made it more array-like by using NumPy’s <a href="https://numpy.org/doc/stable/reference/generated/numpy.all.html"><code>all</code> function</a> to handle the color matching.</p>
+<pre><code>python:
+ 1:  import numpy as np
+ 2:  from PIL import Image
+ 3:  
+ 4:  def recolor(image, oldcolor, newcolor):
+ 5:    '''Return a new RGBA image based on image but with
+ 6:    the oldcolor pixels changed to newcolor.'''
+ 7:  
+ 8:    # Put the image into an array
+ 9:    data = np.array(image)
+10:  
+11:    # Array of Booleans, each element depends on whether the
+12:    # RGB values of that pixel match oldcolor
+13:    # We'll use this as a filter when assigning newcolor
+14:    is_old = np.all(data[:, :, :3] == oldcolor, axis=2)
+15:    # Change the oldcolor pixels to newcolor; don't change alpha channel
+16:    data[:,:,:3][is_old] = newcolor
+17:  
+18:    # Return the new image
+19:    return Image.fromarray(data)
+</code></pre>
+<p>It’s a pretty short function, mainly because NumPy allows us to handle arrays and slices of arrays as single items. Whatever looping is needed is done behind the scenes at the speed of compiled code.</p>
+<p>The <code>is_old</code> array, a Boolean array the size and shape of the image, is used in Line 13 to filter which pixels get assigned <code>newcolor</code>. Only those pixels for which the R, G, and B values match <code>oldcolor</code> get changed.</p>
+<p>Notice that the slices in Lines 14 and 16 concern themselves only with the first three elements of the color array. If the input <code>image</code> is in <code>RGB</code> mode, that’s everything; but if the input <code>image</code> is in <code>RGBA</code> mode, the alpha channel is left untouched. This is what we want, but care must still be taken when combining the result with another image.</p>
+<p>For example, let’s say we want make a new rectangle where the outline is blue instead of black and another new rectangle where the interior is red instead of white. And we want both of these new rectangles placed on a light gray background. Here’s one way to do it:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import numpy as np
+ 4:  from PIL import Image
+ 5:  from recolor import recolor
+ 6:  
+ 7:  # Make a gray canvas for placing other images on
+ 8:  canvas = Image.new('RGBA', (24, 16), (224, 224, 224))
+ 9:  
+10:  # Open the rectangular GIF and convert to RGBA
+11:  rect = Image.open('rect.gif').convert('RGBA')
+12:  
+13:  # Make two new rectangles, one with the black changed to blue
+14:  # and the other with the white changed to red
+15:  blue_rect = recolor(rect, (0, 0, 0), (0, 0, 255))
+16:  red_rect = recolor(rect, (255, 255, 255), (255, 0, 0))
+17:  
+18:  # Place the rectangles on the canvas, honoring the alpha channel
+19:  canvas.alpha_composite(blue_rect, (2, 2))
+20:  canvas.alpha_composite(red_rect, (14, 2))
+21:  
+22:  # Save as a PNG and as a BMP
+23:  canvas.save('test1.png')
+24:  canvas.save('test1.bmp')
+</code></pre>
+<p>Note that we made the background <code>canvas</code> an <code>RGBA</code> image and used <a href="https://pillow.readthedocs.io/en/stable/reference/Image.html#PIL.Image.alpha_composite"><code>alpha_composite</code></a> to place the two newly colored image onto <code>canvas</code>. By doing it this way, we account for the transparency in the two rectangles and the background gray shows through in the final images. I saved the results as a PNG because that’s probably the most common format for this type of image nowadays. And I saved it as a BMP because that’s the format Jason needed to transfer to his e-ink device. If we look at both the PNG and BMP images in Acorn with the magnification turned way up, they’ll look the same, like this:</p>
+<p><img alt="Englarged PNG and BMP images via alpha_composite" class="ss" src="https://leancrew.com/all-this/images2025/20250209-Englarged%20PNG%20and%20BMP%20images%20via%20alpha_composite.png" title="Englarged PNG and BMP images via alpha_composite" width="480px"/></p>
+<p>To me, this is the expected result. It’s what you’d get if you opened the rectangle image in an editor like Acorn, changed the colors, and pasted it onto a gray background rectangle.</p>
+<p>The word <em>paste</em> in the previous paragraph can lead you astray when working with PIL. Here’s a slightly different script. It still uses <code>RGBA</code> mode for the component images, but it uses the <a href="https://pillow.readthedocs.io/en/stable/reference/Image.html#PIL.Image.Image.paste"><code>paste</code> function</a> instead of <code>alpha_composite</code> to put them together.</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import numpy as np
+ 4:  from PIL import Image
+ 5:  from recolor import recolor
+ 6:  
+ 7:  # Make a gray canvas for placing other images on
+ 8:  canvas = Image.new('RGBA', (24, 16), (224, 224, 224))
+ 9:  
+10:  # Open the rectangular GIF and convert to RGBA
+11:  rect = Image.open('rect.gif').convert('RGBA')
+12:  
+13:  # Make two new rectangles, one with the black changed to blue
+14:  # and the other with the white changed to red
+15:  blue_rect = recolor(rect, (0, 0, 0), (0, 0, 255))
+16:  red_rect = recolor(rect, (255, 255, 255), (255, 0, 0))
+17:  
+18:  # Paste the rectangles on the canvas
+19:  canvas.paste(blue_rect, (2, 2))
+20:  canvas.paste(red_rect, (14, 2))
+21:  
+22:  # Save as a PNG and as a BMP
+23:  canvas.save('test2.png')
+24:  canvas.save('test2.bmp')
+</code></pre>
+<p>Everything’s the same until Line 18. Lines 19–20 use <code>paste</code>, and the resulting files are named <code>test2</code> instead of <code>test1</code>. Here’s what <code>test2.png</code> looks like when enlarged in Acorn:</p>
+<p><img alt="Enlarged PNG image via paste" class="ss" src="https://leancrew.com/all-this/images2025/20250209-Enlarged%20PNG%20image%20via%20paste.png" title="Enlarged PNG image via paste" width="480px"/></p>
+<p>Well, this is a surprise—it was to me, anyway. In PIL, transparent pixels blow through the background image when they are <code>paste</code>‘d. Or at least they do if the output format supports transparency. BMP files don’t support transparency, so here’s what <code>test2.bmp</code> looks like:</p>
+<p><img alt="Enlarged BMP via paste" class="ss" src="https://leancrew.com/all-this/images2025/20250209-Enlarged%20BMP%20via%20paste.png" title="Enlarged BMP via paste" width="480px"/></p>
+<p>In <code>blue_rect</code> all the pixels with a black color value were changed to blue, even the ones that were transparent in the original GIF. And when we save the result to a file format that doesn’t support transparency, the blue appears in the supposedly transparent areas. A similar argument explains the large black area in the area where <code>red_rect</code> was <code>paste</code>‘d.</p>
+<p>If there’s no transparency in the foreground image, the <code>paste</code> function is just fine. But to me, turning everything into <code>RGBA</code> mode and using <code>alpha_composite</code> is the way to go. It does what I want, and I don’t have to think anymore.</p>
+<p>By the way, Jason didn’t use my <code>recolor</code> function directly because it didn’t fit in with how the rest of his script (which I didn’t see until later) was structured. But he was able to break it up and inject pieces of it to get his script working, which is all that matters.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:pil">
+<p>The original Python Imaging Library has ceased to be. It’s expired and gone to meet its maker; run down the curtain and joined the choir invisible. But because its replacement, Pillow, uses the same terminology, I will refer to it as PIL throughout the post. <a href="#fnref:pil" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>

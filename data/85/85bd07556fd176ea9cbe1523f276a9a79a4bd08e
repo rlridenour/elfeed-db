@@ -1,0 +1,635 @@
+<h1>Table of Contents</h1>
+
+<ol>
+<li><a href="https://turtleware.eu/rss.xml#org91882bd">Building ECL</a></li>
+<li><a href="https://turtleware.eu/rss.xml#org69f465e">Building WECL</a></li>
+<li><a href="https://turtleware.eu/rss.xml#orgb48e043">Building user programs</a></li>
+<li><a href="https://turtleware.eu/rss.xml#org2218eab">Extending ASDF</a></li>
+<li><a href="https://turtleware.eu/rss.xml#org724c21a">Funding</a></li>
+</ol>
+
+<p>Using Common Lisp in WASM enabled runtimes is a new frontier for the Common Lisp
+ecosystem. In the previous post <a href="https://turtleware.eu/posts/Using-Common-Lisp-from-inside-the-Browser.html">Using Common Lisp from inside the Browser</a> I've
+discussed how to embed Common Lisp scripts directly on the website, discussed
+the foreign function interface to JavaScript and SLIME port called LIME allowing
+the user to connect with a local Emacs instance.</p>
+
+<p>This post will serve as a tutorial that describes how to build WECL and how to
+cross-compile programs to WASM runtime. Without further ado, let's dig in.</p>
+
+<p><a id="org91882bd"></a></p>
+
+<h1>Building ECL</h1>
+
+<p>To compile ECL targeting WASM we first build the host version and then we use it
+to cross-compile it for the target architecture.</p>
+
+<pre><code>git clone https://gitlab.com/embeddable-common-lisp/ecl.git
+cd ecl
+export ECL_SRC=`pwd`
+export ECL_HOST=${ECL_SRC}/ecl-host
+./configure --prefix=${ECL_HOST} &amp;&amp; make -j32 &amp;&amp; make install
+</code></pre>
+
+<p>Currently ECL uses <a href="https://emscripten.org/docs/tools_reference/emsdk.html">Emscripten SDK</a> that implements required target primitives
+like libc. In the meantime, I'm also porting ECL to <a href="https://wasi.dev/">WASI</a>, but it is not ready
+yet.  In any case we need to install and activate <code>emsdk</code>:</p>
+
+<pre><code>git clone https://github.com/emscripten-core/emsdk.git
+pushd emsdk
+./emsdk install latest
+./emsdk activate latest
+source ./emsdk_env.sh
+popd
+</code></pre>
+
+<p>Finally it is time to build the target version of ECL. A flag <code>--disable-shared</code>
+is optional, but keep in mind that cross-compilation of user programs is a new
+feature and it is still taking shape. Most notably some nuances with compiling
+systems from <code>.asd</code> files may differ depending on the flag used here.</p>
+
+<pre><code>make distclean # removes build/ directory
+export ECL_WASM=${ECL_SRC}/ecl-wasm
+export ECL_TO_RUN=${ECL_HOST}/bin/ecl
+emconfigure ./configure --host=wasm32-unknown-emscripten --build=x86_64-pc-linux-gnu \
+            --with-cross-config=${ECL_SRC}/src/util/wasm32-unknown-emscripten.cross_config \
+            --prefix=${ECL_WASM} --disable-shared --with-tcp=no --with-cmp=no
+
+emmake make -j32 &amp;&amp; emmake make install
+
+# some files need to be copied manually
+cp build/bin/ecl.js build/bin/ecl.wasm ${ECL_WASM}
+</code></pre>
+
+<p>Running from a browser requires us to host the file. To spin Common Lisp web
+server on the spot, we can use one of our scripts (that assume that <code>quicklisp</code>
+is installed to download <code>hunchentoot</code>).</p>
+
+<pre><code>export WEBSERVER=${ECL_SRC}/src/util/webserver.lisp
+${ECL_TO_RUN} --load $WEBSERVER
+# After the server is loaded run:
+# firefox localhost:8888/ecl-wasm/ecl.html
+</code></pre>
+
+<p>Running from <code>node</code> is more straightforward from the console perspective, but
+there is one caveat: read operations are not blocking, so if we try to run a
+default REPL we'll have many nested I/O errors because stdin returns EOF.
+Running in batch mode works fine though:</p>
+
+<pre><code>node ecl-wasm/ecl.js --eval '(format t &quot;Hello world!~%&quot;)' --eval '(quit)'
+warning: unsupported syscall: __syscall_prlimit64
+Hello world!
+program exited (with status: 0), but keepRuntimeAlive() is set (counter=0) due to an async operation, so halting execution but not exiting the runtime or preventing further async execution (you can use emscripten_force_exit, if you want to force a true shutdown)
+</code></pre>
+
+<p>The produced wasm is not suitable for running in other runtimes, because
+Emscripten requires <a href="https://github.com/WasmEdge/WasmEdge/issues/2335">additional functions</a> to <a href="https://emscripten.org/docs/porting/setjmp-longjmp.html">emulate setjmp</a>. For example:</p>
+
+<pre><code>wasmedge ecl-wasm/ecl.wasm
+[2025-11-21 13:34:54.943] [error] instantiation failed: unknown import, Code: 0x62
+[2025-11-21 13:34:54.943] [error]     When linking module: &quot;env&quot; , function name: &quot;invoke_iii&quot;
+[2025-11-21 13:34:54.943] [error]     At AST node: import description
+[2025-11-21 13:34:54.943] [error]     This may be the import of host environment like JavaScript or Golang. Please check that you've registered the necessary host modules from the host programming language.
+[2025-11-21 13:34:54.943] [error]     At AST node: import section
+[2025-11-21 13:34:54.943] [error]     At AST node: module
+</code></pre>
+
+<p><a id="org69f465e"></a></p>
+
+<h1>Building WECL</h1>
+
+<p>The previous step allowed us to run vanilla ECL. Now we are going to use
+artifacts created during the compilation to create an application that skips
+boilerplate provided by vanilla Emscripten and includes Common Lisp code for
+easier development - FFI to JavaScript, windowing abstraction, support for
+&lt;script type='common-lisp'&gt;, Emacs connectivity and in-browser REPL support.</p>
+
+<p>First we need to clone the WECL repository:</p>
+
+<pre><code>fossil clone https://fossil.turtleware.eu/wecl
+cd wecl
+</code></pre>
+
+<p>Then we need to copy over compilation artifacts and my SLIME fork (<a href="https://github.com/slime/slime/pull/879">pull request</a>)
+to the <code>Code</code> directory:</p>
+
+<pre><code>pushd Code
+cp -r ${ECL_WASM} wasm-ecl
+git clone git@github.com:dkochmanski/slime.git
+popd
+</code></pre>
+
+<p>Finally we can build and start the application:</p>
+
+<pre><code>./make.sh build
+./make.sh serve
+</code></pre>
+
+<p>If you want to connect to Emacs, then open the file <code>App/lime.el</code>, evaluate the
+buffer and call the function <code>(lime-net-listen &quot;localhost&quot; 8889)</code>. Then open a
+browser at <a href="http://localhost:8888/slug.html">http://localhost:8888/slug.html</a> and click &quot;Connect&quot;. A new REPL
+should pop up in your Emacs instance.</p>
+
+<p>It is time to talk a bit about contents of the <code>wecl</code> repository and how the
+instance is bootstrapped. These things are still under development, so details
+may change in the future.</p>
+
+<ol>
+<li>Compile <code>wecl.wasm</code> and its loader <code>wecl.js</code></li>
+</ol>
+
+<p>We've already built the biggest part, that is ECL itself. Now we link
+<code>libecl.a</code>, <code>libeclgc.a</code> and <code>libeclgmp.a</code> with the file <code>Code/wecl.c</code> that
+calls <code>cl_boot</code> when the program is started. This is no different from the
+ordinary embedding procedure of ECL.</p>
+
+<p>The file <code>wecl.c</code> defines additionally supporting functions for JavaScript
+interoperation that allow us to call JavaScript and keeping track of shared
+objects. These functions are exported so that they are available in CL env.
+Moreover it loads a few lisp files:</p>
+
+<ul>
+<li><strong>Code/packages.lisp:</strong> package where JS interop functions reside</li>
+<li><strong>Code/utilities.lisp:</strong> early utilities used in the codebase (i.e <code>when-let</code>)</li>
+<li><strong>Code/wecl.lisp:</strong> JS-FFI, object registry and a stream to wrap <code>console.log</code></li>
+<li><strong>Code/jsapi/*.lisp:</strong> JS bindings (operators, classes, &#x2026;)</li>
+<li><strong>Code/script-loader.lisp:</strong> loading Common Lisp scripts directly in HTML</li>
+</ul>
+
+<p>After that the function returns. It is the user responsibility to start the
+program logic in one of scripts loaded by the the script loader. There are a few
+examples of this:</p>
+
+<ul>
+<li><strong>main.html:</strong> loads a repl and another xterm console (external dependencies)</li>
+<li><strong>easy.html:</strong> showcase how to interleave JavaScript and Common Lisp in gadgets</li>
+<li><strong>slug.html:</strong> push button that connects to the lime.el instance on localhost</li>
+</ul>
+
+<p>The only requirement for the website to use ECL is to include two scripts in its
+header. <code>boot.js</code> configures the runtime loader and <code>wecl.js</code> loads <code>wasm</code> file:</p>
+
+<pre><code>&lt;!doctype html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;Web Embeddable Common Lisp&lt;/title&gt;
+    &lt;script type=&quot;text/javascript&quot; src=&quot;boot.js&quot;&gt;&lt;/script&gt;
+    &lt;script type=&quot;text/javascript&quot; src=&quot;wecl.js&quot;&gt;&lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;script type=&quot;text/common-lisp&quot;&gt;
+      (loop for i from 0 below 3
+            for p = (|createElement| &quot;document&quot; &quot;p&quot;)
+            do (setf (|innerText| p) (format nil &quot;Hello world ~a!&quot; i))
+               (|appendChild| &quot;document.body&quot; p))
+    &lt;/script&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</code></pre>
+
+<p>I've chosen to use unmodified names of JS operators in bindings to make looking
+them up easier. One can use an utility <code>lispify-name</code> to have lispy bindings:</p>
+
+<pre><code>(macrolet ((lispify-operator (name)
+             `(defalias ,(lispify-name name) ,name))
+           (lispify-accessor (name)
+             (let ((lisp-name (lispify-name name)))
+               `(progn
+                  (defalias ,lisp-name ,name)
+                  (defalias (setf ,lisp-name) (setf ,name))))))
+  (lispify-operator |createElement|)    ;create-element
+  (lispify-operator |appendChild|)      ;append-child
+  (lispify-operator |removeChild|)      ;remove-child
+  (lispify-operator |replaceChildren|)  ;replace-children
+  (lispify-operator |addEventListener|) ;add-event-listener
+  (lispify-accessor |innerText|)        ;inner-text
+  (lispify-accessor |textContent|)      ;text-content
+  (lispify-operator |setAttribute|)     ;set-attribute
+  (lispify-operator |getAttribute|))    ;get-attribute
+</code></pre>
+
+<p>Note that scripts may be modified without recompiling WECL. On the other hand
+files that are loaded at startup (along with swank source code) are embedded in
+the <code>wasm</code> file. For now they are loaded at startup, but they may be compiled in
+the future if there is such need.</p>
+
+<p>When using WECL in the browser, functions like <code>compile-file</code> and <code>compile</code> are
+available and they defer compilation to the bytecodes compiler. The bytecodes
+compiler in ECL is very fast, but produces unoptimized bytecode because it is a
+one-pass compiler. When performance matters, it is necessary to use compile on
+the host to an object file or to a static library and link it against WECL in
+file <code>make.sh</code> &#x2013; recompilation of <code>wecl.wasm</code> is necessary.</p>
+
+<p><a id="orgb48e043"></a></p>
+
+<h1>Building user programs</h1>
+
+<p>Recently Marius Gerbershagen improved cross-compilation support for user
+programs from the host implementation using the same toolchain that builds ECL.
+Compiling files simple: use <code>target-info.lisp</code> file installed along with the
+cross-compiled ECL as an argument to <code>with-compilation-unit</code>:</p>
+
+<pre><code>;;; test-file-1.lisp
+(in-package &quot;CL-USER&quot;)
+(defmacro twice (&amp;body body) `(progn ,@body ,@body))
+
+;;; test-file-1.lisp
+(in-package &quot;CL-USER&quot;)
+(defun bam (x) (twice (format t &quot;Hello world ~a~%&quot; (incf x))))
+
+(defvar *target*
+  (c:read-target-info &quot;/path/to/ecl-wasm/target-info.lsp&quot;))
+
+(with-compilation-unit (:target *target*)
+  (compile-file &quot;test-file-1.lisp&quot; :system-p t :load t)
+  (compile-file &quot;test-file-2.lisp&quot; :system-p t)
+  (c:build-static-library &quot;test-library&quot;
+                          :lisp-files '(&quot;test-file-1.o&quot; &quot;test-file-2.o&quot;)
+                          :init-name &quot;init_test&quot;))
+</code></pre>
+
+<p>This will produce a file <code>libtest-library.a</code>. To use the library in WECL we
+should include it in the emcc invocation in <code>make.sh</code> and call the function
+<code>init_test</code> in <code>Code/wecl.c</code> before <code>script-loader.lisp</code> is loaded:</p>
+
+<pre><code>/* Initialize your libraries here, so they can be used in user scripts. */
+extern void init_test(cl_object);
+ecl_init_module(NULL, init_test);
+</code></pre>
+
+<p>Note that we've passed the argument <code>:load</code> to <code>compile-file</code> &#x2013; it ensures that
+after the file is compiled, we load it (in our case - its source code) using the
+target runtime <code>*features*</code> value. During cross-compilation ECL includes also a
+feature <code>:cross</code>. Loading the first file is necessary to define a macro that is
+used in the second file. Now if we open REPL in the browser:</p>
+
+<pre><code>&gt; #'lispify-name
+#&lt;bytecompiled-function LISPIFY-NAME 0x9f7690&gt;
+&gt; #'cl-user::bam
+#&lt;compiled-function COMMON-LISP-USER::BAM 0x869d20&gt;
+&gt; (cl-user::bam 3)
+Hello world 4
+Hello world 5
+</code></pre>
+
+<p><a id="org2218eab"></a></p>
+
+<h1>Extending ASDF</h1>
+
+<p>The approach for cross-compiling in the previous section is the API provided by
+ECL. It may be a bit crude for everyday work, especially when we work with a
+complex dependency tree. In this section we'll write an extension to ASDF that
+allows us to compile entire system with its dependencies into a static library.</p>
+
+<p>First let's define a package and add configure variables:</p>
+
+<pre><code>(defpackage &quot;ASDF-ECL/CC&quot;
+  (:use &quot;CL&quot; &quot;ASDF&quot;)
+  (:export &quot;CROSS-COMPILE&quot; &quot;CROSS-COMPILE-PLAN&quot; &quot;CLEAR-CC-CACHE&quot;))
+(in-package &quot;ASDF-ECL/CC&quot;)
+
+(defvar *host-target*
+  (c::get-target-info))
+
+#+(or)
+(defvar *wasm-target*
+  (c:read-target-info &quot;/path/to/ecl-wasm/target-info.lsp&quot;))
+
+(defparameter *cc-target* *host-target*)
+(defparameter *cc-cache-dir* #P&quot;/tmp/ecl-cc-cache/&quot;)
+</code></pre>
+
+<p>ASDF operates in two passes &#x2013; first it computes the operation plan and then it
+performs it. To help with specifying dependencies ASDF provides five mixins:</p>
+
+<ul>
+<li><p><strong>DOWNWARD-OPERATION:</strong> before operating on the component, perform an operation
+on children - i.e loading the system requires loading all its components.</p></li>
+<li><p><strong>UPWARD-OPERATION:</strong> before operating on the component, perform an operation on
+parent - i.e invalidating the cache requires invalidating cache of parent.</p></li>
+<li><p><strong>SIDEWAY-OPERATION:</strong> before operating on the component, perform the operation
+on all component dependencies - i.e load components that we depend on</p></li>
+<li><p><strong>SELFWARD-OPERATION:</strong> before operating on the component, perform operations on
+itself - i.e compile the component before loading it</p></li>
+<li><p><strong>NON-PROPAGATING-OPERATION:</strong> a standalone operation with no dependencies</p></li>
+</ul>
+
+<p>Cross-compilation requires us to produce object file from each source file of
+the target system and its dependencies. We will achieve that by defining two
+operations: <code>cross-object-op</code> for producing object files from lisp source code
+and <code>cross-compile-op</code> for producing static libraries from objects:</p>
+
+<pre><code>(defclass cross-object-op (downward-operation) ())
+
+(defmethod downward-operation ((self cross-object-op))
+  'cross-object-op)
+
+;;; Ignore all files that are not CL-SOURCE-FILE.
+(defmethod perform ((o cross-object-op) (c t)))
+
+(defmethod perform ((o cross-object-op) (c cl-source-file))
+  (let ((input-file (component-pathname c))
+        (output-file (output-file o c)))
+    (multiple-value-bind (output warnings-p failure-p)
+        (compile-file input-file :system-p t :output-file output-file)
+      (uiop:check-lisp-compile-results output warnings-p failure-p
+                                       &quot;~/asdf-action::format-action/&quot;
+                                       (list (cons o c))))))
+
+(defclass cross-compile-op (sideway-operation downward-operation)
+  ())
+
+(defmethod perform ((self cross-compile-op) (c system))
+  (let* ((system-name (primary-system-name c))
+         (inputs (input-files self c))
+         (output (output-file self c))
+         (init-name (format nil &quot;init_lib_~a&quot;
+                            (substitute #\_ nil system-name
+                                        :test (lambda (x y)
+                                                (declare (ignore x))
+                                                (not (alpha-char-p y)))))))
+    (c:build-static-library output :lisp-files inputs
+                                   :init-name init-name)))
+
+(defmethod sideway-operation ((self cross-compile-op))
+  'cross-compile-op)
+
+(defmethod downward-operation ((self cross-compile-op))
+  'cross-object-op)
+</code></pre>
+
+<p>We can confirm that the plan is computed correctly by running it on a system
+with many transient dependencies:</p>
+
+<pre><code>(defun debug-plan (system)
+  (format *debug-io* &quot;-- Plan for ~s -----------------~%&quot; system)
+  (map nil (lambda (a)
+             (format *debug-io* &quot;~24a: ~a~%&quot; (car a) (cdr a)))
+       (asdf::plan-actions
+        (make-plan 'sequential-plan 'cross-compile-op system))))
+
+(debug-plan &quot;mcclim&quot;)
+</code></pre>
+
+<p>In Common Lisp the compilation of subsequent files often depends on previous
+definitions. That means that we need to load files. Loading files compiled for
+another architecture is not an option. Moreover:</p>
+
+<ul>
+<li>some systems will have different dependencies based on <strong>features</strong></li>
+<li>code may behave differently depending on the evaluation environment</li>
+<li>compilation may require either host or target semantics for cross-compilation</li>
+</ul>
+
+<p>There is no general solution except from full target emulation or the client
+code being fully aware that it is being cross compiled. That said, surprisingly
+many Common Lisp programs can be cross-compiled without many issues.</p>
+
+<p>In any case we need to be able to load source code while it is being compiled.
+Depending on the actual code we may want to specify the host or the target
+features, load the source code directly or first compile it, etc. To allow user
+choosing the load strategy we define an operation <code>cross-load-op</code>:</p>
+
+<pre><code>(defparameter *cc-load-type* :minimal)
+(defvar *cc-last-load* :minimal)
+
+(defclass cross-load-op (non-propagating-operation) ())
+
+(defmethod operation-done-p ((o cross-load-op) (c system))
+  (and (component-loaded-p c)
+       (eql *cc-last-load* *cc-load-type*)))
+
+;;; :FORCE :ALL is excessive. We should store the compilation strategy flag as a
+;;; compilation artifact and compare it with *CC-LOAD-TYPE*.
+(defmethod perform ((o cross-load-op) (c system))
+  (setf *cc-last-load* *cc-load-type*)
+  (ecase *cc-load-type*
+    (:emulate
+     (error &quot;Do you still believe in Santa Claus?&quot;))
+    (:default
+     (operate 'load-op c))
+    (:minimal
+     (ext:install-bytecodes-compiler)
+     (operate 'load-op c)
+     (ext:install-c-compiler))
+    (:ccmp-host
+     (with-compilation-unit (:target *host-target*)
+       (operate 'load-op c :force :all)))
+    (:bcmp-host
+     (with-compilation-unit (:target *host-target*)
+       (ext:install-bytecodes-compiler)
+       (operate 'load-op c :force :all)
+       (ext:install-c-compiler)))
+    (:bcmp-target
+     (with-compilation-unit (:target *cc-target*)
+       (ext:install-bytecodes-compiler)
+       (operate 'load-op c :force :all)
+       (ext:install-c-compiler)))
+    (:load-host
+     (with-compilation-unit (:target *host-target*)
+       (operate 'load-source-op c :force :all)))
+    (:load-target
+     (with-compilation-unit (:target *cc-target*)
+       (operate 'load-source-op c :force :all)))))
+</code></pre>
+
+<p>To estabilish a cross-compilation dynamic context suitable for ASDF operations
+we'll define a new macro <code>WITH-ASDF-COMPILATION-UNIT</code>. It modifies the cache
+directory, injects features that are commonly expected by various systems, and
+configures the ECL compiler. That macro is used while the</p>
+
+<pre><code>;;; KLUDGE some system definitions test that *FEATURES* contains this or that
+;;; variant of :ASDF* and bark otherwise.
+;;;
+;;; KLUDGE systems may have DEFSYSTEM-DEPENDS-ON that causes LOAD-ASD to try to
+;;; load the system -- we need to modify *LOAD-SYSTEM-OPERATION* for that. Not
+;;; to be conflated with CROSS-LOAD-UP.
+;;; 
+;;; KLUDGE We directly bind ASDF::*OUTPUT-TRANSLATIONS* because ASDF advertised
+;;; API does not work.
+(defmacro with-asdf-compilation-unit (() &amp;body body)
+  `(with-compilation-unit (:target *cc-target*)
+     (flet ((cc-path ()
+              (merge-pathnames &quot;**/*.*&quot;
+                               (uiop:ensure-directory-pathname *cc-cache-dir*))))
+       (let ((asdf::*output-translations* `(((t ,(cc-path)))))
+             (*load-system-operation* 'load-source-op)
+             (*features* (remove-duplicates
+                          (list* :asdf :asdf2 :asdf3 :asdf3.1 *features*))))
+         ,@body))))
+</code></pre>
+
+<p>Note that loading the system should happen in a different environment than
+compiling it. Most notably we can't reuse the cache. That's why <code>cross-load-op</code>
+must not be a dependency of <code>cross-compile-op</code>. Output translations and features
+affect the planning phase, so we need estabilish the environment over <code>operate</code>
+and not only <code>perform</code>. We will also define functions for the user to invoke
+cross-compilation, to show cross-compilation plan and to wipe the cache:</p>
+
+<pre><code>(defun cross-compile (system &amp;rest args
+                      &amp;key cache-dir target load-type &amp;allow-other-keys)
+  (let ((*cc-cache-dir* (or cache-dir *cc-cache-dir*))
+        (*cc-target* (or target *cc-target*))
+        (*cc-load-type* (or load-type *cc-load-type*))
+        (cc-operation (make-operation 'cross-compile-op)))
+    (apply 'operate cc-operation system args)
+    (with-asdf-compilation-unit () ;; ensure cache
+      (output-file cc-operation system))))
+
+(defun cross-compile-plan (system target)
+  (format *debug-io* &quot;-- Plan for ~s -----------------~%&quot; system)
+  (let ((*cc-target* target))
+    (with-asdf-compilation-unit ()
+      (map nil (lambda (a)
+                 (format *debug-io* &quot;~24a: ~a~%&quot; (car a) (cdr a)))
+           (asdf::plan-actions
+            (make-plan 'sequential-plan 'cross-compile-op system))))))
+
+(defun cross-compile-plan (system target)
+  (format *debug-io* &quot;-- Plan for ~s -----------------~%&quot; system)
+  (let ((*cc-target* target))
+    (with-asdf-compilation-unit ()
+      (map nil (lambda (a)
+                 (format *debug-io* &quot;~24a: ~a~%&quot; (car a) (cdr a)))
+           (asdf::plan-actions
+            (make-plan 'sequential-plan 'cross-compile-op system))))))
+
+(defun clear-cc-cache (&amp;key (dir *cc-cache-dir*) (force nil))
+  (uiop:delete-directory-tree
+   dir
+   :validate (or force (yes-or-no-p &quot;Do you want to delete recursively ~S?&quot; dir))
+   :if-does-not-exist :ignore))
+
+;;; CROSS-LOAD-OP happens inside the default environment, while the plan for
+;;; cross-compilation should have already set the target features.
+
+(defmethod operate ((self cross-compile-op) (c system) &amp;rest args)
+  (declare (ignore args))
+  (unless (operation-done-p 'cross-load-op c)
+    (operate 'cross-load-op c))
+  (with-asdf-compilation-unit ()
+    (call-next-method)))
+</code></pre>
+
+<p>Last but not least we need to specify input and output files for operations.
+This will tie into the plan, so that compiled objects will be reused. Computing
+input files for cross-compile-op is admittedly hairy, because we need to visit
+all dependency systems and collect their outputs too. Dependencies may take
+various forms, so we need to normalize them.</p>
+
+<pre><code>(defmethod input-files ((o cross-object-op) (c cl-source-file))
+  (list (component-pathname c)))
+
+(defmethod output-files ((o cross-object-op) (c cl-source-file))
+  (let ((input-file (component-pathname c)))
+    (list (compile-file-pathname input-file :type :object))))
+
+(defmethod input-files ((self cross-compile-op) (c system))
+  (let ((visited (make-hash-table :test #'equal))
+        (systems nil))
+    (labels ((normalize-asdf-system (dep)
+               (etypecase dep
+                 ((or string symbol)
+                  (setf dep (find-system dep)))
+                 (system)
+                 (cons
+                  (ecase (car dep)
+                    ;; *features* are bound here to the target.
+                    (:feature
+                     (destructuring-bind (feature depspec) (cdr dep)
+                       (if (member feature *features*)
+                           (setf dep (normalize-asdf-system depspec))
+                           (setf dep nil))))
+                    ;; INV if versions were incompatible, then CROSS-LOAD-OP would bark.
+                    (:version
+                     (destructuring-bind (depname version) (cdr dep)
+                       (declare (ignore version))
+                       (setf dep (normalize-asdf-system depname))))
+                    ;; Ignore &quot;require&quot;, these are used during system loading.
+                    (:require))))
+               dep)
+             (rec (sys)
+               (setf sys (normalize-asdf-system sys))
+               (when (null sys)
+                 (return-from rec))
+               (unless (gethash sys visited)
+                 (setf (gethash sys visited) t)
+                 (push sys systems)
+                 (map nil #'rec (component-sideway-dependencies sys)))))
+      (rec c)
+      (loop for sys in systems
+            append (loop for sub in (asdf::sub-components sys :type 'cl-source-file)
+                         collect (output-file 'cross-object-op sub))))))
+
+(defmethod output-files ((self cross-compile-op) (c system))
+  (let* ((path (component-pathname c))
+         (file (make-pathname :name (primary-system-name c) :defaults path)))
+    (list (compile-file-pathname file :type :static-library))))
+</code></pre>
+
+<p>At last we can cross compile ASDF systems. Let's give it a try:</p>
+
+<pre><code>ASDF-ECL/CC&gt; (cross-compile-plan &quot;flexi-streams&quot; *wasm-target*)
+-- Plan for &quot;flexi-streams&quot; -----------------
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;trivial-gray-streams&quot; &quot;package&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;trivial-gray-streams&quot; &quot;streams&quot;&gt;
+#&lt;cross-compile-op &gt;    : #&lt;system &quot;trivial-gray-streams&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;packages&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;mapping&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;ascii&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;koi8-r&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;mac&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;iso-8859&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;enc-cn-tbl&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;code-pages&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;specials&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;util&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;conditions&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;external-format&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;length&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;encode&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;decode&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;in-memory&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;stream&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;output&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;input&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;io&quot;&gt;
+#&lt;cross-object-op &gt;     : #&lt;cl-source-file &quot;flexi-streams&quot; &quot;strings&quot;&gt;
+#&lt;cross-compile-op &gt;    : #&lt;system &quot;flexi-streams&quot;&gt;
+NIL
+ASDF-ECL/CC&gt; (cross-compile &quot;flexi-streams&quot; :target *wasm-target*)
+;;; ...
+#P&quot;/tmp/ecl-cc-cache/libs/flexi-streams-20241012-git/libflexi-streams.a&quot;
+</code></pre>
+
+<p>Note that <code>libflexi-streams.a</code> contains all objects from both libraries
+<code>flexi-streams</code> and <code>trivial-gray-streams</code>. All artifacts are cached, so if you
+remove an object or modify a file, then only necessary parts will be recompiled.</p>
+
+<p>All that is left is to include <code>libflexi-streams.a</code> in <code>make.sh</code> and put the
+initialization form in <code>wecl.c</code>:</p>
+
+<pre><code>extern void init_lib_flexi_streams(cl_object);
+ecl_init_module(NULL, init_lib_flexi_streams);.
+</code></pre>
+
+<p>This should suffice for the first iteration for cross-compiling systems. Next
+steps of improvement would be:</p>
+
+<ul>
+<li>compiling to static libraries (without dependencies)</li>
+<li>compiling to shared libraries (with and without dependencies)</li>
+<li>compiling to an executable (final wasm file)</li>
+<li>target system emulation (for faithful correspondence between load and compile)</li>
+</ul>
+
+<p>The code from this section may be found in <code>wecl</code> repository</p>
+
+<p><a id="org724c21a"></a></p>
+
+<h1>Funding</h1>
+
+<p>This project is funded through <a href="https://nlnet.nl/commonsfund">NGI0 Commons Fund</a>, a fund established by <a href="https://nlnet.nl">NLnet</a> with financial support from the European Commission's <a href="https://ngi.eu">Next Generation Internet</a> program. Learn more at the <a href="https://nlnet.nl/project/ECL">NLnet project page</a>.</p>
+
+<p><a href="https://nlnet.nl"><img alt="NLnet foundation logo" src="https://nlnet.nl/logo/banner.png" width="20%" /></a>
+<a href="https://nlnet.nl/commonsfund"><img alt="NGI Zero Logo" src="https://nlnet.nl/image/logos/NGI0_tag.svg" width="20%" /></a></p>

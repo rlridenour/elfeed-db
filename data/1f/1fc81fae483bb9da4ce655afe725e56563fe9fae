@@ -1,0 +1,145 @@
+<p>As someone who enjoys using Emacs for almost everything, I recently began exploring an alternative Emacs-native method for publishing static websites.</p>
+<p>Currently, I use <a href="https://github.com/kaushalmodi/ox-hugo">ox-hugo</a> to build a static site from a single Org file, and it works beautifully for exporting content to Hugo-compatible Markdown. However, I wanted to create a backup web generation system entirely within Emacs that doesn&rsquo;t rely on external tools like Hugo and might fit into my overarching <strong>Emacs Enhancements</strong> project concept.</p>
+<p>My <strong>Emacs Enhancements</strong> project focuses on replacing significant external packages that I commonly use with a collection of simple Elisp functions and built-in functionality. This approach is ideal for situations where I run Emacs on an air-gapped system or even on Windows, where I have found package management to be somewhat unreliable. You can check out my progress on <a href="https://github.com/captainflasmr/Emacs-enhanced">GitHub</a>.</p>
+<p>So, how do I replace Hugo/ox-hugo? Well, I finally got around to experimenting with the powerful <code>org-publish</code> system. I say &ldquo;finally&rdquo; because I’ve had my eye on this for quite a while, but at no point in the past did I have the time to invest in learning it. Now, during the festive period, I have my laptop and potentially some downtime so maybe now is the time!</p>
+<p>This post documents my work in progress journey of setting up an Emacs-based publishing workflow using <code>org-publish</code> to export to HTML.</p>
+<h2 id="why-org-publish-over-ox-hugo"><strong>Why Org-Publish over ox-hugo?</strong></h2>
+<p>While ox-hugo provides extensive functionality to structure and export content seamlessly for Hugo-based static sites, I found these motivations to explore org-publish:</p>
+<ol>
+<li><strong>Native Emacs Solution</strong>: Keeping everything within the Emacs ecosystem.</li>
+<li><strong>Backup</strong>: Ensures I have a non-Hugo-dependent HTML web site generation backup.</li>
+<li><strong>Customizability</strong>: Leverage fine-grained control over publishing directory structures and formats from within Emacs elisp.</li>
+</ol>
+<p>That said, this isn&rsquo;t a replacement for ox-hugo, but an experiment to see how efficient a pure Emacs approach can be.</p>
+<h2 id="project-setup-overview"><strong>Project Setup Overview</strong></h2>
+<ol>
+<li><strong>Using a Monolithic Org File</strong>: My starting file, <code>emacs--all.org</code>, contains all blog posts under separate headings.</li>
+<li><strong>Split the Org File into Multiple Smaller Files</strong>: For compatibility with <code>org-publish</code>, I wrote a utility to split the file. This allows each blog post to be processed independently.</li>
+<li><strong>Use <code>org-publish-project-alist</code></strong>: Define a multi-step pipeline for splitting, exporting HTML, and processing images.</li>
+</ol>
+<p>Here’s how I tackled each step in detail:</p>
+<h2 id="step-1-splitting-the-monolithic-org-file"><strong>Step 1: Splitting the Monolithic Org File</strong></h2>
+<p>The first hurdle was enabling <code>org-publish</code> to work with my single Org file. Since <code>org-publish</code> usually expects individual files to process, I created a custom function, <code>my-org-publish-split-headings</code>. This function splits the top-level headings marked as <code>DONE</code> into separate files, each prefixed with the date from a property (e.g., <code>:EXPORT_HUGO_LASTMOD:</code>).</p>
+<h3 id="splitting-file-logic">Splitting File Logic</h3>
+<p>Hopefully, this defun is commented well enough to be almost self-documenting!</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(defun my-org-publish-split-headings (plist filename pub-dir)
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Split an Org file into separate files, each corresponding to a top-level heading
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">that is marked as DONE.
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">Each file name is prefixed with the date in YYYYMMDD format extracted from the
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">:EXPORT_HUGO_LASTMOD: property. PLIST is the property list for the publishing
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">process, FILENAME is the input Org file, and PUB-DIR is the publishing directory.&#34;</span>
+</span></span><span style="display:flex;"><span>  (with-temp-buffer
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">insert-file-contents</span> filename) <span style="color:#75715e">;; Load the content of the current Org file</span>
+</span></span><span style="display:flex;"><span>    (<span style="color:#a6e22e">goto-char</span> (<span style="color:#a6e22e">point-min</span>))
+</span></span><span style="display:flex;"><span>    (let ((heading-level <span style="color:#ae81ff">1</span>) <span style="color:#75715e">;; Level of the top-level heading to split by</span>
+</span></span><span style="display:flex;"><span>          prev-start heading-title sanitized-title output-file lastmod-date)
+</span></span><span style="display:flex;"><span>      <span style="color:#75715e">;; Iterate over all top-level headings</span>
+</span></span><span style="display:flex;"><span>      (while (<span style="color:#a6e22e">re-search-forward</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;^\\*\\{%d\\} \\(?:\\([[:upper:]]+\\) \\)?\\(.*\\)&#34;</span> heading-level) <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>        (let ((todo-keyword (match-string <span style="color:#ae81ff">1</span>)) <span style="color:#75715e">;; Extract the TODO keyword (if it exists)</span>
+</span></span><span style="display:flex;"><span>              (heading-title (match-string <span style="color:#ae81ff">2</span>))) <span style="color:#75715e">;; Extract the title of the heading</span>
+</span></span><span style="display:flex;"><span>          <span style="color:#75715e">;; Process only headings marked as DONE</span>
+</span></span><span style="display:flex;"><span>          (when (and todo-keyword (<span style="color:#a6e22e">string-equal</span> todo-keyword <span style="color:#e6db74">&#34;DONE&#34;</span>))
+</span></span><span style="display:flex;"><span>            (setq prev-start (<span style="color:#a6e22e">match-beginning</span> <span style="color:#ae81ff">0</span>)) <span style="color:#75715e">;; Start of the current heading</span>
+</span></span><span style="display:flex;"><span>            (setq sanitized-title (when heading-title
+</span></span><span style="display:flex;"><span>                                    (replace-regexp-in-string <span style="color:#e6db74">&#34;[^a-zA-Z0-9_-]&#34;</span> <span style="color:#e6db74">&#34;_&#34;</span> heading-title))) <span style="color:#75715e">;; Sanitize title</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">;; Extract the :EXPORT_HUGO_LASTMOD: property for the current section</span>
+</span></span><span style="display:flex;"><span>            (save-excursion
+</span></span><span style="display:flex;"><span>              (when (<span style="color:#a6e22e">re-search-forward</span> <span style="color:#e6db74">&#34;:EXPORT_HUGO_LASTMOD: +\\(&lt;.+&gt;\\)&#34;</span> (save-excursion (<span style="color:#a6e22e">re-search-forward</span> <span style="color:#e6db74">&#34;^\\* &#34;</span> <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span>) (<span style="color:#a6e22e">point</span>)) <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>                (let* ((raw-lastmod (match-string <span style="color:#ae81ff">1</span>)) <span style="color:#75715e">;; Extract the timestamp string (e.g., &#34;&lt;2024-12-08 08:37&gt;&#34;)</span>
+</span></span><span style="display:flex;"><span>                       (date-elements (when (<span style="color:#a6e22e">string-match</span> <span style="color:#e6db74">&#34;&lt;\\([0-9]+\\)-\\([0-9]+\\)-\\([0-9]+\\)&#34;</span> raw-lastmod)
+</span></span><span style="display:flex;"><span>                                        (<span style="color:#a6e22e">list</span> (match-string <span style="color:#ae81ff">1</span> raw-lastmod) <span style="color:#75715e">;; Year</span>
+</span></span><span style="display:flex;"><span>                                              (match-string <span style="color:#ae81ff">2</span> raw-lastmod) <span style="color:#75715e">;; Month</span>
+</span></span><span style="display:flex;"><span>                                              (match-string <span style="color:#ae81ff">3</span> raw-lastmod))))) <span style="color:#75715e">;; Day</span>
+</span></span><span style="display:flex;"><span>                  (setq lastmod-date (when date-elements
+</span></span><span style="display:flex;"><span>                                       (<span style="color:#a6e22e">apply</span> <span style="color:#a6e22e">#&#39;concat</span> date-elements))))))
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">;; Default to &#34;00000000&#34; if no valid lastmod-date is found</span>
+</span></span><span style="display:flex;"><span>            (setq lastmod-date (or lastmod-date <span style="color:#e6db74">&#34;00000000&#34;</span>))
+</span></span><span style="display:flex;"><span>            <span style="color:#75715e">;; Find the end of this section (right before the next top-level heading)</span>
+</span></span><span style="display:flex;"><span>            (let ((section-end (save-excursion
+</span></span><span style="display:flex;"><span>                                 (or (<span style="color:#a6e22e">re-search-forward</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;^\\*\\{%d\\} &#34;</span> heading-level) <span style="color:#66d9ef">nil</span> <span style="color:#66d9ef">t</span>)
+</span></span><span style="display:flex;"><span>                                     (<span style="color:#a6e22e">point-max</span>))))) <span style="color:#75715e">;; End of current section or end of file</span>
+</span></span><span style="display:flex;"><span>              <span style="color:#75715e">;; Only proceed if sanitized title exists and is valid</span>
+</span></span><span style="display:flex;"><span>              (when (and sanitized-title (not (string-empty-p sanitized-title)))
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e">;; Create the output file name (prepend the date)</span>
+</span></span><span style="display:flex;"><span>                (setq output-file (<span style="color:#a6e22e">expand-file-name</span> (<span style="color:#a6e22e">format</span> <span style="color:#e6db74">&#34;%s-%s.org&#34;</span> lastmod-date sanitized-title) pub-dir))
+</span></span><span style="display:flex;"><span>                <span style="color:#75715e">;; Write the section content (from prev-start to section-end)</span>
+</span></span><span style="display:flex;"><span>                (<span style="color:#a6e22e">write-region</span> prev-start section-end output-file)
+</span></span><span style="display:flex;"><span>                (<span style="color:#a6e22e">message</span> <span style="color:#e6db74">&#34;Wrote %s&#34;</span> output-file)))))))
+</span></span><span style="display:flex;"><span>    <span style="color:#75715e">;; Return nil to indicate successful processing</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#66d9ef">nil</span>))
+</span></span></code></pre></div><p>I will go into more detail about how I set this up in a future post and how I decided on a split org-file naming convention.</p>
+<h2 id="step-2-org-publish-configuration"><strong>Step 2: Org-Publish Configuration</strong></h2>
+<figure><img src="https://emacs.dyerdwelling.family/ox-hugo/20241226125955-emacs--Exploring-Emacs-Based-Static-Website-Publishing-with-Org-Publish.jpg" width="100%">
+</figure>
+
+<p>After splitting the file, I defined the publishing pipeline in <code>org-publish-project-alist</code>. Here’s what each part does:</p>
+<ol>
+<li><strong><code>split-emacs</code></strong>:
+<ul>
+<li>Runs the custom splitting function (<code>my-org-publish-split-headings</code>).</li>
+<li>Takes the original monolithic Org file and generates smaller Org files in a designated directory.</li>
+</ul>
+</li>
+<li><strong><code>blog-posts-emacs</code></strong>:
+<ul>
+<li>Processes these generated Org files and exports them to HTML.</li>
+<li>Adds metadata such as preamble, postamble, and custom <code>.css</code> links for styling.</li>
+<li>Automatically generates a &ldquo;sitemap&rdquo; for blog indexing.</li>
+</ul>
+</li>
+<li><strong><code>images-emacs</code></strong>:
+<ul>
+<li>Publishes related images to the target directory.</li>
+</ul>
+</li>
+<li><strong><code>blog</code></strong>:
+<ul>
+<li>Meta-project to combine all the phases (<code>split-emacs</code>, <code>blog-posts-emacs</code>, <code>images-emacs</code>).</li>
+</ul>
+</li>
+</ol>
+<h3 id="org-publish-project-alist"><code>org-publish-project-alist</code></h3>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;ox-publish</span>)
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;;</span>
+</span></span><span style="display:flex;"><span>(setq org-publish-project-alist
+</span></span><span style="display:flex;"><span>      <span style="color:#f92672">&#39;</span>((<span style="color:#e6db74">&#34;split-emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-directory <span style="color:#e6db74">&#34;~/DCIM/content&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-extension <span style="color:#e6db74">&#34;org&#34;</span>
+</span></span><span style="display:flex;"><span>         :publishing-directory <span style="color:#e6db74">&#34;~/DCIM/content/split/emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :exclude <span style="color:#e6db74">&#34;.*&#34;</span>
+</span></span><span style="display:flex;"><span>         :include (<span style="color:#e6db74">&#34;emacs--all.org&#34;</span>)
+</span></span><span style="display:flex;"><span>         :publishing-function my-org-publish-split-headings
+</span></span><span style="display:flex;"><span>         :recursive <span style="color:#66d9ef">nil</span>)
+</span></span><span style="display:flex;"><span>        (<span style="color:#e6db74">&#34;blog-posts-emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-directory <span style="color:#e6db74">&#34;~/DCIM/content/split/emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-extension <span style="color:#e6db74">&#34;org&#34;</span>
+</span></span><span style="display:flex;"><span>         :publishing-directory <span style="color:#e6db74">&#34;~/publish/hugo-emacs/site/static/public_html&#34;</span>
+</span></span><span style="display:flex;"><span>         :publishing-function org-html-publish-to-html
+</span></span><span style="display:flex;"><span>         :recursive <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>         :section-numbers <span style="color:#66d9ef">nil</span>
+</span></span><span style="display:flex;"><span>         :with-toc <span style="color:#66d9ef">nil</span>
+</span></span><span style="display:flex;"><span>         :html-preamble <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>         :html-postamble <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>         :auto-sitemap <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>         :sitemap-filename <span style="color:#e6db74">&#34;index.org&#34;</span>
+</span></span><span style="display:flex;"><span>         :sitemap-title <span style="color:#e6db74">&#34;the DyerDwelling&#34;</span>
+</span></span><span style="display:flex;"><span>         :html-head <span style="color:#e6db74">&#34;&lt;link rel=\&#34;stylesheet\&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    href=\&#34;../assets/css//bootstrap.css\&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    type=\&#34;text/css\&#34;/&gt;\n
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    &lt;link rel=\&#34;stylesheet\&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    href=\&#34;../assets/css//style-ignore.css\&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#e6db74">                    type=\&#34;text/css\&#34;/&gt;&#34;</span>
+</span></span><span style="display:flex;"><span>         :sitemap-function my-sitemap-format
+</span></span><span style="display:flex;"><span>         :sitemap-sort-files alphabetically)
+</span></span><span style="display:flex;"><span>        (<span style="color:#e6db74">&#34;images-emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-directory <span style="color:#e6db74">&#34;~/DCIM/content/emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :base-extension <span style="color:#e6db74">&#34;jpg\\|gif\\|png&#34;</span>
+</span></span><span style="display:flex;"><span>         :recursive <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>         :publishing-directory <span style="color:#e6db74">&#34;~/publish/hugo-emacs/site/static/public_html/emacs&#34;</span>
+</span></span><span style="display:flex;"><span>         :publishing-function org-publish-attachment)
+</span></span><span style="display:flex;"><span>        (<span style="color:#e6db74">&#34;blog&#34;</span> <span style="color:#75715e">;; Meta-project to combine phases</span>
+</span></span><span style="display:flex;"><span>         :components (<span style="color:#e6db74">&#34;split-emacs&#34;</span> <span style="color:#e6db74">&#34;images-emacs&#34;</span> <span style="color:#e6db74">&#34;blog-posts-emacs&#34;</span>))))
+</span></span></code></pre></div><h2 id="conclusion">Conclusion</h2>
+<p>Here is the generated site: <a href="https://www.emacs.dyerdwelling.family/public_html/">https://www.emacs.dyerdwelling.family/public_html/</a></p>
+<p>This was a simple introduction to my approach to using <code>org-publish</code> to provide an alternative web publishing option for my blog, while I&rsquo;m still refining this workflow, the combination of a monolithic Org file for writing and <code>org-publish</code> for exporting HTML is already proving quite effective as a pure Emacs-powered alternative.</p>

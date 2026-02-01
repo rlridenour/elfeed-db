@@ -1,0 +1,83 @@
+<p>
+I spent some time figuring out how to submit a <code>multipart/form-data</code> form with <code>url-retrieve-synchronously</code> with Emacs Lisp. It was surprisingly hard to find an example of working with multi-part forms. I had totally forgotten that I had figured something out last year: <a href="https://sachachua.com/blog/2024/09/using-emacs-lisp-to-export-txt-epub-pdf-from-org-mode-to-the-supernote-via-browse-and-access/">Using Emacs Lisp to export TXT/EPUB/PDF from Org Mode to the Supernote via Browse and Access</a>. Well, I still had to spend some extra time dealing with the quirks of the PeerTube REST API. For toobnix.org, having <code>=</code> in the boundary didn't seem to work. Also, since I had newlines (<code>\n</code>) in my data, I needed to replace all of them with <code>\r\n</code>, which I could do with <code>encode-coding-string</code> and the <code>utf-8-dos</code> coding system. So here's an example I can use for the future:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">let*</span> ((boundary (format <span class="org-string">"%s%d"</span> (make-string 20 ?-) (time-to-seconds)))
+       (url-request-method <span class="org-string">"PUT"</span>)       <span class="org-comment-delimiter">; </span><span class="org-comment">or POST</span>
+       (url-request-extra-headers
+        (append
+         (list
+          (cons <span class="org-string">"Content-Type"</span>
+                (concat <span class="org-string">"multipart/form-data; boundary="</span> boundary))
+          <span class="org-comment-delimiter">;; </span><span class="org-comment">put any authentication things you need here too, like</span>
+          <span class="org-comment-delimiter">;; </span><span class="org-comment">(cons "Authorization" "Bearer ...")</span>
+          )
+         url-request-extra-headers
+         nil))
+       (url-request-data
+        (mm-url-encode-multipart-form-data
+         <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"field1"</span> .
+            ,(encode-coding-string <span class="org-string">"Whatever\nyour value is"</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">utf-8-dos</span>)))
+         boundary))
+       (url <span class="org-string">"http://127.0.0.1"</span>))        <span class="org-comment-delimiter">; </span><span class="org-comment">or whatever the URL is</span>
+    (<span class="org-keyword">with-current-buffer</span> (url-retrieve-synchronously url)
+      (<span class="org-keyword">prog1</span> (buffer-string)
+        (kill-buffer (current-buffer)))))
+</code></pre>
+</div>
+
+
+<p>
+I've also added it to my local elisp-demos notes file (see the <code>elisp-demos-user-files</code> variable) so that helpful can display it when I use <code>C-h f</code> to describe <code>mm-url-encode-multipart-form-data</code>.
+</p>
+
+<p>
+Here I'm using it to update the video description in <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-toobnix.el">emacsconf-toobnix.el</a>:
+</p>
+
+<p>
+</p><details open=""><summary>emacsconf-toobnix-update-video-description: Update the description for TALK.</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">emacsconf-toobnix-update-video-description</span> (talk <span class="org-type">&amp;optional</span> type)
+  <span class="org-doc">"Update the description for TALK.</span>
+<span class="org-doc">TYPE is 'talk or 'answers."</span>
+  (<span class="org-keyword">interactive</span>
+   (<span class="org-keyword">let</span> ((talk (emacsconf-complete-talk-info)))
+     (list
+      talk
+      (<span class="org-keyword">if</span> (plist-get talk <span class="org-builtin">:qa-toobnix-url</span>)
+          (intern (completing-read <span class="org-string">"Type: "</span> <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"talk"</span> <span class="org-string">"answers"</span>)))
+        <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">talk</span>))))
+  (<span class="org-keyword">setq</span> type (<span class="org-keyword">or</span> type <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">talk</span>))
+  (<span class="org-keyword">let*</span> ((properties
+          (<span class="org-keyword">pcase</span> type
+            (<span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">answers</span> (emacsconf-publish-answers-video-properties talk <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">toobnix</span>))
+            (_ (emacsconf-publish-talk-video-properties talk <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">toobnix</span>))))
+         (id
+          (emacsconf-toobnix-id-from-url
+           (plist-get talk (<span class="org-keyword">pcase</span> type
+                             (<span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">answers</span> <span class="org-builtin">:qa-toobnix-url</span>)
+                             (_ <span class="org-builtin">:toobnix-url</span>)))))
+         (boundary (format <span class="org-string">"%s%d"</span> (make-string 20 ?-)
+                           (time-to-seconds)))
+         (url-request-method <span class="org-string">"PUT"</span>)
+         (url-request-extra-headers
+          (cons (cons <span class="org-string">"Content-Type"</span>
+                      (concat <span class="org-string">"multipart/form-data; boundary="</span> boundary))
+                (emacsconf-toobnix-api-header)))
+         (url-request-data
+          (mm-url-encode-multipart-form-data
+                     <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"description"</span> .
+                        ,(encode-coding-string
+                          (plist-get properties <span class="org-builtin">:description</span>)
+                          <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">utf-8-dos</span>)))
+                     boundary))
+         (url (concat <span class="org-string">"https://toobnix.org/api/v1/videos/"</span> id)))
+    (<span class="org-keyword">with-current-buffer</span> (url-retrieve-synchronously url)
+      (<span class="org-keyword">prog1</span> (buffer-string)
+        (kill-buffer (current-buffer))))))
+
+</pre></div></details>
+<p></p>
+<div><a href="https://sachachua.com/blog/2025/12/emacs-lisp-making-a-multi-part-form-put-or-post-using-url-retrieve-synchronously-and-mm-url-encode-multipart-form-data/index.org">View org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KDTSW82PQXXNFQBKACP8AWDH" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2025%2F12%2Femacs-lisp-making-a-multi-part-form-put-or-post-using-url-retrieve-synchronously-and-mm-url-encode-multipart-form-data%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

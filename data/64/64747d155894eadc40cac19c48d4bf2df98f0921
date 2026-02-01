@@ -1,0 +1,59 @@
+<p>Last week I had an urge to both see if it&#39;s possible to send tasks from emacs to OmniFocus and to test Claude&#39;s ability with elisp.
+Most of my productivity needs are handled analog but some go into OmniFocus (right now). I use orgmode for notes and tasks related to those notes but not as my task management system.
+While the quick capture in OmniFocus works just fine I thought i&#39;d just experiment a little and see what&#39;s possible - because with emacs anything is possible, right?</p>
+<h2>First Iteration</h2>
+<p>My first iteration with Claude prompts didn&#39;t do too bad. Claude wanted to use the orgmode capture templates which I don&#39;t really need and it cause issues with destroying my splits. So I modified it a little and simply use the modeline for prompts. It worked well but using the URL Scheme would trigger the OmniFocus capture dialog anyway. I could not find anything their docs so I asked on their slack and a user informed me of the <code>autosave</code> param which solved that issue. Now it silently sent my task with notes to my inbox in the database.</p>
+<pre><code class="language-elisp">(defun gn/omnifocus-capture-original ()
+    &quot;Capture a task with optional note to OmniFocus via URL scheme&quot;
+    (interactive)
+    (let* ((task-name (read-string &quot;Task name: &quot;))
+           (task-note (read-string &quot;Note (optional): &quot;))
+           (encoded-name (url-hexify-string task-name))
+           (encoded-note (if (string-empty-p task-note) 
+                              &quot;&quot; 
+                             (concat &quot;&amp;note=&quot; (url-hexify-string task-note))))
+           (omnifocus-url (concat &quot;omnifocus:///add?name=&quot; encoded-name encoded-note &quot;&amp;autosave=true&quot;)))
+        (call-process &quot;open&quot; nil nil nil omnifocus-url)
+        (message &quot;Task sent to OmniFocus: %s&quot; task-name)))
+
+(global-set-key (kbd &quot;C-c o&quot;) &#39;gn/omnifocus-capture)
+</code></pre>
+<h2>Robustified</h2>
+<p>I like that the orgmode capture templates will capture the location in a file in the notes so I came up with this robustified version of the function to prompt if I want to save the location and also to use the date picker for due dates.</p>
+<pre><code class="language-elisp">(defun gn/omnifocus-capture ()
+  &quot;Capture a task with optional note, due date, and location in file to OmniFocus via URL scheme&quot;
+  (interactive)
+  (let* ((task-name (read-string &quot;Task name: &quot;))
+         (task-note (read-string &quot;Note (optional): &quot;))
+         ;; Use org-read-date with empty default - just press Enter to skip
+         (due-date (org-read-date nil nil nil &quot;Due date (Enter to skip): &quot; nil nil t))
+         (due-date-param (if (or (not due-date) (string-empty-p due-date))
+                            &quot;&quot; 
+                          (concat &quot;&amp;due=&quot; (url-hexify-string due-date))))
+         ;; Ask about location only if in a file
+         (capture-location (and (buffer-file-name)
+                               (string= &quot;y&quot; (read-string &quot;Include current location? (y/N): &quot; &quot;n&quot;))))
+         (location-info (when capture-location
+                         (format &quot;File: %s, Line: %d&quot; 
+                                (file-name-nondirectory (buffer-file-name))
+                                (line-number-at-pos))))
+         (full-note (if location-info
+                       (if (string-empty-p task-note)
+                           location-info
+                         (concat task-note &quot;\n\nLocation: &quot; location-info))
+                     task-note))
+         (encoded-name (url-hexify-string task-name))
+         (encoded-note (if (string-empty-p full-note) 
+                          &quot;&quot; 
+                        (concat &quot;&amp;note=&quot; (url-hexify-string full-note))))
+         (omnifocus-url (concat &quot;omnifocus:///add?name=&quot; encoded-name encoded-note due-date-param &quot;&amp;autosave=true&quot;)))
+    (call-process &quot;open&quot; nil nil nil omnifocus-url)
+    (message &quot;Task sent to OmniFocus: %s%s%s&quot; 
+             task-name 
+             (if (string-empty-p due-date) &quot;&quot; (concat &quot; (due: &quot; due-date &quot;)&quot;))
+             (if location-info &quot; [with location]&quot; &quot;&quot;))))
+</code></pre>
+<h2>Conclusion</h2>
+<p>Claude did ok with this experiment. Not fully working code but close enough for my less-than-stellar elisp chops to get it working. I don&#39;t know if i&#39;ll really make use of this going forward but it was a fun experiment and i&#39;m keeping it in my config just in case. The nice to have feature of this is to quickly grab the location in a file and send to OmniFocus without interupting the context of what I&#39;m working on.</p>
+<p>If I don&#39;t stick with OmniFocus and move to Things3 in the future, I&#39;m confident this can be quickly modified to work with it&#39;s URL Schemes.</p>
+<p>I&#39;m sure my elisp is not up to par so feel free to call me out it on Mastodon or email.</p>

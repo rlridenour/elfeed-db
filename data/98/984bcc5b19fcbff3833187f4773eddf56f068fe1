@@ -1,0 +1,46 @@
+<p>Comments in posts can be a great source of recommendations. Here's a way to extract post links using Emacs and <a href="http://github.com/zweifisch/enlive">enlive</a>.</p>
+<p><img src="https://xenodium.github.io/images/get-emacs-to-gather-urls-in-posts/emacs-enlive-url-fetch.gif" alt=""></p>
+<pre><code class="language-{.commonlisp">(require 'enlive) ;; https://github.com/zweifisch/enlive
+(require 'org)
+
+(defun ar/input-clipboard-url-or-prompt ()
+  &quot;Return a URL from clipboard or prompt user for one.&quot;
+  (let* ((clipboard (current-kill 0))
+         (url (if (string-match &quot;^https?://&quot; clipboard)
+                  clipboard
+                (read-string &quot;URL: &quot;))))
+    (unless (string-match &quot;^https?://&quot; url)
+      (error &quot;Not a URL&quot;))
+    url))
+
+(defun ar/url-fetch-anchor-elements (url)
+  &quot;Fetch anchor elements in URL as list of alist:
+\((title . \&quot;my title\&quot;)
+ (url . \&quot;http://some.location.com\&quot;)).&quot;
+  (let ((elements (enlive-query-all (enlive-fetch url) [a])))
+    (mapcar (lambda (element)
+              `((title . ,(enlive-text element))
+                (url . ,(enlive-attr element 'href))))
+            elements)))
+
+(defun ar/url-view-links-at ()
+  &quot;View external links in HTML from prompted URL or clipboard.&quot;
+  (interactive)
+  (with-current-buffer (get-buffer-create &quot;*links*&quot;)
+    (org-mode)
+    (view-mode -1)
+    (erase-buffer)
+    (mapc (lambda (anchor)
+            (let-alist anchor
+              (when (and .url (string-match &quot;^http&quot; .url))
+                (insert (org-make-link-string .url
+                                              .title) &quot;\n&quot;))))
+          (ar/url-fetch-anchor-elements
+           (ar/input-clipboard-url-or-prompt)))
+    (delete-duplicate-lines (point-min) (point-max))
+    (goto-char (point-min))
+    (toggle-truncate-lines +1)
+    (view-mode +1)
+(switch-to-buffer (current-buffer))))
+</code></pre>
+<p>UPDATE(2019-04-13): Refreshed post with latest code from my <a href="https://github.com/xenodium/dotsies/blob/9cf32157c5fec140218898dfcb11e74f623fec6c/emacs/ar/ar-url.el#L35">init</a>. Thanks to <a href="https://twitter.com/sjig">Gĳs</a> for pinging.</p>

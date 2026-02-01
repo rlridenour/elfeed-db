@@ -1,0 +1,167 @@
+<p>
+I've really started making good use of <code>org-babel</code> recently as part of my job, and <code>org-babel-tangle</code> has been particularly invaluable. I never honestly expected to get any use out of <code>org-babel</code> outside of taking lecture notes or working through textbooks. Don't get me wrong, it's a very useful tool - and I want to explain how I'm using it now that I've found a really solid use-case for it.
+</p>
+
+<p>
+If you're unfamiliar, <code>org-babel</code> is a literate programming extension for <code>org-mode</code>. On a surface level, it works similar to a Python notebook. It allows you to specify what major mode to treat a code block as and execute code directly from within your <code>org-mode</code> file. It also allows you to rip code out of code-blocks and place it into another file. So, for example, I can have two code-blocks at different points in my <code>org</code> file, both with a <code>:tangle file.cpp</code> header, and have them both be inserted (in order) into <code>file.cpp</code>. This feature is often used for literate configs within Emacs - where one <code>org</code> file contains all the configuration code, with suitable annotations.
+</p>
+
+<p>
+I don't use a literate config (currently). Actually, when it comes to Lisp I'm generally against being too literate in your code, either in code comments or literal literate programming. There's a quote out of <a href="https://mumble.net/~campbell/scheme/style.txt">Riastradh's Lisp Style Rules</a> that I generally adhere to:
+</p>
+
+<blockquote>
+<p>
+Write comments only where the code is incapable of explaining itself.
+Prefer self-explanatory code over explanatory comments.  Avoid
+`literate programming' like the plague.
+</p>
+
+<p>
+Rationale:  If the code is often incapable of explaining itself, then
+perhaps it should be written in a more expressive language.  This may
+mean using a different programming language altogether, or, since we
+are talking about Lisp, it may mean simply building a combinator
+language or a macro language for the purpose.  `Literate programming'
+is the logical conclusion of languages incapable of explaining
+themselves; it is a direct concession of the inexpressiveness of the
+computer language implementing the program, to the extent that the
+only way a human can understand the program is by having it rewritten
+in a human language.
+</p>
+</blockquote>
+
+<p>
+In Lisp, via macros, we usually have the luxury of completely changing the "language" (not literally) of the code we write, which means that code can, in my opinion, actually be self-documenting. Whenever I feel the impulse to annotate something with a comment, I try to take time to reflect on whether that line could instead be written in a better way that requires less external explanation. There are exceptions, like marking where a section of some logic begins and ends, but that's my general philosophy. It's also why I like Racket so much - being able to switch as required between effectively any syntax you want for a particular problem is very useful for maintaining readability in my opinion. Or just because I want to write something using APL syntax.
+</p>
+
+<p>
+However, at work, I don't have the luxury of writing in Lisp. Currently I'm doing data engineering with <code>dbt</code>, and I'm mostly writing in SQL (with Jinja macros sprinkled on top). There's also been a lot of hubbub around code style recently, for a number of reasons I won't get into, and now we are recommended to use <code>sqlfluff</code> to fix up formatting on SQL files. So, my two issues here are:
+</p>
+<ol class="org-ol">
+<li>SQL can be <i>very</i> opaque without sufficient commentary (something that is very true for a lot of older <code>dbt</code> models in this codebase).</li>
+<li>I do not like the standard <code>sqlfluff</code> formatting rules. This is really just a personal grip, but having functions and keywords be CAPITALISED has always seemed a bit pointless to me, as though it's a relic from a time before syntax highlighting.</li>
+<li>Bonus: <code>dbt</code> tests are often undocumented and (this is a problem with a lot of test suites, not just <code>dbt</code>) are abstracted away from the context of the code they're testing.</li>
+</ol>
+
+<p>
+<code>org-babel</code> helps me fix all of these issues in one fell swoop. Better yet, it lets me do so without ever bothering other people working in the repository with <code>org-mode</code> or Emacs.
+</p>
+
+<p>
+Let's tackle the first issue: opaqueness and literate programming. There is more to this than just explaining that "Oh, line X does Y and Z". The business context of a particular decision can also be very helpful to keep track of, and so is the story or task in Jira that a model or code block is a part of. While the former of these two could be done with just code comments, the latter benefits greatly from <code>org</code>'s structural editing. For example, if a bunch of user stories are related and should be (per the system design) in one folder in the tree, we can structure the file like so (<code>DE-</code> is the user story prefix in Jira):
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-level-1">* DE-1: Building some pipeline</span>
+<span class="org-org-level-2">** Model 1</span>
+<span class="org-org-level-2">** Model 2</span>
+</pre>
+</div>
+
+<p>
+Even better, some models are made up of a massive chain of SQL CTEs. We can add those to our structure too:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-level-1">* DE-1: Building some pipeline</span>
+<span class="org-org-level-2">** Model 1</span>
+<span class="org-org-level-3">*** CTE 1</span>
+<span class="org-org-level-3">*** CTE 2</span>
+</pre>
+</div>
+
+<p>
+For each model, we can specify the file we want the model to untangle to via header properties for each code-block.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-level-1">* DE-1: Building some pipeline</span>
+<span class="org-org-level-2">** Model 1</span>
+<span class="org-org-drawer">:PROPERTIES:
+</span><span class="org-org-special-keyword">:header-args:sql:</span> <span class="org-org-property-value">:tangle model_1.sql :comments no :padline no</span>
+<span class="org-org-special-keyword">:header-args:yaml:</span> <span class="org-org-property-value">:tangle _model_1.yml :comments no :padline no</span>
+<span class="org-org-drawer">:END:
+</span>
+<span class="org-org-level-3">*** CTE 1</span>
+<span class="org-org-level-3">*** CTE 2</span>
+</pre>
+</div>
+
+<p>
+This way, every SQL code-block within Model 1 automatically gets tangled into the right file, and the YAML (which is used for test specification in <code>dbt</code>) goes to its own file. I can write as much as I want around a code block, and it will also be ignored during the tangle. But, if I want a specific piece of text to be inserted as a comment in the output file (which I might want to do, since the output is going into version control and no one but me will ever see the 'master file'), I can do that by adding <code>:comments org</code> to the header of the code-block.
+</p>
+
+<p>
+OK, so literate programming is solved. Let's look at the bonus issue next since that's still more in the realm of literate programming as a whole. One benefit of this setup is that I can write my YAML tests directly next to the actual SQL source code. For example:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-block-begin-line">#+begin_src sql
+</span><span class="org-org-block">  </span><span class="org-org-block"><span class="org-keyword">select</span></span><span class="org-org-block"> something </span><span class="org-org-block"><span class="org-keyword">from</span></span><span class="org-org-block"> somewhere
+</span><span class="org-org-block-end-line">#+end_src
+</span>
+<span class="org-org-drawer">:testing:
+</span>This goes to the yaml.
+<span class="org-org-block-begin-line">#+begin_src yaml
+</span>  - name: some_column
+    data_Type: INTEGER
+    tests:
+      - not_null
+<span class="org-org-block-end-line">#+end_src
+</span><span class="org-org-drawer">:end:</span>
+</pre>
+</div>
+
+<p>
+This of course requires setting up the boilerplate for the YAML file, which I do in a separate code-block before the first CTE section. I also use this preface to specify the <code>dbt</code> materialization and table alias, as well as add a general comment as to the purpose of the model.
+</p>
+
+<p>
+If you're familiar with YAML, you will know that indentation is used to determine scope, and tangling <code>org</code> files tends to mess up the whitespace rules. The solution here is to set the <code>org-src-preserve-indentation</code> variable to <code>t</code> - but we want this to be on a per-file basis. And we have some other Elisp that we want to run, so that we can fix the second issue of code style. I have an Elisp code block that looks like this at the start of the <code>org</code> file:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-org-meta-line">#+name: startup</span>
+<span class="org-org-block-begin-line">#+begin_src elisp :results silent
+</span><span class="org-org-block">  (</span><span class="org-org-block"><span class="org-keyword">setq</span></span><span class="org-org-block"> org-src-preserve-identation t)
+
+  (</span><span class="org-org-block"><span class="org-keyword">defun</span></span><span class="org-org-block"> </span><span class="org-org-block"><span class="org-function-name">sql-format</span></span><span class="org-org-block"> ()
+    </span><span class="org-org-block"><span class="org-doc">"Run sqlfluff on the current file."</span></span><span class="org-org-block">
+    (call-process-shell-command (concat </span><span class="org-org-block"><span class="org-string">"sqlfluff fix --dialect snowflake"</span></span><span class="org-org-block"> buffer-file-name)
+                            nil
+                            nil))
+
+  (add-hook 'org-babel-post-tangle-hook (</span><span class="org-org-block"><span class="org-keyword">lambda</span></span><span class="org-org-block"> () (</span><span class="org-org-block"><span class="org-keyword">when</span></span><span class="org-org-block"> (string-match-p </span><span class="org-org-block"><span class="org-string">".sql\\"</span></span><span class="org-org-block"> (buffer-file-name))
+                                                   (beginning-of-buffer)
+                                                   (flush-lines </span><span class="org-org-block"><span class="org-string">"-- :end:"</span></span><span class="org-org-block">)
+                                           (flush-lines </span><span class="org-org-block"><span class="org-string">"^$"</span></span><span class="org-org-block">)
+                                           (save-buffer)
+                                           (sql-format))))
+</span><span class="org-org-block-end-line">#+end_src</span>
+</pre>
+</div>
+
+<p>
+The <code>sql-format</code> function just runs <code>sqlfluff</code> over the file of the current buffer, our team is using Snowflake so that's the dialect I've selected. I want a hook to run this function on the output whenever I tangle an SQL file, so that's what the <code>add-hook</code> block is doing. The reason for the two <code>flush-lines</code> calls is to get rid of any <code>:end:</code> comments (which come up when I want a comment after a <code>:testing:</code> section) and to remove any empty lines (since <code>sqlfluff</code> will handle padding on it's own). This means that I can write the SQL however I like, and then not care about formatting the output. In fact, until I send the PR for review, I never even have to read the actual output of the master file. I can just work in it the whole time.
+</p>
+
+<p>
+We can run this code-block from within <code>org-mode</code> with <code>C-c C-c</code>, but it's a bit of a chore to do this each time I enter the file. There is a better way: with local variables I can execute this code-block when I enter the file. This is also the reason for <code>#+name: startup</code> at the top:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-org"><span class="org-comment"># Local Variables&#58;</span>
+<span class="org-comment"># org-confirm-babel-evaluate: nil</span>
+<span class="org-comment"># eval: (progn (org-babel-goto-named-src-block "startup") (org-babel-execute-src-block))</span>
+<span class="org-comment"># End:</span>
+</pre>
+</div>
+
+<p>
+Chuck this at the end of the <code>org</code> file, and now every time you open it that startup block will run.
+</p>
+
+<p>
+That's basically it. There's a few caveats: obviously, once this gets merged into the version control then any changes won't synchronise with the <code>org</code> file. This could be fixed with link comments and <code>org-babel-detangle</code>, but that goes against the making sure no one else in the team ever needs to interact with <code>org</code>. This workflow is supposed to be for myself only, and not interrupt anyone else in their reading or writing of the code. This does mean that once it starts going through review, and especially once any code is actually merged, the master file is essentially useless as it won't stay up to date. But that's OK, because usually any changes that are made after merge are minor, and I can still keep the <code>org</code> file updated with any information that shouldn't be a file comment. Or, I can export the whole thing as a word document to describe the implementation in plain English to the reviewer. Not sure if that will ever come up, but it's nice to have the option.
+</p>

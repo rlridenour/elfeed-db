@@ -1,0 +1,223 @@
+<p>Zach Beane has released the latest Quicklisp beta (January 2026),
+  and I am pleased to have contributed to this release.  Here are the highlights:</p>
+
+<ul>
+  <li><code>dual-numbers</code> &mdash; Implements dual numbers and
+    automatic differentiation using dual numbers for Common Lisp.</li>
+
+  <li><code>fold</code> &mdash; FOLD-LEFT and FOLD-RIGHT functions.</li>
+
+  <li><code>function</code> &mdash; Provides higher-order functions
+    for composition, currying, partial application, and other functional
+    operations.</li>
+
+  <li><code>generic-arithmetic</code> &mdash; Defines replacement
+    generic arithmetic functions with CLOS generic functions making it
+    easier to extend the Common Lisp numeric tower to user defined
+    numeric types.</li>
+
+  <li><code>named-let</code> &mdash; Overloads the LET macro to provide
+    named let functionality similar to that found in Scheme.</li>
+</ul>
+
+<h2>Selected Functions</h2>
+
+<h2>Dual numbers</h2>
+
+<div class="defun">
+  <div class="defun-header">
+    <span class="defun-name">DERIVATIVE</span>
+    <span class="defun-args">function</span>
+    <span class="defun-ret-type">&rarr; function</span>
+  </div>
+  
+  <div class="defun-body">
+    <p>
+      Returns a new unary function that computes the exact derivative of the given
+      <code>function</code> at any point <code>x</code>.
+    </p>
+
+    <p>
+      The returned function utilizes <strong>Dual Number</strong> arithmetic to perform
+      automatic differentiation. It evaluates <code>f(x + &epsilon;)</code>, where
+      <code>&epsilon;</code> is the dual unit (an infinitesimal such that &epsilon;<sup>2</sup> = 0).
+      The result is extracted from the infinitesimal part of the computation.
+    </p>
+
+    <div class="defun-math">
+      f(x + &epsilon;) = f(x) + f'(x)&epsilon;
+    </div>
+
+    <p>
+      This method avoids the precision errors of numerical approximation (finite difference)
+      and the complexity of symbolic differentiation. It works for any function composed
+      of standard arithmetic operations and elementary functions supported by the
+      <code>dual-numbers</code> library (e.g., <code>sin</code>, <code>exp</code>, <code>log</code>).
+    </p>
+
+    <h4>Example</h4>
+    <pre class="code-block lisp">
+(defun square (x) (* x x))
+
+(let ((df (derivative #'square)))
+  (funcall df 5)) 
+;; => 10
+    </pre>
+
+    <h4>Implementation Note</h4>
+    <p>
+      The implementation relies on the <code>generic-arithmetic</code> system to ensure that
+      mathematical operations within <code>function</code> can accept and return
+      <code>dual-number</code> instances seamlessly.
+    </p>
+  </div>
+</div>
+
+<h2>Function</h2>
+<div class="defun">
+  <div class="defun-header">
+    <span class="defun-name">BINARY-COMPOSE-LEFT</span>
+    <span class="defun-args">binary-fn unary-fn</span>
+    <span class="defun-ret-type">&rarr; function</span>
+    
+    <div style="height: 0.5rem;"></div> 
+    
+    <span class="defun-name">BINARY-COMPOSE-RIGHT</span>
+    <span class="defun-args">binary-fn unary-fn</span>
+    <span class="defun-ret-type">&rarr; function</span>
+  </div>
+  
+  <div class="defun-body">
+    <p>
+      Composes a binary function <code>B(x, y)</code> with a unary function <code>U(z)</code> 
+      applied to one of its arguments.
+    </p>
+
+    <div class="defun-math">
+      (binary-compose-left B U)(x, y) &equiv; B(U(x), y)
+    </div>
+    <div class="defun-math">
+      (binary-compose-right B U)(x, y) &equiv; B(x, U(y))
+    </div>
+
+    <p>
+      These combinators are essential for "lifting" unary operations into binary contexts,
+      such as when folding a sequence where elements need preprocessing before aggregation.
+    </p>
+
+    <h4>Example</h4>
+    <pre class="code-block lisp">
+;; Summing the squares of a list
+(fold-left (binary-compose-right #'+ #'square) 0 '(1 2 3))
+;; => 14  ; (+ (+ (+ 0 (sq 1)) (sq 2)) (sq 3))
+    </pre>
+  </div>
+</div>
+
+
+<h2>FOLD</h2>
+
+<div class="defun">
+  <div class="defun-header">
+    <span class="defun-name">FOLD-LEFT</span>
+    <span class="defun-args">function initial-value sequence</span>
+    <span class="defun-ret-type">&rarr; result</span>
+  </div>
+  
+  <div class="defun-body">
+    <p>
+      Iterates over <code>sequence</code>, calling <code>function</code> with the
+      current accumulator and the next element. The accumulator is initialized to
+      <code>initial-value</code>.
+    </p>
+
+    <p>
+      This is a <strong>left-associative</strong> reduction. The function is applied as:
+    </p>
+
+    <div class="defun-math">
+      (f ... (f (f initial-value x<sub>0</sub>) x<sub>1</sub>) ... x<sub>n</sub>)
+    </div>
+
+    <p>
+      Unlike <code>CL:REDUCE</code>, the argument order for <code>function</code> is strictly defined:
+      the <strong>first</strong> argument is always the accumulator, and the <strong>second</strong>
+      argument is always the element from the sequence. This explicit ordering eliminates ambiguity
+      and aligns with the functional programming convention found in Scheme and ML.
+    </p>
+
+    <h4>Arguments</h4>
+    <ul>
+      <li><code>function</code>: A binary function taking (accumulator, element).</li>
+      <li><code>initial-value</code>: The starting value of the accumulator.</li>
+      <li><code>sequence</code>: A list or vector to traverse.</li>
+    </ul>
+
+    <h4>Example</h4>
+    <pre class="code-block lisp">
+(fold-left (lambda (acc x) (cons x acc))
+           nil
+           '(1 2 3))
+;; => (3 2 1)  ; Effectively reverses the list
+    </pre>
+  </div>
+</div>
+
+<h2>Named Let</h2>
+<div class="defun">
+    <div class="defun-header">
+    <span class="defun-name">LET</span>
+    <span class="defun-args">bindings &amp;body body</span>
+    <span class="defun-ret-type">&rarr; result</span>
+          <div></div> 
+
+    <span class="defun-name">LET</span>
+    <span class="defun-args">name bindings &amp;body body</span>
+    <span class="defun-ret-type">&rarr; result</span>
+  </div>
+  
+  <div class="defun-body">
+    <p>
+      Provides the functionality of the "Named Let" construct, commonly found in Scheme.
+      This allows for the definition of recursive loops within a local scope without
+      the verbosity of <code>LABELS</code>.
+    </p>
+
+    <p>
+      The macro binds the variables defined in <code>bindings</code> as in a standard <code>let</code>,
+      but also binds <code>name</code> to a local function that can be called recursively
+      with new values for those variables.
+    </p>
+
+    <div class="defun-math">
+      (let name ((var val) ...) ... (name new-val ...) ...)
+    </div>
+
+    <p>
+      This effectively turns recursion into a concise, iterative structure. It is the
+      idiomatic functional alternative to imperative <code>loop</code> constructs.
+    </p>
+    
+    <p>
+      While commonly used for tail recursive loops, the function bound by named let is a first-class procedure
+      that can be called anywhere or used as a value.</p>
+
+    <h4>Example</h4>
+    <pre class="code-block lisp">
+;; Standard Countdown Loop
+(let recur ((n 10))
+  (if (zerop n)
+      'blastoff
+      (progn
+        (print n)
+        (recur (1- n)))))
+    </pre>
+
+    <h4>Implementation Note</h4>
+    <p>
+      The <code>named-let</code> library overloads the standard <code>CL:LET</code>
+      macro to support this syntax directly if the first argument is a symbol. This allows
+      users to use <code>let</code> uniformly for both simple bindings and recursive loops.
+    </p>
+  </div>
+</div>

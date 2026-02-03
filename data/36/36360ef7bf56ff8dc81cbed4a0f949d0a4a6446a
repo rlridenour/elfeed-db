@@ -1,0 +1,452 @@
+<p>If you're using htmx and evaluating Django LiveView, this article is for you. I want to quickly show you the equivalences of what you usually do with htmx and how to achieve it with Django LiveView. It's not an exhaustive comparison, but a practical guide to migrate or decide which one to use.</p>
+<h2 id="blog-single-content__title--fundamental-differences" class="blog-single__content-title">Fundamental differences</h2>
+<p>Before looking at code, we need to be clear: architecturally they are very different. They don't even share the same communication protocol.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>htmx</th>
+<th>Django LiveView</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Protocol</td>
+<td>HTTP/AJAX</td>
+<td>WebSockets</td>
+</tr>
+<tr>
+<td>Communication</td>
+<td>Individual requests (GET, POST, etc)</td>
+<td>Persistent connection</td>
+</tr>
+<tr>
+<td>State</td>
+<td>Stateless</td>
+<td>Stateful</td>
+</tr>
+<tr>
+<td>Real-time updates</td>
+<td>No (polling required)</td>
+<td>Yes (server push)</td>
+</tr>
+<tr>
+<td>Infrastructure requirements</td>
+<td>Minimal (HTTP server)</td>
+<td>Moderate (Channels + Redis recommended)</td>
+</tr>
+<tr>
+<td>Latency</td>
+<td>Higher (each HTTP request)</td>
+<td>Lower (persistent connection)</td>
+</tr>
+<tr>
+<td>Broadcast support</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Performance*</td>
+<td>Good (16.48ms)</td>
+<td>Excellent (9.35ms)</td>
+</tr>
+<tr>
+<td>Requires</td>
+<td>Views or REST API</td>
+<td>Django Channels</td>
+</tr>
+</tbody>
+</table>
+</div><ul>
+<li>Based on <a href="/blog/06892b5b/performance-comparison-of-djangos-main-interactive-frameworks/">simple benchmarks</a> with multiple users.</li>
+</ul>
+<p>In practical terms, htmx is simpler to configure and use for basic interactions. Django LiveView is more powerful for real-time interactive applications, when you need to maintain server state, broadcast to multiple clients, or create SPA-type applications.</p>
+<h2 id="blog-single-content__title--installation-and-configuration" class="blog-single__content-title">Installation and configuration</h2>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- In your base template --&gt;
+&lt;script src="https://unpkg.com/htmx.org@2.0.8"&gt;&lt;/script&gt;</code></pre>
+<p>Done. No server configuration.</p>
+<p>Optionally, you can install <code>django-htmx</code> to facilitate working with htmx in Django. It provides middleware that detects htmx requests and simplifies header handling:</p>
+<pre class="highlight"><code class="language-bash">pip install django-htmx</code></pre>
+<pre class="highlight"><code class="language-python"># settings.py
+MIDDLEWARE = [
+    # ... other middleware
+    'django_htmx.middleware.HtmxMiddleware',
+]</code></pre>
+<p>With this, you can use <code>request.htmx</code> in your views to detect htmx requests and access specific headers.</p>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<p>Requires Django Channels and an ASGI server like Daphne. Redis is not mandatory, but is highly recommended as otherwise you will lose some communication functionalities.</p>
+<p><strong>Basic installation (without Redis, testing only):</strong></p>
+<pre class="highlight"><code class="language-bash">pip install django-liveview channels daphne</code></pre>
+<p><strong>Recommended installation (with Redis, for development and production):</strong></p>
+<pre class="highlight"><code class="language-bash">pip install django-liveview channels channels-redis daphne redis</code></pre>
+<pre class="highlight"><code class="language-python"># settings.py
+INSTALLED_APPS = [
+    'daphne',  # Must be first
+    'django.contrib.staticfiles',
+    # ... other apps
+    'liveview',
+]
+
+ASGI_APPLICATION = 'myproject.asgi.application'
+
+# Option 1: Without Redis (local testing only)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+# Option 2: With Redis (recommended)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [('127.0.0.1', 6379)],
+        },
+    },
+}</code></pre>
+<pre class="highlight"><code class="language-python"># asgi.py
+import os
+from django.core.asgi import get_asgi_application
+from channels.routing import ProtocolTypeRouter, URLRouter
+from channels.auth import AuthMiddlewareStack
+from liveview import routing
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'myproject.settings')
+
+application = ProtocolTypeRouter({
+    'http': get_asgi_application(),
+    'websocket': AuthMiddlewareStack(
+        URLRouter(routing.websocket_urlpatterns)
+    ),
+})</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+from django.urls import path, include
+
+urlpatterns = [
+    path('', include('liveview.urls')),
+    # ... your urls
+]</code></pre>
+<p>You need more packages and configurations. But as you'll see, the power you get in return is worth it.</p>
+<h2 id="blog-single-content__title--case-1-update-content-with-a-click" class="blog-single__content-title">Case 1: Update content with a click</h2>
+<p>The most basic example. A button that updates a <code>div</code>.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;div id="content"&gt;Initial content&lt;/div&gt;
+&lt;button hx-get="/update-content" hx-target="#content"&gt;
+    Update
+&lt;/button&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def update_content(request):
+    return HttpResponse("&lt;p&gt;Updated content&lt;/p&gt;")</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('update-content/', update_content),</code></pre>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+{% load liveview %}
+&lt;!DOCTYPE html&gt;
+&lt;html data-liveview-room-uuid="{% liveview_room_uuid %}"&gt;
+&lt;head&gt;
+    {% liveview_headers %}
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;div id="content"&gt;{{ content }}&lt;/div&gt;
+    &lt;button data-liveview-function="update_content"
+            data-action="click-&gt;page#run"&gt;
+        Update
+    &lt;/button&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># handlers.py
+from liveview import liveview_handler
+
+@liveview_handler("update_content")
+def update_content(consumer, content):
+    return {
+        "target": "#content",
+        "html": "&lt;p&gt;Updated content&lt;/p&gt;",
+    }</code></pre>
+<p>Notice how htmx needs a specific route, while LiveView handles everything via WebSocket with a decorator.</p>
+<h2 id="blog-single-content__title--case-2-form-with-validation" class="blog-single__content-title">Case 2: Form with validation</h2>
+<p>A form that validates on the server without reloading the page.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;form hx-post="/validate-form" hx-target="#errors"&gt;
+    &lt;input type="email" name="email"&gt;
+    &lt;div id="errors"&gt;&lt;/div&gt;
+    &lt;button type="submit"&gt;Submit&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def validate_form(request):
+    email = request.POST.get('email')
+    if not email or '@' not in email:
+        return HttpResponse('&lt;p style="color:red;"&gt;Invalid email&lt;/p&gt;')
+    return HttpResponse('&lt;p style="color:green;"&gt;Valid email&lt;/p&gt;')</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('validate-form/', validate_form),</code></pre>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+{% load liveview %}
+&lt;form data-liveview-function="validate_form"
+      data-action="submit-&gt;page#run"&gt;
+    &lt;input type="email" name="email" id="email-input"&gt;
+    &lt;div id="errors"&gt;{{ error_message }}&lt;/div&gt;
+    &lt;button type="submit"&gt;Submit&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># handlers.py
+from liveview import liveview_handler
+
+@liveview_handler("validate_form")
+def validate_form(consumer, content):
+    email = content.get('email', '')
+
+    if not email or '@' not in email:
+        error_html = '&lt;p style="color:red;"&gt;Invalid email&lt;/p&gt;'
+    else:
+        error_html = '&lt;p style="color:green;"&gt;Valid email&lt;/p&gt;'
+
+    return {
+        "target": "#errors",
+        "html": error_html,
+    }</code></pre>
+<p>With Django LiveView you can access the form state directly from the <code>content</code> object without having to use <code>request.POST</code>.</p>
+<h2 id="blog-single-content__title--case-3-real-time-search" class="blog-single__content-title">Case 3: Real-time search</h2>
+<p>Search that updates as you type.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;input type="text"
+       name="query"
+       hx-get="/search"
+       hx-trigger="keyup changed delay:500ms"
+       hx-target="#results"&gt;
+&lt;div id="results"&gt;&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def search(request):
+    query = request.GET.get('query', '')
+    results = Article.objects.filter(title__icontains=query)[:5]
+    return render(request, 'search_results.html', {'results': results})</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('search/', search),</code></pre>
+<p>The <code>delay:500ms</code> attribute prevents making requests on every key press.</p>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+{% load liveview %}
+&lt;input type="text"
+       name="query"
+       id="search-input"
+       data-liveview-function="search"
+       data-action="input-&gt;page#run"
+       data-liveview-debounce="500"&gt;
+&lt;div id="results"&gt;{% include 'search_results.html' %}&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># handlers.py
+from django.template.loader import render_to_string
+from liveview import liveview_handler
+from .models import Article
+
+@liveview_handler("search")
+def search(consumer, content):
+    query = content.get('query', '')
+    results = Article.objects.filter(title__icontains=query)[:5]
+
+    html = render_to_string('search_results.html', {'results': results})
+
+    return {
+        "target": "#results",
+        "html": html,
+    }</code></pre>
+<p>The <code>data-liveview-debounce="500"</code> attribute serves the same function as <code>delay:500ms</code> in htmx.</p>
+<h2 id="blog-single-content__title--case-4-automatic-update-polling" class="blog-single__content-title">Case 4: Automatic update (polling)</h2>
+<p>Content that updates periodically.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;div hx-get="/stats"
+     hx-trigger="every 2s"
+     id="stats"&gt;
+    {{ stats }}
+&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def stats(request):
+    active_users = get_active_users()
+    return HttpResponse(f'&lt;p&gt;Active users: {active_users}&lt;/p&gt;')</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('stats/', stats),</code></pre>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<p>Django LiveView doesn't have automatic client-side polling. The philosophy is different: the server broadcasts when there are changes. But you can simulate it with a thread on the server:</p>
+<pre class="highlight"><code class="language-python"># handlers.py
+import threading
+from time import sleep
+from liveview import liveview_handler
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+
+def poll_stats():
+    """Thread that updates stats every 2 seconds"""
+    channel_layer = get_channel_layer()
+    while True:
+        sleep(2)
+        active_users = get_active_users()
+        html = f'&lt;p&gt;Active users: {active_users}&lt;/p&gt;'
+
+        async_to_sync(channel_layer.group_send)(
+            'broadcast',
+            {
+                'type': 'broadcast_message',
+                'message': {
+                    'target': '#stats',
+                    'html': html,
+                }
+            }
+        )
+
+# Start thread when app starts
+threading.Thread(target=poll_stats, daemon=True).start()</code></pre>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;div id="stats"&gt;{{ stats }}&lt;/div&gt;</code></pre>
+<p>This approach is more powerful because all connected clients receive the update simultaneously, without each one doing individual polling.</p>
+<h2 id="blog-single-content__title--case-5-spa-navigation" class="blog-single__content-title">Case 5: SPA navigation</h2>
+<p>Navigate without reloading the entire page.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Base template --&gt;
+&lt;nav hx-boost="true"&gt;
+    &lt;a href="/about"&gt;About us&lt;/a&gt;
+    &lt;a href="/contact"&gt;Contact&lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;div id="content"&gt;
+    &lt;!-- Content --&gt;
+&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def about(request):
+    return render(request, 'about.html')
+
+def contact(request):
+    return render(request, 'contact.html')</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('about/', about),
+path('contact/', contact),</code></pre>
+<p><code>hx-boost="true"</code> converts normal links into AJAX requests. htmx intercepts the click, makes a GET request and replaces the <code>&lt;body&gt;</code> with the response content.</p>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+{% load liveview %}
+&lt;nav&gt;
+    &lt;a href="#"
+       data-liveview-function="load_about"
+       data-action="click-&gt;page#run"&gt;
+        About us
+    &lt;/a&gt;
+    &lt;a href="#"
+       data-liveview-function="load_contact"
+       data-action="click-&gt;page#run"&gt;
+        Contact
+    &lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;div id="content"&gt;
+    &lt;!-- Content --&gt;
+&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># handlers.py
+from django.template.loader import render_to_string
+from liveview import liveview_handler
+
+@liveview_handler("load_about")
+def load_about(consumer, content):
+    html = render_to_string('about.html')
+    return {
+        "target": "#content",
+        "html": html,
+    }
+
+@liveview_handler("load_contact")
+def load_contact(consumer, content):
+    html = render_to_string('contact.html')
+    return {
+        "target": "#content",
+        "html": html,
+    }</code></pre>
+<h2 id="blog-single-content__title--case-6-shared-state-between-users" class="blog-single__content-title">Case 6: Shared state between users</h2>
+<p>Multiple users viewing real-time data.</p>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<p>No native support. You need to implement Server-Sent Events (SSE) or WebSockets manually, which breaks the htmx model.</p>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-python"># handlers.py
+from liveview import liveview_handler
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+
+@liveview_handler("add_message")
+def add_message(consumer, content):
+    message_text = content.get('message', '')
+    channel_layer = get_channel_layer()
+
+    # Broadcast to all connected users
+    async_to_sync(channel_layer.group_send)(
+        'chat_room',
+        {
+            'type': 'broadcast_message',
+            'message': {
+                'target': '#messages',
+                'html': f'&lt;p&gt;{message_text}&lt;/p&gt;',
+            }
+        }
+    )</code></pre>
+<pre class="highlight"><code class="language-html">&lt;!-- Template --&gt;
+&lt;div id="messages"&gt;
+    &lt;!-- Messages appear here --&gt;
+&lt;/div&gt;
+&lt;form data-liveview-function="add_message"
+      data-action="submit-&gt;page#run"&gt;
+    &lt;input type="text" name="message"&gt;
+    &lt;button type="submit"&gt;Send&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<p>All connected users receive the message instantly.</p>
+<h2 id="blog-single-content__title--case-7-file-handling" class="blog-single__content-title">Case 7: File handling</h2>
+<h3 id="blog-single-content__title--htmx" class="blog-single__content-title">htmx</h3>
+<pre class="highlight"><code class="language-html">&lt;form hx-post="/upload"
+      hx-encoding="multipart/form-data"
+      hx-target="#result"&gt;
+    &lt;input type="file" name="file"&gt;
+    &lt;button type="submit"&gt;Upload&lt;/button&gt;
+&lt;/form&gt;
+&lt;div id="result"&gt;&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># views.py
+def upload(request):
+    if request.method == 'POST':
+        uploaded_file = request.FILES['file']
+        # Process file
+        return HttpResponse(f'&lt;p&gt;File {uploaded_file.name} uploaded&lt;/p&gt;')</code></pre>
+<pre class="highlight"><code class="language-python"># urls.py
+path('upload/', upload),</code></pre>
+<h3 id="blog-single-content__title--django-liveview" class="blog-single__content-title">Django LiveView</h3>
+<pre class="highlight"><code class="language-html">{% load liveview %}
+&lt;form data-liveview-function="upload_file"
+      data-action="submit-&gt;page#run"
+      enctype="multipart/form-data"&gt;
+    &lt;input type="file" name="file" id="file-input"&gt;
+    &lt;button type="submit"&gt;Upload&lt;/button&gt;
+&lt;/form&gt;
+&lt;div id="result"&gt;&lt;/div&gt;</code></pre>
+<pre class="highlight"><code class="language-python"># handlers.py
+from liveview import liveview_handler
+
+@liveview_handler("upload_file")
+def upload_file(consumer, content):
+    uploaded_file = content.get('file')
+    if uploaded_file:
+        # Process file
+        return {
+            "target": "#result",
+            "html": f'&lt;p&gt;File {uploaded_file.name} uploaded&lt;/p&gt;',
+        }</code></pre>
+<p>Functionally similar, but over WebSocket.</p>
+<h2 id="blog-single-content__title--practical-migration" class="blog-single__content-title">Practical migration</h2>
+<p>If you decide to migrate from htmx to LiveView:</p>
+<ol>
+<li><strong>Install basic dependencies</strong>: <code>django-liveview</code>, <code>channels</code>, <code>daphne</code> (and optionally <code>channels-redis</code> + Redis for production)</li>
+<li><strong>Configure ASGI</strong>: Modify settings.py and asgi.py according to the installation section</li>
+<li><strong>Configure channel layers</strong>: Use <code>InMemoryChannelLayer</code> for testing or <code>RedisChannelLayer</code> for production</li>
+<li><strong>Convert views to handlers</strong>: Each view that returns partial HTML becomes a handler with <code>@liveview_handler</code></li>
+<li><strong>Update templates</strong>: Replace <code>hx-*</code> attributes with <code>data-liveview-*</code> and <code>data-action</code>. Also add the necessary tags for LiveView</li>
+</ol>
+<p>You can keep SSR for some pages, htmx in some components and use LiveView in others. One technology doesn't exclude the other.</p>
+<p>There is no wrong choice. Both technologies are complementary and seek maximum simplicity within their paradigms. Choose the one that best suits your needs and scale from there. Happy Hacking!</p>

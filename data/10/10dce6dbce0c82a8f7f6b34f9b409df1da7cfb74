@@ -1,0 +1,1250 @@
+<h2 id="contents">Contents</h2>
+
+<ul>
+  <li><a href="https://nmunro.github.io/2024/12/29/ningle-1.html">Part 1 (Hello World)</a></li>
+  <li><a href="https://nmunro.github.io/2024/12/30/ningle-2.html">Part 2 (Basic Templates)</a></li>
+  <li><a href="https://nmunro.github.io/2025/01/30/ningle-3.html">Part 3 (Introduction to middleware and Static File management)</a></li>
+  <li><a href="https://nmunro.github.io/2025/02/28/ningle-4.html">Part 4 (Forms)</a></li>
+  <li><a href="https://nmunro.github.io/2025/03/31/ningle-5.html">Part 5 (Environmental Variables)</a></li>
+  <li><a href="https://nmunro.github.io/2025/04/30/ningle-6.html">Part 6 (Database Connections)</a></li>
+  <li><a href="https://nmunro.github.io/2025/05/31/ningle-7.html">Part 7 (Envy Configuation Switching)</a></li>
+  <li><a href="https://nmunro.github.io/2025/06/29/ningle-8.html">Part 8 (Mounting Middleware)</a></li>
+  <li><a href="https://nmunro.github.io/2025/07/31/ningle-9.html">Part 9 (Authentication System)</a></li>
+  <li><a href="https://nmunro.github.io/2025/08/28/ningle-10.html">Part 10 (Email)</a></li>
+  <li><a href="https://nmunro.github.io/2025/09/30/ningle-11.html">Part 11 (Posting Tweets &amp; Advanced Database Queries)</a></li>
+  <li><a href="https://nmunro.github.io/2025/10/29/ningle-12.html">Part 12 (Clean Up &amp; Bug Fix)</a></li>
+  <li><a href="https://nmunro.github.io/2025/11/20/ningle-13.html">Part 13 (Adding Comments)</a></li>
+  <li>Part 14 (Pagination, Part 1)</li>
+</ul>
+
+<h2 id="introduction">Introduction</h2>
+
+<p>Hello and welcome back, I hope you all had a good festive season, I took a break last month as I usually get very busy in December, but lest you think I had stopped posting, I have prepared a two part lesson this time: Pagination. We are first going to look at rolling your own pagination, but we will then look at integrating a package I wrote <a href="https://github.com/nmunro/ningle-pager">ningle-pager</a>, to simplify the code. This way if my package doesn't fit your needs, you have the information required to build your own solution.</p>
+
+<p>In practical terms, something like a microblogging app would use <a href="https://en.wikipedia.org/wiki/Infinite_scrolling">infinite scrolling</a>, but we don't have anywhere enough data to present that as a lesson right now, and besides pagination has a lot of uses, Google and Amazon use it for their products, so it must be pretty useful!</p>
+
+<h2 id="theory">Theory</h2>
+
+<p>In SQL, there is the ability to <a href="https://www.geeksforgeeks.org/sql/sql-limit-clause/">LIMIT</a> results, but also, the ability to start from an <a href="https://www.datacamp.com/tutorial/sql-offset">OFFSET</a>, which ultimately does the heavy lifting for us. We have previously looked at <a href="https://github.com/fukamachi/sxql">SXQL</a>, which is a thin layer upon SQL, so we can use <code class="language-plaintext highlighter-rouge">(limit 50)</code> and <code class="language-plaintext highlighter-rouge">(offset 100)</code> (or whatever values we want) to interact with the database, we will also use <code class="language-plaintext highlighter-rouge">GET</code> parameters like <code class="language-plaintext highlighter-rouge">?page=2&amp;limit=50</code> (or something). So with this information we know the url patterns and we know what <code class="language-plaintext highlighter-rouge">SXQL</code> forms we want to use, we just have to design how our application will work internally.</p>
+
+<p>Our solution will define an interface, any controller that needs to be paginated will:</p>
+
+<ul>
+  <li>Accept a <code class="language-plaintext highlighter-rouge">page</code> keyword parameter</li>
+  <li>Accept a <code class="language-plaintext highlighter-rouge">limit</code> keyword parameter</li>
+  <li>Return a <code class="language-plaintext highlighter-rouge">values</code> list that has 3 items, the results, the total count, and the offset.</li>
+</ul>
+
+<p>The work will touch the models, the controllers, and the templates:</p>
+
+<h2 id="models">Models</h2>
+
+<p>We are gonna get deep into the weeds with <a href="https://en.wikipedia.org/wiki/Common_Lisp_Object_System">clos</a> in how we implement our pagination in this part, there's multiple methods so we will take each implementation one by one. You can learn more about how OOP is implemented in my older <a href="https://www.youtube.com/watch?v=ULzmjVTpINg">videos</a>.</p>
+
+<h3 id="generic-method">generic Method</h3>
+
+<p>We start with a generic definition, we already had one, but we are modifying it. Fun fact, the generic method defines all the parameters a method <em>might</em> use, but not all methods <em>must</em> use the arguments, which comes in real handy for us later:</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">posts</span> <span class="p">(</span><span class="nv">user</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Gets the posts"</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Here we have a <code class="language-plaintext highlighter-rouge">generic</code> method, generic methods do nothing on their own, they help us define what a method should do, but of course under certain circumstances <em>how</em> a method does what it does may need to change, this allows us to implment different specialised concrete methods, we will look at this below.</p>
+
+<p>What we have done with this generic method is add key arguments <code class="language-plaintext highlighter-rouge">offset</code>, <code class="language-plaintext highlighter-rouge">limit</code>, and <code class="language-plaintext highlighter-rouge">count</code>, as we saw previously, all this does is declare a <code class="language-plaintext highlighter-rouge">:documentation</code> form.</p>
+
+<h3 id="around-method">:around method</h3>
+
+<p>As you may, or may not know, the Common Lisp Object System (clos for short) allows us to define, as we have done previously <code class="language-plaintext highlighter-rouge">primary methods</code>, these are methods that specialise on one (or more) of the parameters. When passed arguments at the point the method is called, the method matching the parameter type of the arguments passed will trigger. That is why our <code class="language-plaintext highlighter-rouge">posts</code> method specifies user to be a user object, or null and handles the logic in different ways. It <em>also</em> allows us to define <code class="language-plaintext highlighter-rouge">auxiliary</code> methods, which are known as <code class="language-plaintext highlighter-rouge">:before</code>, <code class="language-plaintext highlighter-rouge">:after</code>, and <code class="language-plaintext highlighter-rouge">:around</code>. The <code class="language-plaintext highlighter-rouge">:before</code> methods will run, well, before the related primary method is called, with each <code class="language-plaintext highlighter-rouge">:before</code> method being called by its most specific signature to its least. <code class="language-plaintext highlighter-rouge">:after</code> methods are the total opposite, they run after a primary method is run, and they run from the least specific version to the most specific. They would be where we might want to add signals, or logging, we could have a <code class="language-plaintext highlighter-rouge">:before</code>, and <code class="language-plaintext highlighter-rouge">:after</code> around the <code class="language-plaintext highlighter-rouge">mito:save-dao</code> that we use and the <code class="language-plaintext highlighter-rouge">:before</code> method sends a <code class="language-plaintext highlighter-rouge">pre-save</code> signal while the <code class="language-plaintext highlighter-rouge">:after</code> sends a <code class="language-plaintext highlighter-rouge">post-save</code> signal.</p>
+
+<p>It is not, however the <code class="language-plaintext highlighter-rouge">:before</code>/<code class="language-plaintext highlighter-rouge">:after</code> methods we care about here, we in fact will write an <code class="language-plaintext highlighter-rouge">:around</code>, which is a more fundamental building block. <code class="language-plaintext highlighter-rouge">:around</code> methods control, how, when, or even if, a primary method gets called, the other methods can't control this. As previously discussed they have a specific order in which they run, so if we wanted to... say... capture arguments and do some processing on them because, I dunno, we should never trust user input, prior to running our primary method, an <code class="language-plaintext highlighter-rouge">:around</code> method is what we would need to use.</p>
+
+<p>The real "magic" of how to do what we want to do is use an <code class="language-plaintext highlighter-rouge">:around</code> method. We will look at the complete implementation a little bit later, but we need to pause and ensure we really understand about method combination in Common Lisp.</p>
+
+<p>As we mentioned in the <code class="language-plaintext highlighter-rouge">defgeneric</code>, not every <code class="language-plaintext highlighter-rouge">method</code> needs to use or specialise on every parameter, and in this <code class="language-plaintext highlighter-rouge">:around</code> method you will notice that the count is absent, that is by design, because the <code class="language-plaintext highlighter-rouge">:around</code> method will compute it and pass it onto the next method in the chain, instead it uses <code class="language-plaintext highlighter-rouge">&amp;allow-other-keys</code> to allow these key arguments to be accepted, but also since they are unnamed, the compiler won't emit a warning that they're not used.</p>
+
+<p>Our implementation is here:</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="ss">:around</span> <span class="p">(</span><span class="nv">user</span> <span class="k">&amp;key</span> <span class="p">(</span><span class="nv">offset</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nv">limit</span> <span class="mi">50</span><span class="p">)</span> <span class="k">&amp;allow-other-keys</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nb">count</span> <span class="p">(</span><span class="nv">mito:count-dao</span> <span class="ss">'post</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">offset</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">0</span> <span class="nv">offset</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="nv">limit</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">&gt;=</span> <span class="nv">offset</span> <span class="nb">count</span><span class="p">))</span>
+      <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">page-count</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">ceiling</span> <span class="nb">count</span> <span class="nv">limit</span><span class="p">)))</span>
+             <span class="p">(</span><span class="nv">corrected-offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page-count</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="nv">corrected-offset</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">))</span>
+      <span class="p">(</span><span class="nb">call-next-method</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="nv">offset</span> <span class="ss">:limit</span> <span class="nv">limit</span> <span class="ss">:count</span> <span class="nb">count</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>The first thing to note is the obvious <code class="language-plaintext highlighter-rouge">:around</code> keyword that comes after the <code class="language-plaintext highlighter-rouge">posts</code> name, this is how we declare a method as an <code class="language-plaintext highlighter-rouge">:around</code> method. The next thing to notice is that the <code class="language-plaintext highlighter-rouge">count</code> parameter is not declared, instead we use the <code class="language-plaintext highlighter-rouge">&amp;allow-other-keys</code>, as discussed above. This method will modify some variables or recalculate the offset if it was invalid before either calling itself (to perform the recalculations) or call the next method with, well, <code class="language-plaintext highlighter-rouge">call-next-method</code>.</p>
+
+<p>We begin with a <code class="language-plaintext highlighter-rouge">let</code> form that will get the number of items by using <code class="language-plaintext highlighter-rouge">mito:count-dao</code>, we determine the offset by getting the max of 0 or the offset, we also define limit as the max of 1 and limit.</p>
+
+<p>The key check here is in the <code class="language-plaintext highlighter-rouge">if</code> form, which checks that both the count is larger than zero <code class="language-plaintext highlighter-rouge">(&gt; count zero)</code> and the offset is bigger than the count <code class="language-plaintext highlighter-rouge">(&gt;= offset count)</code>, this tells us that an invalid condition exists, we can't request an offset to be larger than the number of items, so we have to handle it. Under these circumstances we need to get the new page-count by calculating <code class="language-plaintext highlighter-rouge">(max 1 (ceiling count limit))</code>, this will round up the result of dividing count by limit, and returns that, or 1.</p>
+
+<p>Once we have that we can calculate a corrected offset by using the formula <code class="language-plaintext highlighter-rouge">(* (1- page-count) limit)</code>, to run through how this formula works, here are some examples, if we assume limit is defined as <code class="language-plaintext highlighter-rouge">50</code>, we can increment the page-count by one each time to see how this calculation works:</p>
+
+<ul>
+  <li>Page 1: <code class="language-plaintext highlighter-rouge">(* (1- 1) 50)</code> -&gt; <code class="language-plaintext highlighter-rouge">(* 0 50)</code> -&gt; 0</li>
+  <li>Page 2: <code class="language-plaintext highlighter-rouge">(* (1- 2) 50)</code> -&gt; <code class="language-plaintext highlighter-rouge">(* 1 50)</code> -&gt; 50</li>
+  <li>Page 3: <code class="language-plaintext highlighter-rouge">(* (1- 3) 50)</code> -&gt; <code class="language-plaintext highlighter-rouge">(* 2 50)</code> -&gt; 100</li>
+</ul>
+
+<p>With this calculation done we can recursively call the method again, this time with the correct values, which brings us to our base case, calling the next method via <code class="language-plaintext highlighter-rouge">call-next-method</code> with the appropriate values which handily brings us to the specific methods now. We can actually dramatically simplify our <code class="language-plaintext highlighter-rouge">primary methods</code> thanks to the <code class="language-plaintext highlighter-rouge">:around</code> method.</p>
+
+<p>Something to bear in mind, our count here is real easy, cos we are just returning all posts, but a more complex application may need more complex logic to determine what and how you are counting.</p>
+
+<h3 id="user-method">user method</h3>
+
+<p>Since we don't need to handle any error state or recovery (because the <code class="language-plaintext highlighter-rouge">:around</code> method handles it), we can actually write simple methods that perform a query and return the results. We have also simplified the way in which we run queries, turns out the <code class="language-plaintext highlighter-rouge">sxql:yield</code> returns multiple values, the first is the SQL string, the second is a list of params to be spliced into it (to avoid sql injection attacks), so we set up a <code class="language-plaintext highlighter-rouge">multiple-value-bind</code> form to capture these, and we put our SQL together, we previously used <code class="language-plaintext highlighter-rouge">:?</code> which was fine, as that is the character used to be a place holder, but this way is nicer to write. The things you learn, eh?</p>
+
+<p>Please note however, where in our <code class="language-plaintext highlighter-rouge">:around</code> method we didn't specify the <code class="language-plaintext highlighter-rouge">count</code> parameter that the generic method defines, in this primary method, we do!</p>
+
+<p>All we do it use a <code class="language-plaintext highlighter-rouge">values</code> form to return the result of running the sql, with the parameters bound to it, the count (number of items total) and the offset from where it starts returning results from.</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nv">user</span><span class="p">)</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">sql</span> <span class="nv">params</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+              <span class="p">(</span><span class="nv">sxql:select</span>
+                  <span class="p">(</span><span class="ss">:post.*</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:user_likes.id</span><span class="p">)</span> <span class="ss">:liked_by_user</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="p">(</span><span class="ss">:as</span> <span class="ss">:likes</span> <span class="ss">:user_likes</span><span class="p">)</span>
+                                  <span class="ss">:on</span> <span class="p">(</span><span class="ss">:and</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:user_likes.post_id</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="ss">:=</span> <span class="ss">:user_likes.user_id</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">user</span><span class="p">))))</span>
+                  <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:offset</span> <span class="nv">offset</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:limit</span> <span class="nv">limit</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">values</span>
+          <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span> <span class="nv">sql</span> <span class="ss">:binds</span> <span class="nv">params</span><span class="p">)</span>
+          <span class="nb">count</span>
+          <span class="nv">offset</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>This makes our primary method much tighter, it runs a query and returns results, the <code class="language-plaintext highlighter-rouge">:around</code> method handles the recalculation logic (which is shared between this primary method and the next). Nice and simple.</p>
+
+<h3 id="null-method">null method</h3>
+
+<p>So having seen the form of our new primary methods above, we follow the same patern for the primary method where the user is <code class="language-plaintext highlighter-rouge">null</code>. As before this primary method accepts the count parameter.</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nb">null</span><span class="p">)</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">sql</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">sxql:yield</span>
+        <span class="p">(</span><span class="nv">sxql:select</span>
+            <span class="p">(</span><span class="ss">:post.*</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:limit</span> <span class="nv">limit</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:offset</span> <span class="nv">offset</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nb">values</span>
+        <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span> <span class="nv">sql</span><span class="p">)</span>
+        <span class="nb">count</span>
+        <span class="nv">offset</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The query is simpler, and we do not need to actually pass any variables into the SQL string, so we don't need the params value returned from the <code class="language-plaintext highlighter-rouge">multiple-value-bind</code>, which means we also don't need to use the <code class="language-plaintext highlighter-rouge">:binds</code> key argument into <code class="language-plaintext highlighter-rouge">mito:retrieve-by-sql</code>.</p>
+
+<p>And that's it, that's our models done!</p>
+
+<h2 id="controllers">Controllers</h2>
+
+<p>Our controller will be the <code class="language-plaintext highlighter-rouge">index</code> controller we built previously, but we need to modify it quite a bit to parse and process the information we need, pagination has a lot of data, and we will need to ensure our templates can present the UI and data in a easy to use manner.</p>
+
+<p>The controller will be so radically different as to be entirely new, it may be easier for you to delete the existing index controller and replace it with what we write here.</p>
+
+<p>The first thing the controller needs to do is grab the <code class="language-plaintext highlighter-rouge">GET</code> parameters and validate them, we follow a basic formula to achieve this for the two parameters we need (page, and limit):</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(or (parse-integer (or (ingle:get-param "page" params) "1") :junk-allowed t) 1)
+(or (parse-integer (or (ingle:get-param "limit" params) "50") :junk-allowed t) 50)
+</code></pre></div></div>
+
+<p>As you can see these are basically identical the only thing that differs are the default values, in the case of page it is <code class="language-plaintext highlighter-rouge">"1"/1</code> for limit it is <code class="language-plaintext highlighter-rouge">"50"/50</code>. To run through the logic we have some basic possibilities we need to handle.</p>
+
+<p>In the case where there is no parameter which will be the case if no <code class="language-plaintext highlighter-rouge">page=x</code> is in url, or the value of <code class="language-plaintext highlighter-rouge">page</code> is not numeric (such as a word, <code class="language-plaintext highlighter-rouge">page=hi</code> or something) the result of <code class="language-plaintext highlighter-rouge">(ingle:get-param "page" params)</code> will be <code class="language-plaintext highlighter-rouge">nil</code>.</p>
+
+<p>In the case where page is provided and is a number, the process is the same, but <code class="language-plaintext highlighter-rouge">(ingle:get-param "page" params)</code> would return a number as a string.</p>
+
+<p>We can see how that would evaluate here:</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="no">nil</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="s">"1"</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">(</span><span class="nb">or</span> <span class="mi">1</span> <span class="mi">1</span><span class="p">)</span>
+<span class="mi">1</span>
+</code></pre></div></div>
+
+<p>The process repeats for the "limit" parameter. It's a lot of checking and handling, it would be nice if there were a library to handle this for us, but I have not yet found one, perhaps that will be our next topic!</p>
+
+<p>NOTE! In this example we are permitting arbitrary <code class="language-plaintext highlighter-rouge">limit</code> values (we are learning), in practice, this should be limited to a maximum value to prevent users from requesting a page that may result in a Denial Of Service type event. What the exact value should be really depends on the data, it might be fine to get thousands of numbers in one go, but if your models are complicated, a smaller number may be better.</p>
+
+<p>You could do something like this to limit... the limit: <code class="language-plaintext highlighter-rouge">(limit (min 100 (max 1 limit)))</code></p>
+
+<p>The <code class="language-plaintext highlighter-rouge">let</code> binding will therefore look like this</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+  <span class="o">...</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>With those parameters validated, we can focus on building our paginated controller. Thanks to the work we did in the models we can pull the values out of the <code class="language-plaintext highlighter-rouge">posts</code> method with <code class="language-plaintext highlighter-rouge">multiple-value-bind</code>:</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">posts</span> <span class="nb">count</span> <span class="nv">offset</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">)</span>
+    <span class="o">...</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>This enables us to now calculate the various values we need to pass through into a template to render the paginator, we need to generate 6 values.</p>
+
+<h3 id="page">page</h3>
+
+<p>The page variable is a way to determine what the current page is, it is calculated like so:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(1+ (floor offset limit))
+</code></pre></div></div>
+
+<p>From the <code class="language-plaintext highlighter-rouge">offset</code> we get from the <code class="language-plaintext highlighter-rouge">multiple-value-bind</code> we round down the value of dividing offset by the limit and add 1 to the value. If we assume, for example, an offset of 50 and a limit of 50, we can see how the page is determined.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(1+ (floor 50 50))
+(1+ 1)
+2
+</code></pre></div></div>
+
+<p>If we want to see something larger:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(1+ (floor 250 50))
+(1+ 5)
+6
+</code></pre></div></div>
+
+<h3 id="page-count">page count</h3>
+
+<p>The page-count variable is a way to determine the total number of pages:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(max 1 (ceiling count limit))
+</code></pre></div></div>
+
+<p>Again, from the <code class="language-plaintext highlighter-rouge">multiple-value-bind</code> we get the <code class="language-plaintext highlighter-rouge">count</code> object, so we can expand this, assuing count is 250 and limit is 50.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(max 1 (ceiling 500 50))
+(max 1 10)
+10
+</code></pre></div></div>
+
+<p>In this manner, given a total number and a page size we want to split it into, we can see the total number of pages.</p>
+
+<h3 id="previous-page-number">previous page number</h3>
+
+<p>Unlike the previous two calculations, prev-page can legitiately be <code class="language-plaintext highlighter-rouge">nil</code>. In the case we are already on the first page there's no way for there to be a previous page, so <code class="language-plaintext highlighter-rouge">nil</code> is fine. If we need to have some binary conditional logic where <code class="language-plaintext highlighter-rouge">nil</code> is acceptable <code class="language-plaintext highlighter-rouge">when</code> is our friend.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(when (&gt; page 1) (1- page))
+</code></pre></div></div>
+
+<p>Wwhen the page is bigger than one, return one less than the value of page, because this is a <code class="language-plaintext highlighter-rouge">when</code> <code class="language-plaintext highlighter-rouge">(1- page)</code> will be returned, or <code class="language-plaintext highlighter-rouge">nil</code> will be.</p>
+
+<h3 id="page-number">page number</h3>
+
+<p>The inverse of the above:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(when (&lt; page page-count) (1+ page))
+</code></pre></div></div>
+
+<p>When the page is smaller than the total number of pages, return one more than the value of page, or <code class="language-plaintext highlighter-rouge">nil</code>.</p>
+
+<h3 id="range-start">range start</h3>
+
+<p>Range start is to help the UI, typically in paginators, especially in large ones, there's a first, last, and current location, but often the current location has some pages to the left and right, this is the range. Now there's no real <em>right</em> number for the ranges, but I settled on 2.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(max 1 (- page 2))
+</code></pre></div></div>
+
+<p>Assuming page is 1, max will return 1, but if we are on, say, page 15, the location the range starts at is 13.</p>
+
+<h3 id="range-end">range end</h3>
+
+<p>Range end behaves like range start, except in the other direction, but we need to ensure we get the minimum of the page-count, in case we are on the last page.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(min page-count (+ page 2))
+</code></pre></div></div>
+
+<p>With these defined we can put them in a <code class="language-plaintext highlighter-rouge">let*</code> form.</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">posts</span> <span class="nb">count</span> <span class="nv">offset</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">page</span> <span class="p">(</span><span class="nb">1+</span> <span class="p">(</span><span class="nb">floor</span> <span class="nv">offset</span> <span class="nv">limit</span><span class="p">)))</span>
+           <span class="p">(</span><span class="nv">page-count</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">ceiling</span> <span class="nb">count</span> <span class="nv">limit</span><span class="p">)))</span>
+           <span class="p">(</span><span class="nv">prev-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nv">page</span> <span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)))</span>
+           <span class="p">(</span><span class="nv">next-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">page</span> <span class="nv">page-count</span><span class="p">)</span> <span class="p">(</span><span class="nb">1+</span> <span class="nv">page</span><span class="p">)))</span>
+           <span class="p">(</span><span class="nv">range-start</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">)))</span>
+           <span class="p">(</span><span class="nv">range-end</span> <span class="p">(</span><span class="nb">min</span> <span class="nv">page-count</span> <span class="p">(</span><span class="nb">+</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">))))</span>
+        <span class="o">...</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The final thing we need to do is return the result of <code class="language-plaintext highlighter-rouge">djula:render-template*</code>, but there is still more data we need to pass through, build upon the variables we defined, there's only 5 more.</p>
+
+<h3 id="pages">pages</h3>
+
+<p>Pages is simply a list of all the pages, which is easy enough to generate:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(loop :for idx :from range-start :to range-end :collect idx)
+</code></pre></div></div>
+
+<h3 id="show-start-gap">show-start-gap</h3>
+
+<p>The show-start-gap is a boolean that tells the template to render part of the paginator UI.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(&gt; range-start 2)
+</code></pre></div></div>
+
+<p>This will return <code class="language-plaintext highlighter-rouge">t</code> or <code class="language-plaintext highlighter-rouge">nil</code> depending on if range-start is larger than 2.</p>
+
+<h3 id="show-end-gap">show-end-gap</h3>
+
+<p>The show-end-gap is the inverse:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(&lt; range-end (1- page-count))
+</code></pre></div></div>
+
+<p>This will return <code class="language-plaintext highlighter-rouge">t</code> or <code class="language-plaintext highlighter-rouge">nil</code> depending on if range-end is smaller than <code class="language-plaintext highlighter-rouge">(1- page-count)</code>.</p>
+
+<h3 id="start-index">start-index</h3>
+
+<p>To get the start-index, this is the number starting from the offset so we can display something like "Showing x - y of z", x would be our start-index.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(if (&gt; count 0) (1+ offset) 0)
+</code></pre></div></div>
+
+<p>If the count is bigger than zero then we return one more than the offset, else we return 0 (the default starting offset being 0).</p>
+
+<h3 id="end-index">end-index</h3>
+
+<p>Again, this is the opposite of another thing, the start-index.</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(if (&gt; count 0) (min count (+ offset (length posts))) 0)
+</code></pre></div></div>
+
+<p>If count is bigger than zero then what we need is the smallest (min) of the count and offset plus the number of posts, or 0. It's possible there isn't a complete pages worth of items, so we need to ensure that we don't over run.</p>
+
+<p>With all that being said, we can now see the complete controller with the values rendered by djula:</p>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">posts</span> <span class="nb">count</span> <span class="nv">offset</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">)</span>
+        <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">page</span> <span class="p">(</span><span class="nb">1+</span> <span class="p">(</span><span class="nb">floor</span> <span class="nv">offset</span> <span class="nv">limit</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">page-count</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">ceiling</span> <span class="nb">count</span> <span class="nv">limit</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">prev-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nv">page</span> <span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">next-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">page</span> <span class="nv">page-count</span><span class="p">)</span> <span class="p">(</span><span class="nb">1+</span> <span class="nv">page</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">range-start</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">range-end</span> <span class="p">(</span><span class="nb">min</span> <span class="nv">page-count</span> <span class="p">(</span><span class="nb">+</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">))))</span>
+          <span class="p">(</span><span class="nv">djula:render-template*</span>
+            <span class="s">"main/index.html"</span>
+            <span class="no">nil</span>
+            <span class="ss">:title</span> <span class="s">"Home"</span>
+            <span class="ss">:user</span> <span class="nv">user</span>
+            <span class="ss">:posts</span> <span class="nv">posts</span>
+            <span class="ss">:form</span> <span class="p">(</span><span class="k">if</span> <span class="nv">user</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+            <span class="ss">:count</span> <span class="nb">count</span>
+            <span class="ss">:page</span> <span class="nv">page</span>
+            <span class="ss">:limit</span> <span class="nv">limit</span>
+            <span class="ss">:page-count</span> <span class="nv">page-count</span>
+            <span class="ss">:prev-page</span> <span class="nv">prev-page</span>
+            <span class="ss">:next-page</span> <span class="nv">next-page</span>
+            <span class="ss">:pages</span> <span class="p">(</span><span class="nb">loop</span> <span class="ss">:for</span> <span class="nv">idx</span> <span class="ss">:from</span> <span class="nv">range-start</span> <span class="ss">:to</span> <span class="nv">range-end</span> <span class="ss">:collect</span> <span class="nv">idx</span><span class="p">)</span>
+            <span class="ss">:show-start-gap</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nv">range-start</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="ss">:show-end-gap</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">range-end</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page-count</span><span class="p">))</span>
+            <span class="ss">:start-index</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">1+</span> <span class="nv">offset</span><span class="p">)</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="ss">:end-index</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">min</span> <span class="nb">count</span> <span class="p">(</span><span class="nb">+</span> <span class="nv">offset</span> <span class="p">(</span><span class="nb">length</span> <span class="nv">posts</span><span class="p">)))</span> <span class="mi">0</span><span class="p">))))))</span>
+</code></pre></div></div>
+
+<p>I would have thought that having an invalid number would have triggered a 404, or perhaps a 400, but having tested this with Google, it seems that the convention is to default to page 1. So with that said and the controller in place, we can now write our templates.</p>
+
+<h2 id="templates">Templates</h2>
+
+<h3 id="index-srctemplatesmainindexhtml">index (src/templates/main/index.html)</h3>
+
+<p>Our index template doesn't require much change at all, we need to only add an <code class="language-plaintext highlighter-rouge">include</code> (from djula) to include the contents of one template inside another. Of course we have still to write the pagination template, but that is just below.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code> {% extends "base.html" %}
+
+{% block content %}
+ &lt;div class="container"&gt;
+    &lt;!-- Post form --&gt;
+    &lt;div class="row mb-4"&gt;
+        &lt;div class="col"&gt;
+            {% if form %}
+                {% form form %}
+            {% endif %}
+        &lt;/div&gt;
+    &lt;/div&gt;
+
+    &lt;!-- Posts Section --&gt;
+<span class="gi">+   {% include "partials/pagination.html" with url="/" title="Posts" %}
+</span>    &lt;div class="row"&gt;
+    ...
+    &lt;/div&gt;
+<span class="gi">+   {% include "partials/pagination.html" with url="/" title="Posts" %}
+</span> &lt;/div&gt;
+ {% endblock %}
+</code></pre></div></div>
+
+<p>Something to bear in mind here is the way this is designed is that if you need to pass in some data, in our case <code class="language-plaintext highlighter-rouge">url</code>, and <code class="language-plaintext highlighter-rouge">title</code>, we can pass through these things, we will use these in the pagination html partial.</p>
+
+<h3 id="pagination-srctemplatespartialspaginationhtml">pagination (src/templates/partials/pagination.html)</h3>
+
+<p>Partials are a way to include reusable parts of html presentation in a template, they help us build isolated pieces of presentation logic that we might want to use over and over again all over our application, this is why we save them in a partials folder, because they are a partial piece of presentation logic.</p>
+
+<p>This is the magic that makes the UI work, while we showed were it would be used in the <code class="language-plaintext highlighter-rouge">index.html</code> page, we need to look into what it does. I do use bootstrap to make things look nice, but I'm very much NOT a frontend engineer, so I can't speak to how to make something look good without it, so inevitably much of the classes and UI come from <a href="https://getbootstrap.com/docs/5.3/components/pagination/">Bootstrap</a>.</p>
+
+<p>I will have to break the html down piece by piece to explain what it's all doing, but look at the final listing to see the complete file.</p>
+
+<p>From the values we calculated though, we start by checking if the page count is bigger than <code class="language-plaintext highlighter-rouge">1</code>, because if we have less than two pages, we can't paginate, therefore the whole UI is wrapped in:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+{% if page-count &gt; 1%}
+    ...
+{% endif %}
+
+</code></pre></div></div>
+
+<p>With that we can use the <code class="language-plaintext highlighter-rouge">start-index</code>, <code class="language-plaintext highlighter-rouge">end-index</code>, and <code class="language-plaintext highlighter-rouge">count</code>, to display the human readable part of the paginator.</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+{% if page-count &gt; 1%}
+  <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"table-pagination"</span><span class="nt">&gt;</span>
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"pagination-summary"</span><span class="nt">&gt;</span>
+      Showing {{ start-index }}-{{ end-index }} of {{ count }}
+    <span class="nt">&lt;/div&gt;</span>
+    ...
+{% endif %}
+
+</code></pre></div></div>
+<p>We then setup a <code class="language-plaintext highlighter-rouge">nav</code>, with a single <code class="language-plaintext highlighter-rouge">ul</code> object in it, with which we define our parts of the paginator as <code class="language-plaintext highlighter-rouge">li</code> tags.</p>
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+{% if page-count &gt; 1%}
+    ...
+    <span class="nt">&lt;nav</span> <span class="na">aria-label=</span><span class="s">"{{ title }} pagination"</span><span class="nt">&gt;</span>
+      <span class="nt">&lt;ul</span> <span class="na">class=</span><span class="s">"pagination"</span><span class="nt">&gt;</span>
+    ...
+{% endif %}
+
+</code></pre></div></div>
+
+<p>Within this <code class="language-plaintext highlighter-rouge">ul</code>, we have to put all of our <code class="language-plaintext highlighter-rouge">li</code> elements which will contain the aspects of the UI. The first such item is:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>    ...
+    <span class="nt">&lt;ul</span> <span class="na">class=</span><span class="s">"pagination"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if not prev-page %} disabled{% endif %}"</span><span class="nt">&gt;</span>
+          {% if prev-page %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ prev-page }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>Prev<span class="nt">&lt;/a&gt;</span>
+          {% else %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>Prev<span class="nt">&lt;/span&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+        ...
+    <span class="nt">&lt;/ul&gt;</span>
+</code></pre></div></div>
+
+<p>This first <code class="language-plaintext highlighter-rouge">li</code> will set the <code class="language-plaintext highlighter-rouge">disabled</code> css class if the <code class="language-plaintext highlighter-rouge">prev-page</code> is not <code class="language-plaintext highlighter-rouge">nil</code>. It will again rely on <code class="language-plaintext highlighter-rouge">prev-page</code> to either render an <code class="language-plaintext highlighter-rouge">a</code> tag building the url up, including the <code class="language-plaintext highlighter-rouge">prev-page</code>, and <code class="language-plaintext highlighter-rouge">limit</code>, else a <code class="language-plaintext highlighter-rouge">span</code> is rendered. This sets up the first element in the pagination UI.</p>
+
+<p>The second <code class="language-plaintext highlighter-rouge">li</code> item checks the <code class="language-plaintext highlighter-rouge">page</code>, and if it is the first page, it sets the <code class="language-plaintext highlighter-rouge">active</code> class and renders a <code class="language-plaintext highlighter-rouge">span</code>, if it is NOT 1 then a link to the first page is rendered with a <code class="language-plaintext highlighter-rouge">a</code> tag, building up the url as we did before.</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if page == 1 %} active{% endif %}"</span><span class="nt">&gt;</span>
+          {% if page == 1 %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>1<span class="nt">&lt;/span&gt;</span>
+          {% else %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page=1&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>1<span class="nt">&lt;/a&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+...
+</code></pre></div></div>
+
+<p>Now that we have gotten the beginning of the paginator with a "Prev" <code class="language-plaintext highlighter-rouge">li</code> element and the first <code class="language-plaintext highlighter-rouge">li</code> element, we <em>might</em> need to render an elipsis (...) if the number of our pages is too large. We will repeat this pattern later on, in reverse, we will use the <code class="language-plaintext highlighter-rouge">show-start-gap</code> boolean to render the <code class="language-plaintext highlighter-rouge">...</code>.</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+        {% if show-start-gap %}
+          <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item disabled"</span><span class="nt">&gt;&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>...<span class="nt">&lt;/span&gt;&lt;/li&gt;</span>
+        {% endif %}
+...
+</code></pre></div></div>
+
+<p>With that done, we can now render the page numbers:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>        {% for p in pages %}
+          {% if p != 1 and p != page-count %}
+            <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if p == page %} active{% endif %}"</span><span class="nt">&gt;</span>
+              {% if p == page %}
+                <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>{{ p }}<span class="nt">&lt;/span&gt;</span>
+              {% else %}
+                <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ p }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>{{ p }}<span class="nt">&lt;/a&gt;</span>
+              {% endif %}
+            <span class="nt">&lt;/li&gt;</span>
+          {% endif %}
+        {% endfor %}
+</code></pre></div></div>
+
+<p>We loop over the list of page numbers we passed into the template as <code class="language-plaintext highlighter-rouge">pages</code>, if the loop iteration is NOT the first page (remember that this is a list of page numbers and starts from 1, not 0) and the loop iteration is not the current page, then we will render the <code class="language-plaintext highlighter-rouge">li</code> tag. If we just so happen to be on the loop iteration that is the current page (<code class="language-plaintext highlighter-rouge">page</code>), we render a <code class="language-plaintext highlighter-rouge">span</code> tag and not a link, else we render a link so that we can directly navigate to this element in the paginator.</p>
+
+<p>We then render the <code class="language-plaintext highlighter-rouge">show-end-gap</code>, using the pattern we used above:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+        {% if show-end-gap %}
+          <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item disabled"</span><span class="nt">&gt;&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>...<span class="nt">&lt;/span&gt;&lt;/li&gt;</span>
+        {% endif %}
+...
+</code></pre></div></div>
+
+<p>This will render an elipsis (...) where needed.</p>
+
+<p>Now to the final page in the paginator, we must check if we are on the final page, which, as we have seen before, we do in the class line, and to determine if we render a <code class="language-plaintext highlighter-rouge">span</code> tag if we are on the final page, or a <code class="language-plaintext highlighter-rouge">a</code> tag if we are not.</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+      <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if page == page-count %} active{% endif %}"</span><span class="nt">&gt;</span>
+          {% if page == page-count %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>{{ page-count }}<span class="nt">&lt;/span&gt;</span>
+          {% else %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ page-count }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>{{ page-count }}<span class="nt">&lt;/a&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+...
+</code></pre></div></div>
+
+<p>And finally, we must render the "Next" part of the pagination:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>...
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if not next-page %} disabled{% endif %}"</span><span class="nt">&gt;</span>
+          {% if next-page %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ next-page }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>Next<span class="nt">&lt;/a&gt;</span>
+          {% else %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>Next<span class="nt">&lt;/span&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+...
+</code></pre></div></div>
+
+<p>If there is NOT a next page we add the disabled class, we then, as we have seen before use the <code class="language-plaintext highlighter-rouge">next-page</code> variable to determine if we render an <code class="language-plaintext highlighter-rouge">a</code> tag, or a <code class="language-plaintext highlighter-rouge">span</code> tag.</p>
+
+<h2 id="full-listings">Full Listings</h2>
+
+<p>To see how all of this comes together here are the files in their entirety.</p>
+
+<h4 id="modelslisp">models.lisp</h4>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/models</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:mito</span> <span class="ss">:sxql</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:import-from</span> <span class="ss">:ningle-auth/models</span> <span class="ss">#:user</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:post</span>
+           <span class="ss">#:id</span>
+           <span class="ss">#:content</span>
+           <span class="ss">#:comments</span>
+           <span class="ss">#:likes</span>
+           <span class="ss">#:user</span>
+           <span class="ss">#:liked-post-p</span>
+           <span class="ss">#:posts</span>
+           <span class="ss">#:parent</span>
+           <span class="ss">#:toggle-like</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/models</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">deftable</span> <span class="nv">post</span> <span class="p">()</span>
+  <span class="p">((</span><span class="nv">user</span>    <span class="ss">:col-type</span> <span class="nv">ningle-auth/models:user</span> <span class="ss">:initarg</span> <span class="ss">:user</span>    <span class="ss">:accessor</span> <span class="nv">user</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">parent</span>  <span class="ss">:col-type</span> <span class="p">(</span><span class="nb">or</span> <span class="ss">:post</span> <span class="ss">:null</span><span class="p">)</span>        <span class="ss">:initarg</span> <span class="ss">:parent</span>  <span class="ss">:reader</span> <span class="nv">parent</span> <span class="ss">:initform</span> <span class="no">nil</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">content</span> <span class="ss">:col-type</span> <span class="p">(</span><span class="ss">:varchar</span> <span class="mi">140</span><span class="p">)</span>          <span class="ss">:initarg</span> <span class="ss">:content</span> <span class="ss">:accessor</span> <span class="nv">content</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">deftable</span> <span class="nv">likes</span> <span class="p">()</span>
+  <span class="p">((</span><span class="nv">user</span> <span class="ss">:col-type</span> <span class="nv">ningle-auth/models:user</span> <span class="ss">:initarg</span> <span class="ss">:user</span> <span class="ss">:reader</span> <span class="nv">user</span><span class="p">)</span>
+   <span class="p">(</span><span class="nv">post</span> <span class="ss">:col-type</span> <span class="nv">post</span>                    <span class="ss">:initarg</span> <span class="ss">:post</span> <span class="ss">:reader</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="ss">:unique-keys</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">likes</span> <span class="p">(</span><span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Returns the number of likes a post has"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">likes</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">mito:count-dao</span> <span class="ss">'likes</span> <span class="ss">:post</span> <span class="nv">post</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">comments</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">user</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Gets the comments for a logged in user"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">comments</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">user</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+            <span class="p">(</span><span class="nv">sxql:select</span>
+                <span class="p">(</span><span class="ss">:post.*</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:user_likes.id</span><span class="p">)</span> <span class="ss">:liked_by_user</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:where</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:parent</span> <span class="ss">:?</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="p">(</span><span class="ss">:as</span> <span class="ss">:likes</span> <span class="ss">:user_likes</span><span class="p">)</span>
+                                <span class="ss">:on</span> <span class="p">(</span><span class="ss">:and</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:user_likes.post_id</span><span class="p">)</span>
+                                          <span class="p">(</span><span class="ss">:=</span> <span class="ss">:user_likes.user_id</span> <span class="ss">:?</span><span class="p">)))</span>
+                <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))</span>
+            <span class="ss">:binds</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">user</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">comments</span> <span class="p">((</span><span class="nv">post</span> <span class="nv">post</span><span class="p">)</span> <span class="p">(</span><span class="nv">user</span> <span class="nb">null</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+        <span class="p">(</span><span class="nv">sxql:select</span>
+            <span class="p">(</span><span class="ss">:post.*</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:where</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:parent</span> <span class="ss">:?</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:limit</span> <span class="mi">50</span><span class="p">)))</span>
+        <span class="ss">:binds</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">toggle-like</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Toggles the like of a user to a given post"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">toggle-like</span> <span class="p">((</span><span class="nv">ningle-auth/models:user</span> <span class="nv">user</span><span class="p">)</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">liked-post</span> <span class="p">(</span><span class="nv">liked-post-p</span> <span class="nv">user</span> <span class="nv">post</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">if</span> <span class="nv">liked-post</span>
+        <span class="p">(</span><span class="nv">mito:delete-dao</span> <span class="nv">liked-post</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'likes</span> <span class="ss">:post</span> <span class="nv">post</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">not</span> <span class="nv">liked-post</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">liked-post-p</span> <span class="p">(</span><span class="nv">user</span> <span class="nv">post</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Returns true if a user likes a given post"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">liked-post-p</span> <span class="p">((</span><span class="nv">ningle-auth/models:user</span> <span class="nv">user</span><span class="p">)</span> <span class="p">(</span><span class="nv">post</span> <span class="nv">post</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'likes</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:post</span> <span class="nv">post</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defgeneric</span> <span class="nv">posts</span> <span class="p">(</span><span class="nv">user</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:documentation</span> <span class="s">"Gets the posts"</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="ss">:around</span> <span class="p">(</span><span class="nv">user</span> <span class="k">&amp;key</span> <span class="p">(</span><span class="nv">offset</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nv">limit</span> <span class="mi">50</span><span class="p">)</span> <span class="k">&amp;allow-other-keys</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nb">count</span> <span class="p">(</span><span class="nv">mito:count-dao</span> <span class="ss">'post</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">offset</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">0</span> <span class="nv">offset</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="nv">limit</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">and</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">&gt;=</span> <span class="nv">offset</span> <span class="nb">count</span><span class="p">))</span>
+      <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">page-count</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">ceiling</span> <span class="nb">count</span> <span class="nv">limit</span><span class="p">)))</span>
+             <span class="p">(</span><span class="nv">corrected-offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page-count</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="nv">corrected-offset</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">))</span>
+      <span class="p">(</span><span class="nb">call-next-method</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="nv">offset</span> <span class="ss">:limit</span> <span class="nv">limit</span> <span class="ss">:count</span> <span class="nb">count</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nv">user</span><span class="p">)</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">sql</span> <span class="nv">params</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">sxql:yield</span>
+              <span class="p">(</span><span class="nv">sxql:select</span>
+                  <span class="p">(</span><span class="ss">:post.*</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">)</span>
+                    <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:user_likes.id</span><span class="p">)</span> <span class="ss">:liked_by_user</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="p">(</span><span class="ss">:as</span> <span class="ss">:likes</span> <span class="ss">:user_likes</span><span class="p">)</span>
+                                  <span class="ss">:on</span> <span class="p">(</span><span class="ss">:and</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:user_likes.post_id</span><span class="p">)</span>
+                                            <span class="p">(</span><span class="ss">:=</span> <span class="ss">:user_likes.user_id</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">user</span><span class="p">))))</span>
+                  <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nv">sxql:offset</span> <span class="nv">offset</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">sxql:limit</span> <span class="nv">limit</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">values</span>
+          <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span> <span class="nv">sql</span> <span class="ss">:binds</span> <span class="nv">params</span><span class="p">)</span>
+          <span class="nb">count</span>
+          <span class="nv">offset</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defmethod</span> <span class="nv">posts</span> <span class="p">((</span><span class="nv">user</span> <span class="nb">null</span><span class="p">)</span> <span class="k">&amp;key</span> <span class="nv">offset</span> <span class="nv">limit</span> <span class="nb">count</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">sql</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">sxql:yield</span>
+        <span class="p">(</span><span class="nv">sxql:select</span>
+            <span class="p">(</span><span class="ss">:post.*</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="ss">:user.username</span> <span class="ss">:username</span><span class="p">)</span>
+              <span class="p">(</span><span class="ss">:as</span> <span class="p">(</span><span class="ss">:count</span> <span class="ss">:likes.id</span><span class="p">)</span> <span class="ss">:like_count</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:from</span> <span class="ss">:post</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:user</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.user_id</span> <span class="ss">:user.id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:left-join</span> <span class="ss">:likes</span> <span class="ss">:on</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:post.id</span> <span class="ss">:likes.post_id</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:group-by</span> <span class="ss">:post.id</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:order-by</span> <span class="p">(</span><span class="ss">:desc</span> <span class="ss">:post.created_at</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">sxql:limit</span> <span class="nv">limit</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">sxql:offset</span> <span class="nv">offset</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nb">values</span>
+        <span class="p">(</span><span class="nv">mito:retrieve-by-sql</span> <span class="nv">sql</span><span class="p">)</span>
+        <span class="nb">count</span>
+        <span class="nv">offset</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<h4 id="controllerslisp">controllers.lisp</h4>
+
+<div class="language-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defpackage</span> <span class="nv">ningle-tutorial-project/controllers</span>
+  <span class="p">(</span><span class="ss">:use</span> <span class="ss">:cl</span> <span class="ss">:sxql</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:import-from</span> <span class="ss">:ningle-tutorial-project/forms</span>
+                <span class="ss">#:post</span>
+                <span class="ss">#:content</span>
+                <span class="ss">#:parent</span>
+                <span class="ss">#:comment</span><span class="p">)</span>
+  <span class="p">(</span><span class="ss">:export</span> <span class="ss">#:index</span>
+           <span class="ss">#:post-likes</span>
+           <span class="ss">#:single-post</span>
+           <span class="ss">#:post-content</span>
+           <span class="ss">#:post-comment</span>
+           <span class="ss">#:logged-in-profile</span>
+           <span class="ss">#:unauthorized-profile</span>
+           <span class="ss">#:people</span>
+           <span class="ss">#:person</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">in-package</span> <span class="nv">ningle-tutorial-project/controllers</span><span class="p">)</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">posts</span> <span class="nb">count</span> <span class="nv">offset</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="p">(</span><span class="nb">*</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)</span> <span class="nv">limit</span><span class="p">)</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">)</span>
+        <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">page</span> <span class="p">(</span><span class="nb">1+</span> <span class="p">(</span><span class="nb">floor</span> <span class="nv">offset</span> <span class="nv">limit</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">page-count</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">ceiling</span> <span class="nb">count</span> <span class="nv">limit</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">prev-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nv">page</span> <span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">next-page</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">page</span> <span class="nv">page-count</span><span class="p">)</span> <span class="p">(</span><span class="nb">1+</span> <span class="nv">page</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">range-start</span> <span class="p">(</span><span class="nb">max</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">)))</span>
+               <span class="p">(</span><span class="nv">range-end</span> <span class="p">(</span><span class="nb">min</span> <span class="nv">page-count</span> <span class="p">(</span><span class="nb">+</span> <span class="nv">page</span> <span class="mi">2</span><span class="p">))))</span>
+          <span class="p">(</span><span class="nv">djula:render-template*</span>
+            <span class="s">"main/index.html"</span>
+            <span class="no">nil</span>
+            <span class="ss">:title</span> <span class="s">"Home"</span>
+            <span class="ss">:user</span> <span class="nv">user</span>
+            <span class="ss">:posts</span> <span class="nv">posts</span>
+            <span class="ss">:form</span> <span class="p">(</span><span class="k">if</span> <span class="nv">user</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+            <span class="ss">:count</span> <span class="nb">count</span>
+            <span class="ss">:page</span> <span class="nv">page</span>
+            <span class="ss">:limit</span> <span class="nv">limit</span>
+            <span class="ss">:page-count</span> <span class="nv">page-count</span>
+            <span class="ss">:prev-page</span> <span class="nv">prev-page</span>
+            <span class="ss">:next-page</span> <span class="nv">next-page</span>
+            <span class="ss">:pages</span> <span class="p">(</span><span class="nb">loop</span> <span class="ss">:for</span> <span class="nv">idx</span> <span class="ss">:from</span> <span class="nv">range-start</span> <span class="ss">:to</span> <span class="nv">range-end</span> <span class="ss">:collect</span> <span class="nv">idx</span><span class="p">)</span>
+            <span class="ss">:show-start-gap</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nv">range-start</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="ss">:show-end-gap</span> <span class="p">(</span><span class="nb">&lt;</span> <span class="nv">range-end</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">page-count</span><span class="p">))</span>
+            <span class="ss">:start-index</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">1+</span> <span class="nv">offset</span><span class="p">)</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="ss">:end-index</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&gt;</span> <span class="nb">count</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nb">min</span> <span class="nb">count</span> <span class="p">(</span><span class="nb">+</span> <span class="nv">offset</span> <span class="p">(</span><span class="nb">length</span> <span class="nv">posts</span><span class="p">)))</span> <span class="mi">0</span><span class="p">))))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-likes</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))))</span>
+         <span class="p">(</span><span class="nv">res</span> <span class="p">(</span><span class="nb">make-hash-table</span> <span class="ss">:test</span> <span class="ss">'equal</span><span class="p">)))</span>
+    <span class="c1">;; Bail out if post does not exist</span>
+    <span class="p">(</span><span class="nb">unless</span> <span class="nv">post</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">getf</span> <span class="p">(</span><span class="nv">lack.response:response-headers</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="ss">:content-type</span><span class="p">)</span> <span class="s">"application/json"</span><span class="p">)</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"error"</span> <span class="nv">res</span><span class="p">)</span> <span class="s">"post not found"</span><span class="p">)</span>
+      <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">return-from</span> <span class="nv">post-likes</span> <span class="p">(</span><span class="nv">com.inuoe.jzon.stringify</span> <span class="nv">res</span><span class="p">)))</span>
+
+    <span class="c1">;; success, continue</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"post"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"liked"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:toggle-like</span> <span class="nv">user</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">gethash</span> <span class="s">"likes"</span> <span class="nv">res</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:likes</span> <span class="nv">post</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nb">getf</span> <span class="p">(</span><span class="nv">lack.response:response-headers</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="ss">:content-type</span><span class="p">)</span> <span class="s">"application/json"</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">201</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">com.inuoe.jzon:stringify</span> <span class="nv">res</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">single-post</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">handler-case</span>
+        <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">post</span> <span class="p">(</span><span class="nv">mito:find-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:id</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:id</span> <span class="nv">params</span><span class="p">))))</span>
+              <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'comment</span><span class="p">)))</span>
+          <span class="p">(</span><span class="nv">cl-forms:set-field-value</span> <span class="nv">form</span> <span class="ss">'ningle-tutorial-project/forms:parent</span> <span class="p">(</span><span class="nv">mito:object-id</span> <span class="nv">post</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/post.html"</span> <span class="no">nil</span>
+                                  <span class="ss">:title</span> <span class="s">"Post"</span>
+                                  <span class="ss">:post</span> <span class="nv">post</span>
+                                  <span class="ss">:comments</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:comments</span> <span class="nv">post</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+                                  <span class="ss">:likes</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:likes</span> <span class="nv">post</span><span class="p">)</span>
+                                  <span class="ss">:form</span> <span class="nv">form</span>
+                                  <span class="ss">:user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)))</span>
+
+        <span class="p">(</span><span class="kt">parse-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+            <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">404</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-content</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'post</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">handler-case</span>
+            <span class="p">(</span><span class="k">progn</span>
+                <span class="p">(</span><span class="nv">cl-forms:handle-request</span> <span class="nv">form</span><span class="p">)</span> <span class="c1">; Can throw an error if CSRF fails</span>
+
+                <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">valid</span> <span class="nv">errors</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">cl-forms:validate-form</span> <span class="nv">form</span><span class="p">)</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">errors</span>
+                        <span class="p">(</span><span class="nb">format</span> <span class="no">t</span> <span class="s">"Errors: ~A~%"</span> <span class="nv">errors</span><span class="p">))</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">valid</span>
+                        <span class="p">(</span><span class="nv">cl-forms:with-form-field-values</span> <span class="p">(</span><span class="nv">content</span><span class="p">)</span> <span class="nv">form</span>
+                            <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:content</span> <span class="nv">content</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:parent</span> <span class="no">nil</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">ingle:redirect</span> <span class="s">"/"</span><span class="p">)))))</span>
+
+            <span class="p">(</span><span class="kt">simple-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+                <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">)))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">post-comment</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+          <span class="p">(</span><span class="nv">form</span> <span class="p">(</span><span class="nv">cl-forms:find-form</span> <span class="ss">'comment</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nb">handler-case</span>
+            <span class="p">(</span><span class="k">progn</span>
+                <span class="p">(</span><span class="nv">cl-forms:handle-request</span> <span class="nv">form</span><span class="p">)</span> <span class="c1">; Can throw an error if CSRF fails</span>
+
+                <span class="p">(</span><span class="nb">multiple-value-bind</span> <span class="p">(</span><span class="nv">valid</span> <span class="nv">errors</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">cl-forms:validate-form</span> <span class="nv">form</span><span class="p">)</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">errors</span>
+                        <span class="p">(</span><span class="nb">format</span> <span class="no">t</span> <span class="s">"Errors: ~A~%"</span> <span class="nv">errors</span><span class="p">))</span>
+
+                    <span class="p">(</span><span class="nb">when</span> <span class="nv">valid</span>
+                        <span class="p">(</span><span class="nv">cl-forms:with-form-field-values</span> <span class="p">(</span><span class="nv">content</span> <span class="nv">parent</span><span class="p">)</span> <span class="nv">form</span>
+                            <span class="p">(</span><span class="nv">mito:create-dao</span> <span class="ss">'ningle-tutorial-project/models:post</span> <span class="ss">:content</span> <span class="nv">content</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:parent</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="nv">parent</span><span class="p">))</span>
+                            <span class="p">(</span><span class="nv">ingle:redirect</span> <span class="s">"/"</span><span class="p">)))))</span>
+
+            <span class="p">(</span><span class="kt">simple-error</span> <span class="p">(</span><span class="nv">err</span><span class="p">)</span>
+                <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+                <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="nv">err</span><span class="p">)))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">logged-in-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/profile.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Profile"</span> <span class="ss">:user</span> <span class="nv">user</span><span class="p">)))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">unauthorized-profile</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">lack.response:response-status</span> <span class="nv">ningle:*response*</span><span class="p">)</span> <span class="mi">403</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"error.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Error"</span> <span class="ss">:error</span> <span class="s">"Unauthorized"</span><span class="p">))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">people</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">users</span> <span class="p">(</span><span class="nv">mito:retrieve-dao</span> <span class="ss">'ningle-auth/models:user</span><span class="p">)))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/people.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"People"</span> <span class="ss">:users</span> <span class="nv">users</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">person</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">username-or-email</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="ss">:person</span> <span class="nv">params</span><span class="p">))</span>
+           <span class="p">(</span><span class="nv">person</span> <span class="p">(</span><span class="nb">first</span> <span class="p">(</span><span class="nv">mito:select-dao</span>
+                            <span class="ss">'ningle-auth/models:user</span>
+                            <span class="p">(</span><span class="nv">where</span> <span class="p">(</span><span class="ss">:or</span> <span class="p">(</span><span class="ss">:=</span> <span class="ss">:username</span> <span class="nv">username-or-email</span><span class="p">)</span>
+                                        <span class="p">(</span><span class="ss">:=</span> <span class="ss">:email</span> <span class="nv">username-or-email</span><span class="p">)))))))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/person.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Person"</span> <span class="ss">:person</span> <span class="nv">person</span> <span class="ss">:user</span> <span class="p">(</span><span class="nv">cu-sith:logged-in-p</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<h4 id="indexhtml">index.html</h4>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{% extends "base.html" %}
+
+{% block content %}
+<span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"container"</span><span class="nt">&gt;</span>
+    <span class="c">&lt;!-- Post form --&gt;</span>
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row mb-4"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col"</span><span class="nt">&gt;</span>
+            {% if form %}
+                {% form form %}
+            {% endif %}
+        <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;/div&gt;</span>
+
+    <span class="c">&lt;!-- Posts Section --&gt;</span>
+    {% include "partials/pagination.html" with url="/" title="Posts" %}
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"row"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"col-12"</span><span class="nt">&gt;</span>
+            {% for post in posts %}
+            <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card post mb-3"</span> <span class="na">data-href=</span><span class="s">"/post/{{ post.id }}"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-body"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;h5</span> <span class="na">class=</span><span class="s">"card-title mb-2"</span><span class="nt">&gt;</span>{{ post.content }}<span class="nt">&lt;/h5&gt;</span>
+                <span class="nt">&lt;p</span> <span class="na">class=</span><span class="s">"card-subtitle text-muted mb-0"</span><span class="nt">&gt;</span>@{{ post.username }}<span class="nt">&lt;/p&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"card-footer d-flex justify-content-between align-items-center"</span><span class="nt">&gt;</span>
+                <span class="nt">&lt;button</span> <span class="na">type=</span><span class="s">"button"</span>
+                        <span class="na">class=</span><span class="s">"btn btn-sm btn-outline-primary like-button"</span>
+                        <span class="na">data-post-id=</span><span class="s">"{{ post.id }}"</span>
+                        <span class="na">data-logged-in=</span><span class="s">"{% if user.username != "</span><span class="err">"</span> <span class="err">%}</span><span class="na">true</span><span class="err">{%</span> <span class="na">else</span> <span class="err">%}</span><span class="na">false</span><span class="err">{%</span> <span class="na">endif</span> <span class="err">%}"</span>
+                        <span class="na">data-liked=</span><span class="s">"{% if post.liked-by-user == 1 %}1{% else %}0{% endif %}"</span>
+                        <span class="na">aria-label=</span><span class="s">"Like post {{ post.id }}"</span><span class="nt">&gt;</span>
+                    {% if post.liked-by-user == 1 %}
+                      <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up-fill text-primary"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                    {% else %}
+                      <span class="nt">&lt;i</span> <span class="na">class=</span><span class="s">"bi bi-hand-thumbs-up text-muted"</span> <span class="na">aria-hidden=</span><span class="s">"true"</span><span class="nt">&gt;&lt;/i&gt;</span>
+                    {% endif %}
+                    <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"ms-1 like-count"</span><span class="nt">&gt;</span>{{ post.like-count }}<span class="nt">&lt;/span&gt;</span>
+                <span class="nt">&lt;/button&gt;</span>
+
+                <span class="nt">&lt;small</span> <span class="na">class=</span><span class="s">"text-muted"</span><span class="nt">&gt;</span>Posted on: {{ post.created-at }}<span class="nt">&lt;/small&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+            <span class="nt">&lt;/div&gt;</span>
+            {% endfor %}
+
+            {% if not posts %}
+                <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"text-center"</span><span class="nt">&gt;</span>
+                    <span class="nt">&lt;p</span> <span class="na">class=</span><span class="s">"text-muted"</span><span class="nt">&gt;</span>No posts to display.<span class="nt">&lt;/p&gt;</span>
+                <span class="nt">&lt;/div&gt;</span>
+            {% endif %}
+        <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;/div&gt;</span>
+    {% include "partials/pagination.html" with url="/" title="Posts" %}
+<span class="nt">&lt;/div&gt;</span>
+{% endblock %}
+
+{% block js %}
+document.querySelectorAll(".like-button").forEach(btn =&gt; {
+  btn.addEventListener("click", function (e) {
+    e.stopPropagation();
+    e.preventDefault();
+
+    // Check login
+    if (btn.dataset.loggedIn !== "true") {
+      alert("You must be logged in to like posts.");
+      return;
+    }
+
+    const postId = btn.dataset.postId;
+    const countSpan = btn.querySelector(".like-count");
+    const icon = btn.querySelector("i");
+    const liked = Number(btn.dataset.liked) === 1;
+    const previous = parseInt(countSpan.textContent, 10) || 0;
+    const url = `/post/${postId}/likes`;
+
+    // Optimistic UI toggle
+    countSpan.textContent = liked ? previous - 1 : previous + 1;
+    btn.dataset.liked = liked ? "false" : "true";
+
+    // Toggle icon classes optimistically
+    if (liked) {
+      // Currently liked, so unlike it
+      icon.className = "bi bi-hand-thumbs-up text-muted";
+    } else {
+      // Currently not liked, so like it
+      icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+    }
+
+    const csrfTokenMeta = document.querySelector('meta[name="csrf-token"]');
+    const headers = { "Content-Type": "application/json" };
+    if (csrfTokenMeta) headers["X-CSRF-Token"] = csrfTokenMeta.getAttribute("content");
+
+    fetch(url, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({ toggle: true })
+    })
+    .then(resp =&gt; {
+      if (!resp.ok) {
+        // Revert optimistic changes on error
+        countSpan.textContent = previous;
+        btn.dataset.liked = liked ? 1 : 0;
+        if (liked) {
+          icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+        } else {
+          icon.className = "bi bi-hand-thumbs-up text-muted";
+        }
+        throw new Error("Network response was not ok");
+      }
+      return resp.json();
+    })
+    .then(data =&gt; {
+      if (data <span class="err">&amp;&amp;</span> typeof data.likes !== "undefined") {
+        countSpan.textContent = data.likes;
+        btn.dataset.liked = data.liked ? "true" : "false";
+
+        // Update icon based on server response
+        if (data.liked) {
+          icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+        } else {
+          icon.className = "bi bi-hand-thumbs-up text-muted";
+        }
+      }
+    })
+    .catch(err =&gt; {
+      console.error("Like failed:", err);
+      // Revert optimistic changes on error
+      countSpan.textContent = previous;
+      btn.dataset.liked = liked ? 1 : 0;
+      if (liked) {
+        icon.className = "bi bi-hand-thumbs-up-fill text-primary";
+      } else {
+        icon.className = "bi bi-hand-thumbs-up text-muted";
+      }
+    });
+  });
+});
+
+document.querySelectorAll(".card.post").forEach(card =&gt; {
+  card.addEventListener("click", function () {
+    const href = card.dataset.href;
+    if (href) {
+      window.location.href = href;
+    }
+  });
+});
+{% endblock %}
+</code></pre></div></div>
+
+<h4 id="paginationhtml">pagination.html</h4>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight"><code>{% if page-count &gt; 1 %}
+  <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"table-pagination"</span><span class="nt">&gt;</span>
+    <span class="nt">&lt;div</span> <span class="na">class=</span><span class="s">"pagination-summary"</span><span class="nt">&gt;</span>
+      Showing {{ start-index }}-{{ end-index }} of {{ count }}
+    <span class="nt">&lt;/div&gt;</span>
+    <span class="nt">&lt;nav</span> <span class="na">aria-label=</span><span class="s">"{{ title }} pagination"</span><span class="nt">&gt;</span>
+      <span class="nt">&lt;ul</span> <span class="na">class=</span><span class="s">"pagination"</span><span class="nt">&gt;</span>
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if not prev-page %} disabled{% endif %}"</span><span class="nt">&gt;</span>
+          {% if prev-page %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ prev-page }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>Prev<span class="nt">&lt;/a&gt;</span>
+          {% else %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>Prev<span class="nt">&lt;/span&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if page == 1 %} active{% endif %}"</span><span class="nt">&gt;</span>
+          {% if page == 1 %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>1<span class="nt">&lt;/span&gt;</span>
+          {% else %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page=1&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>1<span class="nt">&lt;/a&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+
+        {% if show-start-gap %}
+          <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item disabled"</span><span class="nt">&gt;&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>...<span class="nt">&lt;/span&gt;&lt;/li&gt;</span>
+        {% endif %}
+
+        {% for p in pages %}
+          {% if p != 1 and p != page-count %}
+            <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if p == page %} active{% endif %}"</span><span class="nt">&gt;</span>
+              {% if p == page %}
+                <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>{{ p }}<span class="nt">&lt;/span&gt;</span>
+              {% else %}
+                <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ p }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>{{ p }}<span class="nt">&lt;/a&gt;</span>
+              {% endif %}
+            <span class="nt">&lt;/li&gt;</span>
+          {% endif %}
+        {% endfor %}
+
+        {% if show-end-gap %}
+          <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item disabled"</span><span class="nt">&gt;&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>...<span class="nt">&lt;/span&gt;&lt;/li&gt;</span>
+        {% endif %}
+
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if page == page-count %} active{% endif %}"</span><span class="nt">&gt;</span>
+          {% if page == page-count %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>{{ page-count }}<span class="nt">&lt;/span&gt;</span>
+          {% else %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ page-count }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>{{ page-count }}<span class="nt">&lt;/a&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+
+        <span class="nt">&lt;li</span> <span class="na">class=</span><span class="s">"page-item{% if not next-page %} disabled{% endif %}"</span><span class="nt">&gt;</span>
+          {% if next-page %}
+            <span class="nt">&lt;a</span> <span class="na">class=</span><span class="s">"page-link"</span> <span class="na">href=</span><span class="s">"{{ url }}?page={{ next-page }}&amp;limit={{ limit }}"</span><span class="nt">&gt;</span>Next<span class="nt">&lt;/a&gt;</span>
+          {% else %}
+            <span class="nt">&lt;span</span> <span class="na">class=</span><span class="s">"page-link"</span><span class="nt">&gt;</span>Next<span class="nt">&lt;/span&gt;</span>
+          {% endif %}
+        <span class="nt">&lt;/li&gt;</span>
+      <span class="nt">&lt;/ul&gt;</span>
+    <span class="nt">&lt;/nav&gt;</span>
+  <span class="nt">&lt;/div&gt;</span>
+{% endif %}
+</code></pre></div></div>
+<h2 id="conclusion">Conclusion</h2>
+
+<p>Phew, that was a long one, and honestly it kinda got into the weeds a bit, thank you for persisting with it and following it to the end. It took quite a while to study and get right. As you no doubt felt while writing it, there was a LOT of calculations and data being passed into the template, and it would be awful to have to repeat that everywhere you wanted to perform pagination, but don't worry in part 2, this is what we want to try and solve. A more generalised pagination system that doesn't require quite so much logic in the controllers.</p>
+
+<p>If you found this lesson helpful, consider experimenting with different page sizes or adding pagination to the comments on individual posts. The patterns we've established here are reusable throughout your application.</p>
+
+<p>If you found bugs or issues, please do let me know, I correct things when told and I try to fix things as quickly as possible.</p>
+
+<h3 id="learning-outcomes">Learning Outcomes</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Learning Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Understand</strong></td>
+      <td>Understand how SQL <code class="language-plaintext highlighter-rouge">LIMIT</code> and <code class="language-plaintext highlighter-rouge">OFFSET</code> work together to enable pagination, and how query parameters like <code class="language-plaintext highlighter-rouge">?page=2&amp;limit=50</code> map to database queries through SXQL's <code class="language-plaintext highlighter-rouge">(sxql:limit n)</code> and <code class="language-plaintext highlighter-rouge">(sxql:offset n)</code> forms.</td>
+    </tr>
+    <tr>
+      <td><strong>Apply</strong></td>
+      <td>Apply CLOS method combination (<code class="language-plaintext highlighter-rouge">:around</code> methods with <code class="language-plaintext highlighter-rouge">call-next-method</code>) to implement parameter validation and error recovery, ensuring offset never exceeds total count and calculating corrected page numbers when needed.</td>
+    </tr>
+    <tr>
+      <td><strong>Analyse</strong></td>
+      <td>Analyse the mathematical relationships in pagination (page-to-offset conversion, range calculations, gap detection) and trace how values flow through the <code class="language-plaintext highlighter-rouge">:around</code> method, primary methods, controller calculations, and template rendering.</td>
+    </tr>
+    <tr>
+      <td><strong>Create</strong></td>
+      <td>Create a complete pagination system by combining <code class="language-plaintext highlighter-rouge">:around</code> methods, SQL queries with LIMIT/OFFSET, controller calculations (page/offset conversions, range calculations), and reusable template partials that handle edge cases like invalid page numbers and single-page results.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="github">Github</h2>
+
+<ul>
+  <li>The link for the custom pagination part of the tutorials code is available <a href="https://github.com/nmunro/ningle-tutorial-project/releases/tag/tutorial-14.1">here</a>.</li>
+</ul>
+
+<h3 id="common-lisp-hyperspec">Common Lisp HyperSpec</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Type</th>
+      <th>Why it appears in this lesson</th>
+      <th>CLHS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defpackage</code></td>
+      <td>Macro</td>
+      <td>Define project packages like <code class="language-plaintext highlighter-rouge">ningle-tutorial-project/models</code>, <code class="language-plaintext highlighter-rouge">/forms</code>, <code class="language-plaintext highlighter-rouge">/controllers</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">in-package</code></td>
+      <td>Macro</td>
+      <td>Enter each package before defining models, controllers, and functions.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defgeneric</code></td>
+      <td>Macro</td>
+      <td>Define the generic <code class="language-plaintext highlighter-rouge">posts</code> function signature with keyword parameters <code class="language-plaintext highlighter-rouge">offset</code>, <code class="language-plaintext highlighter-rouge">limit</code>, and <code class="language-plaintext highlighter-rouge">count</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defmethod</code></td>
+      <td>Macro</td>
+      <td>Implement specialized <code class="language-plaintext highlighter-rouge">posts</code> methods for <code class="language-plaintext highlighter-rouge">user</code> and <code class="language-plaintext highlighter-rouge">null</code> types, and the <code class="language-plaintext highlighter-rouge">:around</code> method for validation.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">call-next-method</code></td>
+      <td>Function</td>
+      <td>Invoke the next most specific method from within the <code class="language-plaintext highlighter-rouge">:around</code> method after validating parameters.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_call_n.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_call_n.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">let</code></td>
+      <td>Special Operator</td>
+      <td>Bind local variables in the <code class="language-plaintext highlighter-rouge">:around</code> method (<code class="language-plaintext highlighter-rouge">count</code>, <code class="language-plaintext highlighter-rouge">offset</code>, <code class="language-plaintext highlighter-rouge">limit</code>) and controller (<code class="language-plaintext highlighter-rouge">user</code>, <code class="language-plaintext highlighter-rouge">page</code>, <code class="language-plaintext highlighter-rouge">limit</code>).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">let*</code></td>
+      <td>Special Operator</td>
+      <td>Sequentially bind pagination calculations (<code class="language-plaintext highlighter-rouge">page</code>, <code class="language-plaintext highlighter-rouge">page-count</code>, <code class="language-plaintext highlighter-rouge">prev-page</code>, etc.) where each depends on previous values.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">if</code></td>
+      <td>Special Operator</td>
+      <td>Check conditions like whether offset exceeds count, or whether count is greater than zero.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_if.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_if.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">when</code></td>
+      <td>Macro</td>
+      <td>Calculate <code class="language-plaintext highlighter-rouge">prev-page</code> and <code class="language-plaintext highlighter-rouge">next-page</code> only when the condition is true, returning <code class="language-plaintext highlighter-rouge">nil</code> otherwise.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_when_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">or</code></td>
+      <td>Macro</td>
+      <td>Provide fallback values when parsing <code class="language-plaintext highlighter-rouge">page</code> and <code class="language-plaintext highlighter-rouge">limit</code> parameters, defaulting to 1 and 50 respectively.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_or.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_or.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">and</code></td>
+      <td>Macro</td>
+      <td>Check multiple conditions in the <code class="language-plaintext highlighter-rouge">:around</code> method (count &gt; 0 AND offset &gt;= count) before recalculating.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_and.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_and.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">multiple-value-bind</code></td>
+      <td>Macro</td>
+      <td>Capture the three return values from <code class="language-plaintext highlighter-rouge">posts</code> (<code class="language-plaintext highlighter-rouge">posts</code>, <code class="language-plaintext highlighter-rouge">count</code>, <code class="language-plaintext highlighter-rouge">offset</code>) and from <code class="language-plaintext highlighter-rouge">sxql:yield</code> (<code class="language-plaintext highlighter-rouge">sql</code>, <code class="language-plaintext highlighter-rouge">params</code>).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_multip.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_multip.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">values</code></td>
+      <td>Function</td>
+      <td>Return multiple values from <code class="language-plaintext highlighter-rouge">posts</code> methods (results, count, offset) to the caller.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/a_values.htm">http://www.lispworks.com/documentation/HyperSpec/Body/a_values.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">loop</code></td>
+      <td>Macro</td>
+      <td>Generate the list of page numbers from <code class="language-plaintext highlighter-rouge">range-start</code> to <code class="language-plaintext highlighter-rouge">range-end</code> for template rendering.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_loop.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_loop.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-integer</code></td>
+      <td>Function</td>
+      <td>Convert string query parameters (<code class="language-plaintext highlighter-rouge">"1"</code>, <code class="language-plaintext highlighter-rouge">"50"</code>) to integers, with <code class="language-plaintext highlighter-rouge">:junk-allowed t</code> for safe parsing.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">floor</code></td>
+      <td>Function</td>
+      <td>Round down the result of <code class="language-plaintext highlighter-rouge">offset / limit</code> to calculate the current page number.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_floorc.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_floorc.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">ceiling</code></td>
+      <td>Function</td>
+      <td>Round up the result of <code class="language-plaintext highlighter-rouge">count / limit</code> to calculate the total number of pages.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_floorc.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_floorc.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">max</code></td>
+      <td>Function</td>
+      <td>Ensure <code class="language-plaintext highlighter-rouge">offset</code> and <code class="language-plaintext highlighter-rouge">limit</code> never go below their minimum valid values (0 and 1), and calculate <code class="language-plaintext highlighter-rouge">range-start</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_max_m.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_max_m.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">min</code></td>
+      <td>Function</td>
+      <td>Ensure <code class="language-plaintext highlighter-rouge">range-end</code> doesn't exceed <code class="language-plaintext highlighter-rouge">page-count</code> and calculate <code class="language-plaintext highlighter-rouge">end-index</code> correctly.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_max_m.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_max_m.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">1+</code> / <code class="language-plaintext highlighter-rouge">1-</code></td>
+      <td>Function</td>
+      <td>Increment/decrement page numbers for navigation (next/previous page, page number conversions).</td>
+      <td>[http://www.lispworks.com/documentation/HyperSpec/Body/f_1pl_1<em>.htm](http://www.lispworks.com/documentation/HyperSpec/Body/f_1pl_1</em>.htm)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">length</code></td>
+      <td>Function</td>
+      <td>Get the count of posts returned to calculate <code class="language-plaintext highlighter-rouge">end-index</code> accurately.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_length.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_length.htm</a></td>
+    </tr>
+  </tbody>
+</table>

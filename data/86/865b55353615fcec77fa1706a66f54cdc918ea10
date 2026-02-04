@@ -1,0 +1,390 @@
+<p>[Equations in this post may not look right (or appear at all) in your RSS reader. Go to <a href="https://leancrew.com/all-this/2026/02/pulling-values-from-a-graph-without-an-llm/">the original article</a> to see them rendered properly.]</p>
+  <hr />
+  <p>The inability of Claude and (especially) ChatGPT to extract data from the chart discussed in <a href="https://leancrew.com/all-this/2026/02/plotting-via-claude/">the last post</a> gnawed at me. It seemed like the sort of thing an LLM should be able to do pretty well, but Claude’s table of values needed some careful editing before I could use it. And ChatGPT just completely botched the job, even after several attempts to steer it right. I knew I could do a much better job in not much more time than I spent trying to get the LLMs to do it.</p>
+<p>As a reminder, here’s the graph:</p>
+<p><img alt="Warsh commentary Dutta plot" class="ss" src="https://leancrew.com/all-this/images2026/20260202-Warsh%20commentary%20Dutta%20plot.jpg" title="Warsh commentary Dutta plot" width="100%"/></p>
+<p>What I wanted was a CSV file with a column of dates (the x-values) and a column of floating point numbers (the y-values). One row for each of the 29 points.</p>
+<p>I’ve done things like this in the past with <a href="https://www.omnigroup.com/omnigraffle">OmniGraffle</a> and AppleScript, so that’s how I approached the problem.</p>
+<p>The first step was to get the x-values, which didn’t involve OmniGraffle or AppleScript. I opened the image in Preview, selected the text labels along the x-axis with <a href="https://textsniper.app/">Text Sniper</a>, and pasted the result into a new <a href="https://www.barebones.com/products/bbedit/index.html">BBEdit</a> window. Text Sniper had no trouble reading the rotated text, but it did have the values separated by space characters instead of line feeds. No problem; I just did a find/replace in BBEdit to get this:</p>
+<pre><code>2006-10
+2007-03
+2007-06
+2008-01
+2008-03
+2008-05
+2008-09
+2008-12
+2009-04
+2009-06
+2009-09
+2009-12
+2010-02
+2010-03
+2010-06
+2010-11
+2011-02
+2011-05
+2015-06
+2017-03
+2024-03
+2024-07
+2024-11
+2025-04
+2025-05
+2025-07
+2025-10
+2025-11
+2026-01
+</code></pre>
+<p>These dates are just months, and I figured it would be best for the plot to assume they were near the middle of each month, so I appended “-15,” to the end of each line. That set all the dates to the 15th of the month, and the comma prepared the file for pasting in the y-values:</p>
+<pre><code>2006-10-15,
+2007-03-15,
+2007-06-15,
+2008-01-15,
+2008-03-15,
+2008-05-15,
+2008-09-15,
+2008-12-15,
+2009-04-15,
+2009-06-15,
+2009-09-15,
+2009-12-15,
+2010-02-15,
+2010-03-15,
+2010-06-15,
+2010-11-15,
+2011-02-15,
+2011-05-15,
+2015-06-15,
+2017-03-15,
+2024-03-15,
+2024-07-15,
+2024-11-15,
+2025-04-15,
+2025-05-15,
+2025-07-15,
+2025-10-15,
+2025-11-15,
+2026-01-15,
+</code></pre>
+<p>Then came the real work. I pasted the image into a new OmniGraffle document with the scale set to “1 pt = 1 pt.” I did this because I knew that OmniGraffle’s AppleScript dictionary returns all coordinates and lengths in points with the origin at the upper left corner of the document. I then drew some thin-lined rectangles to get the y-coordinate of the horizontal axis and calculate the y-scale of the image.</p>
+<p>A rectangle with its top edge along the horizontal axis told me that the y-origin of the plot was 581 points down from the top of the document. To get the scale of the plot, I drew another rectangle whose bottom edge was aligned with the negative sign in the “-4” label and whose top edge was aligned with the equivalent part of the “4” label. That rectangle was 512.6 points high, so the scale of the plot is</p>
+<math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><mrow><mfrac><mn>512.6</mn><mn>8</mn></mfrac><mo>=</mo><mn>64.075</mn><mspace width="0.278em"></mspace><mrow><mi mathvariant="normal">p</mi><mi mathvariant="normal">t</mi><mi mathvariant="normal">s</mi><mi mathvariant="normal">/</mi><mi mathvariant="normal">u</mi><mi mathvariant="normal">n</mi><mi mathvariant="normal">i</mi><mi mathvariant="normal">t</mi></mrow></mrow></math>
+<p>I then made a new layer called “Markers” and drew a diamond (OmniGraffle has a built-in diamond shape) sized to match the markers in the plot. By duplication and dragging, I put a diamond shape over every marker. Here’s what it looked like with every diamond selected:</p>
+<p><img alt="OmniGraffle document with graph and markers" class="ss" src="https://leancrew.com/all-this/images2026/20260204-OmniGraffle%20document%20with%20graph%20and%20markers.png" title="OmniGraffle document with graph and markers" width="100%"/></p>
+<p>If you zoom in, you’ll see that the diamonds are 26.4 points tall, which means that the center of each diamond is 13.2 points below its top edge. We’ll need this value in the AppleScript because when OmniGraffle is asked for the location of an object, it returns the coordinates of the top left corner.</p>
+<p>Here’s another useful tidbit I’ve learned when using OmniGraffle’s AppleScript dictionary in the past: when you ask for <code>every shape</code> in a layer, the list of shapes is returned in the top-to-bottom order shown in the left sidebar. You may think this is obvious, but it isn’t. As you add shapes to a layer, each new shape appears in the sidebar <em>above</em> its predecessor. So the order of the items in the <code>every shape</code> list is the opposite of the creation order. The upshot of this is that to get the y-values of the diamonds in left-to-right order (to match their date order), I created them in right-to-left order.<sup id="fnref:reverse"><a href="#fn:reverse" rel="footnote">1</a></sup></p>
+<p>Now it’s time to write and run the AppleScript that extracts the y-coordinates of the centers of the diamonds and scales them to match the plot. It’s pretty simple:</p>
+<pre><code>applescript:
+ 1:  set yValues to {}
+ 2:  set yOrigin to 581
+ 3:  set yOffset to 13.2
+ 4:  set yScale to 64.075
+ 5:  
+ 6:  tell application "OmniGraffle"
+ 7:    tell layer "Markers" of canvas 1 of document 1
+ 8:      set diamonds to every shape
+ 9:      repeat with d in diamonds
+10:        set pt to (origin of d)
+11:        set end of yValues to (yOrigin - (item 2 of pt) - yOffset) / yScale
+12:      end repeat
+13:    end tell
+14:  end tell
+15:  
+16:  yValues
+</code></pre>
+<p>Line 1 initializes the list of y-values we’ll be building. Lines 2–4 set the values we established above. After the <code>tell</code> commands to establish that we’re focusing on the “Markers” layer, Line 8 creates the list of diamonds. Lines 9–12 loop through that list to get the location (<code>origin</code>) of each diamond and convert it to the value being plotted. The order in which the subtraction is done in Line 11 accounts for the fact that OmniGraffle’s coordinates increase as you go down but the plot’s coordinates increase as you go up.</p>
+<p>Line 16 spits out the list of y-values in the Result section of Script Editor:</p>
+<pre><code>{1.777610453442, 2.105119526221, 2.417138303752,
+-2.823376834196, -2.217843888773, 0.804769157205,
+-3.225882114947, -2.315093559097, 1.802782567774,
+2.308216918434, 3.517346715278, 3.011460781549,
+2.606423024043, 3.211060498316, 4.212510467041,
+4.018455838485, 4.315198697655, 4.018455838485,
+3.316423039057, 2.512942396277, 1.803414490836,
+1.203973154221, -0.507963600878, -0.304047453731,
+-0.80360682595, -2.016491975871, -1.812215148741,
+-2.521036825178, -2.2390063608}
+</code></pre>
+<p>That’s way more digits than is justified, but the extra digits don’t hurt anything. After turning each comma-space combination into a linefeed, I did a column paste to put the y-values after the dates. Adding a header line turned it into the CSV file I wanted for plotting:</p>
+<pre><code>Date,Hawk
+2006-10-15,1.777610453442
+2007-03-15,2.105119526221
+2007-06-15,2.417138303752
+2008-01-15,-2.823376834196
+2008-03-15,-2.217843888773
+2008-05-15,0.804769157205
+2008-09-15,-3.225882114947
+2008-12-15,-2.315093559097
+2009-04-15,1.802782567774
+2009-06-15,2.308216918434
+2009-09-15,3.517346715278
+2009-12-15,3.011460781549
+2010-02-15,2.606423024043
+2010-03-15,3.211060498316
+2010-06-15,4.212510467041
+2010-11-15,4.018455838485
+2011-02-15,4.315198697655
+2011-05-15,4.018455838485
+2015-06-15,3.316423039057
+2017-03-15,2.512942396277
+2024-03-15,1.803414490836
+2024-07-15,1.203973154221
+2024-11-15,-0.507963600878
+2025-04-15,-0.304047453731
+2025-05-15,-0.80360682595
+2025-07-15,-2.016491975871
+2025-10-15,-1.812215148741
+2025-11-15,-2.521036825178
+2026-01-15,-2.2390063608
+</code></pre>
+<p>I still have the CSV file made by Claude. Let’s compare:</p>
+<table>
+<thead>
+<tr>
+<th align="center">Date</th>
+<th align="right">Claude</th>
+<th align="right">AppleScript</th>
+<th align="right">Difference</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">2006-10-15</td>
+<td align="right">1.7</td>
+<td align="right">1.78</td>
+<td align="right">-0.08</td>
+</tr>
+<tr>
+<td align="center">2007-03-15</td>
+<td align="right">2.0</td>
+<td align="right">2.11</td>
+<td align="right">-0.11</td>
+</tr>
+<tr>
+<td align="center">2007-06-15</td>
+<td align="right">2.4</td>
+<td align="right">2.42</td>
+<td align="right">-0.02</td>
+</tr>
+<tr>
+<td align="center">2008-01-15</td>
+<td align="right">-2.9</td>
+<td align="right">-2.82</td>
+<td align="right">-0.08</td>
+</tr>
+<tr>
+<td align="center">2008-03-15</td>
+<td align="right">-2.2</td>
+<td align="right">-2.22</td>
+<td align="right">0.02</td>
+</tr>
+<tr>
+<td align="center">2008-05-15</td>
+<td align="right">0.8</td>
+<td align="right">0.80</td>
+<td align="right">-0.00</td>
+</tr>
+<tr>
+<td align="center">2008-09-15</td>
+<td align="right">-3.2</td>
+<td align="right">-3.23</td>
+<td align="right">0.03</td>
+</tr>
+<tr>
+<td align="center">2008-12-15</td>
+<td align="right">-2.5</td>
+<td align="right">-2.32</td>
+<td align="right">-0.18</td>
+</tr>
+<tr>
+<td align="center">2009-04-15</td>
+<td align="right">1.7</td>
+<td align="right">1.80</td>
+<td align="right">-0.10</td>
+</tr>
+<tr>
+<td align="center">2009-06-15</td>
+<td align="right">2.2</td>
+<td align="right">2.31</td>
+<td align="right">-0.11</td>
+</tr>
+<tr>
+<td align="center">2009-09-15</td>
+<td align="right">3.5</td>
+<td align="right">3.52</td>
+<td align="right">-0.02</td>
+</tr>
+<tr>
+<td align="center">2009-12-15</td>
+<td align="right">3.0</td>
+<td align="right">3.01</td>
+<td align="right">-0.01</td>
+</tr>
+<tr>
+<td align="center">2010-02-15</td>
+<td align="right">2.6</td>
+<td align="right">2.61</td>
+<td align="right">-0.01</td>
+</tr>
+<tr>
+<td align="center">2010-03-15</td>
+<td align="right">3.1</td>
+<td align="right">3.21</td>
+<td align="right">-0.11</td>
+</tr>
+<tr>
+<td align="center">2010-06-15</td>
+<td align="right">4.2</td>
+<td align="right">4.21</td>
+<td align="right">-0.01</td>
+</tr>
+<tr>
+<td align="center">2010-11-15</td>
+<td align="right">4.0</td>
+<td align="right">4.02</td>
+<td align="right">-0.02</td>
+</tr>
+<tr>
+<td align="center">2011-02-15</td>
+<td align="right">4.4</td>
+<td align="right">4.32</td>
+<td align="right">0.08</td>
+</tr>
+<tr>
+<td align="center">2011-05-15</td>
+<td align="right">4.1</td>
+<td align="right">4.02</td>
+<td align="right">0.08</td>
+</tr>
+<tr>
+<td align="center">2015-06-15</td>
+<td align="right">3.3</td>
+<td align="right">3.32</td>
+<td align="right">-0.02</td>
+</tr>
+<tr>
+<td align="center">2017-03-15</td>
+<td align="right">2.5</td>
+<td align="right">2.51</td>
+<td align="right">-0.01</td>
+</tr>
+<tr>
+<td align="center">2024-03-15</td>
+<td align="right">1.7</td>
+<td align="right">1.80</td>
+<td align="right">-0.10</td>
+</tr>
+<tr>
+<td align="center">2024-07-15</td>
+<td align="right">1.2</td>
+<td align="right">1.20</td>
+<td align="right">-0.00</td>
+</tr>
+<tr>
+<td align="center">2024-11-15</td>
+<td align="right">-0.5</td>
+<td align="right">-0.51</td>
+<td align="right">0.01</td>
+</tr>
+<tr>
+<td align="center">2025-04-15</td>
+<td align="right">-0.3</td>
+<td align="right">-0.30</td>
+<td align="right">0.00</td>
+</tr>
+<tr>
+<td align="center">2025-05-15</td>
+<td align="right">-0.6</td>
+<td align="right">-0.80</td>
+<td align="right">0.20</td>
+</tr>
+<tr>
+<td align="center">2025-07-15</td>
+<td align="right">-2.1</td>
+<td align="right">-2.02</td>
+<td align="right">-0.08</td>
+</tr>
+<tr>
+<td align="center">2025-10-15</td>
+<td align="right">-2.0</td>
+<td align="right">-1.81</td>
+<td align="right">-0.19</td>
+</tr>
+<tr>
+<td align="center">2025-11-15</td>
+<td align="right">-2.5</td>
+<td align="right">-2.52</td>
+<td align="right">0.02</td>
+</tr>
+<tr>
+<td align="center">2026-01-15</td>
+<td align="right">-2.3</td>
+<td align="right">-2.24</td>
+<td align="right">-0.06</td>
+</tr>
+</tbody>
+</table>
+<p>Claude’s values were off by only about 0.2 at worst, but recall that it originally included a spurious date and had the last seven y-values assigned to the wrong date. The “Claude” values shown above are after I figured out those obvious errors and corrected them.</p>
+<p>An odd thing about Claude’s errors: they don’t show a consistent bias in either magnitude or direction. Like everyone who programs, I’m used to seeing output with incorrect numbers. (In my first draft of the AppleScript, I multiplied by <code>yScale</code> instead of dividing, which gave pretty wild results.) What I’m not used to is inexplicably wrong numbers—numbers that aren’t wrong in a predictable way.</p>
+<p>At the risk of lengthening this post even further, here’s the graph with the AppleScript-derived values:</p>
+<p><img alt="Warsh commentary via AppleScript" class="ss" src="https://leancrew.com/all-this/images2026/20260202-Warsh%20commentary%20via%20AppleScript.png" title="Warsh commentary via AppleScript" width="100%"/></p>
+<p>And here’s the Python code that created it:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  import pandas as pd
+ 4:  from datetime import datetime
+ 5:  import matplotlib.pyplot as plt
+ 6:  from matplotlib.ticker import MultipleLocator, AutoMinorLocator
+ 7:  from matplotlib.dates import DateFormatter, YearLocator, MonthLocator
+ 8:  
+ 9:  # Import the data
+10:  df = pd.read_csv('warsh-applescript.csv', parse_dates=[0])
+11:  x = df.Date
+12:  y = df.Hawk
+13:  
+14:  # Create the plot with a given size in inches
+15:  fig, ax = plt.subplots(figsize=(8, 5))
+16:  
+17:  # Add a line
+18:  ax.plot(x, y, 'D-', color='#60150a', lw=3, ms=5)
+19:  
+20:  # Set the limits
+21:  plt.xlim(xmin=datetime(2006,1,1), xmax=datetime(2026,12,31))
+22:  plt.ylim(ymin=-4, ymax=5)
+23:  
+24:  # Set the major and minor ticks and add a grid
+25:  ax.xaxis.set_major_locator(YearLocator(2))
+26:  ax.xaxis.set_minor_locator(YearLocator(1))
+27:  ax.xaxis.set_major_formatter(DateFormatter('%Y'))
+28:  ax.yaxis.set_major_locator(MultipleLocator(1))
+29:  ax.axhline(y=0, color='k', lw=.5)
+30:  
+31:  # Title and axis labels
+32:  plt.title('Warsh commentary')
+33:  plt.xlabel('')
+34:  plt.ylabel('Monetary hawkishness')
+35:  
+36:  # Make the border and tick marks 0.5 points wide
+37:  [ i.set_linewidth(0.5) for i in ax.spines.values() ]
+38:  ax.tick_params(which='both', width=.5)
+39:  
+40:  # Reduce the whitespace around the plot
+41:  plt.tight_layout()
+42:  
+43:  # Save as PNG
+44:  plt.savefig('20260202-Warsh commentary via AppleScript.png', format='png', dpi=150)
+</code></pre>
+<p>Importing <a href="https://pandas.pydata.org/">Pandas</a> is overkill just to read a CSV file, but it’s more efficient of my time. The rest of the code is basically just my typical <a href="https://matplotlib.org/">Matplotlib</a> boilerplate with a few tweaks for dealing with the limits and tick spacing.</p>
+<p>Did this take longer than having Claude return the CSV file? Of course it did, but it didn’t take much more than half an hour or so, equally divided between the OmniGraffle drawing and the AppleScript coding. And that half-hour was much more satisfying than arguing with a random number generator and then editing its work after losing the argument.</p>
+<p>Also, because I’ve now written up the process (which took significantly longer than doing it), I have a method I can use with confidence in the future.</p>
+<div class="footnotes">
+<hr/>
+<ol>
+<li id="fn:reverse">
+<p>There are, of course, many ways to reverse a list, but there’s no <code>reverse</code> command in AppleScript. It’s easier to remember to create the shapes in reverse order. It takes no more time to do it that way. <a href="#fnref:reverse" rev="footnote">↩</a></p>
+</li>
+</ol>
+</div>
+  

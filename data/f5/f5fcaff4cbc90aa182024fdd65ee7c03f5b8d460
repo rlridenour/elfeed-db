@@ -1,0 +1,184 @@
+
+        <link rel="stylesheet" type="text/css" href="https://rahuljuliato.com/rss-styles.css">
+        <p>I'll start by admitting something upfront: for a long time, I was
+<strong>very vocal about not recommending Eglot</strong> if you were working with a
+modern web development stack, especially things like React,
+TypeScript, ESLint, Tailwind, Vue, etc. I even said so publicly in
+GitHub issues and discussions.</p>
+<p>That said, I always <em>liked</em> Eglot.</p>
+<p>More than liked, actually. Eglot always felt <strong>closer to Emacs
+itself</strong>. So much so that it eventually became part of Emacs core. Its
+design philosophy: minimalistic, protocol-driven, no magic UI layers
+is very close to my way to tackle Emacs.  In contrast, <code>lsp-mode</code> +
+<code>lsp-ui</code> behaves much more like a full-blown IDE, and yes, nothing
+wrong with that approach, you can use <code>lsp-mode</code> without the <code>lsp-ui</code>
+package, but you know, if I could, I'd rather stay within Emacs
+provided capabilities.</p>
+<p>The real problem for me was simple:
+<strong>I couldn't use all the LSP servers I needed at the same time.</strong></p>
+<p>And in modern web development with Eglot, that's not optional anymore 😄.</p>
+<hr>
+<h2>Intro</h2>
+<p>It's been a few years now since LSP servers started absorbing
+responsibilities that once belonged exclusively to <em>linters</em>.</p>
+<p>Linting today is faster, more precise, and far more
+interactive. Diagnostics, quick fixes, refactors, formatting, and even
+architectural hints are now part of the LSP ecosystem. Servers can
+recommend actions, explain problems, and react to changes in real
+time.</p>
+<p>Because of that, there's less and less reason to:</p>
+<p>• wrap a linter's API into a Flymake backend</p>
+<p>• parse CLI output while developing</p>
+<p>• reinvent glue code for every tool</p>
+<p>The LSP protocol is well documented, standardized, and, at least in
+theory, every server speaks the same "language".</p>
+<p>As time went on, something else became clear: some linters stopped
+being maintained as standalone tools, while <strong>new ones started life as
+LSP servers first</strong>. In some ecosystems, the <em>only</em> supported
+interface is LSP.</p>
+<p>This imposed a brick wall for Eglot usage.</p>
+<p>Eglot supports <strong>one server per buffer</strong>. That was fine when "one
+server did everything". But today, we often want:</p>
+<p>• a language server for semantics and completion</p>
+<p>• a linter server for diagnostics and code actions</p>
+<p>• a (or some) framework-specific server(s) (Tailwind, Vue, Angular, etc.)</p>
+<hr>
+<h2>Solutions</h2>
+<p>For a long time, João (Eglot's maintainer) collected feedback around
+this limitation. Multiple issues, discussions, and experiments circled
+around the same idea:</p>
+<blockquote>
+<p>"How do we support multiple LSP servers per buffer <strong>without turning Eglot into something it isn't</strong>?"</p>
+</blockquote>
+<p>One important constraint was clear: <strong>Eglot itself should not be overhauled to manage multiple servers internally</strong>.</p>
+<p>The proposed solution was elegant: an <strong>external multiplexer</strong>, a tool that looks like <em>one</em> LSP server to the client, but actually
+talks to many servers behind the scenes, merging and routing messages
+appropriately.</p>
+<p>I'll admit that having designed hardware-level mux/demuxes in the past
+made me like this "software" idea.</p>
+<p>One implementation which came from these discussions is <code>lspx</code>. I
+tested it before, and while promising, it wasn't quite mature enough
+for my daily workflow at the time.</p>
+<p>So João did what he had been suggesting for some time.</p>
+<p>He stepped in and built it himself.</p>
+<hr>
+<h2>What is Rassumfrassum</h2>
+<p><code>rassumfrassum</code> is an <strong>LSP multiplexer</strong>, you can check its
+repository here:
+<a href="https://github.com/joaotavora/rassumfrassum/">https://github.com/joaotavora/rassumfrassum/</a></p>
+<p>From the client's perspective (Eglot, Neovim, anything), it behaves
+like a single stdio LSP server. Internally, it spawns and manages
+<strong>multiple real LSP servers</strong>, routing requests and merging responses.</p>
+<p>You start it like this:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh">rass -- server-a <span class="token punctuation">[</span>params-a<span class="token punctuation">]</span> -- server-b <span class="token punctuation">[</span>params-b<span class="token punctuation">]</span> -- server-c <span class="token punctuation">[</span>params-c<span class="token punctuation">]</span>
+</code></pre></div>
+<p>Or, using presets, like:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh">rass python
+</code></pre></div>
+<p>Behind the scenes, Rassumfrassum:</p>
+<p>• forwards requests to all relevant servers</p>
+<p>• aggregates diagnostics</p>
+<p>• merges code actions and completions</p>
+<p>• handles timing, delays, and late responses</p>
+<p>• optionally streams diagnostics incrementally</p>
+<p>All of this is implemented in Python, with a clear separation between:</p>
+<p>• JSON-RPC plumbing</p>
+<p>• LSP semantics</p>
+<p>• server-specific logic</p>
+<p>This is also where Rassumfrassum introduces a <strong>non-standard but
+optional streaming diagnostics extension</strong>, which allows multiple
+diagnostic sources to coexist without stomping on each other.</p>
+<p>See it in action from João's screencapture:</p>
+<p><img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-01.gif&w=3840&q=75" alt="rassumfrassum"></p>
+<hr>
+<h2>Bringing it to my React Web Dev workflow</h2>
+<p>My day job often involves a lot of <strong>React web development</strong>, from
+different repo sizes and ages, and this is where Rassumfrassum becomes
+a <em>killer feature</em> for me.</p>
+<p>Let's take an example, a typical modern React stack needs, at
+minimum (as suggested by NextJS framework I'll present in a example below):</p>
+<p>• <code>typescript-language-server</code> (types, navigation, refactors)</p>
+<p>• <code>ESLint</code> (diagnostics, fixes)</p>
+<p>• <code>tailwindcss-language-server</code> (class completion, validation)</p>
+<p>Before this, with Eglot, you had to choose <em>one</em>.</p>
+<p>To properly test this, I created a minimal but realistic example
+repository you can clone:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh"><span class="token comment"># **demo_react_ts_eslint_tailwind_app_for_lsp_debug**</span>
+<span class="token function">git</span> clone https://github.com/LionyxML/demo_react_ts_eslint_tailwind_app_for_lsp_debug
+</code></pre></div>
+<p>It's basically this so-called "default" modern React setup:
+TypeScript, ESLint, Tailwind.</p>
+<p>To make this post not too long, I'm assuming the reader knows about
+<code>npm</code>, <code>pnpm</code> and other tools related to the <code>javascript</code> world.</p>
+<p>Basically you need to clone the repo and install the app with:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh"><span class="token function">pnpm</span> <span class="token function">install</span>
+</code></pre></div>
+<p>And make sure you have the needed LSP servers installed, I did it with:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh"><span class="token function">pnpm</span> <span class="token function">install</span> <span class="token parameter variable">-g</span> typescript-language-server typescript @tailwindcss/language-server eslint-lsp
+</code></pre></div>
+<p><strong>Note</strong>: Yep, I know about <code>vscode-eslint-language-server</code> being
+newer, but still I had problems with it, <code>eslint-lsp</code> worked, and I'm happy.</p>
+<p>After fixing a broken Tailwind server installation on my side (user
+error 😄), this setup worked flawlessly with:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh">rass -- typescript-language-server <span class="token parameter variable">--stdio</span> <span class="token punctuation">\</span>
+	 -- eslint-lsp <span class="token parameter variable">--stdio</span> <span class="token punctuation">\</span>
+	 -- tailwindcss-language-server <span class="token parameter variable">--stdio</span>
+</code></pre></div>
+<p>You don't need to run this in your terminal, instead, visit your
+project file and fire up Eglot using:</p>
+<div class="remark-highlight"><pre class="language-unknown"><code class="language-unknown">C-u M-x eglot RET
+rass -- typescript-language-server --stdio -- eslint-lsp --stdio -- tailwindcss-language-server --stdio RET</code></pre></div>
+<p>This project <code>README</code> provides you with directions on what is expected
+from each LSP server to "see". The only relevant file is
+<code>app/page.tsx</code>.</p>
+<p>Well, I did all that and suddenly, everything was there:</p>
+<p>• <strong>Flymake buffer</strong> listing diagnostics from <em>all servers</em></p>
+<p>• <strong>Code completion</strong> from both TypeScript and Tailwind</p>
+<p>• <strong>Code actions</strong></p>
+<p>Fast, responsive, and clean. Here are some other screenshots:</p>
+<p>• the example React code with Flymake marking diagnostics on margin
+and in-buffer:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-02.png&w=3840&q=75" alt="demo-02"></p>
+<p>• Flymake buffer showing messages from typescript, eslint and tailwind:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-03.png&w=3840&q=75" alt="demo-03"></p>
+<p>• Eldoc showing typescript + eslint warnings while also providing type description:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-05.png&w=3840&q=75" alt="demo-05"></p>
+<p>• Typescript completion:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-06.png&w=3840&q=75" alt="demo-06"></p>
+<p>• Tailwind completion:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-07.png&w=3840&q=75" alt="demo-07"></p>
+<p>• Code actions:
+<img src="https://rahuljuliato.com/_next/image?url=%2Fassets%2Fblog%2Fposts%2Feglot-rass-04.png&w=3840&q=75" alt="demo-04"></p>
+<p>It feels fast. It feels correct. And most importantly: <strong>it feels like
+Emacs, not an IDE pretending to be Emacs.</strong></p>
+<p>And of course, if everything works for you when firing up Eglot
+manually, you can add something like this to your config:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">with-eval-after-load</span> <span class="token quoted-symbol variable symbol">'eglot</span>
+  <span class="token punctuation">(</span><span class="token car">add-to-list</span>
+   <span class="token quoted-symbol variable symbol">'eglot-server-programs</span>
+   <span class="token punctuation">'(</span><span class="token punctuation">(</span><span class="token car">tsx-ts-mode</span> typescript-ts-mode<span class="token punctuation">)</span>
+	 <span class="token punctuation">.</span> <span class="token punctuation">(</span><span class="token string">"rass"</span>
+		<span class="token string">"--"</span>
+		<span class="token string">"typescript-language-server"</span> <span class="token string">"--stdio"</span>
+		<span class="token string">"--"</span>
+		<span class="token string">"eslint-lsp"</span> <span class="token string">"--stdio"</span>
+		<span class="token string">"--"</span>
+		<span class="token string">"tailwindcss-language-server"</span> <span class="token string">"--stdio"</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>A small debugging tip: you can check eglot connections with <code>M-x eglot-list-connections RET</code> and be sure it is running your custom
+invocation command.</p>
+<hr>
+<h2>Conclusion</h2>
+<p>I want to sincerely thank <strong>João Távora</strong> for his continuous work for
+the Emacs community over the years.</p>
+<p>Rassumfrassum solves a long-standing, real-world problem in a way that
+respects both:</p>
+<p>• the LSP ecosystem</p>
+<p>• Eglot's design philosophy</p>
+<p>This is still a young project, and there will be bugs. That's
+expected. But the foundation is solid, the approach is elegant, and
+the impact is huge.</p>
+<p>If you were, like me, holding back on Eglot for modern web development
+<strong>this changes everything.</strong></p>
+<p>Please try it, report issues, and support the project.
+This is not just a win for Eglot, it's a win for the entire LSP ecosystem.</p>

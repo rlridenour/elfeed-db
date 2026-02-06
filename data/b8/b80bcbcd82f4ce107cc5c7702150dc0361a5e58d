@@ -1,0 +1,281 @@
+
+<p class="wp-block-paragraph">If you have any data &#8211; backups are not optional.<br>Devices crash. Pendrives disappear. Houses burn down.</p>
+
+
+
+<p class="wp-block-paragraph">Your backups are useful only if you can restore them.</p>
+
+
+
+<span id="more-8591"></span>
+
+
+
+<h3 id="orgfd80aa0" class="wp-block-heading">The Strategy</h3>
+
+
+
+<p class="wp-block-paragraph">The good old-fashioned 3-2-1 works. No doubt. No arguments.</p>
+
+
+
+<p class="wp-block-paragraph">3 copies of your data:</p>
+
+
+
+<ul class="wp-block-list">
+<li>1 original (the working data)</li>
+
+
+
+<li>2 backups</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">2 different types of storage (for example: disk + external drive).<br>1 copy stored off-site (not in the same physical location).</p>
+
+
+
+<p class="wp-block-paragraph">The tool can be anything:</p>
+
+
+
+<ul class="wp-block-list">
+<li>rsync</li>
+
+
+
+<li>scp + tar</li>
+
+
+
+<li>Bacula</li>
+
+
+
+<li>Borg Backup</li>
+
+
+
+<li>etc.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Borg is a solid choice.</p>
+
+
+
+<h3 id="org26aabe4" class="wp-block-heading">The Tool</h3>
+
+
+
+<p class="wp-block-paragraph"><a href="https://borgbackup.readthedocs.io/en/stable/usage/general.html">Borg Backup</a>&nbsp;is simple &#8211; yet effective.<br>Written in Python and being open source &#8211; it&#8217;s easy to audit.</p>
+
+
+
+<ul class="wp-block-list">
+<li>256-bit AES encryption (with authenticated integrity)</li>
+
+
+
+<li>Data compression</li>
+
+
+
+<li>Deduplication for storage efficiency</li>
+
+
+
+<li>Off-site remote backups (via SSH)</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Borg is part of many distros &#8211; like Debian Trixie.</p>
+
+
+
+<h3 id="org2bbc7eb" class="wp-block-heading">The Basics</h3>
+
+
+
+<p class="wp-block-paragraph">At&nbsp;<strong>repository</strong>&nbsp;initialization there are&nbsp;<strong>two ways</strong>&nbsp;to store the secret key:</p>
+
+
+
+<ol class="wp-block-list">
+<li>In the repo, encrypted by the passphrase.</li>
+
+
+
+<li>Elsewhere, refer to it with command options.</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">After initializing a repository you cannot switch between the two strategies.<br>You have to decide when creating it.</p>
+
+
+
+<h3 id="orgaa4da34" class="wp-block-heading">The Repository</h3>
+
+
+
+<p class="wp-block-paragraph">The repository is a standard system path.<br>It can be on the local system or remotely accessible with SSH.</p>
+
+
+
+<p class="wp-block-paragraph">Initialization:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg init --encryption [repokey-blake2|keyfile-blake2] /path/to/repo </div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<ul class="wp-block-list">
+<li><code>repokey-blake2</code>&nbsp;creates a Blake2 keyfile&nbsp;<strong>inside</strong>&nbsp;the repository.</li>
+
+
+
+<li><code>keyfile-blake2</code>&nbsp;creates it&nbsp;<strong>outside</strong>. You have to manage the key.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">The keyfile can be protected with a passphrase.<br>In both modes, a passphrase is strongly recommended.</p>
+
+
+
+<h3 id="org350390e" class="wp-block-heading">The Archive</h3>
+
+
+
+<p class="wp-block-paragraph">To create an archive in the repository use the:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg create /path/to/repo::archive-name ~/important/stuff</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">It creates the archive&nbsp;<code>archive-name</code>&nbsp;in the&nbsp;<code>path/to/repo</code>&nbsp;repository and<br>backs up&nbsp;<code>~/important/stuff</code>&nbsp;with all of its contents.</p>
+
+
+
+<p class="wp-block-paragraph">Remote, off-site backups via SSH:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg create ssh://user@192.168.100.10/path/to/repo::archive</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">External keyfile can be used (when the repository was initialized with keyfile-blake2):</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">export BORG_KEY_FILE=/data/keyfiles/notebook-backup.key</div><div class="cm-line">borg create ssh://user@backup.example.org/path/to/repo::notebook-2026-01-09 ~/important/stuff</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 id="org8789a09" class="wp-block-heading">Pruning</h3>
+
+
+
+<p class="wp-block-paragraph">Archives are collecting in the repository.<br>Pruning sets the retention policy.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg prune -v --list /path/to/repo \</div><div class="cm-line">     --keep-daily=7 \</div><div class="cm-line">     --keep-weekly=4 \</div><div class="cm-line">     --keep-monthly=6</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">This will keep:</p>
+
+
+
+<ul class="wp-block-list">
+<li>7 days of backups</li>
+
+
+
+<li>4 weekly backups</li>
+
+
+
+<li>6 monthly backups</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">All of them sit in the repository, encrypted, deduplicated.</p>
+
+
+
+<h3 id="orgb9bb565" class="wp-block-heading">Verify And Restore Data</h3>
+
+
+
+<h4 id="org979ac49" class="wp-block-heading">Option 1: Mount the archive</h4>
+
+
+
+<p class="wp-block-paragraph">You can mount and browse the archive like a filesystem to verify files in it:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg mount /path/to/repo::archive /mountpoint</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 id="orgb525bbc" class="wp-block-heading">Option 2: Extract the archive</h4>
+
+
+
+<p class="wp-block-paragraph">An archive can be extracted like with&nbsp;<code>tar</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">borg extract /path/to/repo::archive /where/to/extract</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Your backups are safe.</p>

@@ -1,0 +1,232 @@
+<p>In a <a href="https://chrismaiorana.com/modeline-hacking-git/">previous post</a>, I mentioned a little bit of modeline hacking to display git changes and today’s commit count. In this article, I thought I would go through those snippets from my modeline code that accomplish this. At the bottom, I’ve also included a standalone minor mode for it.</p>
+<p>Basically, this code will show you a format like “250/5” where 250 represents the number of uncommitted changes and 5 represents the number of commits made today.</p>
+<p>If you&#8217;re interested in topics like these, particularly how you can leverage programs like git for technical and creative writing, I&#8217;d highly recommend my downloadable handbooks:</p>
+<ul>
+<li><a href="https://chris-maiorana.kit.com/products/emacs-for-writers">Emacs For Writers</a></li>
+<li><a href="https://chris-maiorana.kit.com/products/git-for-writers">Git For Writers</a></li>
+</ul>
+<div id="table-of-contents" role="doc-toc">
+<h2>Table of Contents</h2>
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="#git-branch-display">Git branch display</a></li>
+<li><a href="#git-changes-and-commit-count">Git changes and commit count display</a>
+<ul>
+<li><a href="#orgf41bb34">Caching variables</a></li>
+<li><a href="#getting-change-count">Getting Change Count</a></li>
+<li><a href="#getting-today-count">Getting today’s commit Count</a></li>
+<li><a href="#modeline-display-variable">Modeline display variable</a></li>
+</ul>
+</li>
+<li><a href="#simplified-minor-mode">Simplified minor mode</a>
+<ul>
+<li><a href="#minor-mode-features">Minor mode features</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-git-branch-display" class="outline-2">
+<h2 id="git-branch-display">Git branch display</h2>
+<div id="text-git-branch-display" class="outline-text-2">
+<p>This section displays the current git branch name in brackets in the modeline. I like seeing the branch name just to make sure I’m in the right place.</p>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">csm-modeline--git-branch</span> ()
+  <span style="color: #2a5045;">"Return the current git branch name, wrapped in brackets.</span>
+<span style="color: #2a5045;">If not in a git repository, return an empty string."</span>
+  (<span style="color: #531ab6;">when</span> buffer-file-name
+    (<span style="color: #531ab6;">let*</span> ((default-directory (file-name-directory buffer-file-name))
+           (branch (string-trim
+                    (shell-command-to-string <span style="color: #3548cf;">"git rev-parse --abbrev-ref HEAD 2&gt;/dev/null"</span>))))
+      (<span style="color: #531ab6;">if</span> (<span style="color: #531ab6;">and</span> branch (not (string-empty-p branch)))
+          (format <span style="color: #3548cf;">"[%s]"</span> branch)
+        <span style="color: #3548cf;">""</span>))))
+
+(<span style="color: #531ab6;">defvar-local</span> <span style="color: #005e8b;">csm-modeline-directory</span>
+  '(<span style="color: #8f0075;">:eval</span>
+    (<span style="color: #531ab6;">when-let</span> ((branch-name (csm-modeline--git-branch)))
+      (propertize branch-name 'face 'magit-branch-local)))
+  <span style="color: #2a5045;">"Mode line construct to display the git branch name."</span>)
+(put 'csm-modeline-directory 'risky-local-variable t)
+</pre>
+</div>
+<ul class="org-ul">
+<li><code>csm-modeline--git-branch</code> uses <code>git rev-parse --abbrev-ref HEAD</code> to catch the current branch name.</li>
+<li>It checks if <code>buffer-file-name</code> exists to ensure we’re in a file-based buffer.</li>
+<li>Sets <code>default-directory</code> to the file’s directory so git commands run in the correct location.</li>
+<li>Redirects errors to <code>/dev/null</code> to silently handle cases in which we’re not in a git repository.</li>
+<li>Formats the branch name in brackets like <code>[master]</code> or <code>[drafting]</code> (my preferred default branch).</li>
+<li><code>csm-modeline-directory</code> is the modeline variable that displays the branch with <code>magit-branch-local</code> face styling.</li>
+<li>The <code>risky-local-variable</code> property is set to <code>t</code> because it evaluates code dynamically.</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-git-changes-and-commit-count" class="outline-2">
+<h2 id="git-changes-and-commit-count">Git changes and commit count display</h2>
+<div id="text-git-changes-and-commit-count" class="outline-text-2">
+<p>This is the main functionality that shows uncommitted changes and today’s commit count.</p>
+</div>
+<div id="outline-container-orgf41bb34" class="outline-3">
+<h3 id="orgf41bb34">Caching variables</h3>
+<div id="text-orgf41bb34" class="outline-text-3">
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defvar</span> <span style="color: #005e8b;">csm-modeline-csmchange-cache</span> nil
+  <span style="color: #2a5045;">"Cache for csmchange command output."</span>)
+
+(<span style="color: #531ab6;">defvar</span> <span style="color: #005e8b;">csm-modeline-csmchange-last-update</span> 0
+  <span style="color: #2a5045;">"Timestamp of last csmchange update."</span>)
+
+(<span style="color: #531ab6;">defvar</span> <span style="color: #005e8b;">csm-modeline-csmchange-update-interval</span> 30
+  <span style="color: #2a5045;">"Update interval in seconds for csmchange output."</span>)
+</pre>
+</div>
+<p>These variables implement a caching mechanism to avoid running shell commands too frequently:</p>
+<ul class="org-ul">
+<li><code>csm-modeline-csmchange-cache</code> stores the last result from the <code>csmchange</code> command</li>
+<li><code>csm-modeline-csmchange-last-update</code> tracks when the cache was last refreshed using a Unix timestamp.</li>
+<li><code>csm-modeline-csmchange-update-interval</code> sets how often to refresh (30 seconds by default)</li>
+</ul>
+<p>This caching is crucial for performance since the modeline updates frequently, but we don’t need to run shell commands every time.</p>
+</div>
+</div>
+<div id="outline-container-getting-change-count" class="outline-3">
+<h3 id="getting-change-count">Getting Change Count</h3>
+<div id="text-getting-change-count" class="outline-text-3">
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">csm-modeline--csmchange-output</span> ()
+  <span style="color: #2a5045;">"Return the output of csmchange command."</span>
+  (<span style="color: #531ab6;">let</span> ((output (shell-command-to-string <span style="color: #3548cf;">"csmchange 2&gt;/dev/null"</span>)))
+    (string-trim output)))
+
+(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">csm-modeline--cached-csmchange-output</span> ()
+  <span style="color: #2a5045;">"Return cached csmchange output, updating if necessary."</span>
+  (<span style="color: #531ab6;">let</span> ((now (float-time)))
+    (<span style="color: #531ab6;">when</span> (<span style="color: #531ab6;">or</span> (null csm-modeline-csmchange-cache)
+              (&gt; (- now csm-modeline-csmchange-last-update)
+                 csm-modeline-csmchange-update-interval))
+      (<span style="color: #531ab6;">setq</span> csm-modeline-csmchange-cache (csm-modeline--csmchange-output)
+            csm-modeline-csmchange-last-update now)))
+  csm-modeline-csmchange-cache)
+</pre>
+</div>
+<ul class="org-ul">
+<li><code>csm-modeline--csmchange-output</code> runs the <code>csmchange</code> command (a custom shell script) and returns the trimmed output.</li>
+<li><code>csm-modeline--cached-csmchange-output</code> implements the caching logic:
+<ul class="org-ul">
+<li>Gets the current time with <code>float-time</code>.</li>
+<li>Checks if the cache is null (first run) or if enough time has passed since the last update.</li>
+<li>If an update is needed, it runs <code>csmchange</code> and updates both the cache and timestamp.</li>
+<li>Returns the cached value.</li>
+</ul>
+</li>
+</ul>
+<p>Here is the <code>csmchange</code> shell script:</p>
+<div class="org-src-container">
+<pre class="src src-sh"><span style="color: #595959;">#</span><span style="color: #595959;">!/bin/</span><span style="color: #531ab6;">bash</span>
+
+<span style="color: #595959;"># </span><span style="color: #595959;">Run the command in the current working directory</span>
+git diff --word-diff=porcelain HEAD | grep -e <span style="color: #3548cf;">'^+[^+]'</span> -e <span style="color: #3548cf;">'^-[^-]'</span> | wc -w
+</pre>
+</div>
+</div>
+</div>
+<div id="outline-container-getting-today-count" class="outline-3">
+<h3 id="getting-today-count">Getting today’s commit Count</h3>
+<div id="text-getting-today-count" class="outline-text-3">
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defun</span> <span style="color: #721045;">csm-modeline--today-commits-count</span> ()
+  <span style="color: #2a5045;">"Return the number of commits made today."</span>
+  (<span style="color: #531ab6;">when</span> buffer-file-name
+    (<span style="color: #531ab6;">let*</span> ((default-directory (file-name-directory buffer-file-name))
+           (count (string-trim
+                   (shell-command-to-string <span style="color: #3548cf;">"git log --since='</span><span style="color: #0000b0;">00:00:00</span><span style="color: #3548cf;">' --oneline --no-merges 2&gt;/dev/null | wc -l"</span>))))
+      (<span style="color: #531ab6;">if</span> (<span style="color: #531ab6;">and</span> count (not (string-empty-p count)))
+          count
+        <span style="color: #3548cf;">"0"</span>))))
+</pre>
+</div>
+<p>This function counts commits made since midnight today:</p>
+<ul class="org-ul">
+<li>Checks <code>buffer-file-name</code> exists to ensure we’re in a file buffer.</li>
+<li>Sets <code>default-directory</code> to the file’s directory for correct git context.</li>
+<li>Uses <code>git log --since='00:00:00'</code> to get commits since midnight.</li>
+<li><code>--oneline</code> formats each commit as a single line for easy counting.</li>
+<li><code>--no-merges</code> excludes merge commits to count only direct commits.</li>
+<li>Pipes to <code>wc -l</code> to count the number of lines (commits).</li>
+<li>Returns “0” if the result is empty or invalid.</li>
+<li>Errors are silently discarded with <code>2&gt;/dev/null</code>.</li>
+</ul>
+</div>
+</div>
+<div id="outline-container-modeline-display-variable" class="outline-3">
+<h3 id="modeline-display-variable">Modeline display variable</h3>
+<div id="text-modeline-display-variable" class="outline-text-3">
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #531ab6;">defvar-local</span> <span style="color: #005e8b;">csm-modeline-csmchange</span>
+  '(<span style="color: #8f0075;">:eval</span>
+    (<span style="color: #531ab6;">when</span> (mode-line-window-selected-p)
+      (<span style="color: #531ab6;">let</span> ((output (csm-modeline--cached-csmchange-output))
+            (commits (csm-modeline--today-commits-count)))
+        (<span style="color: #531ab6;">when</span> (<span style="color: #531ab6;">and</span> output (not (string-empty-p output)))
+          (<span style="color: #531ab6;">let*</span> ((change-count (string-to-number output))
+                 (face (<span style="color: #531ab6;">if</span> (&gt;= change-count 250) 'warning 'font-lock-string-face)))
+            (concat <span style="color: #3548cf;">" "</span>
+                    (propertize output 'face face)
+                    (<span style="color: #531ab6;">when</span> commits
+                      (propertize (format <span style="color: #3548cf;">"/%s"</span> commits) 'face face))))))))
+  <span style="color: #2a5045;">"Mode line construct to display csmchange output with today's commit count."</span>)
+
+(put 'csm-modeline-csmchange 'risky-local-variable t)
+</pre>
+</div>
+<p>This is the main modeline variable that brings it all together:</p>
+<ul class="org-ul">
+<li>Uses <code>:eval</code> to dynamically evaluate the code each time the modeline updates.</li>
+<li><code>mode-line-window-selected-p</code> ensures the display only appears in the active window.</li>
+<li>Retrieves both the cached change count and today’s commit count.</li>
+<li>Converts the change count to a number to compare against 250.</li>
+<li>Selects a face: <code>'warning</code> (usually red/orange), depending on theme, if changes &gt;~ 250, otherwise <code>'font-lock-string-face</code> (usually green/blue).</li>
+<li>Formats the output as changes over commits (e.g. “250/5”).</li>
+<li>Setting <code>risky-local-variable</code> to <code>t</code> allows the dynamic evaluation.</li>
+</ul>
+</div>
+</div>
+</div>
+<div id="outline-container-simplified-minor-mode" class="outline-2">
+<h2 id="simplified-minor-mode">Simplified minor mode</h2>
+<div id="text-simplified-minor-mode" class="outline-text-2">
+<p>On my GitHub, I have included <a href="https://github.com/cryptstopher/git-change-minor-mode">a self-contained minor mode</a> that implements only the git changes and commit count functionality. I figured this would be easier for individual analysis. If you have any suggestions on how to improve it please let me know. The <code>csmchange</code> shell script logic has been integrated directly into the minor mode, making it fully self-contained without requiring external commands.<span style="font-family: Consolas, Monaco, monospace;"> </span></p>
+</div>
+<div id="outline-container-minor-mode-features" class="outline-3">
+<h3 id="minor-mode-features">Minor mode features</h3>
+<div id="text-minor-mode-features" class="outline-text-3">
+<p>The simplified minor mode includes:</p>
+<ol class="org-ol">
+<li><b>Built-in Change Counting</b>: The <code>csmchange</code> shell script logic is integrated directly into the package, so no external commands are required (though you can still use an external command if you prefer by setting <code>git-stats-modeline-use-builtin-diff</code> to <code>nil</code>).</li>
+<li><b>Customizable Settings</b>: Users can customize the update interval, warning threshold, whether to use built-in diff counting, and optionally the command to use for external counting.</li>
+<li><b>Same Core Logic</b>: Uses the identical caching and counting logic from the original modeline.</li>
+<li><b>Easy Activation</b>: Simply call <code>(git-stats-modeline-mode 1)</code> to enable or <code>(git-stats-modeline-mode 0)</code> to disable.</li>
+<li><b>Global Minor Mode</b>: Affects all buffers, not just specific ones.</li>
+<li><b>Self-Contained</b>: Can be distributed as a standalone functionality with proper headers and documentation.</li>
+</ol>
+<p>How the minor could be used and modified:</p>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><span style="color: #595959;">;; </span><span style="color: #595959;">Load the file</span>
+(load-file <span style="color: #3548cf;">"/path/to/git-stats-modeline.el"</span>)
+
+<span style="color: #595959;">;; </span><span style="color: #595959;">Enable the mode (uses built-in change counting by default)</span>
+(git-stats-modeline-mode 1)
+
+<span style="color: #595959;">;; </span><span style="color: #595959;">Optional: customize settings</span>
+(<span style="color: #531ab6;">setq</span> git-stats-modeline-warning-threshold 300)
+(<span style="color: #531ab6;">setq</span> git-stats-modeline-update-interval 60)
+
+<span style="color: #595959;">;; </span><span style="color: #595959;">Optional: use external command instead of built-in counting</span>
+(<span style="color: #531ab6;">setq</span> git-stats-modeline-use-builtin-diff nil)
+(<span style="color: #531ab6;">setq</span> git-stats-modeline-change-command <span style="color: #3548cf;">"csmchange"</span>)
+</pre>
+</div>
+</div>
+</div>
+</div>
+<p>The post <a href="https://chrismaiorana.com/git-changes-in-emacs-modeline/">Git changes and commits in Emacs modeline</a> appeared first on <a href="https://chrismaiorana.com">Chris Maiorana</a>.</p>

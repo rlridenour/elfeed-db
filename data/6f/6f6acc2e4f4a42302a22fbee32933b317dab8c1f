@@ -1,0 +1,54 @@
+<h2 id="why">Why?</h2>
+<p>I am greatly fond of Org Mode. Everything happens in Org: tasks, notes, scheduling, you name it.</p>
+<p>But here is the thing. I still want my events to show up in macOS Calendar. Why? Well, Calendar.app has nice widgets. It syncs to my iPhone. It sends me notifications that actually work. And sometimes, I just want to glance at my day without firing up Emacs. Also: Why not?</p>
+<p>So the question becomes:</p>
+<blockquote>
+<p>how do I get my Org scheduled items into Calendar.app without copy-pasting like some kind of animal?</p>
+</blockquote>
+<h3 id="what-about-existing-solutions">What about existing solutions?</h3>
+<p><a href="https://github.com/dengste/org-caldav">org-caldav</a> is the full-featured option – bidirectional sync via CalDAV. But iCloud authentication is painful, and it kept breaking on me. Life is too short.</p>
+<p><a href="https://orgmode.org/worg/org-contrib/org-mac-iCal.html">org-mac-iCal</a> syncs the wrong direction (Calendar → Org) and hasn&rsquo;t been maintained since OS X 10.5.</p>
+<p>Org&rsquo;s built-in <code>ox-icalendar</code> just exports. You still need to automate it and get the file into Calendar somehow. That&rsquo;s the gap I wanted to fill.</p>
+<h2 id="the-solution">The Solution</h2>
+<p>With a lot of coding assistant, a lot of (reverse) engineering and a lot of code review so that I do not break my stuff&hellip;</p>
+<p>Enter <code>org-to-cal</code> – an Emacs package I wrote to solve exactly this. It exports Org items tagged with <code>:ical:</code> to macOS Calendar. Automatically. On save.</p>
+<p>The package lives here: <a href="https://gitlab.com/aimebertrand/org-to-cal">https://gitlab.com/aimebertrand/org-to-cal</a></p>
+<h3 id="how-it-works">How It Works</h3>
+<p>The concept is simple:</p>
+<ol>
+<li>Tag your Org entries with <code>:ical:</code></li>
+<li>Save the file</li>
+<li>The event appears in Calendar.app</li>
+</ol>
+<p>Behind the scenes, it uses Org&rsquo;s built-in <code>ox-icalendar</code> to generate a standard <code>.ics</code> file. Getting that file into Calendar is where it gets interesting.</p>
+<h3 id="two-sync-methods">Two Sync Methods</h3>
+<p>I implemented two different approaches. Pick your poison.</p>
+<h4 id="server-method">Server Method</h4>
+<p>A small HTTP server (Python, embedded in the package) serves the <code>.ics</code> file on <code>localhost:8042</code>. You subscribe to it in Calendar.app like any calendar subscription.</p>
+<p>A LaunchAgent starts the server on reboot of the mac.</p>
+<h4 id="direct-import-method">Direct Import Method</h4>
+<p>A Swift executable talks directly to EventKit (macOS&rsquo;s calendar API). A LaunchAgent watches the <code>.ics</code> file and imports changes immediately.</p>
+<p>Pros: Instant updates. No polling.
+Cons: Slightly more complex. Does not delete events (only creates/updates).</p>
+<h4 id="or-both">Or both</h4>
+<p>You can run both simultaneously if you want redundancy. I do.</p>
+<h2 id="how-it-works">How it works</h2>
+<p>Well i do not wanna bore you with all the details. The <a href="https://gitlab.com/aimebertrand/org-to-cal">README.org</a> is quite good and extensive.</p>
+<h2 id="bonus-cross-machine-support">Bonus: Cross-Machine Support</h2>
+<p>The direct import method has a neat trick. It stores event UIDs in a <code>uid_map.plist</code> file <strong>and</strong> embeds them in the event notes as <code>[org-uid:xxx]</code>. This means if you sync via iCloud and the local UID mapping is lost, it can recover by searching the notes field.</p>
+<p>Granted, this is an edge case. But when it works, it feels like magic.</p>
+<h2 id="caveats">Caveats</h2>
+<p>Be advised:</p>
+<blockquote>
+<p>This is one-way sync. Org → Calendar. If you edit events in Calendar.app, those changes will not come back to Org.</p>
+</blockquote>
+<p>Also, the direct import method cannot delete events. If you remove the <code>:ical:</code> tag from an Org entry, the event stays in Calendar. You will have to delete it manually. ¯\_(ツ)_/¯</p>
+<h2 id="conclusion">Conclusion</h2>
+<p><code>org-to-cal</code> scratches a very specific itch of mine. I wanted my Org schedule in Calendar.app without thinking about it. Now it just happens.</p>
+<p>The code is <a href="https://gitlab.com/aimebertrand/org-to-cal/-/blob/main/LICENSE">MIT licensed</a>. Contributions welcome.</p>
+<h2 id="resources">Resources</h2>
+<ul>
+<li><a href="https://gitlab.com/aimebertrand/org-to-cal">org-to-cal on GitLab</a></li>
+<li><a href="https://orgmode.org/manual/iCalendar-Export.html">Org Mode iCalendar Export</a></li>
+<li><a href="https://developer.apple.com/documentation/eventkit">EventKit Documentation</a></li>
+</ul>

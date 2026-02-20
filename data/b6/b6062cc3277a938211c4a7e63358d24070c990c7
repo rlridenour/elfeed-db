@@ -1,0 +1,523 @@
+
+<p class="wp-block-paragraph">You feel the comfort of the cloud &#8211; low maintenance, fast setup.<br>Your source code, configuration and files are safe.</p>
+
+
+
+<p class="wp-block-paragraph">Or… are they?</p>
+
+
+
+<p class="wp-block-paragraph">You rely on a third party for infrastructure control, security operations and availability.<br>What would your business continuity plan look like if your SaaS provider became unavailable?</p>
+
+
+
+<p class="wp-block-paragraph">In this article we investigate a self-hosted solution for small businesses.</p>
+
+
+
+<span id="more-8744"></span>
+
+
+
+<h3 class="wp-block-heading">Risks In SaaS</h3>
+
+
+
+<p class="wp-block-paragraph">You don&#8217;t control the underlying infrastructure.<br>You don&#8217;t audit the services they use.<br>You trust the provider&#8217;s security posture.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">A private repository is private if the settings are correct.<br>Your data is safe until the first breach happens.</p>
+</blockquote>
+
+
+
+<h3 class="wp-block-heading">Local-First Is The Secure Solution</h3>
+
+
+
+<p class="wp-block-paragraph">The cloud SaaS is not an enemy &#8211;&nbsp;<strong>only the way you use it can make it one</strong>.<br>Be selective about what you share.<br>Keep the critical data inside the office walls.</p>
+
+
+
+<p class="wp-block-paragraph">Here is where&nbsp;<strong>Gitea</strong>&nbsp;comes into the picture.</p>
+
+
+
+<p class="wp-block-paragraph">This lightweight self-hosted SCM and productivity tool runs on your infrastructure.<br>It allows you to control data access, retention and network exposure directly.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">Either as your local-first SCM, or a mirror of your cloud instances &#8211; your control and resiliency increase.</p>
+</blockquote>
+
+
+
+<h3 class="wp-block-heading">Install The Gitea Server</h3>
+
+
+
+<p class="wp-block-paragraph">A typical small installation runs comfortably on 1–2 GB RAM, with much lower idle usage.<br>It&#8217;s so lightweight, it can run on a generic PC, or even a mini-PC.<br>You own the hardware, your data, your processes.</p>
+
+
+
+<p class="wp-block-paragraph">Gitea requires&nbsp;<code>git</code>&nbsp;installed on your server.</p>
+
+
+
+<p class="wp-block-paragraph">Download the latest binary that matches your architecture.<br>Always verify the latest stable release at&nbsp;<a href="https://dl.gitea.com/gitea/">https://dl.gitea.com/gitea/</a>.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">wget -O gitea https://dl.gitea.com/gitea/1.25.4/gitea-1.25.4-linux-amd64</div><div class="cm-line">chmod +x gitea</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Move the binary to the system $PATH.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mv gitea /usr/local/bin/gitea</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a dedicated user to run the service.<br>Do not attempt to run Gitea as root.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo adduser \
+     --system \
+     --shell /bin/bash \
+     --gecos 'Git Version Control Server' \
+     --group \
+     --disabled-password \
+     --home /home/git \
+     git
+</pre></div>
+
+
+<p class="wp-block-paragraph">Create the required directory structure.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo mkdir -p /var/lib/gitea/{custom,data,log}
+sudo chown -R git:git /var/lib/gitea/
+sudo chmod -R 750 /var/lib/gitea/
+sudo mkdir /etc/gitea
+sudo chown root:git /etc/gitea
+sudo chmod 770 /etc/gitea           # Temporary write permission
+</pre></div>
+
+
+<p class="wp-block-paragraph">It gives&nbsp;<strong>temporary</strong>&nbsp;write permission to&nbsp;<code>/etc/gitea</code>.<br>Gitea writes&nbsp;<code>app.ini</code>&nbsp;during first start via the web installer.</p>
+
+
+
+<p class="wp-block-paragraph">After the installation reset it.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+chmod 750 /etc/gitea
+chmod 640 /etc/gitea/app.ini
+</pre></div>
+
+
+<p class="wp-block-paragraph">Configure a gitea systemd service for Gitea&nbsp;<a href="https://docs.gitea.com/installation/linux-service">as written in the official documentation</a>.</p>
+
+
+
+<p class="wp-block-paragraph">Enable and start the&nbsp;<code>gitea</code>&nbsp;service.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo systemctl enable gitea
+sudo systemctl start gitea
+</pre></div>
+
+
+<h3 class="wp-block-heading">Enterprise-Ready Database Backend</h3>
+
+
+
+<p class="wp-block-paragraph">The default Gitea configuration uses SQLite as its database backend.<br>If you want concurrency and to scale it better &#8211; use PostgreSQL.</p>
+
+
+
+<p class="wp-block-paragraph">Set up the&nbsp;<code>[database]</code>&nbsp;part of the&nbsp;<code>/etc/gitea/app.ini</code>&nbsp;to handle PostgreSQL:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+&#91;database]
+DB_TYPE  = postgres
+HOST     = 127.0.0.1:5432
+NAME     = gitea
+USER     = gitea
+PASSWD   = &lt;your_secure_password&gt;
+SSL_MODE = disable
+</pre></div>
+
+
+<p class="wp-block-paragraph">Use&nbsp;<code>SSL_MODE = require</code>&nbsp;if PostgreSQL runs on a separate host.</p>
+
+
+
+<p class="wp-block-paragraph">Create a DB role for Gitea:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code class="language-sql"><div class="cm-line"><span class="tok-keyword">CREATE</span> <span class="tok-keyword">ROLE</span> gitea <span class="tok-keyword">WITH</span> LOGIN PASSWORD <span class="tok-string">&apos;&lt;your_secure_password&gt;&apos;</span>;</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a database for it:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code class="language-sql"><div class="cm-line"><span class="tok-keyword">CREATE</span> DATABASE gitea <span class="tok-keyword">WITH</span> OWNER gitea TEMPLATE template0 ENCODING UTF8 LC_COLLATE <span class="tok-string">&apos;en_US.UTF-8&apos;</span> LC_CTYPE <span class="tok-string">&apos;en_US.UTF-8&apos;</span>;</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">If the DB is local, in the&nbsp;<code>pg_hba.conf</code>&nbsp;set up the user&#8217;s permission:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">local    gitea    gitea    scram-sha-256</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Reverse Proxy And SSL</h3>
+
+
+
+<p class="wp-block-paragraph">Never communicate in plain text over the network.<br>Protect your data in transit with SSL.</p>
+
+
+
+<p class="wp-block-paragraph">You can configure a simple, secure proxy server in minutes.</p>
+
+
+
+<p class="wp-block-paragraph">Edit the site file:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo nano /etc/nginx/sites-available/gitea</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Configure the reverse proxy in this file:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+server {
+    listen 80;
+    server_name gitea.tomsitcafe.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    client_max_body_size 100M;
+}
+</pre></div>
+
+
+<p class="wp-block-paragraph">Adjust&nbsp;<code>client_max_body_size</code>&nbsp;according to your repository sizes.</p>
+
+
+
+<p class="wp-block-paragraph">Enable it:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo ln -s /etc/nginx/sites-available/gitea /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+</pre></div>
+
+
+<p class="wp-block-paragraph">Add the Certbot HTTPS certificate:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo certbot --nginx -d gitea.tomsitcafe.com
+</pre></div>
+
+
+<p class="wp-block-paragraph">Important Gitea server setting:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+&#91;server]
+DOMAIN    = gitea.tomsitcafe.com
+ROOT_URL = https://gitea.tomsitcafe.com/
+</pre></div>
+
+
+<p class="wp-block-paragraph">Make sure that you use HTTPS as the protocol.</p>
+
+
+
+<p class="wp-block-paragraph">This setting gives you a secure base SCM with</p>
+
+
+
+<ul class="wp-block-list">
+<li>UI</li>
+
+
+
+<li>RBAC</li>
+
+
+
+<li>scalability</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Self-Hosted CI/CD System</h3>
+
+
+
+<p class="wp-block-paragraph">If you don&#8217;t just want to store the source code:&nbsp;<code>act_runner</code>&nbsp;builds you CI/CD.<br><a href="https://docs.gitea.com/usage/actions/overview">Gitea Actions</a>&nbsp;is Gitea&#8217;s built-in CI/CD tool.</p>
+
+
+
+<p class="wp-block-paragraph">For simplicity, it is recommended to install&nbsp;<em>Docker</em>&nbsp;on the runner host.</p>
+
+
+
+<p class="wp-block-paragraph">Download the&nbsp;<a href="https://gitea.com/gitea/act_runner/releases">act<sub>runner</sub></a>&nbsp;release binary for your architecture.</p>
+
+
+
+<p class="wp-block-paragraph">Move the binary to its place in the system $PATH.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+chmod +x act_runner
+sudo mv act_runner /usr/local/bin/act_runner
+</pre></div>
+
+
+<p class="wp-block-paragraph">Create a dedicated user to the runner.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo adduser \
+     --system \
+     --shell /bin/bash \
+     --gecos 'Gitea act_runner User' \
+     --group \
+     --disabled-password \
+     --home /home/act_runner \
+     act_runner
+</pre></div>
+
+
+<p class="wp-block-paragraph">If using Docker, the&nbsp;<code>act_runner</code>&nbsp;user should also be&nbsp;<strong>added to the docker group</strong>&nbsp;before starting the service.</p>
+
+
+
+<p class="wp-block-paragraph">It requires logout/login or service restart to take effect.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo usermod -aG docker act_runner</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph"><strong>Warning</strong>: Docker can be dangerous.<br>The users of the&nbsp;<code>docker</code>&nbsp;group are literally&nbsp;<code>root</code>&nbsp;on the host.</p>
+
+
+
+<p class="wp-block-paragraph">Only add&nbsp;<strong>trusted</strong>&nbsp;users to this group &#8211; and to your Gitea server.</p>
+
+
+
+<p class="wp-block-paragraph">Switch to the&nbsp;<code>act_runner</code>&nbsp;user.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo -iu act_runner</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Generate a configuration file.<br>Each&nbsp;<code>act_runner</code>&nbsp;instance requires its own directory.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">act_runner generate-config &gt; /home/act_runner/&lt;runner-dir&gt;/runner_config.yaml</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Edit the configuration for your instance.</p>
+
+
+
+<p class="wp-block-paragraph">Register the runner to the Gitea server.<br>Perform it in the&nbsp;<strong>runner&#8217;s config directory</strong>&nbsp;otherwise the&nbsp;<code>.runner</code>&nbsp;state file is generated in the wrong place. Alternatively you can use a full path to the file in the configuration file.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">cd /home/act_runner/&lt;runner-dir&gt;</div><div class="cm-line">act_runner register --no-interactive --instance &lt;instance_url&gt; --token &lt;registration_token&gt; --name &lt;runner_name&gt; --labels &lt;runner_labels&gt; --config &lt;config&gt;</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Start the runner.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">act_runner daemon --config /home/act_runner/&lt;runner-dir&gt;/runner_config.yaml</div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Verify that the runner can communicate with the Gitea server.</p>
+
+
+
+<p class="wp-block-paragraph">As root or with sudo: configure the systemd service for the runner.</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+&#91;Unit]
+Description=Gitea Actions runner
+Documentation=https://gitea.com/gitea/act_runner
+After=docker.service
+
+&#91;Service]
+ExecStart=/usr/local/bin/act_runner daemon --config /home/act_runner/&lt;runner-dir&gt;/runner_config.yaml
+ExecReload=/bin/kill -s HUP $MAINPID
+WorkingDirectory=/home/act_runner/&lt;runner-dir&gt;
+TimeoutSec=0
+RestartSec=10
+Restart=always
+User=act_runner
+
+&#91;Install]
+WantedBy=multi-user.target
+</pre></div>
+
+
+<p class="wp-block-paragraph">Operational notes:</p>
+
+
+
+<ul class="wp-block-list">
+<li><code>force_pull: false</code>&nbsp;for local images</li>
+
+
+
+<li>Many community actions (including&nbsp;<code>actions/checkout</code>) require Node.js inside the runner environment.</li>
+
+
+
+<li><code>upload-artifact@v4</code>&nbsp;not supported on Gitea</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">When Self-Hosting Makes Sense</h3>
+
+
+
+<ul class="wp-block-list">
+<li>Regulatory or data residency requirements</li>
+
+
+
+<li>Sensitive intellectual property</li>
+
+
+
+<li>Need for hybrid redundancy strategy (mirroring)</li>
+
+
+
+<li>Long-term cost predictability</li>
+
+
+
+<li>Air-gapped or internal-only environments</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">The cloud and SaaS are not bad.<br>They must be used responsibly, with careful planning.</p>
+
+
+
+<p class="wp-block-paragraph">Local-first is a trust model with internal responsibility.<br>The service and data are on your own hardware.</p>
+
+
+
+<p class="wp-block-paragraph">Mirroring between the services is a viable solution for SMBs.<br>It enhances resiliency and data security.</p>
+
+
+
+<p class="wp-block-paragraph">Responsibility shifts from vendor to operator.</p>

@@ -1,0 +1,97 @@
+<p><img
+  class="centered"
+  style="width: 1024px"
+  src="/graphics/2024/vpn-in-box.png"
+  alt="vpn in box"
+/></p>
+<h2>Why run the VPN client in a VM?</h2>
+<p>The Cisco AnyConnect VPN client will not allow you to <code>ssh</code> into your
+VM and set up your VPN in case the server side profile is configured
+with:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">&lt;LinuxVPNEstablishment&gt;</span>LocalUsersOnly<span class="nt">&lt;/LinuxVPNEstablishment&gt;</span>
+</code></pre></div>
+
+<p>There <a href="https://skybert.net/linux/running-cisco-anyconnect-vpn-on-a-headless-machine/">are ways to hack
+this</a>,
+but I have come to settle on running VPN in an VM with X:</p>
+<h2>VM with a lightweight distro and desktop environment</h2>
+<p>I run a VM with <a href="https://debian.org">Debian</a>. It runs
+<a href="https://www.x.org/wiki/">X</a> and has a light DM, like
+<a href="https://fluxbox.org">Fluxbox</a>, so that it doesn't consume too many
+resources.</p>
+<h2>VPN</h2>
+<p>In the VM, I've installed Cisco AnyConnect VPN.</p>
+<h2>HTTP proxy</h2>
+<p>In the VM, I've installed
+<a href="http://tinyproxy.github.io/">tinyproxy</a>. It's started by default, so
+you just need to note down the port number and use that when launching
+your browsers:</p>
+<div class="highlight"><pre><span></span><code>$ grep ^Port /etc/tinyproxy/tinyproxy.conf
+Port 8000
+</code></pre></div>
+
+<h2>Giving the VM a name</h2>
+<p>Naming is hard, I've called it <code>proxy</code>. Since I run it in KVM managed
+by <code>virsh</code>, I query it for its IP like so:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>virsh<span class="w"> </span>net-dhcp-leases<span class="w"> </span>default<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>proxy<span class="w"> </span><span class="p">|</span><span class="w"> </span>awk<span class="w"> </span><span class="s1">&#39;{print $5}&#39;</span>
+<span class="m">192</span>.168.122.55/24
+</code></pre></div>
+
+<p>And add it to my <code>/etc/hosts</code>:</p>
+<div class="highlight"><pre><span></span><code># tee proxy 192.168.122.55 /etc/hosts
+</code></pre></div>
+
+<p>Now, whenever I say <code>proxy</code>, my machine routes the request to the VM.</p>
+<h2>SSH through the VPN</h2>
+<p>When I need to <code>ssh</code> into a machine that requires me to be on the VPN,
+I use:</p>
+<div class="highlight"><pre><span></span><code>$ ssh -J proxy bugs.internal
+</code></pre></div>
+
+<h2>Web browser through the VPN</h2>
+<p>When I need to browse a web site that requires me to be on the VPN, I
+start it with an extra option specifying the HTTP proxy:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>google-chrome-stable<span class="w"> </span>--proxy-server<span class="o">=</span>proxy:8000<span class="w"> </span>https://accounting.internal<span class="w"> </span><span class="p">&amp;</span>
+</code></pre></div>
+
+<p>When I need to use <code>curl</code> over the VPN, I pass the <code>-x</code> parameter:</p>
+<div class="highlight"><pre><span></span><code>$ curl -x proxy:8000 https://accounting.internal
+</code></pre></div>
+
+<h2>Maven through the VPN</h2>
+<p>In my <code>.zshrc</code> (<code>.bashrc</code> work just the same), I have the following
+that adds proxy settings to the <code>MAVEN_OPTS</code> variable depending on an
+internal website is available:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>--max-time<span class="w"> </span><span class="m">1</span><span class="w"> </span>--fail<span class="w"> </span>-s<span class="w"> </span>-x<span class="w"> </span>proxy:8899<span class="w"> </span>-I<span class="w"> </span>https://bugs.internal/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">MAVEN_OPTS</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">MAVEN_OPTS</span><span class="si">}</span>
+<span class="s2">    -Dhttp.proxyHost=proxy</span>
+<span class="s2">    -Dhttp.proxyPort=8000</span>
+<span class="s2">    -Dhttps.proxyHost=proxy</span>
+<span class="s2">    -Dhttps.proxyPort=8000</span>
+<span class="s2">  &quot;</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<h2>Anything through the VPN</h2>
+<p>Most command line programs support the environment variables:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">no_proxy</span><span class="o">=</span>localhost
+<span class="nv">http_proxy</span><span class="o">=</span>
+<span class="nv">https_proxy</span><span class="o">=</span>
+</code></pre></div>
+
+<p>I have the following in my <code>.zshrc</code> to set these variables dynamically:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>--max-time<span class="w"> </span><span class="m">1</span><span class="w"> </span>--fail<span class="w"> </span>-s<span class="w"> </span>-x<span class="w"> </span>proxy:8899<span class="w"> </span>-I<span class="w"> </span>https://bugs.internal/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="o">{</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">no_proxy</span><span class="o">=</span>localhost
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">NO_PROXY</span><span class="o">=</span><span class="si">${</span><span class="nv">no_proxy</span><span class="si">}</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">http_proxy</span><span class="o">=</span><span class="err">&#39;</span>http://proxy:8000
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">https_proxy</span><span class="o">=</span><span class="si">${</span><span class="nv">http_proxy</span><span class="si">}</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">HTTP_PROXY</span><span class="o">=</span><span class="si">${</span><span class="nv">http_proxy</span><span class="si">}</span>
+<span class="w">  </span><span class="nb">export</span><span class="w"> </span><span class="nv">HTTPS_PROXY</span><span class="o">=</span><span class="si">${</span><span class="nv">http_proxy</span><span class="si">}</span>
+<span class="o">}</span>
+</code></pre></div>
+
+<h2>Success</h2>
+<p>That's it. All other requests, I use regular browser sessions that
+don't route through the VPN. Which is most of what I need: Teams,
+Slack, Outlook, Git++</p>
+<p>Happy networking!</p>

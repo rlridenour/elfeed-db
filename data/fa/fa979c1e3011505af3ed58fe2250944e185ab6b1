@@ -1,0 +1,59 @@
+<p>The fan's been spinning for hours. The Microsoft Defender is a gift that keeps on giving:</p>
+<p><img
+  class="centered"
+  src="ksnip_20240806-084305.png"
+  alt="Microsoft Defender constantly high CPU"
+/></p>
+<p>The interweb suggested asking <code>mdatp</code> what's up, but that didn't really help either:</p>
+<div class="highlight"><pre><span></span><code># mdatp diagnostic real-time-protection-statistics --output json |
+    python high_cpu_parser.py
+</code></pre></div>
+
+<p>A bit of</p>
+<div class="highlight"><pre><span></span><code># strace -p &lt;pid&gt; -f
+</code></pre></div>
+
+<p>gave me a hunch, though:</p>
+<div class="highlight"><pre><span></span><code>FUTEX_WAIT_PRIVATE, 0, {tv_sec=0, tv_nsec=500000000}) = -1 ETIMEDOUT (Connection timed out)
+</code></pre></div>
+
+<p>This is a known pattern for multiple directory scans running. This
+made me curious if I had multiple <code>wdavdaemon</code> processes running. And
+lo and behold, I had.</p>
+<p>It turns out,</p>
+<div class="highlight"><pre><span></span><code># paru -Syu
+</code></pre></div>
+
+<p>had upgraded Microsoft Defender, but a restart:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># systemctl daemon-reload</span>
+<span class="c1"># systemctl restart mdatp</span>
+</code></pre></div>
+
+<p>didn't shut down the old process cleanly.</p>
+<p>A <code>systemctl stop mdatp</code> and a good old <code>kill -9 &lt;pid&gt;</code> saved the
+day:</p>
+<div class="highlight"><pre><span></span><code># systemctl stop mdatp
+# kill -9 $(pidof wdavdaemon)
+</code></pre></div>
+
+<p>Now, there should be no <code>wdavdaemon</code> running:</p>
+<div class="highlight"><pre><span></span><code># pidof wdavdaemon
+#
+</code></pre></div>
+
+<p>And we can start Microsoft Defender again:</p>
+<div class="highlight"><pre><span></span><code># systemctl start mdatp
+</code></pre></div>
+
+<p>Now, <code>mdatp</code> runs again and my CPU fan is quiet. </p>
+<div class="highlight"><pre><span></span><code>$ top -p $(pidof wdavdaemon | tr &#39; &#39; &#39;,&#39;)
+</code></pre></div>
+
+<p>Lists only <code>wdavdaemon</code> processes each consuming less than a
+percent. </p>
+<p><img
+   class="centered"
+   src="ksnip_20240806-084259.png"
+   alt="alt img text"
+/></p>
+<p>Good grief.</p>

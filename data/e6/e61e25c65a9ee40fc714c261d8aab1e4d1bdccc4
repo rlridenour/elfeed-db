@@ -1,0 +1,70 @@
+<p>The <a href="https://github.com/fail2ban/fail2ban">fail2ban</a> package installed
+on the Debian version offered by AWS has a default configuration that
+depends on reading log files. This doesn't work when
+e.g. <a href="https://www.openssh.com/">sshd</a> writes failed login attempts to
+the systemd journal rather than the traditional <code>/var/log/auth.log</code>.</p>
+<p>The error looks like this:</p>
+<div class="highlight"><pre><span></span><code>#  systemctl status fail2ban
+× fail2ban.service - Fail2Ban Service
+     Loaded: loaded (/lib/systemd/system/fail2ban.service; enabled; preset: enabled)
+     Active: failed (Result: exit-code) since Wed 2025-02-05 19:43:14 UTC; 2s ago
+   Duration: 82ms
+       Docs: man:fail2ban(1)
+    Process: 7698 ExecStart=/usr/bin/fail2ban-server -xf start (code=exited, status=255/EXCEPTION)
+   Main PID: 7698 (code=exited, status=255/EXCEPTION)
+        CPU: 80ms
+
+systemd[1]: Started fail2ban.service - Fail2Ban Service.
+..
+fail2ban-server[8032]: 2025-02-05 19:51:15,947 fail2ban [8032]:  ERROR   Failed during configuration: Have not found any log file for sshd jail
+..
+systemd[1]: fail2ban.service: Main process exited, code=exited, status=255/EXCEPTION
+systemd[1]: fail2ban.service: Failed with result &#39;exit-code&#39;.
+</code></pre></div>
+
+<p>The fix is simple, though, just add the following to the enabled jail,
+or set it in <code>/etc/fail2ban/jail.conf</code> to apply this to all jails:</p>
+<div class="highlight"><pre><span></span><code># vim /etc/fail2ban/jail.d/defaults-debian.conf
+</code></pre></div>
+
+<p>And add the line with <code>backend</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">[sshd]</span>
+<span class="na">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">true</span>
+<span class="na">backend</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">systemd</span>
+</code></pre></div>
+
+<p>Now, restart <code>fail2ban</code> and check its status:</p>
+<div class="highlight"><pre><span></span><code># systemctl restart fail2ban
+# systemctl status fail2ban
+● fail2ban.service - Fail2Ban Service
+     Loaded: loaded (/lib/systemd/system/fail2ban.service; enabled; preset: enabled)
+     Active: active (running) since Wed 2025-02-05 19:52:34 UTC; 9min ago
+       Docs: man:fail2ban(1)
+   Main PID: 8041 (fail2ban-server)
+      Tasks: 5 (limit: 1107)
+     Memory: 16.3M
+        CPU: 458ms
+     CGroup: /system.slice/fail2ban.service
+             └─8041 /usr/bin/python3 /usr/bin/fail2ban-server -xf start
+
+systemd[1]: Started fail2ban.service - Fail2Ban Service.
+..
+fail2ban-server[8041]: Server ready
+</code></pre></div>
+
+<p>Finally, check <code>fail2ban</code> itself to see that the <code>sshd</code> jail is
+working:</p>
+<div class="highlight"><pre><span></span><code># fail2ban-client status sshd
+Status for the jail: sshd
+|- Filter
+|  |- Currently failed: 0
+|  |- Total failed: 0
+|  `- Journal matches:  _SYSTEMD_UNIT=sshd.service + _COMM=sshd
+`- Actions
+   |- Currently banned: 0
+   |- Total banned: 0
+   `- Banned IP list:   
+</code></pre></div>
+
+<p>As you can see, <code>fail2ban</code> is keeping tabs on failed ssh login
+attempts and will put failed IPs in jail. Happy banning!</p>

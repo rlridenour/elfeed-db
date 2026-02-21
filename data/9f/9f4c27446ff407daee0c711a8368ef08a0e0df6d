@@ -1,0 +1,264 @@
+<h2>Create USB disk to boot the installer from</h2>
+<p>First, I downloaded the ISO with a torrent obtained from
+https://archlinux.org/download/. I used BitTorrent client
+<a href="https://deluge-torrent.org/">Deluge</a>.</p>
+<p>I then used <a href="https://man7.org/linux/man-pages/man1/dd.1.html">dd</a> to
+write the ISO to the flash drive. I figured out the <code>/dev/&lt;device&gt;</code> by
+running <code>dmesg</code> as I plugged in the USB disk:</p>
+<div class="highlight"><pre><span></span><code># dmesg
+..
+[40163.683166] usb 3-7: new high-speed USB device number 18 using xhci_hcd
+..
+[40166.445458] sd 0:0:0:0: [sda] Attached SCSI removable disk
+</code></pre></div>
+
+<p>The <code>sda</code> bit was all I needed, I could then run <code>dd</code> to write the
+file to the disk:</p>
+<div class="highlight"><pre><span></span><code># dd bs=4M \
+     if=tmp/archlinux-2024.05.01-x86_64.iso \
+     of=/dev/sda conv=fsync \
+     oflag=direct \
+     status=progress
+</code></pre></div>
+
+<h2>Getting X1 to boot from the USB</h2>
+<p>Enter the BIOS/UEFI by hitting <kbd>F2</kbd> (or <kbd>Esc</kbd>, I
+hammered on both of them) to enter the BIOS/UEFI configuration and
+disable Secure Boot (which requires the OS to be signed my Microsoft's
+key.</p>
+<p>Then reboot again and hit <kbd>F12</kbd> to get the boot menu. From
+there, select the USB disk.</p>
+<h2>Let the fun begin</h2>
+<p>On my old computer next to the new one, I had the <a href="https://wiki.archlinux.org/title/Installation_guide">Arch Linux
+installation
+guide</a> which
+steps you through the different commands you must type to get the bare
+boned OS installed.</p>
+<h3>Network in the installer</h3>
+<p>I set up the wireless card with:</p>
+<div class="highlight"><pre><span></span><code># iwctl
+station wlan0 connect my-ssid
+&lt;pasword&gt;
+exit
+# dhclient -v wlan0
+</code></pre></div>
+
+<h3>Partioning the harddrive</h3>
+<div class="highlight"><pre><span></span><code># cfisk /dev/nme0n1
+</code></pre></div>
+
+<h3>Full disk encryption</h3>
+<p>https://wiki.archlinux.org/title/Dm-crypt/Encrypting_an_entire_system#LUKS_on_a_partition</p>
+<p>I opted for the bootloader I've used the last 15 years,
+<a href="https://wiki.archlinux.org/title/GRUB">GRUB</a>. I did forget to
+<a href="https://wiki.archlinux.org/title/GRUB#Generate_the_main_configuration_file">Generatethe main GRUB configuration
+file</a>,
+so be sure to do that.</p>
+<h2>Boot loader</h2>
+<div class="highlight"><pre><span></span><code># pacman -S grub efibootmgr
+</code></pre></div>
+
+<p>First, get the UUIDs of the encrypted partition, <code>/dev/nvme0n1p2</code>, and
+the decrypted, mounted partition, <code>/dev/mapper/root</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="gh">#</span> blkid
+/dev/nvme0n1p1: UUID=&quot;D0BB-3264&quot; BLOCK_SIZE=&quot;512&quot; TYPE=&quot;vfat&quot; PARTUUID=&quot;26cb7637-9a3e-4be1-b477-07af31946dee&quot;
+/dev/nvme0n1p2: UUID=&quot;0ac79fb6-12f5-4d7b-9501-f7c185f94c00&quot; TYPE=&quot;crypto_LUKS&quot; PARTUUID=&quot;3300b64d-1e98-443f-a59e-8c9fae104d21&quot;
+/dev/mapper/root: UUID=&quot;4941d62c-51af-4dbb-8390-51f83411edec&quot; BLOCK_SIZE=&quot;4096&quot; TYPE=&quot;ext4&quot;
+</code></pre></div>
+
+<p>In <code>/etc/default/grub</code>, edit these two variables:</p>
+<div class="highlight"><pre><span></span><code>GRUB_CMDLINE_LINUX_DEFAULT=&quot;loglevel=3
+cryptdevice=UUID=0ac79fb6-12f5-4d7b-9501-f7c185f94c00:root
+root=/dev/mapper/root&quot;
+
+GRUB_ENABLE_CRYPTODISK=y
+</code></pre></div>
+
+<p>Note, the <code>cryptdevice</code> is UUID of the encrypted partition itself, whereas what's in <code>/etc/fstab</code> is the UUID of the decrypted and mounted partition:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>grep<span class="w"> </span>ext4<span class="w"> </span>/etc/fstab
+<span class="nv">UUID</span><span class="o">=</span>4941d62c-51af-4dbb-8390-51f83411edec<span class="w"> </span>/<span class="w"> </span>ext4<span class="w"> </span>rw,relatime<span class="w"> </span><span class="m">0</span><span class="w"> </span><span class="m">1</span>
+</code></pre></div>
+
+<p>Every time after editing <code>/etc/default/grub</code>, re-generate the runtime conf:</p>
+<div class="highlight"><pre><span></span><code># grub-mkconfig -o /boot/grub/grub.cfg
+</code></pre></div>
+
+<p>In the generated <code>/boot/grub/grub.cfg</code>, you can see the two UUIDs of the encrypted disk, <code>0ac79fb6-12f5-4d7b-9501-f7c185f94c00</code>, and the decrypted block of the root partiation, <code>4941d62c-51af-4dbb-8390-51f83411edec</code>:</p>
+<div class="highlight"><pre><span></span><code>    linux   /vmlinuz-linux root=UUID=4941d62c-51af-4dbb-8390-51f83411edec rw  loglevel=3 cryptdevice=UUID=0ac79fb6-12f5-4d7b-9501-f7c185f94c00:root root=/dev/mapper/root
+</code></pre></div>
+
+<p>The final step, is to install the bootloader binary itself.  Normally,
+you only need this comamnd once, this is to install the grub boot
+loader binary into the right place on the disk. Whatever you put in
+<code>--bootloader-id</code> will show up in the UEFI/BIOS in the computer as
+well as in the machine boot menu that you typically access with
+<kbd>F12</kbd></p>
+<div class="highlight"><pre><span></span><code># grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=Arch
+</code></pre></div>
+
+<h2>No sounds</h2>
+<p>Got a vital clue from:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>journalctl<span class="w"> </span>-b
+</code></pre></div>
+
+<p>which said (search for both <code>snd</code> and <code>sof</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">hda</span><span class="w"> </span><span class="n">codecs</span><span class="w"> </span><span class="n">found</span><span class="p">,</span><span class="w"> </span><span class="n">mask</span><span class="w"> </span><span class="mi">5</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">using</span><span class="w"> </span><span class="n">HDA</span><span class="w"> </span><span class="n">machine</span><span class="w"> </span><span class="n">driver</span><span class="w"> </span><span class="n">skl_hda_dsp_generic</span><span class="w"> </span><span class="n">now</span>
+<span class="o">..</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">SOF</span><span class="w"> </span><span class="n">firmware</span><span class="w"> </span><span class="ow">and</span><span class="o">/</span><span class="ow">or</span><span class="w"> </span><span class="n">topology</span><span class="w"> </span><span class="n">file</span><span class="w"> </span><span class="ow">not</span><span class="w"> </span><span class="n">found</span><span class="o">.</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">Supported</span><span class="w"> </span><span class="n">default</span><span class="w"> </span><span class="n">profiles</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">ipc</span><span class="w"> </span><span class="n">type</span><span class="w"> </span><span class="mi">1</span><span class="w"> </span><span class="p">(</span><span class="n">Requested</span><span class="p">):</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w">  </span><span class="n">Firmware</span><span class="w"> </span><span class="n">file</span><span class="p">:</span><span class="w"> </span><span class="n">intel</span><span class="o">/</span><span class="n">sof</span><span class="o">-</span><span class="n">ipc4</span><span class="o">/</span><span class="n">mtl</span><span class="o">/</span><span class="n">sof</span><span class="o">-</span><span class="n">mtl</span><span class="o">.</span><span class="n">ri</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w">  </span><span class="n">Topology</span><span class="w"> </span><span class="n">file</span><span class="p">:</span><span class="w"> </span><span class="n">intel</span><span class="o">/</span><span class="n">sof</span><span class="o">-</span><span class="n">ace</span><span class="o">-</span><span class="n">tplg</span><span class="o">/</span><span class="n">sof</span><span class="o">-</span><span class="n">hda</span><span class="o">-</span><span class="n">generic</span><span class="o">-</span><span class="mi">2</span><span class="n">ch</span><span class="o">.</span><span class="n">tplg</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">Check</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="n">you</span><span class="w"> </span><span class="n">have</span><span class="w"> </span><span class="s1">&#39;sof-firmware&#39;</span><span class="w"> </span><span class="n">package</span><span class="w"> </span><span class="n">installed</span><span class="o">.</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">Optionally</span><span class="w"> </span><span class="n">it</span><span class="w"> </span><span class="n">can</span><span class="w"> </span><span class="n">be</span><span class="w"> </span><span class="n">manually</span><span class="w"> </span><span class="n">downloaded</span><span class="w"> </span><span class="n">from</span><span class="p">:</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w">    </span><span class="n">https</span><span class="p">:</span><span class="o">//</span><span class="n">github</span><span class="o">.</span><span class="n">com</span><span class="o">/</span><span class="n">thesofproject</span><span class="o">/</span><span class="n">sof</span><span class="o">-</span><span class="n">bin</span><span class="o">/</span>
+<span class="n">May</span><span class="w"> </span><span class="mi">31</span><span class="w"> </span><span class="mi">09</span><span class="p">:</span><span class="mi">31</span><span class="p">:</span><span class="mi">27</span><span class="w"> </span><span class="n">mithrandir</span><span class="w"> </span><span class="n">kernel</span><span class="p">:</span><span class="w"> </span><span class="n">sof</span><span class="o">-</span><span class="n">audio</span><span class="o">-</span><span class="n">pci</span><span class="o">-</span><span class="n">intel</span><span class="o">-</span><span class="n">mtl</span><span class="w"> </span><span class="mi">0000</span><span class="p">:</span><span class="mi">00</span><span class="p">:</span><span class="mi">1</span><span class="n">f</span><span class="o">.</span><span class="mi">3</span><span class="p">:</span><span class="w"> </span><span class="n">error</span><span class="p">:</span><span class="w"> </span><span class="n">sof_probe_work</span><span class="w"> </span><span class="n">failed</span><span class="w"> </span><span class="n">err</span><span class="p">:</span><span class="w"> </span><span class="o">-</span><span class="mi">2</span>
+</code></pre></div>
+
+<p>I was sure I had already installed <code>sof-firmware</code>, but you know what?
+I hadn't! This was shortly remedied with:</p>
+<div class="highlight"><pre><span></span><code># pacman -S sof-firmware
+# reboot
+</code></pre></div>
+
+<h2>Fonts in Emacs</h2>
+<p>To get the fonts for the nice icons on the mode line that
+<code>doom-modeline-mode</code> puts on, I had to install the package:</p>
+<div class="highlight"><pre><span></span><code># pacman -S ttf-nerd-fonts-symbols-mono
+</code></pre></div>
+
+<h2>LSP in Emacs</h2>
+<p><kbd>M-x lsp-mode RET</kbd> gave the error:</p>
+<blockquote>
+<p>make-process--with-editor-process-filter: Doing vfork: No such file
+or directory</p>
+</blockquote>
+<p>I found no good way of getting Emacs or <code>lsp</code> to tell me exactly
+<em>what</em> wasn't found, so I had to bisect my <code>.emacs</code> manually. It
+turned out that</p>
+<div class="highlight"><pre><span></span><code><span class="p">(</span><span class="k">setq</span><span class="w"> </span><span class="nv">lsp-java-java-path</span><span class="w"> </span><span class="s">&quot;/usr/lib/jvm/java-21-openjdk/bin/java&quot;</span><span class="p">)</span>
+</code></pre></div>
+
+<p>Pointed to a non-existing JDK. After installing the needed version,
+LSP worked as it should. I've <a href="https://github.com/emacs-lsp/lsp-java/issues/479">suggested an improvement in
+lsp-java</a> to help
+future Emacs users.</p>
+<h2>Firefox cannot display Chinese characters</h2>
+<p>Both Simplified Chinese and Traditional Chinese characters showed up
+as boxes:</p>
+<p><img
+  class="centered"
+  src="/2024/firefox-missing-chinese-fonts.png"
+  alt="Firefox showing text where Chinese characters are showed as boxes"
+/></p>
+<p>Installing this font:</p>
+<div class="highlight"><pre><span></span><code># pacman -S wqy-microhei
+</code></pre></div>
+
+<p>and restarting Firefox resolved the issue. I can now read Simplified
+Chinese and Traditional Chinese to my heart full content.</p>
+<h2>libvirtd / virt-manager VMs don't get IP</h2>
+<p>Turns out <code>dnsmasq</code> wasn't running:</p>
+<div class="highlight"><pre><span></span><code># systemctl status dnsmasq
+× dnsmasq.service - dnsmasq - A lightweight DHCP and caching DNS server
+     Loaded: loaded (/usr/lib/systemd/system/dnsmasq.service; disabled; preset: disabled)
+     Active: failed (Result: exit-code) since Mon 2024-06-10 09:33:37 CEST; 1min 2s ago
+..
+</code></pre></div>
+
+<p>Starting it again gave a clue:</p>
+<div class="highlight"><pre><span></span><code>#<span class="w"> </span><span class="nv">systemctl</span><span class="w"> </span><span class="nv">start</span><span class="w"> </span><span class="nv">dnsmasq</span>
+#<span class="w"> </span><span class="nv">journalctl</span><span class="w"> </span><span class="o">-</span><span class="nv">u</span><span class="w"> </span><span class="nv">dnsmasq</span><span class="w"> </span><span class="o">-</span><span class="nv">f</span>
+..
+<span class="nv">Jun</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="mi">09</span>:<span class="mi">38</span>:<span class="mi">24</span><span class="w"> </span><span class="nv">mithrandir</span><span class="w"> </span><span class="nv">dnsmasq</span>[<span class="mi">29904</span>]:<span class="w"> </span><span class="nv">failed</span><span class="w"> </span><span class="nv">to</span><span class="w"> </span><span class="nv">create</span><span class="w"> </span><span class="nv">listening</span><span class="w"> </span><span class="nv">socket</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nv">port</span><span class="w"> </span><span class="mi">53</span>:<span class="w"> </span><span class="nv">Address</span><span class="w"> </span><span class="nv">already</span><span class="w"> </span><span class="nv">in</span><span class="w"> </span><span class="nv">use</span>
+</code></pre></div>
+
+<p>Indeed:</p>
+<div class="highlight"><pre><span></span><code># netstat --tcp -nlp | grep 53
+tcp        0      0 192.168.122.1:53        0.0.0.0:*               LISTEN      1967/dnsmasq
+</code></pre></div>
+
+<p>So I'd better close that one down. but first, I wanted to find out
+<em>what</em> started it:</p>
+<div class="highlight"><pre><span></span><code>$ ps -u -p 1967
+USER         PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+nobody      1967  0.0  0.0  13916  1968 ?        S    Jun07   0:00 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/defaul
+</code></pre></div>
+
+<p>Now, <em>that</em> looks very daemony, running as user <code>nobody</code> and all, but
+that's something of <a href="https://refspecs.linuxbase.org/LSB_3.0.0/LSB-PDA/LSB-PDA/usernames.html">a relic from
+LSB</a>
+and with systemd, running with <code>DynamicUser</code> is a better option (or
+indeed any dedicated user, to ensure that the same user, no matter how
+unprivileged, is shared across processes).</p>
+<p>Killing that method with:</p>
+<div class="highlight"><pre><span></span><code># kill -9 1967
+</code></pre></div>
+
+<p>And starting <code>dnsmasq</code> again, looked so much better:</p>
+<div class="highlight"><pre><span></span><code># journalctl -u dnsmasq -f
+..
+Jun 10 09:47:01 mithrandir systemd[1]: Starting dnsmasq - A lightweight DHCP and caching DNS server...
+Jun 10 09:47:01 mithrandir dnsmasq[31222]: dnsmasq: syntax check OK.
+Jun 10 09:47:01 mithrandir systemd[1]: Started dnsmasq - A lightweight DHCP and caching DNS server.
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: started, version 2.90 cachesize 150
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: compile time options: IPv6 GNU-getopt DBus no-UBus i18n IDN2 DHCP DHCPv6 no-Lua TFTP conntrack ipset nftset auth cryptohash DNSSEC loop-detect inotify dumpfile
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: DBus support enabled: connected to system bus
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: reading /etc/resolv.conf
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: using nameserver 10.0.128.100#53
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: using nameserver 10.0.128.110#53
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: using nameserver 8.8.8.8#53
+Jun 10 09:47:01 mithrandir dnsmasq[31223]: read /etc/hosts - 0 names
+</code></pre></div>
+
+<p>The VM didn't get an IP via DHCP directly, so I tried retarting
+it. Still no cigar. Then, I tried to restart <code>libvirtd</code> itself:</p>
+<div class="highlight"><pre><span></span><code># systemctl restart libvirtd
+</code></pre></div>
+
+<p>I thought I was homefree, but alas:</p>
+<div class="highlight"><pre><span></span><code># journalctl -u libvirtd -f
+..
+Jun 10 09:50:28 mithrandir systemd[1]: Started libvirt legacy monolithic daemon.
+Jun 10 09:50:29 mithrandir dnsmasq[31614]: failed to create listening socket for 192.168.122.1: Address already in use
+Jun 10 09:50:29 mithrandir dnsmasq[31614]: FAILED to start up
+Jun 10 09:50:29 mithrandir libvirtd[31561]: libvirt version: 10.4.0
+Jun 10 09:50:29 mithrandir libvirtd[31561]: hostname: mithrandir
+Jun 10 09:50:29 mithrandir libvirtd[31561]: internal error: Child process (VIR_BRIDGE_NAME=virbr0 /usr/bin/dnsmasq --conf-file=/var/lib/libvirt/dnsmasq/default.conf --leasefile-ro --dhcp-script=/usr/lib/libvirt/libvirt_leaseshelper) unexpected exit status 2:
+                                            dnsmasq: failed to create listening socket for 192.168.122.1: Address already in use
+Jun 10 09:51:57 mithrandir libvirtd[31561]: Domain id=2 name=&#39;debian12&#39; uuid=1181da1e-8e70-4a45-831b-ff6a61de639a is tainted: host-cpu
+</code></pre></div>
+
+<p>I then got an idea: Perhaps the <code>dnsmasq</code> service should be disabled? Since it looks like <code>libvirtd</code> is a service that starts multiple services, including <code>dnsmasq</code>:</p>
+<div class="highlight"><pre><span></span><code># systemctl stop dnsmasq
+# systemctl disable dnsmasq
+# systemctl restart libvirtd
+</code></pre></div>
+
+<p>Now, that looked better:</p>
+<div class="highlight"><pre><span></span><code># journalctl -u libvirtd -f
+..
+Jun 10 09:55:01 mithrandir systemd[1]: Started libvirt legacy monolithic daemon.
+Jun 10 09:55:02 mithrandir dnsmasq[32243]: started, version 2.90 cachesize 150
+..
+Jun 10 09:55:02 mithrandir dnsmasq-dhcp[32243]: DHCP, IP range 192.168.122.2 -- 192.168.122.254, lease time 1h
+Jun 10 09:55:02 mithrandir dnsmasq-dhcp[32243]: DHCP, sockets bound exclusively to interface virbr0
+</code></pre></div>
+
+<p>But my VMs were <em>still</em> not getting an IP.</p>
+<p>It turned out my firewall was in the way. On my VM, I checked if I
+could access <code>dnsmasq</code> on the host machine:</p>
+<div class="highlight"><pre><span></span><code>$ nc -zv 192.168.122.1 53
+^C
+</code></pre></div>
+
+<p>Thus, I needed to punch a hole in my firewall to allow VMs on my
+<code>libvirtd</code> created network to request IPs from <code>dnsmasq</code>:</p>
+<div class="highlight"><pre><span></span><code># ufw allow from 192.168.122.0/24 to 192.168.122.1 port 53 proto tcp
+</code></pre></div>
+
+<p>Now, my VMs could finally request access the DHCP server:</p>
+<div class="highlight"><pre><span></span><code># nc -zv 192.168.122.1 53
+Connection to 192.168.122.1 53 port [tcp/domain] succeeded!
+</code></pre></div>

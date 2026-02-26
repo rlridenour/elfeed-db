@@ -1,0 +1,188 @@
+<p>I’ve been using Emacs for over 20 years and I <em>still</em> keep discovering (and
+rediscovering) comment-related commands and variables. You’d think that after two
+decades I’d have comments figured out, but it turns out there’s a surprising
+amount of depth hiding behind a few keybindings.</p>
+
+<p>What prompted this article was my recent work on
+<a href="https://github.com/bbatsov/neocaml/">neocaml</a>, a tree-sitter based major mode
+for OCaml. OCaml uses <code class="language-plaintext highlighter-rouge">(* ... *)</code> block comments – no line comments at all –
+and that unusual syntax forced me to dig deeper into how Emacs handles comments
+internally. I learned more about comment variables in the past few months than in
+the previous 20 years combined.</p>
+
+<!--more-->
+
+<h2 id="the-swiss-army-knife-m-">The Swiss Army Knife: M-;</h2>
+
+<p>I wrote about <code class="language-plaintext highlighter-rouge">comment-dwim</code> back in my <a href="/blog/2020/06/10/comment-commands-redux/">Comment Commands
+Redux</a> article, but I don’t
+think I did it justice. <code class="language-plaintext highlighter-rouge">M-;</code> is genuinely one of the most context-sensitive
+commands in Emacs. Here’s a breakdown of what it does depending on <em>where</em> you
+invoke it:</p>
+
+<p><strong>With an active region:</strong> It calls <code class="language-plaintext highlighter-rouge">comment-region</code> to comment out the selected
+code. But if the region already consists entirely of comments, it calls
+<code class="language-plaintext highlighter-rouge">uncomment-region</code> instead. So it’s effectively a toggle.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<p><strong>On an empty line:</strong> It inserts a comment (using <code class="language-plaintext highlighter-rouge">comment-start</code> and
+<code class="language-plaintext highlighter-rouge">comment-end</code>) and places point between the delimiters, properly indented.</p>
+
+<p><strong>On a line with code but no comment:</strong> It adds an end-of-line comment, indented
+to <code class="language-plaintext highlighter-rouge">comment-column</code> (default 32). This is the classic “inline comment”
+workflow – write your code, hit <code class="language-plaintext highlighter-rouge">M-;</code>, type your annotation.</p>
+
+<p><strong>On a line that already has an end-of-line comment:</strong> It jumps to that comment
+and reindents it. Pressing <code class="language-plaintext highlighter-rouge">M-;</code> again just keeps you there.</p>
+
+<p><strong>With a prefix argument (<code class="language-plaintext highlighter-rouge">C-u M-;</code>):</strong> It kills the first comment on the
+current line.</p>
+
+<p>That’s five distinct behaviors from a single keybinding. No wonder people
+find it confusing at first. If you want something simpler, <code class="language-plaintext highlighter-rouge">comment-line</code> (<code class="language-plaintext highlighter-rouge">C-x
+C-;</code>, added in Emacs 25.1) just toggles comments on the current line or region
+– nothing more, nothing less.</p>
+
+<h2 id="continuing-comments-m-j">Continuing Comments: M-j</h2>
+
+<p>I also wrote about <code class="language-plaintext highlighter-rouge">M-j</code> years ago in <a href="/blog/2013/06/05/continue-a-comment-on-the-next-line/">Continue a Comment on the Next
+Line</a>. The
+command (<code class="language-plaintext highlighter-rouge">comment-indent-new-line</code><sup id="fnref:2" role="doc-noteref"><a href="#fn:2" class="footnote" rel="footnote">2</a></sup>) breaks the current line and
+continues the comment on the next line with proper indentation.</p>
+
+<p>For languages with line comments (<code class="language-plaintext highlighter-rouge">//</code>, <code class="language-plaintext highlighter-rouge">#</code>, <code class="language-plaintext highlighter-rouge">;;</code>), this works great out of the
+box – it just inserts the comment delimiter on the new line. But for languages
+with block comments like OCaml’s <code class="language-plaintext highlighter-rouge">(* ... *)</code>, the default behavior is less
+helpful: it <em>closes</em> the current comment and opens a new one:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(* some text about something. *)
+(* |
+</code></pre></div></div>
+
+<p>What you actually want is to continue the same comment:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(* some text about something.
+   |
+</code></pre></div></div>
+
+<p>This is controlled by two variables that I suspect most people have never heard of:</p>
+
+<ul>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">comment-multi-line</code></strong> – when non-nil, tells commands like <code class="language-plaintext highlighter-rouge">M-j</code> to
+continue the current comment rather than closing and reopening it.</p>
+  </li>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">comment-line-break-function</code></strong> – the function that <code class="language-plaintext highlighter-rouge">M-j</code> actually calls to
+do its work. Major modes can set this to customize the line-breaking behavior
+inside comments.</p>
+  </li>
+</ul>
+
+<p>In neocaml, I set <code class="language-plaintext highlighter-rouge">comment-multi-line</code> to <code class="language-plaintext highlighter-rouge">t</code> and provide a custom
+<code class="language-plaintext highlighter-rouge">comment-line-break-function</code> that uses tree-sitter to find the column where the
+comment body text starts, then indents the new line to match:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setq-local</span> <span class="nv">comment-multi-line</span> <span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">setq-local</span> <span class="nv">comment-line-break-function</span> <span class="nf">#'</span><span class="nv">neocaml--comment-indent-new-line</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The implementation is straightforward – walk up the tree-sitter AST to find the
+enclosing comment node, compute the body column from the opening delimiter, and
+indent accordingly. Now <code class="language-plaintext highlighter-rouge">M-j</code> inside <code class="language-plaintext highlighter-rouge">(** documentation *)</code> produces a new line
+indented to align with the text after <code class="language-plaintext highlighter-rouge">(**</code>.</p>
+
+<h2 id="filling-comments-m-q">Filling Comments: M-q</h2>
+
+<p>While I was at it I also had to teach <code class="language-plaintext highlighter-rouge">M-q</code> (<code class="language-plaintext highlighter-rouge">fill-paragraph</code>) about OCaml
+comments. By default, <code class="language-plaintext highlighter-rouge">fill-paragraph</code> doesn’t know where a <code class="language-plaintext highlighter-rouge">(* ... *)</code> comment
+starts and ends, so it either does nothing useful or mangles things.</p>
+
+<p>The fix was setting <code class="language-plaintext highlighter-rouge">fill-paragraph-function</code> to a custom function that uses
+tree-sitter to find the comment boundaries, narrows to the body text (excluding
+the <code class="language-plaintext highlighter-rouge">(*</code> and <code class="language-plaintext highlighter-rouge">*)</code> delimiters), and fills within that region. The fill prefix is
+computed from the body start column so continuation lines align properly:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>(* This is a long comment that gets
+   wrapped at the fill column, with
+   continuation lines properly
+   indented *)
+</code></pre></div></div>
+
+<h2 id="the-comment-variable-zoo">The Comment Variable Zoo</h2>
+
+<p>Working on all of this made me realize just how many comment-related variables
+Emacs exposes for major modes to configure. Here are the ones I ended up caring
+about:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Variable</th>
+      <th>Purpose</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-start</code></td>
+      <td>Opening delimiter (<code class="language-plaintext highlighter-rouge">"(* "</code> for OCaml)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-end</code></td>
+      <td>Closing delimiter (<code class="language-plaintext highlighter-rouge">" *)"</code> for OCaml)</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-start-skip</code></td>
+      <td>Regexp to skip the opening delimiter</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-multi-line</code></td>
+      <td>Continue comments vs. close-and-reopen</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-line-break-function</code></td>
+      <td>What <code class="language-plaintext highlighter-rouge">M-j</code> calls</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-column</code></td>
+      <td>Column for end-of-line comments</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">comment-style</code></td>
+      <td>How <code class="language-plaintext highlighter-rouge">comment-region</code> formats comments</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">fill-paragraph-function</code></td>
+      <td>Custom fill behavior</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Most of these have sensible defaults for line-comment languages, which is why you
+can go 20 years without thinking about them. But the moment you deal with block
+comments, especially unusual ones like OCaml’s nested <code class="language-plaintext highlighter-rouge">(* ... *)</code>, you
+discover the full machinery.</p>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>I find it remarkable that after all these years Emacs can still surprise me. A
+handful of comment commands – <code class="language-plaintext highlighter-rouge">M-;</code>, <code class="language-plaintext highlighter-rouge">M-j</code>, <code class="language-plaintext highlighter-rouge">M-q</code> – and a set of buffer-local
+variables give you a comment editing experience that’s both powerful and
+deeply customizable. Most users never need to think about the underlying
+variables, but they’re there when you need them, and they compose nicely.</p>
+
+<p>If you’re a major mode author, pay attention to these variables. Getting comments
+right is one of those things that users notice immediately when it breaks and
+never think about when it works.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>This is the one behavior of <code class="language-plaintext highlighter-rouge">comment-dwim</code> that’s somewhat inconvenient – to uncomment the current line you have to select it first. <code class="language-plaintext highlighter-rouge">comment-line</code> (<code class="language-plaintext highlighter-rouge">C-x C-;</code>) handles this more gracefully. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:2" role="doc-endnote">
+      <p>In older Emacs versions this was called <code class="language-plaintext highlighter-rouge">indent-new-comment-line</code>. The modern name is <code class="language-plaintext highlighter-rouge">comment-indent-new-line</code>, but both work. <a href="#fnref:2" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

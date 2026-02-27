@@ -1,0 +1,147 @@
+<div class="update" id="org0847ab9">
+<p>
+<span class="timestamp-wrapper"><time class="timestamp" datetime="2026-02-26">[2026-02-26 Thu]</time></span>: Made the code even neater with <code>:key</code>, included the old code as well
+</p>
+
+</div>
+
+<p>
+At this week's <a href="https://emacs-berlin.org/">Emacs Berlin meetup</a>, someone wanted to know how to change the order of completion candidates. Specifically, they wanted to list the top level Org Mode headings before the second level headings and so on. They were using <a href="https://github.com/alphapapa/org-ql">org-ql</a> to navigate Org headings, but since org-ql sorts its candidates by the number of matches according to the code in the <code>org-ql-completing-read</code> function, I wasn't quite sure how to get it to do what they wanted. (And I realized my org-ql setup was broken, so I couldn't fiddle with it live. Edit: Turns out I needed to update the <a target="_blank" href="https://elpa.gnu.org/packages/peg.html">peg</a> package) Instead, I showed folks <code>consult-org-heading</code> which is part of the <a href="https://github.com/minad/consult">Consult</a> package, which I like to use to jump around the headings in a single Org file. It's a short function that's easy to use as a starting point for something custom.
+</p>
+
+<p>
+Here's some code that allows you to use <code>consult-org-heading</code> to jump to an Org heading in the current file with completions sorted by level.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">consult-org</span>
+  (advice-add
+   <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;headings</span>
+   <span class="org-builtin">:filter-return</span>
+   (<span class="org-keyword">lambda</span> (candidates)
+     (sort candidates
+           <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (o) (car (get-text-property 0 <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;heading</span> o)))))))
+</code></pre>
+</div>
+
+
+
+<figure id="org8098e5b">
+<img src="https://sachachua.com/blog/2026/02/sorting-completion-candidates-such-as-sorting-org-headings-by-level/2026-02-26_13-42-58.png" alt="2026-02-26_13-42-58.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot showing where the candidates transition from top-level headings to second-level headings</figcaption>
+</figure>
+
+<p>
+My previous approach defined a different function based on <code>consult-org-heading</code>, but using the advice feels a little cleaner because it will also make it work for any other function that uses <code>consult-org&#45;&#45;headings</code>. I've included the old code in case you're curious. Here, we don't modify the function's behaviour using advice, we just make a new function (<code>my-consult-org-heading</code>) that calls another function that processes the results a little (<code>my-consult-org&#45;&#45;headings</code>).
+</p>
+
+<details><summary>Old code, if you're curious</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-consult-org&#45;&#45;headings</span> (prefix match scope <span class="org-type">&amp;rest</span> skip)
+  (<span class="org-keyword">let</span> ((candidates (consult-org&#45;&#45;headings prefix match scope)))
+    (sort candidates
+          <span class="org-builtin">:lessp</span>
+          (<span class="org-keyword">lambda</span> (a b)
+            (<span class="org-keyword">let</span> ((level-a (car (get-text-property 0 <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;heading</span> a)))
+                  (level-b (car (get-text-property 0 <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;heading</span> b))))
+              (<span class="org-keyword">cond</span>
+               ((&lt; level-a level-b) t)
+               ((&lt; level-b level-a) nil)
+               ((string&lt; a b) t)
+               ((string&lt; b a) nil)))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-consult-org-heading</span> (<span class="org-type">&amp;optional</span> match scope)
+  <span class="org-doc">"Jump to an Org heading.</span>
+
+<span class="org-doc">MATCH and SCOPE are as in `</span><span class="org-doc"><span class="org-constant">org-map-entries</span></span><span class="org-doc">' and determine which</span>
+<span class="org-doc">entries are offered.  By default, all entries of the current</span>
+<span class="org-doc">buffer are offered."</span>
+  (<span class="org-keyword">interactive</span> (<span class="org-keyword">unless</span> (derived-mode-p <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">org-mode</span>)
+                 (<span class="org-warning">user-error</span> <span class="org-string">"Must be called from an Org buffer"</span>)))
+  (<span class="org-keyword">let</span> ((prefix (not (memq scope <span class="org-highlight-quoted-quote">'</span>(nil tree region region-start-level file)))))
+    (consult&#45;&#45;read
+     (<span class="org-keyword">consult&#45;&#45;slow-operation</span> <span class="org-string">"Collecting headings..."</span>
+       (<span class="org-keyword">or</span> (my-consult-org&#45;&#45;headings prefix match scope)
+           (<span class="org-warning">user-error</span> <span class="org-string">"No headings"</span>)))
+     <span class="org-builtin">:prompt</span> <span class="org-string">"Go to heading: "</span>
+     <span class="org-builtin">:category</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-heading</span>
+     <span class="org-builtin">:sort</span> nil
+     <span class="org-builtin">:require-match</span> t
+     <span class="org-builtin">:history</span> <span class="org-highlight-quoted-quote">'</span>(<span class="org-builtin">:input</span> consult-org&#45;&#45;history)
+     <span class="org-builtin">:narrow</span> (consult-org&#45;&#45;narrow)
+     <span class="org-builtin">:state</span> (consult&#45;&#45;jump-state)
+     <span class="org-builtin">:annotate</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;annotate</span>
+     <span class="org-builtin">:group</span> (<span class="org-keyword">and</span> prefix <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult-org&#45;&#45;group</span>)
+     <span class="org-builtin">:lookup</span> (apply-partially <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">consult&#45;&#45;lookup-prop</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-marker</span>))))
+</code></pre>
+</div>
+
+</details>
+
+<p>
+I also wanted to get this to work for <code>C-u org-refile</code>, which uses <code>org-refile-get-location</code>.
+This is a little trickier because the table of completion candidates is a list of cons cells that don't store the level, and it doesn't pass the metadata to <code>completing-read</code> to tell it not to re-sort the results. We'll just fake it by counting the number of "/", which is the path separator used if <code>org-outline-path-complete-in-steps</code> is set to <code>nil</code>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org</span>
+  (advice-add
+   <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">org-refile-get-location</span>
+   <span class="org-builtin">:around</span>
+   (<span class="org-keyword">lambda</span> (fn <span class="org-type">&amp;rest</span> args)
+     (<span class="org-keyword">let</span> ((completion-extra-properties
+            <span class="org-highlight-quoted-quote">'</span>(<span class="org-builtin">:display-sort-function</span>
+              (<span class="org-keyword">lambda</span> (candidates)
+                (sort candidates
+                      <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (s) (length (split-string s <span class="org-string">"/"</span>))))))))
+       (apply fn args)))))
+</code></pre>
+</div>
+
+
+
+<figure id="org535f616">
+<img src="https://sachachua.com/blog/2026/02/sorting-completion-candidates-such-as-sorting-org-headings-by-level/2026-02-26_14-01-28.png" alt="2026-02-26_14-01-28.png">
+
+<figcaption><span class="figure-number">Figure 2: </span>Screenshot of sorted refile entries</figcaption>
+</figure>
+
+<p>
+In general, if you would like completion candidates to be in a certain order, you can specify  <code>display-sort-function</code> either by calling <code>completing-read</code> with a collection that's a lambda function instead of a table of completion candidates, or by overriding it with <code>completion-category-overrides</code> if there's a category you can use or <code>completion-extra-properties</code> if not.
+</p>
+
+<p>
+Here's a short example of passing a lambda to a completion function (<a href="https://manueluberti.eu/posts/2025-09-21-date-at-point/">thanks to Manuel Uberti</a>):
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">mu-date-at-point</span> (date)
+  <span class="org-doc">"Insert current DATE at point via `</span><span class="org-doc"><span class="org-constant">completing-read</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">interactive</span>
+   (<span class="org-keyword">let*</span> ((formats <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"%Y%m%d"</span> <span class="org-string">"%F"</span> <span class="org-string">"%Y%m%d%H%M"</span> <span class="org-string">"%Y-%m-%dT%T"</span>))
+          (vals (mapcar <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">format-time-string</span> formats))
+          (opts
+           (<span class="org-keyword">lambda</span> (string pred action)
+             (<span class="org-keyword">if</span> (eq action <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">metadata</span>)
+                 <span class="org-highlight-quoted-quote">'</span>(metadata (display-sort-function . identity))
+               (complete-with-action action vals string pred)))))
+     (list (completing-read <span class="org-string">"Insert date: "</span> opts nil t))))
+  (insert date))
+</code></pre>
+</div>
+
+
+<p>
+If you use <code>consult&#45;&#45;read</code> from the <a href="https://github.com/minad/consult">Consult</a> completion framework, there is a <code>:sort</code> property that you can set to either nil or your own function.
+</p>
+
+<p>
+This entry is part of the <a href="https://sachachua.com/blog/2026/01/emacs-carnival-february-2026-completion/">Emacs Carnival for Feb 2026: Completion</a>.
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#org">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/02/sorting-completion-candidates-such-as-sorting-org-headings-by-level/index.org">View Org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KJDNREMY8GE4DA5A48P5RD2R" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F02%2Fsorting-completion-candidates-such-as-sorting-org-headings-by-level%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

@@ -1,0 +1,243 @@
+<h2 id="contents">Contents</h2>
+
+<ul>
+  <li><a href="https://nmunro.github.io/2024/12/29/ningle-1.html">Part 1 (Hello World)</a></li>
+  <li><a href="https://nmunro.github.io/2024/12/30/ningle-2.html">Part 2 (Basic Templates)</a></li>
+  <li><a href="https://nmunro.github.io/2025/01/30/ningle-3.html">Part 3 (Introduction to middleware and Static File management)</a></li>
+  <li><a href="https://nmunro.github.io/2025/02/28/ningle-4.html">Part 4 (Forms)</a></li>
+  <li><a href="https://nmunro.github.io/2025/03/31/ningle-5.html">Part 5 (Environmental Variables)</a></li>
+  <li><a href="https://nmunro.github.io/2025/04/30/ningle-6.html">Part 6 (Database Connections)</a></li>
+  <li><a href="https://nmunro.github.io/2025/05/31/ningle-7.html">Part 7 (Envy Configuation Switching)</a></li>
+  <li><a href="https://nmunro.github.io/2025/06/29/ningle-8.html">Part 8 (Mounting Middleware)</a></li>
+  <li><a href="https://nmunro.github.io/2025/07/31/ningle-9.html">Part 9 (Authentication System)</a></li>
+  <li><a href="https://nmunro.github.io/2025/08/28/ningle-10.html">Part 10 (Email)</a></li>
+  <li><a href="https://nmunro.github.io/2025/09/30/ningle-11.html">Part 11 (Posting Tweets &amp; Advanced Database Queries)</a></li>
+  <li><a href="https://nmunro.github.io/2025/10/29/ningle-12.html">Part 12 (Clean Up &amp; Bug Fix)</a></li>
+  <li><a href="https://nmunro.github.io/2025/11/20/ningle-13.html">Part 13 (Adding Comments)</a></li>
+  <li><a href="https://nmunro.github.io/2026/01/31/ningle-14.html">Part 14 (Pagination, Part 1)</a></li>
+  <li>Part 15 (Pagination, Part 2)</li>
+</ul>
+
+<h2 id="introduction">Introduction</h2>
+
+<p>Welcome back! We will be revisiting the pagination from last time, however we are going to try and make this easier on ourselves, I built a package for pagination <a href="https://github.com/nmunro/mito-pager">mito-pager</a>, the idea is that much of what we looked at in the last lesson was very boiler plate and repetitive so we should look at removing this.</p>
+
+<p>I will say, my <code class="language-plaintext highlighter-rouge">mito-pager</code> can do a little more than just what I show here, it has two modes, you can use <code class="language-plaintext highlighter-rouge">paginate-dao</code> (named this way so that it is familiar to <code class="language-plaintext highlighter-rouge">mito</code>) to paginate over simple models, however, if you need to perform complex queries there is a macro <code class="language-plaintext highlighter-rouge">with-pager</code> that you can use to paginate. It is this second form we will use in this tutorial.</p>
+
+<p>There is one thing to bear in mind, when using <code class="language-plaintext highlighter-rouge">mito-pager</code>, you <em>must</em> implement your data retrieval functions in such a way to return a <code class="language-plaintext highlighter-rouge">values</code> object, as <code class="language-plaintext highlighter-rouge">mito-pager</code> relies on this to work.</p>
+
+<p>I encourge you to try the library out in other use-cases and, of course, if you have ideas, please let me know.</p>
+
+<h2 id="changes">Changes</h2>
+
+<p>Most of our changes are quite limited in scope, really it's just our controllers and models that need most of the edits.</p>
+
+<h3 id="ningle-tutorial-projectasd">ningle-tutorial-project.asd</h3>
+
+<p>We need to add the <code class="language-plaintext highlighter-rouge">mito-pager</code> package to our project asd file.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">- :ningle-auth)
+</span><span class="gi">+ :ningle-auth
++ :mito-pager)
+</span></code></pre></div></div>
+
+<h3 id="srccontrollerslisp">src/controllers.lisp</h3>
+
+<p>Here is the real payoff! I almost dreaded writing the sheer volume of the change but then realised it's so simple, we only need to change our index function, and it may be better to delete it all and write our new simplified version.</p>
+
+<div class="language-common-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">index</span> <span class="p">(</span><span class="nv">params</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">user</span> <span class="p">(</span><span class="nb">gethash</span> <span class="ss">:user</span> <span class="nv">ningle:*session*</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">req-page</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"page"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"1"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">1</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">req-limit</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nb">parse-integer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">ingle:get-param</span> <span class="s">"limit"</span> <span class="nv">params</span><span class="p">)</span> <span class="s">"50"</span><span class="p">)</span> <span class="ss">:junk-allowed</span> <span class="no">t</span><span class="p">)</span> <span class="mi">50</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">flet</span> <span class="p">((</span><span class="nv">get-posts</span> <span class="p">(</span><span class="nv">limit</span> <span class="nv">offset</span><span class="p">)</span> <span class="p">(</span><span class="nv">ningle-tutorial-project/models:posts</span> <span class="nv">user</span> <span class="ss">:offset</span> <span class="nv">offset</span> <span class="ss">:limit</span> <span class="nv">limit</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">mito-pager:with-pager</span> <span class="p">((</span><span class="nv">posts</span> <span class="nv">pager</span> <span class="nf">#'</span><span class="nv">get-posts</span> <span class="ss">:page</span> <span class="nv">req-page</span> <span class="ss">:limit</span> <span class="nv">req-limit</span><span class="p">))</span>
+        <span class="p">(</span><span class="nv">djula:render-template*</span> <span class="s">"main/index.html"</span> <span class="no">nil</span> <span class="ss">:title</span> <span class="s">"Home"</span> <span class="ss">:user</span> <span class="nv">user</span> <span class="ss">:posts</span> <span class="nv">posts</span> <span class="ss">:pager</span> <span class="nv">pager</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>This is <em>much</em> nicer, and in my opinion, the controller should be this simple.</p>
+
+<h3 id="srcmainlisp">src/main.lisp</h3>
+
+<p>We need to ensure we include the templates from <code class="language-plaintext highlighter-rouge">mito-pager</code>, this is a simple one line change.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code> (defun start (&amp;key (server :woo) (address "127.0.0.1") (port 8000))
+    (djula:add-template-directory (asdf:system-relative-pathname :ningle-tutorial-project "src/templates/"))
+<span class="gi">+   (djula:add-template-directory (asdf:system-relative-pathname :mito-pager "src/templates/"))
+</span></code></pre></div></div>
+
+<h3 id="srcmodelslisp">src/models.lisp</h3>
+
+<p>As mentioned at the top of this tutorial, we have to implement our data retrieval functions in a certain way. While there are some changes here, we ultimately end up with less code.</p>
+
+<p>We can start by removing the <code class="language-plaintext highlighter-rouge">count</code> parameter, we wont be needing it in this implementation, and since we don't need the <code class="language-plaintext highlighter-rouge">count</code> parameter anymore, the <code class="language-plaintext highlighter-rouge">:around</code> method can go too!</p>
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">- (defgeneric posts (user &amp;key offset limit count)
+</span><span class="gi">+ (defgeneric posts (user &amp;key offset limit)
+</span><span class="gd">-
+- (defmethod posts :around (user &amp;key (offset 0) (limit 50) &amp;allow-other-keys)
+-   (let ((count (mito:count-dao 'post))
+-         (offset (max 0 offset))
+-         (limit (max 1 limit)))
+-     (if (and (&gt; count 0) (&gt;= offset count))
+-       (let* ((page-count (max 1 (ceiling count limit)))
+-              (corrected-offset (* (1- page-count) limit)))
+-         (posts user :offset corrected-offset :limit limit))
+-       (call-next-method user :offset offset :limit limit :count count))))
+</span></code></pre></div></div>
+
+<p>There's two methods to look at, the first is when the type of user is <code class="language-plaintext highlighter-rouge">user</code>:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">-
+- (defmethod posts ((user user) &amp;key offset limit count)
+</span><span class="gi">+ (defmethod posts ((user user) &amp;key offset limit)
+</span><span class="err">...</span>
+      (values
+<span class="gd">-         (mito:retrieve-by-sql sql :binds params)
+-         count
+-         offset)))
+</span><span class="gi">+         (mito:retrieve-by-sql sql :binds params)
++         (mito:count-dao 'post))))
+</span></code></pre></div></div>
+
+<p>The second is when the type of user is <code class="language-plaintext highlighter-rouge">null</code>:</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">-
+- (defmethod posts ((user null) &amp;key offset limit count)
+</span><span class="gi">+ (defmethod posts ((user null) &amp;key offset limit)
+</span><span class="err">...</span>
+    (values
+<span class="gd">-       (mito:retrieve-by-sql sql)
+-       count
+-       offset)))
+</span><span class="gi">+       (mito:retrieve-by-sql sql)
++       (mito:count-dao 'post))))
+</span></code></pre></div></div>
+
+<p>As you can see, all we are really doing is relying on mito to do the lions share of the work, right down to the count.</p>
+
+<h3 id="srctemplatesmainindexhtml">src/templates/main/index.html</h3>
+
+<p>The change here is quite simple, all we need to do is to change the path to the partial, we need to simply point to the partial provided by <code class="language-plaintext highlighter-rouge">mito-pager</code>.</p>
+
+<div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code>
+- {% include "partials/pager.html" with url="/" title="Posts" %}
+<span class="gi">+ {% include "mito-pager/partials/pager.html" with url="/" title="Posts" %}
+</span>
+</code></pre></div></div>
+
+<h3 id="srctemplatespartialspaginationhtml">src/templates/partials/pagination.html</h3>
+
+<p>This one is easy, we can delete it! <code class="language-plaintext highlighter-rouge">mito-pager</code> provides its own template, and while you can override it (if you so wish), in this tutorial we do not need it anymore.</p>
+
+<h2 id="conclusion">Conclusion</h2>
+
+<p>I hope you will agree that this time, using a prebuilt package takes a lot of the pain out of pagination. I don't like to dictate what developers should, or shouldn't use, so that's why last time you were given the same information I had, so if you wish to build your own library, you can, or if you want to focus on getting things done, you are more than welcome to use mine, and of course, if you find issues please do let me know!</p>
+
+<h3 id="learning-outcomes">Learning Outcomes</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Learning Outcome</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Understand</strong></td>
+      <td>Understand how third-party pagination libraries like <code class="language-plaintext highlighter-rouge">mito-pager</code> abstract boilerplate pagination logic, and how <code class="language-plaintext highlighter-rouge">with-pager</code> expects a fetch function returning <code class="language-plaintext highlighter-rouge">(values items count)</code> to handle page clamping, offset calculation, and boundary correction automatically.</td>
+    </tr>
+    <tr>
+      <td><strong>Apply</strong></td>
+      <td>Apply <code class="language-plaintext highlighter-rouge">flet</code> to define a local adapter function that bridges the project's <code class="language-plaintext highlighter-rouge">posts</code> generic function with <code class="language-plaintext highlighter-rouge">mito-pager</code>'s expected <code class="language-plaintext highlighter-rouge">(lambda (limit offset) ...)</code> interface, and use <code class="language-plaintext highlighter-rouge">with-pager</code> to reduce controller complexity to its essential logic.</td>
+    </tr>
+    <tr>
+      <td><strong>Analyse</strong></td>
+      <td>Analyse what responsibilities were transferred from the manual pagination implementation to <code class="language-plaintext highlighter-rouge">mito-pager</code> &mdash; count caching, boundary checking, offset calculation, page correction, and range generation &mdash; contrasting the complexity of both approaches.</td>
+    </tr>
+    <tr>
+      <td><strong>Create</strong></td>
+      <td>Refactor a manual pagination implementation to use <code class="language-plaintext highlighter-rouge">mito-pager</code> by simplifying model methods to return <code class="language-plaintext highlighter-rouge">(values items count)</code>, replacing complex multi-step controller calculations with <code class="language-plaintext highlighter-rouge">with-pager</code>, and delegating the pagination template partial to the library.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="github">Github</h2>
+
+<ul>
+  <li>The link for the custom pagination part of the tutorials code is available <a href="https://github.com/nmunro/ningle-tutorial-project/releases/tag/tutorial-14.2">here</a>.</li>
+</ul>
+
+<h3 id="common-lisp-hyperspec">Common Lisp HyperSpec</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Symbol</th>
+      <th>Type</th>
+      <th>Why it appears in this lesson</th>
+      <th>CLHS</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defpackage</code></td>
+      <td>Macro</td>
+      <td>Define project packages like <code class="language-plaintext highlighter-rouge">ningle-tutorial-project/models</code>, <code class="language-plaintext highlighter-rouge">/forms</code>, <code class="language-plaintext highlighter-rouge">/controllers</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defpac.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">in-package</code></td>
+      <td>Macro</td>
+      <td>Enter each package before defining models, controllers, and functions.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_in_pkg.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defgeneric</code></td>
+      <td>Macro</td>
+      <td>Define the simplified generic <code class="language-plaintext highlighter-rouge">posts</code> function signature with keyword parameters <code class="language-plaintext highlighter-rouge">offset</code> and <code class="language-plaintext highlighter-rouge">limit</code> (the <code class="language-plaintext highlighter-rouge">count</code> parameter is removed).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defgen.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">defmethod</code></td>
+      <td>Macro</td>
+      <td>Implement the simplified <code class="language-plaintext highlighter-rouge">posts</code> methods for <code class="language-plaintext highlighter-rouge">user</code> and <code class="language-plaintext highlighter-rouge">null</code> types (the <code class="language-plaintext highlighter-rouge">:around</code> validation method is removed).</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_defmet.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">flet</code></td>
+      <td>Special Operator</td>
+      <td>Define the local <code class="language-plaintext highlighter-rouge">get-posts</code> adapter function that wraps <code class="language-plaintext highlighter-rouge">posts</code> to match <code class="language-plaintext highlighter-rouge">mito-pager</code>'s expected <code class="language-plaintext highlighter-rouge">(lambda (limit offset) ...)</code> interface.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_flet_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_flet_.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">let*</code></td>
+      <td>Special Operator</td>
+      <td>Sequentially bind <code class="language-plaintext highlighter-rouge">user</code>, <code class="language-plaintext highlighter-rouge">req-page</code>, and <code class="language-plaintext highlighter-rouge">req-limit</code> in the controller where each value is used in subsequent bindings.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm">http://www.lispworks.com/documentation/HyperSpec/Body/s_let_l.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">or</code></td>
+      <td>Macro</td>
+      <td>Provide fallback values when parsing <code class="language-plaintext highlighter-rouge">page</code> and <code class="language-plaintext highlighter-rouge">limit</code> parameters, defaulting to 1 and 50 respectively.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_or.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_or.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">multiple-value-bind</code></td>
+      <td>Macro</td>
+      <td>Capture the SQL string and bind parameters returned by <code class="language-plaintext highlighter-rouge">sxql:yield</code> in the model methods.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/m_multip.htm">http://www.lispworks.com/documentation/HyperSpec/Body/m_multip.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">values</code></td>
+      <td>Function</td>
+      <td>Return two values from <code class="language-plaintext highlighter-rouge">posts</code> methods &mdash; the list of results and the total count &mdash; as required by <code class="language-plaintext highlighter-rouge">mito-pager:with-pager</code>.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/a_values.htm">http://www.lispworks.com/documentation/HyperSpec/Body/a_values.htm</a></td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">parse-integer</code></td>
+      <td>Function</td>
+      <td>Convert string query parameters (<code class="language-plaintext highlighter-rouge">"1"</code>, <code class="language-plaintext highlighter-rouge">"50"</code>) to integers, with <code class="language-plaintext highlighter-rouge">:junk-allowed t</code> for safe parsing.</td>
+      <td><a href="http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm">http://www.lispworks.com/documentation/HyperSpec/Body/f_parse_.htm</a></td>
+    </tr>
+  </tbody>
+</table>

@@ -1,0 +1,146 @@
+<p>
+When I'm writing a journal entry in French, I
+sometimes want to translate a phrase that I can't
+look up word by word using a dictionary.
+Instead of switching to a browser, I can use an
+Emacs function to prompt me for text and either
+insert or display the translation.
+The <a href="https://github.com/alphapapa/plz.el">plz</a> library makes HTTP requests slightly
+neater.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-french-en-to-fr</span> (text <span class="org-type">&amp;optional</span> display-only)
+  (<span class="org-keyword">interactive</span> (list (read-string <span class="org-string">"Text: "</span>) current-prefix-arg))
+  (<span class="org-keyword">let*</span> ((url <span class="org-string">"https://translation.googleapis.com/language/translate/v2"</span>)
+         (params <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"key"</span> . ,(getenv <span class="org-string">"GOOGLE_API_KEY"</span>))
+                   (<span class="org-string">"q"</span> . ,text)
+                   (<span class="org-string">"source"</span> . <span class="org-string">"en"</span>)
+                   (<span class="org-string">"target"</span> . <span class="org-string">"fr"</span>)
+                   (<span class="org-string">"format"</span> . <span class="org-string">"text"</span>)))
+         (query-string (mapconcat
+                        (<span class="org-keyword">lambda</span> (pair)
+                          (format <span class="org-string">"%s=%s"</span>
+                                  (url-hexify-string (car pair))
+                                  (url-hexify-string (cdr pair))))
+                        params
+                        <span class="org-string">"&amp;"</span>))
+         (full-url (concat url <span class="org-string">"?"</span> query-string)))
+    (<span class="org-keyword">let*</span> ((response (plz <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">get</span> full-url <span class="org-builtin">:as</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>))
+           (data (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">data</span> response))
+           (translations (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">translations</span> data))
+           (first-translation (car translations))
+           (translated-text (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">translatedText</span> first-translation)))
+      (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+        (<span class="org-keyword">if</span> display-only
+            (message <span class="org-string">"%s"</span> translated-text)
+          (insert translated-text)))
+      translated-text)))
+</code></pre>
+</div>
+
+
+<p>
+I think it would be even nicer if I could use speech synthesis, so I can keep it a little more separate from my typing thoughts. I want to be able to say "Okay, translate &hellip;" or "Okay, &hellip; in French" to get a translation. I've been using <a href="https://github.com/sachac/whisper.el/">my fork of natrys/whisper.el</a> for <a href="https://sachachua.com/topic/speech-recognition/">speech recognition</a> in English, and I like it a lot. By adding a function to <code>whisper-after-transcription-hook</code>, I can modify the intermediate results before they're inserted into the buffer.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-translate</span> ()
+  (goto-char (point-min))
+  (<span class="org-keyword">let</span> ((case-fold-search t))
+    (<span class="org-keyword">when</span> (re-search-forward <span class="org-string">"okay[,\\.]? translate[,\\.]? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string">okay[,\\.]? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+?</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string"> in French"</span> nil t)
+      (<span class="org-keyword">let*</span> ((s (<span class="org-keyword">or</span> (match-string 1) (match-string 2)))
+             (translation (<span class="org-keyword">save-match-data</span> (my-french-en-to-fr s))))
+        (replace-match
+         (propertize translation
+                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">type-hint</span> translation
+                     <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">help-echo</span> s))))))
+
+(<span class="org-keyword">with-eval-after-load</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper</span>
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">whisper-after-transcription-hook</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-whisper-translate</span> 70))
+</code></pre>
+</div>
+
+
+<p>
+But that's too easy. I want to actually type things myself so that I get more practice. Something like an autocomplete suggestion would be handy as a way of showing me a hint at the cursor. The usual completion-at-point functions are too eager to insert things if there's only one candidate, so we'll just fake it with an overlay. This code works only with my whisper.el fork because it supports using a list of functions for <code>whisper-insert-text-at-point</code>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-whisper-maybe-type-with-hints</span> (text)
+  <span class="org-doc">"Add this function to `</span><span class="org-doc"><span class="org-constant">whisper-insert-text-at-point</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">let</span> ((hint (<span class="org-keyword">and</span> text (org-find-text-property-in-string <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">type-hint</span> text))))
+    (<span class="org-keyword">if</span> hint
+        (<span class="org-keyword">progn</span>
+          (my-type-with-hint hint)
+          nil)
+      text)))
+
+(<span class="org-keyword">defvar-local</span> <span class="org-variable-name">my-practice-overlay</span> nil)
+(<span class="org-keyword">defvar-local</span> <span class="org-variable-name">my-practice-target</span> nil)
+(<span class="org-keyword">defvar-local</span> <span class="org-variable-name">my-practice-start</span> nil)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-practice-cleanup</span> ()
+  <span class="org-doc">"Remove the overlay and stop monitoring."</span>
+  (<span class="org-keyword">when</span> (overlayp my-practice-overlay)
+    (delete-overlay my-practice-overlay))
+  (<span class="org-keyword">setq</span> my-practice-overlay nil
+        my-practice-target nil
+        my-practice-start nil)
+  (remove-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">post-command-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-practice-monitor</span> t))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-practice-monitor</span> ()
+  <span class="org-doc">"Updates hint or cancels."</span>
+  (<span class="org-keyword">let*</span> ((pos (point))
+         (input (buffer-substring-no-properties my-practice-start pos))
+         (input-len (length input))
+         (target-len (length my-practice-target)))
+    (<span class="org-keyword">cond</span>
+     ((<span class="org-keyword">or</span> (&lt; pos my-practice-start)
+          (&gt; pos (+ my-practice-start target-len))
+          (string-match <span class="org-string">"[\n\t]"</span> input)
+          (string= input my-practice-target))
+      (my-practice-cleanup))
+     ((string-prefix-p (downcase input) (downcase my-practice-target))
+      (<span class="org-keyword">let</span> ((remaining (substring my-practice-target input-len)))
+        (move-overlay my-practice-overlay pos pos)
+        (overlay-put my-practice-overlay <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">after-string</span>
+                     (propertize remaining <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">shadow</span>))))
+     (t                                 <span class="org-comment-delimiter">; </span><span class="org-comment">typo</span>
+      (move-overlay my-practice-overlay pos pos)
+      (overlay-put my-practice-overlay <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">after-string</span>
+                   (propertize (substring my-practice-target input-len) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">error</span>))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-type-with-hint</span> (string)
+  <span class="org-doc">"Show hints for STRING."</span>
+  (<span class="org-keyword">interactive</span> <span class="org-string">"sString to practice: "</span>)
+  (my-practice-cleanup)
+  (<span class="org-keyword">setq-local</span> my-practice-target string)
+  (<span class="org-keyword">setq-local</span> my-practice-start (point))
+  (<span class="org-keyword">setq-local</span> my-practice-overlay (make-overlay (point) (point) nil t t))
+  (overlay-put my-practice-overlay <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">after-string</span> (propertize string <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">face</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">shadow</span>))
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">post-command-hook</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">my-practice-monitor</span> nil t))
+</code></pre>
+</div>
+
+
+<p>
+Here's a demonstration of me saying "Okay, this is a test, in French.":
+</p>
+
+<div class="media-post" id="orgb96826f">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2026/02/using-speech-recognition-for-on-the-fly-translations-in-emacs-and-faking-in-buffer-completion-for-the-results/2026-02-27-translate-and-type-with-hints.webm" type="video/webm"><a href="https://sachachua.com/blog/2026/02/using-speech-recognition-for-on-the-fly-translations-in-emacs-and-faking-in-buffer-completion-for-the-results/2026-02-27-translate-and-type-with-hints.webm">Download the video</a></video><figcaption><div>Screencast of using speech recognition to translate into French and provide a hint when typing</div></figcaption></figure>
+<p></p>
+
+</div>
+
+<p>
+Since we're faking in-buffer completion here, maybe we can still get away with considering this as an entry for <a href="https://sachachua.com/blog/2026/01/emacs-carnival-february-2026-completion/">Emacs Carnival February 2026: Completion</a> ? =)
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-using-speech-recognition-for-translations-in-emacs-and-faking-in-buffer-completion-for-the-results">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/02/using-speech-recognition-for-on-the-fly-translations-in-emacs-and-faking-in-buffer-completion-for-the-results/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F02%2Fusing-speech-recognition-for-on-the-fly-translations-in-emacs-and-faking-in-buffer-completion-for-the-results%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

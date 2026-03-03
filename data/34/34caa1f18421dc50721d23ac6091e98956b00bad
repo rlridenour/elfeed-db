@@ -1,0 +1,131 @@
+<p><a href="https://github.com/magnars/expand-region.el">expand-region</a> is one of my all
+time favorite Emacs packages. I’ve been using it since forever – press a key,
+the selection grows to the next semantic unit, press again, it grows further.
+Simple, useful, and satisfying. I’ve mentioned it
+quite a few times over the years, and it’s been a
+permanent fixture in my config for as long as I can remember.</p>
+
+<p>But lately I’ve been wondering if there’s a better way. I’ve been playing with
+Neovim and Helix from time to time (heresy, I know), and both have structural
+selection baked in via tree-sitter – select a node, expand to its parent, and so
+on. Meanwhile, I’ve been building and using more tree-sitter major modes in
+Emacs (e.g. <a href="https://github.com/clojure-emacs/clojure-ts-mode">clojure-ts-mode</a> and
+<a href="https://github.com/bbatsov/neocaml/">neocaml</a>), and the contrast started to
+bother me. We have this rich AST sitting right there in the buffer, but
+expand-region doesn’t know about it.</p>
+
+<p>The fundamental limitation is that expand-region relies on hand-written,
+mode-specific expansion functions for each language. Someone has to write and
+maintain <code class="language-plaintext highlighter-rouge">er/mark-ruby-block</code>, <code class="language-plaintext highlighter-rouge">er/mark-python-statement</code>, <code class="language-plaintext highlighter-rouge">er/mark-html-tag</code>,
+and so on. Some languages have great support, others get generic fallbacks. And
+when a new language comes along, you’re on your own until someone writes the
+expansion functions for it.</p>
+
+<!--more-->
+
+<h2 id="enter-tree-sitter">Enter Tree-sitter</h2>
+
+<p>You can probably see where this is going. Tree-sitter gives us a complete AST
+for any language that has a grammar, and walking up the AST from a point is
+<em>exactly</em> what semantic region expansion needs to do. Instead of hand-written
+heuristics per language, you just ask tree-sitter: “what’s the parent node?”</p>
+
+<p>Both Clojure and OCaml have rich, deeply nested syntax (s-expressions in
+Clojure, pattern matching and nested modules in OCaml), and semantic selection
+expansion is invaluable when navigating their code. Rolling my own tree-sitter
+based solution crossed my mind, but fortunately someone had already done it
+better.</p>
+
+<h2 id="expreg">expreg</h2>
+
+<p><a href="https://github.com/casouri/expreg">expreg</a> (short for “expand region”)<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup> is a
+package by Yuan Fu – the same person who implemented Emacs’s built-in
+tree-sitter support. Yuan Fu created expreg in mid-2023, shortly after the
+tree-sitter integration shipped in Emacs 29, and it landed on GNU ELPA soon after.
+It’s a natural extension of his tree-sitter work: if you’ve given Emacs a
+proper understanding of code structure, you might as well use it for selection
+too.</p>
+
+<p>The package requires Emacs 29.1+ and the setup is minimal:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">expreg</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:bind</span> <span class="p">((</span><span class="s">"C-="</span> <span class="o">.</span> <span class="nv">expreg-expand</span><span class="p">)</span>
+         <span class="p">(</span><span class="s">"C--"</span> <span class="o">.</span> <span class="nv">expreg-contract</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>That’s it. Two commands: <code class="language-plaintext highlighter-rouge">expreg-expand</code> and <code class="language-plaintext highlighter-rouge">expreg-contract</code>. If you’ve used
+expand-region, you already know the workflow.</p>
+
+<h2 id="what-makes-it-better-than-expand-region">What Makes It Better Than expand-region</h2>
+
+<p><strong>It works with any tree-sitter grammar automatically.</strong> No per-language
+configuration. If your buffer has a tree-sitter parser active, expreg walks the
+AST to generate expansion candidates. OCaml, Clojure, Rust, Go, Python, C –
+all covered with zero language-specific code.</p>
+
+<p><strong>It works without tree-sitter too.</strong> This is the key insight that makes expreg a
+true expand-region replacement rather than just a tree-sitter toy. When no
+tree-sitter parser is available, it falls back to Emacs’s built-in syntax tables
+for words, lists, strings, comments, and defuns. So it works in
+<code class="language-plaintext highlighter-rouge">fundamental-mode</code>, <code class="language-plaintext highlighter-rouge">text-mode</code>, config files, commit messages – everywhere.</p>
+
+<p><strong>It generates all candidate regions upfront.</strong> On the first call to
+<code class="language-plaintext highlighter-rouge">expreg-expand</code>, every expander function runs and produces a list of candidate
+regions. These are filtered, sorted by size, and deduplicated. Subsequent calls
+just pop the next region off the stack. This makes the behavior predictable and
+easy to debug – no more wondering why expand-region jumped to something
+unexpected.</p>
+
+<p><strong>It’s tiny.</strong> The entire package is a single file of a few hundred lines. Compare
+that to expand-region’s dozens of mode-specific files. Less code means fewer
+bugs and easier maintenance.</p>
+
+<h2 id="customization">Customization</h2>
+
+<p>The expander functions are controlled by <code class="language-plaintext highlighter-rouge">expreg-functions</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">expreg--subword</span>    <span class="c1">; CamelCase subwords (when subword-mode is active)</span>
+ <span class="nv">expreg--word</span>       <span class="c1">; words and symbols</span>
+ <span class="nv">expreg--list</span>       <span class="c1">; parenthesized expressions</span>
+ <span class="nv">expreg--string</span>     <span class="c1">; string literals</span>
+ <span class="nv">expreg--treesit</span>    <span class="c1">; tree-sitter nodes</span>
+ <span class="nv">expreg--comment</span>    <span class="c1">; comments</span>
+ <span class="nv">expreg--paragraph-defun</span><span class="p">)</span> <span class="c1">; paragraphs and function definitions</span>
+</code></pre></div></div>
+
+<p>There’s also <code class="language-plaintext highlighter-rouge">expreg--sentence</code> available but not enabled by default – useful
+for prose:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'text-mode-hook</span>
+          <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+            <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'expreg-functions</span> <span class="nf">#'</span><span class="nv">expreg--sentence</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<h2 id="should-you-switch">Should You Switch?</h2>
+
+<p>If you’re using tree-sitter based major modes (and in 2026, you probably should
+be), <code class="language-plaintext highlighter-rouge">expreg</code> gives you better, language-aware expansion for free. If you’re still
+on classic major modes, it’s at least as good as <code class="language-plaintext highlighter-rouge">expand-region</code> thanks to the
+syntax-table fallbacks.</p>
+
+<p>The only reason to stick with expand-region is if you rely on some very specific
+mode-specific expansion behavior that expand-region’s hand-written functions
+handle and expreg’s generic approach doesn’t. In practice, I haven’t hit such a
+case.</p>
+
+<p>I’ve been using expreg for a while now across Clojure, OCaml, Emacs Lisp, and
+various non-programming buffers. It just works. It’s one of those small
+packages that quietly improves your daily editing without demanding attention.
+And like tree-sitter powered <a href="/blog/2025/06/03/tree-sitter-powered-code-completion/">code completion</a>, it’s another example of how
+tree-sitter is reshaping what Emacs packages can do with minimal effort.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Naming is hard. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

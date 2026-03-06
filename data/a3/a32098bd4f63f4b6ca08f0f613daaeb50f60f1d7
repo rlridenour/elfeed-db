@@ -1,0 +1,713 @@
+
+<p class="wp-block-paragraph">When the enterprise behind one of the widespread hypervisors was acquired:<br>many sysadmins decided to move on.<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Most of them chose a <strong>Linux-based open-source</strong> alternative.</li>
+
+
+
+<li>Many of them migrated to the <strong>Microsoft ecosystem</strong>.</li>
+
+
+
+<li>They chased the <em>same workflow</em>, the <em>same features</em> they had before.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Only a very few operators dared to <strong>rework their processes and architecture</strong>.<br></p>
+
+
+
+<p class="wp-block-paragraph"><strong>KVM</strong> (<em>Kernel-based Virtual Machines</em>) is part of the Linux kernel.<br>It is a stable and fast hypervisor.<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>A carefully configured host OS for KVM can reduce the attack surface compared to feature-heavy hypervisors.</li>
+
+
+
+<li>The <code>libvirt</code> API enables secure automation and configuration management.</li>
+
+
+
+<li>KVM can host Linux, Windows and BSD virtual machines as well.</li>
+
+
+
+<li>It ships an ecosystem of mature tools for the operators in charge.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">KVM is not a downgrade. It&#8217;s a sideways step.<br></p>
+
+
+
+<span id="more-8789"></span>
+
+
+
+<h3 class="wp-block-heading">Install On Debian Linux</h3>
+
+
+
+<p class="wp-block-paragraph">The KVM hypervisor can run on nearly all Linux distributions.<br>The process to prepare the system and install it is similar across them.<br></p>
+
+
+
+<p class="wp-block-paragraph"><em>Check the documentation of your distribution for the differences.</em><br></p>
+
+
+
+<h4 class="wp-block-heading">Pre-Checks</h4>
+
+
+
+<ul class="wp-block-list">
+<li>In the BIOS/EFI verify that the virtualization is supported <strong>and enabled</strong>.</li>
+
+
+
+<li>Verify that your CPU has virtualization capabilities.<br>lscpu |grep -i virtualization</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Installation</h4>
+
+
+
+<p class="wp-block-paragraph">KVM is part of the Linux kernel, the necessary modules can be installed directly from the Debian repository.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo apt install -y qemu-kvm qemu-utils libvirt-daemon-system \
+     libvirt-clients virtinst
+</pre></div>
+
+
+<h4 class="wp-block-heading">Post-Checks</h4>
+
+
+
+<p class="wp-block-paragraph">After the installation the <code>libvirtd</code> is enabled and it is running:</p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+systemctl status libvirtd
+</pre></div>
+
+
+<p class="wp-block-paragraph">Verify if every tool was installed perfectly.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+qemu-system-x86_64 --version
+virsh --version
+lsmod |grep kvm
+</pre></div>
+
+
+<h3 class="wp-block-heading">Configure The System</h3>
+
+
+
+<p class="wp-block-paragraph">To manage KVM with <strong>non-root</strong> users they must be a member of the <code>libvirt</code> group.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo usermod -aG libvirt $USER
+</pre></div>
+
+
+<p class="wp-block-paragraph">Configure the default libvirt system resource for the users.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+echo "export LIBVIRT_DEFAULT_URI='qemu:///system'" &gt;&gt; $HOME/.bashrc
+source .bashrc
+</pre></div>
+
+
+<p class="wp-block-paragraph">The default network will allow the virtual machines to connect to the internet <strong>from behind a NAT</strong>.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo virsh net-list
+sudo virsh net-start default
+sudo virsh net-autostart default
+</pre></div>
+
+
+<p class="wp-block-paragraph">NAT is great for isolated virtual machines.<br></p>
+
+
+
+<p class="wp-block-paragraph">If you want to reach the VMs via SSH, or allow them to use LAN resources, you need a <strong>network bridge</strong>.<br></p>
+
+
+
+<h4 class="wp-block-heading">Bridge Network</h4>
+
+
+
+<ul class="wp-block-list">
+<li>Creating a bridge network allows the virtual machines to connect directly to the LAN.</li>
+
+
+
+<li>The VMs will be reachable on the local network.</li>
+
+
+
+<li>They can use the resources on the LAN.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">This example assumes <code>ifupdown</code> is in use.<br></p>
+
+
+
+<p class="wp-block-paragraph">The bridge-utils package provides the legacy brctl tool for managing bridges.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo apt install bridge-utils
+</pre></div>
+
+
+<p class="wp-block-paragraph">Create the bridge interface:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo brctl addbr bridge0
+</pre></div>
+
+
+<p class="wp-block-paragraph">For persistent configuration add its config to <code>/etc/network/interfaces</code>:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+auto lo
+iface lo inet loopback
+
+auto &lt;your physical NIC interface&gt;
+iface &lt;your physical NIC interface&gt; inet manual
+
+auto bridge0
+iface bridge0 inet static
+    address &lt;your IP&gt;
+    netmask &lt;your netmask&gt;
+    gateway &lt;your gateway&gt;
+    bridge_ports &lt;your physical NIC interface&gt;
+    bridge_stp off
+    bridge_fd 0
+    bridge_maxwait 0
+</pre></div>
+
+
+<p class="wp-block-paragraph">Be careful when modifying remote servers &#8211; you can lock yourself out.<br></p>
+
+
+
+<p class="wp-block-paragraph">After modifying <code>/etc/network/interfaces</code>, restart networking or reboot the host.<br></p>
+
+
+
+<h3 class="wp-block-heading">Storage Pools</h3>
+
+
+
+<p class="wp-block-paragraph">The <strong>default</strong> storage pool for KVM is in <code>/var/lib/libvirt/images</code>.<br>When you prepare the architecture, it is recommended to mount it separately from a <strong>dedicated</strong> filesystem.<br></p>
+
+
+
+<p class="wp-block-paragraph">The <code>virsh</code> command is the cockpit of the KVM operator.<br>You can administer the storage pools with it.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh pool-list --all
+virsh pool-info default
+</pre></div>
+
+
+<h3 class="wp-block-heading">Virtual Image Formats</h3>
+
+
+
+<p class="wp-block-paragraph">KVM supports multiple image formats.<br></p>
+
+
+
+<p class="wp-block-paragraph">Most SMBs use either the <code>raw</code> or <code>qcow2</code>.<br></p>
+
+
+
+<h4 class="wp-block-heading">Raw</h4>
+
+
+
+<ul class="wp-block-list">
+<li><code>raw</code> is a fast and reliable image format.</li>
+
+
+
+<li>It is just a storage container &#8211; there is no metadata or snapshot functionality.</li>
+
+
+
+<li>For snapshots LVM or other tools are recommended.</li>
+
+
+
+<li>The images use their entire size on the disk (no thin-provisioning).</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Qcow2</h4>
+
+
+
+<ul class="wp-block-list">
+<li><code>qcow2</code> is an enterprise ready image format as well.</li>
+
+
+
+<li><code>qcow2</code> introduces a small performance overhead compared to <code>raw</code>.</li>
+
+
+
+<li>The <code>qcow2</code> <strong>supports</strong> internal and external snapshotting.</li>
+
+
+
+<li>The images are thin-provisioned.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">For heavy IO virtual machines <code>raw</code> format is recommended (e.g. database servers).<br>If the virtual machine is a general server the <code>qcow2</code> format is adequate.<br></p>
+
+
+
+<h3 class="wp-block-heading">Install Virtual Machines</h3>
+
+
+
+<p class="wp-block-paragraph"><code>virt-install</code> is the operator&#8217;s main tool to install virtual machines.<br></p>
+
+
+
+<p class="wp-block-paragraph">The most basic installation is parameterized like this:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virt-install \
+  --name debian-image \
+  --memory 4096 \
+  --vcpus 4 \
+  --disk size=20,path=/var/lib/libvirt/images/debian-image.qcow2,format=qcow2 \
+  --cdrom /var/lib/libvirt/images/debian-13.3.0-amd64-netinst.iso \
+  --os-variant debian13 \
+  --network bridge=bridge0 \
+  --graphics spice
+
+</pre></div>
+
+
+<p class="wp-block-paragraph">The <code>/var/lib/libvirt/images/debian-13.3.0-amd64-netinst.iso</code> must be downloaded in advance.<br></p>
+
+
+
+<h3 class="wp-block-heading">Clone Virtual Machines</h3>
+
+
+
+<p class="wp-block-paragraph">The <code>virt-clone</code> tool can clone existing virtual machines.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virt-clone \
+    --original debian-image \
+    --name debian-clone \
+    --file /var/lib/libvirt/images/debian-clone.qcow2
+
+</pre></div>
+
+
+<h3 class="wp-block-heading">Basic Virtual Machine Operations</h3>
+
+
+
+<p class="wp-block-paragraph">The cockpit of the operator is the <code>virsh</code> for the basic administration.<br></p>
+
+
+
+<h4 class="wp-block-heading">Start</h4>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh start debian-clone
+
+</pre></div>
+
+
+<h4 class="wp-block-heading">Shutdown</h4>
+
+
+
+<p class="wp-block-paragraph">If the <code>qemu-ga</code> is running, the command shuts down the virtual machine gracefully.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh shutdown debian-clone
+</pre></div>
+
+
+<h4 class="wp-block-heading">Destroy</h4>
+
+
+
+<p class="wp-block-paragraph">Destroying a virtual machine powers it off without graceful shutdown.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh destroy debian-clone
+</pre></div>
+
+
+<h4 class="wp-block-heading">List</h4>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh list &#91;--all | --autostart | --with-snapshot | --without-snapshot ]
+</pre></div>
+
+
+<h4 class="wp-block-heading">Autostart</h4>
+
+
+
+<p class="wp-block-paragraph">If you want a virtual machine to start at the host boot, then <code>autostart</code> it.<br></p>
+
+
+
+<pre class="wp-block-preformatted">virsh autostart debian-clone
+</pre>
+
+
+
+<h4 class="wp-block-heading">Undefine</h4>
+
+
+
+<p class="wp-block-paragraph">Undefining a virtual machine removes it from the system, and optionally removes its disks.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh undefine debian-clone &#91;--remove-all-storage]
+</pre></div>
+
+
+<h3 class="wp-block-heading">Resize Virtual Machines</h3>
+
+
+
+<p class="wp-block-paragraph">One image doesn&#8217;t fit for all purposes.<br>The operators have to reconfigure the virtual machine after cloning the image.<br></p>
+
+
+
+<p class="wp-block-paragraph">The <code>qemu-img</code> tool can resize disk images that don&#8217;t contain snapshots.<br></p>
+
+
+
+<p class="wp-block-paragraph">Shrinking disk images is not safe without careful partition and filesystem reduction first.<br></p>
+
+
+
+<p class="wp-block-paragraph">To increase the size by 10G:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo qemu-img resize /var/lib/libvirt/images/debian-image.qcow2 +10G
+</pre></div>
+
+
+<p class="wp-block-paragraph">To set a new disk size:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo qemu-img resize /var/lib/libvirt/images/debian-image.qcow2 60G
+</pre></div>
+
+
+<p class="wp-block-paragraph">Running virtual machines can be resized with the <code>virsh</code> tool:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+sudo virsh blockresize debian-image /var/lib/libvirt/images/debian-image.qcow2 60G
+</pre></div>
+
+
+<p class="wp-block-paragraph">Don&#8217;t forget to <strong>expand the partitions</strong> and the <strong>filesystem</strong> after these operations.<br></p>
+
+
+
+<h3 class="wp-block-heading">Take Snapshots</h3>
+
+
+
+<p class="wp-block-paragraph">Virtual machines with <code>qcow2</code> storage support internal and external snapshots.<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Internal snapshots created inside the <code>qcow2</code> image.</li>
+
+
+
+<li>External snapshots generate an additional <code>qcow2</code> file.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Create an external disk snapshot:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-create-as debian-clone clean-state --description "Clean state snapshot" --disk-only
+</pre></div>
+
+
+<p class="wp-block-paragraph">Create an internal snapshot:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-create-as debian-clone clean-state --description "Clean state snapshot" --atomic
+</pre></div>
+
+
+<p class="wp-block-paragraph">List:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-list debian-clone
+</pre></div>
+
+
+<p class="wp-block-paragraph">Info:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-info debian-clone clean-state
+</pre></div>
+
+
+<p class="wp-block-paragraph">Revert:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-revert debian-clone clean-state
+</pre></div>
+
+
+<p class="wp-block-paragraph">Delete:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh snapshot-delete debian-clone clean-state
+</pre></div>
+
+
+<h3 class="wp-block-heading">Backup Strategy</h3>
+
+
+
+<p class="wp-block-paragraph">Snapshots are <strong>not</strong> backups.<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Internal <code>qcow2</code> snapshots increase image complexity.</li>
+
+
+
+<li>External snapshots depend on a chain of files.</li>
+
+
+
+<li>A corrupted base image breaks all dependent snapshots.</li>
+
+
+
+<li>Snapshots live on the same storage pool by default.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">They are recovery points.<br>They are not disaster recovery.<br></p>
+
+
+
+<h4 class="wp-block-heading">What Must Be Backed Up</h4>
+
+
+
+<p class="wp-block-paragraph">A KVM virtual machine consists of:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>The disk image (e.g. <code>/var/lib/libvirt/images/debian-image.qcow2</code>)</li>
+
+
+
+<li>The VM definition (libvirt XML configuration)</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Export the VM definition:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh dumpxml debian-image &gt; debian-image.xml
+</pre></div>
+
+
+<p class="wp-block-paragraph">Store it with your backups.<br></p>
+
+
+
+<h4 class="wp-block-heading">Cold Backup (Recommended For Simplicity)</h4>
+
+
+
+<p class="wp-block-paragraph">The safest method:<br></p>
+
+
+
+<ol class="wp-block-list">
+<li>Shut down the virtual machine.</li>
+
+
+
+<li>Copy the disk image.</li>
+
+
+
+<li>Backup the XML definition.</li>
+</ol>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+virsh shutdown debian-image
+cp /var/lib/libvirt/images/debian-image.qcow2 /backup/location/
+</pre></div>
+
+
+<p class="wp-block-paragraph">Simple. Predictable. Restorable.<br></p>
+
+
+
+<h4 class="wp-block-heading">Hot Backup (Advanced)</h4>
+
+
+
+<p class="wp-block-paragraph">For running production systems:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Use storage-level snapshots (LVM, ZFS, Ceph, SAN).</li>
+
+
+
+<li>Or create an external snapshot, back up the base image, then merge.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Hot backups require planning and testing.<br></p>
+
+
+
+<h4 class="wp-block-heading">Restore Procedure</h4>
+
+
+
+<p class="wp-block-paragraph">A backup is valid only if it can be restored.<br></p>
+
+
+
+<p class="wp-block-paragraph">To restore:<br></p>
+
+
+
+<pre class="wp-block-preformatted">virsh define debian-image.xml
+virsh start debian-image
+</pre>
+
+
+
+<p class="wp-block-paragraph">Test restore procedures regularly.<br></p>
+
+
+
+<h4 class="wp-block-heading">Operator Rule</h4>
+
+
+
+<ul class="wp-block-list">
+<li>Never rely on <code>qcow2</code> internal snapshots as backups.</li>
+
+
+
+<li>Never keep backups on the same filesystem as the storage pool.</li>
+
+
+
+<li>Always test restore workflows.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">If you cannot restore it, you do not have a backup.<br></p>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">KVM is not a product you adopt.<br>It is a system you operate.<br></p>
+
+
+
+<p class="wp-block-paragraph">It will not protect you from poor architecture.<br>It will not fix weak processes.<br>It will not replace operational discipline.<br></p>
+
+
+
+<p class="wp-block-paragraph">But if you design carefully,<br>automate deliberately,<br>and back up responsibly,<br></p>
+
+
+
+<p class="wp-block-paragraph">it will run for years without asking for attention.<br></p>
+
+
+
+<p class="wp-block-paragraph">The difference is not the hypervisor.<br></p>
+
+
+
+<p class="wp-block-paragraph">It is the operator behind it.</p>
+
+
+
+<p class="wp-block-paragraph"></p>

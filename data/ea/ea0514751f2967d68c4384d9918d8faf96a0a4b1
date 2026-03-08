@@ -1,0 +1,90 @@
+ 
+          <p>As you no doubt know by now, we Emacs users have the <em>Teenage Mutant Ninja Power</em>. Expert usage of a <em>Heroes in a Hard Shell</em> is no exception. Pizza Time!</p>
+<p>All silliness aside, the plethora of options available to the Emacs user when it comes to executing shell commands in &ldquo;terminals&rdquo;&mdash;real or fake&mdash;can be overwhelming. There&rsquo;s <code>shell</code>, <code>eshell</code>, <code>comint</code>, <code>term</code>, <code>ansi-term</code>, and then third party packages further expand this with <code>eat</code>, <code>vterm</code>, &hellip; The most interesting shell by far is the one that&rsquo;s not a shell but a Lisp REPL that looks like a shell: <strong>Eshell</strong>. That&rsquo;s the one I would like to focus one now.</p>
+<p>But first: why would you want to pull in your <code>$TERM</code> work inside Emacs? The more you get used to it, the easier it will be to answer this: because all your favourite text selection, manipulation, &hellip; shortcuts will be available to you. Remember how stupendously difficult it is to just shift-select and yank/copy/whatever you want to call it text in your average terminal emulator? That&rsquo;s why. In Emacs, I can move around the point in that shell buffer however I want. I can search inside that buffer&mdash;since everything is just text&mdash;however I want. Even the easiest solution, just firing off your vanilla <code>shell</code>, that in my case runs Zsh, will net you most of these benefits.</p>
+<p>And then there&rsquo;s Eshell: the Lisp-powered shell that&rsquo;s not really a shell but does a really good job in pretending it is. With Eshell you can interact with everything else you&rsquo;ve got up and running inside Emacs. Want to dump the output to a buffer at point? <code>./command.sh &gt;&gt;&gt; #&lt;mybuffer&gt;</code>. Want to see what&rsquo;s hooked into LSP mode? <code>echo $lsp-mode-hook</code>. Want to create your own commands? <code>(defun eshell/mycmd(arg))</code> and then just <code>mycmd dir/somefile</code>. Eshell makes it possible to mix Elisp and your typical Bash-like syntax.</p>
+<p>The only problem is that Eshell isn&rsquo;t a true terminal emulator and doesn&rsquo;t support full-screen terminal programs and fancy TTY stuff. That&rsquo;s where <a href="https://codeberg.org/akib/emacs-eat">Eat: Emulate A Terminal</a> comes in. The Eat minor mode is compatible with Eshell: as soon as you execute a command-line program, it takes over. There are four input modes available to you for sending text to the terminal in case your Emacs shortcuts clash with those of the program. It solves all my problems: long-running processes like <code>bun run vitest</code> work; interactive programs like <a href="https://github.com/dundee/gdu/">gdu</a> and <code>composer create-project</code> work, &hellip;</p>
+<hr>
+<p>Yet the default Eshell mode is a bit bare-bones, so obviously I pimped the hell out of it. Here&rsquo;s a short summary of what my <a href="https://codeberg.org/wouterg/bakemacs">Bakemacs shelling.el config</a> alters:</p>
+<ul>
+<li>Customize <code>eshell-banner-message</code> at startup</li>
+<li>Integrate <code>consult-history</code>: <code>M-r</code> replaces the default &ldquo;i-search backward&rdquo;. This is a gigantic improvement as Consult lets me quickly <em>and</em> visually finetune my search through all previous commands. These are also saved on exit (increase <code>eshell-history-size</code> while you&rsquo;re at it).</li>
+<li>Improve <code>C-g</code> to immediately kill a process or deactivate the mark.</li>
+<li>The big one: replace <code>pcomplete</code> with a custom completion-at-point system (see below).</li>
+<li>When typing a path like <code>cd dir1/dir2</code>, backspace kills the entire last <code>/dir2</code> directory instead of just a single character. This works just like <code>find-file</code> now and speeds up my path commands by a lot.</li>
+<li>Bind a shortcut to a convenient function that sends input to Eshell &amp; executes it.</li>
+<li>Change the prompt into a simple <code>$ </code> to more easily copy-paste things in and out of that buffer. This integrates with <code>consult-outline</code> meaning I can very easily jump back to a previous command and its output!</li>
+<li>Move most of the prompt info to the modeline such as the working directory and optional Git information.</li>
+<li>Make <code>ls</code> sort by directories first to align it with my Dired change: <code>--group-directories-first</code> doesn&rsquo;t work as <code>eshell/ls</code> is an Elisp function.</li>
+<li>Bind a shortcut to a convenient pop-to-eshell buffer &amp; new-eshell-tab function that takes the current perspective into account.</li>
+<li>Make <code>cat</code> font-lock so it outputs with syntax highlighting.</li>
+<li>Create a <code>bcd</code> command: <code>bcd &lt;#somebuf&gt;</code> does a <code>cd</code> into the directory of that buffer&rsquo;s contents.</li>
+<li>Create a <code>rcd</code> command: stay on the current Tramp host but go to an absolute path. Using <code>cd /</code> will always navigate to your local HDD root so <code>rcd /</code> is the same as <code>cd /</code> if you&rsquo;re used to <code>ssh</code> instead of Emacs&rsquo;s Tramp.</li>
+<li>Give Eshell dedicated space on the top as a side window to quickly call and dismiss with <code>(window-toggle-side-windows)</code>.</li>
+<li>Customise more shortcuts to help with navigation. UP and DOWN (or <code>C-p</code>/<code>C-n</code>) just move the point, even at the last line, which never works in a conventional terminal. <code>M-p</code> and <code>M-n</code> cycle through command history.</li>
+<li>Customise more aliases of which the handy ones are:
+<ul>
+<li><code>alias ff view-file $1</code> &amp; <code>alias fe find-file $1</code></li>
+<li><code>alias cls clear 1</code></li>
+<li><code>alias l ls -lah</code></li>
+<li><code>alias d dired $1</code></li>
+<li><code>alias f fd --color=always $*</code></li>
+</ul>
+</li>
+</ul>
+<p>Here&rsquo;s a short video demonstrating some of these features:</p>
+<figure class="video-mask">
+  <video width="100%" controls preload="metadata" aria-label="Eshell with an autocomplete window on top, the Markdown source of this blog post on bottom. Note the custom modeline info on top displaying the working directory.">
+	<source src="/post/2026/03/a-note-on-shelling-in-emacs/eshell.mp4" type="video/mp4">
+	Your browser does not support HTML video. Here's a link to the MP4-encoded video instead: <a href="/post/2026/03/a-note-on-shelling-in-emacs/eshell.mp4">/post/2026/03/a-note-on-shelling-in-emacs/eshell.mp4</a>.
+  </video>
+  <figcaption>
+    Eshell with an autocomplete window on top, the Markdown source of this blog post on bottom. Note the custom modeline info on top displaying the working directory.
+  </figcaption>
+</figure>
+
+<p>The reason for ditching <code>pcomplete</code> is simple: it&rsquo;s extremely slow over Tramp. Just pressing TAB while working on a remote machine takes six seconds to load a simple directory structure of a few files, what&rsquo;s up with that? I&rsquo;ve been profiling my Tramp connections and connecting to the local NAS over SSH is very slow because apparently <code>pcomplete</code> can&rsquo;t do a single <code>ls</code> and process that info into an autocomplete pop-up.</p>
+<p>Yet I wanted to keep my Corfu/Cape behaviour that I&rsquo;m used to working in other buffers so I created my own completion-at-point-function that dispatches smartly to other internals:</p>
+<ul>
+<li>If the point is at command and &hellip;
+<ul>
+<li>it&rsquo;s a path: direct to <code>cape-file</code>.</li>
+<li>it&rsquo;s a local dir cmd: wrap <code>cape-file</code> to filter on dirs only. Cape is dumb and by default also returns files.</li>
+<li>it&rsquo;s an elisp func starting with <code>(</code>: complete that with <code>elisp-completion-at-point</code>.</li>
+<li>else it&rsquo;s a shell command. These are now cached by expanding all folders from <code>$PATH</code> with a fast Perl command.</li>
+</ul>
+</li>
+<li>If the point is at the argument and &hellip;
+<ul>
+<li>it&rsquo;s a variable starting with <code>$</code>: create a super CAPF to lisp <em>both</em> Elisp and <code>$ENV</code> vars (also cached)!</li>
+<li>it&rsquo;s a buffer or process starting with <code>#&lt;</code>: fine, here <code>pcomplete</code>, can you handle this? Are you sure?</li>
+<li>it&rsquo;s a remote dir cmd (e.g. <code>/protocol:</code>): <code>pcomplete</code>.</li>
+<li>it&rsquo;s (still) a local dir cmd: see above.</li>
+<li>In all other cases, it&rsquo;s probably a file argument: fall back to just <code>cape-file</code>.</li>
+</ul>
+</li>
+</ul>
+<p>I&rsquo;m sure there are holes in this logic but so far it&rsquo;s been working quite well for me. Cape is very fast as is my own shell command/variable cache. The added bonus is having access to nerd icons. I used <code>:annotation-function</code> to distinguish Elisp vars from external shell vars in case you&rsquo;re completing <code>$</code> as there are only a handful shell variables and a huge number of Elisp ones.</p>
+<p>I also learned the hard way that you should cache stuff listed in your modeline as this gets continuously redrawn when scrolling through your buffer:</p>
+<div class="highlight"><pre tabindex="0" style="color:#d8dee9;background-color:#2e3440;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>  <span style="color:#eceff4">(</span>doom-modeline-def-segment bb/doom-modeline-pwd-segment <span style="color:#eceff4">()</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#a3be8c">&#34;The cached modeline segment of bb/doom-modeline-pwd&#34;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#eceff4">(</span><span style="color:#81a1c1">unless</span> <span style="color:#eceff4">(</span>string= bb/doom-modeline--pwd-cache-dir default-directory<span style="color:#eceff4">)</span>
+</span></span><span style="display:flex;"><span>      <span style="color:#eceff4">(</span>bb/doom-modeline-pwd-update<span style="color:#eceff4">))</span>
+</span></span><span style="display:flex;"><span>    bb/doom-modeline--pwd-cache-out<span style="color:#eceff4">)</span>
+</span></span></code></pre></div><p>The details can be found in <code>theme.el</code>&mdash;just to be on the safe side, I disabled Git/project specific stuff in case <code>file-remote-p</code> is <code>t</code> to avoid more Tramp snailness.</p>
+<p>The last cool addition: make use of Emacs&rsquo;s new <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Symbol-Completion.html">Completion Preview mode</a>&mdash;but only for recent commands. That means I temporarily remap <code>completion-at-point-functions</code> as soon as TAB is pressed. Otherwise, the preview might also show things that I don&rsquo;t really want. The video showcases this as well.</p>
+<p>Happy (e)sheling!</p>
+
+
+          
+          <p>
+            Related topics: /
+                  <a href="https://brainbaking.com/tags/emacs">emacs</a> /</span>
+          </p>
+          
+          <p>
+            By <a href="/about">Wouter Groeneveld</a> on 8 March 2026.&nbsp;
+            <a href="mailto:hifromrss@brainbaking.com?subject=Re: A%20Note%20On%20Shelling%20In%20Emacs">Reply via email</a>.
+          </p>
+          
+      

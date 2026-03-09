@@ -1,0 +1,393 @@
+<p>I recently wrote about
+<a href="https://batsov.com/articles/2026/02/27/building-emacs-major-modes-with-treesitter-lessons-learned/">building major modes with Tree-sitter</a>
+over on <a href="https://batsov.com">batsov.com</a>, covering the mode author’s perspective. But what about the
+<em>user’s</em> perspective? If you’re using a Tree-sitter-powered major mode, how do
+you actually customize the highlighting?</p>
+
+<p>This is another article in a recent streak inspired by my work on
+<a href="https://github.com/bbatsov/neocaml">neocaml</a>,
+<a href="https://github.com/clojure-emacs/clojure-ts-mode">clojure-ts-mode</a>, and
+<a href="https://github.com/bbatsov/asciidoc-mode">asciidoc-mode</a>. Building three
+Tree-sitter modes across very different languages has given me a good feel for
+both sides of the font-lock equation – and I keep running into users who are
+puzzled by how different the new system is from the old regex-based world.</p>
+
+<p>This post covers what changed, what you can control, and how to make Tree-sitter
+font-lock work exactly the way you want.</p>
+
+<h2 id="the-old-world-regex-font-lock">The Old World: Regex Font-Lock</h2>
+
+<p>Traditional font-lock in Emacs actually has two phases. First, <em>syntactic
+fontification</em> handles comments and strings using the buffer’s syntax table and
+<code class="language-plaintext highlighter-rouge">parse-partial-sexp</code> (implemented in C) – this isn’t regexp-based at all.
+Second, <em>keyword fontification</em> runs the regexps in <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> against
+the buffer text to highlight everything else: language keywords, types, function
+names, and so on. When people talk about “regex font-lock,” they usually mean
+this second phase, which is where most of the mode-specific highlighting lives
+and where most of the customization happens.</p>
+
+<p>If you wanted to customize it, you’d manipulate <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> directly:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Add a custom highlighting rule in the old world</span>
+<span class="p">(</span><span class="nv">font-lock-add-keywords</span> <span class="ss">'emacs-lisp-mode</span>
+  <span class="o">'</span><span class="p">((</span><span class="s">"\\&lt;\\(FIXME\\|TODO\\)\\&gt;"</span> <span class="mi">1</span> <span class="ss">'font-lock-warning-face</span> <span class="nv">prepend</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The downsides are well-known: regexps can’t understand nesting, they break on
+multi-line constructs, and getting them right for a real programming language is
+a never-ending battle of edge cases.</p>
+
+<h2 id="the-new-world-tree-sitter-font-lock">The New World: Tree-sitter Font-Lock</h2>
+
+<p>Tree-sitter font-lock is fundamentally different. Instead of matching text with
+regexps, it queries the <em>syntax tree</em>. A major mode defines
+<code class="language-plaintext highlighter-rouge">treesit-font-lock-settings</code> – a list of Tree-sitter queries paired with faces.
+Each query pattern matches node types in the parse tree, not text patterns.</p>
+
+<p>This means highlighting is structurally correct by definition. A string is
+highlighted as a string because the parser identified it as a string node, not
+because a regexp happened to match quote characters. If the code has a syntax
+error, the parser still produces a (partial) tree, and highlighting degrades
+gracefully instead of going haywire.</p>
+
+<p>There’s also a significant performance difference. With regex font-lock, every
+regexp in <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> runs against every line in the visible region on
+each update – more rules means linearly more work, and a complex major mode can
+easily have dozens of regexps. Poorly written patterns with nested quantifiers
+can trigger catastrophic backtracking, causing visible hangs on certain inputs.
+Multi-line font-lock (via <code class="language-plaintext highlighter-rouge">font-lock-multiline</code> or <code class="language-plaintext highlighter-rouge">jit-lock-contextually</code>)
+makes things worse, requiring re-scanning of larger regions that’s both expensive
+and fragile. Tree-sitter sidesteps all of this: after the initial parse, edits
+only re-parse the changed portion of the syntax tree, and font-lock queries run
+against the already-built tree rather than scanning raw text. The result is
+highlighting that scales much better with buffer size and rule complexity.</p>
+
+<p>The trade-off is that customization works differently. You can’t just add a
+regexp to a list anymore. But the new system offers its own kind of flexibility,
+and in many ways it’s more powerful.</p>
+
+<p><strong>Note:</strong> The Emacs manual covers Tree-sitter font-lock in the
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Parser_002dbased-Font-Lock.html">Parser-based Font Lock</a>
+section. For the full picture of Tree-sitter integration in Emacs, see
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Parsing-Program-Source.html">Parsing Program Source</a>.</p>
+
+<h2 id="feature-levels-the-coarse-knob">Feature Levels: The Coarse Knob</h2>
+
+<p>Every Tree-sitter major mode organizes its font-lock rules into <em>features</em> –
+named groups of related highlighting rules. Features are then arranged into 4
+levels, from minimal to maximal. The Emacs manual recommends the following
+conventions for what goes into each level:</p>
+
+<ul>
+  <li><strong>Level 1:</strong> The absolute minimum – typically <code class="language-plaintext highlighter-rouge">comment</code> and <code class="language-plaintext highlighter-rouge">definition</code></li>
+  <li><strong>Level 2:</strong> Key language constructs – <code class="language-plaintext highlighter-rouge">keyword</code>, <code class="language-plaintext highlighter-rouge">string</code>, <code class="language-plaintext highlighter-rouge">type</code></li>
+  <li><strong>Level 3:</strong> Everything that can be reasonably fontified (this is the default level)</li>
+  <li><strong>Level 4:</strong> Marginally useful highlighting – things like <code class="language-plaintext highlighter-rouge">bracket</code>, <code class="language-plaintext highlighter-rouge">delimiter</code>, <code class="language-plaintext highlighter-rouge">operator</code></li>
+</ul>
+
+<p>In practice, many modes don’t follow these conventions precisely. Some put
+<code class="language-plaintext highlighter-rouge">number</code> at level 2, others at level 3. Some include <code class="language-plaintext highlighter-rouge">variable</code> at level 1,
+others at level 4. The inconsistency across modes means that setting
+<code class="language-plaintext highlighter-rouge">treesit-font-lock-level</code> to the same number in different modes can give you
+quite different results – which is one more reason you might want the
+fine-grained control described in the next section.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<p>It’s also worth noting that the feature names themselves are not standardized.
+There are many common ones you’ll see across modes – <code class="language-plaintext highlighter-rouge">comment</code>, <code class="language-plaintext highlighter-rouge">string</code>,
+<code class="language-plaintext highlighter-rouge">keyword</code>, <code class="language-plaintext highlighter-rouge">type</code>, <code class="language-plaintext highlighter-rouge">number</code>, <code class="language-plaintext highlighter-rouge">bracket</code>, <code class="language-plaintext highlighter-rouge">operator</code>, <code class="language-plaintext highlighter-rouge">definition</code>, <code class="language-plaintext highlighter-rouge">function</code>,
+<code class="language-plaintext highlighter-rouge">variable</code>, <code class="language-plaintext highlighter-rouge">constant</code>, <code class="language-plaintext highlighter-rouge">builtin</code> – but individual modes often define features
+specific to their language. Clojure has <code class="language-plaintext highlighter-rouge">quote</code>, <code class="language-plaintext highlighter-rouge">deref</code>, and <code class="language-plaintext highlighter-rouge">tagged-literals</code>;
+OCaml might have <code class="language-plaintext highlighter-rouge">attribute</code>; a markup language mode might have <code class="language-plaintext highlighter-rouge">heading</code> or
+<code class="language-plaintext highlighter-rouge">link</code>. Different modes also vary in how granular they get: some expose a rich
+set of features that let you fine-tune almost every aspect of highlighting, while
+others are more spartan and stick to the basics.</p>
+
+<p>The bottom line is that you’ll always have to check what your particular mode
+offers. The easiest way is <code class="language-plaintext highlighter-rouge">M-x describe-variable RET
+treesit-font-lock-feature-list</code> in a buffer using that mode – it shows all
+features organized by level. You can also inspect the mode’s source directly by
+looking at how it populates <code class="language-plaintext highlighter-rouge">treesit-font-lock-settings</code> (try <code class="language-plaintext highlighter-rouge">M-x find-library</code>
+to jump to the mode’s source).</p>
+
+<p>For example, clojure-ts-mode defines:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Features</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code class="language-plaintext highlighter-rouge">comment</code>, <code class="language-plaintext highlighter-rouge">definition</code>, <code class="language-plaintext highlighter-rouge">variable</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">keyword</code>, <code class="language-plaintext highlighter-rouge">string</code>, <code class="language-plaintext highlighter-rouge">char</code>, <code class="language-plaintext highlighter-rouge">symbol</code>, <code class="language-plaintext highlighter-rouge">builtin</code>, <code class="language-plaintext highlighter-rouge">type</code></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">constant</code>, <code class="language-plaintext highlighter-rouge">number</code>, <code class="language-plaintext highlighter-rouge">quote</code>, <code class="language-plaintext highlighter-rouge">metadata</code>, <code class="language-plaintext highlighter-rouge">doc</code>, <code class="language-plaintext highlighter-rouge">regex</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><code class="language-plaintext highlighter-rouge">bracket</code>, <code class="language-plaintext highlighter-rouge">deref</code>, <code class="language-plaintext highlighter-rouge">function</code>, <code class="language-plaintext highlighter-rouge">tagged-literals</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>And neocaml:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Level</th>
+      <th>Features</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td><code class="language-plaintext highlighter-rouge">comment</code>, <code class="language-plaintext highlighter-rouge">definition</code></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td><code class="language-plaintext highlighter-rouge">keyword</code>, <code class="language-plaintext highlighter-rouge">string</code>, <code class="language-plaintext highlighter-rouge">number</code></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td><code class="language-plaintext highlighter-rouge">attribute</code>, <code class="language-plaintext highlighter-rouge">builtin</code>, <code class="language-plaintext highlighter-rouge">constant</code>, <code class="language-plaintext highlighter-rouge">type</code></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td><code class="language-plaintext highlighter-rouge">operator</code>, <code class="language-plaintext highlighter-rouge">bracket</code>, <code class="language-plaintext highlighter-rouge">delimiter</code>, <code class="language-plaintext highlighter-rouge">variable</code>, <code class="language-plaintext highlighter-rouge">function</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The default level is 3, which is a reasonable middle ground for most people. You
+can change it globally:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">treesit-font-lock-level</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1">;; maximum highlighting</span>
+</code></pre></div></div>
+
+<p>Or per-mode via a hook:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-clojure-ts-font-lock</span> <span class="p">()</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">treesit-font-lock-level</span> <span class="mi">2</span><span class="p">))</span>  <span class="c1">;; minimal: just keywords and strings</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'clojure-ts-mode-hook</span> <span class="nf">#'</span><span class="nv">my-clojure-ts-font-lock</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This is the equivalent of the old <code class="language-plaintext highlighter-rouge">font-lock-maximum-decoration</code> variable, but
+more principled – features at each level are explicitly chosen by the mode
+author rather than being an arbitrary “how much highlighting do you want?” dial.</p>
+
+<p><strong>Note:</strong> The Emacs manual describes this system in detail under
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Parser_002dbased-Font-Lock.html#Font-Lock-and-Syntax">Font Lock and Syntax</a>.</p>
+
+<h2 id="cherry-picking-features-the-fine-knob">Cherry-Picking Features: The Fine Knob</h2>
+
+<p>Levels are a blunt instrument. What if you want operators and variables (level 4)
+but not brackets and delimiters (also level 4)? You can’t express that with a
+single number.</p>
+
+<p>Enter <code class="language-plaintext highlighter-rouge">treesit-font-lock-recompute-features</code>. This function lets you explicitly
+enable or disable individual features, regardless of level:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-neocaml-font-lock</span> <span class="p">()</span>
+  <span class="p">(</span><span class="nv">treesit-font-lock-recompute-features</span>
+   <span class="o">'</span><span class="p">(</span><span class="nv">comment</span> <span class="nv">definition</span> <span class="kt">keyword</span> <span class="nb">string</span> <span class="nc">number</span>
+     <span class="nv">attribute</span> <span class="nv">builtin</span> <span class="nv">constant</span> <span class="k">type</span> <span class="nv">operator</span> <span class="nv">variable</span><span class="p">)</span>  <span class="c1">;; enable</span>
+   <span class="o">'</span><span class="p">(</span><span class="nv">bracket</span> <span class="nv">delimiter</span> <span class="k">function</span><span class="p">)))</span>                       <span class="c1">;; disable</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'neocaml-base-mode-hook</span> <span class="nf">#'</span><span class="nv">my-neocaml-font-lock</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>You can also call it interactively with <code class="language-plaintext highlighter-rouge">M-x treesit-font-lock-recompute-features</code>
+to experiment in the current buffer before committing to a configuration.</p>
+
+<p>This used to be hard in the old regex world – you’d have to dig into
+<code class="language-plaintext highlighter-rouge">font-lock-keywords</code>, figure out which entries corresponded to which syntactic
+elements, and surgically remove them. Emacs 29 improved the situation with
+<code class="language-plaintext highlighter-rouge">font-lock-ignore</code>, which lets you declaratively suppress specific font-lock
+rules by mode, face, or regexp. Still, the Tree-sitter approach is arguably
+cleaner: features are named groups designed for exactly this kind of
+cherry-picking, rather than an escape hatch bolted on after the fact.</p>
+
+<h2 id="customizing-faces">Customizing Faces</h2>
+
+<p>This part works the same as before – faces are faces. Tree-sitter modes use
+the standard <code class="language-plaintext highlighter-rouge">font-lock-*-face</code> family, so your theme applies automatically.
+If you want to tweak a specific face:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">custom-set-faces</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">font-lock-type-face</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="s">"DarkSeaGreen4"</span><span class="p">))))</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">font-lock-property-use-face</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="s">"DarkOrange3"</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>One thing to note: Tree-sitter modes use some of the newer faces introduced in
+Emacs 29, like <code class="language-plaintext highlighter-rouge">font-lock-operator-face</code>, <code class="language-plaintext highlighter-rouge">font-lock-bracket-face</code>,
+<code class="language-plaintext highlighter-rouge">font-lock-number-face</code>, <code class="language-plaintext highlighter-rouge">font-lock-property-use-face</code>, and
+<code class="language-plaintext highlighter-rouge">font-lock-escape-face</code>. These didn’t exist in the old world (there was no
+concept of “operator highlighting” in traditional font-lock), so older themes
+may not define them. If your theme makes operators and variables look the same,
+that’s why – the theme predates these faces.</p>
+
+<h2 id="adding-custom-rules">Adding Custom Rules</h2>
+
+<p>This is where Tree-sitter font-lock really shines compared to the old system.
+Instead of writing regexps, you write Tree-sitter queries that match on the
+actual syntax tree.</p>
+
+<p>Say you want to distinguish block-delimiting keywords (<code class="language-plaintext highlighter-rouge">begin</code>/<code class="language-plaintext highlighter-rouge">end</code>,
+<code class="language-plaintext highlighter-rouge">struct</code>/<code class="language-plaintext highlighter-rouge">sig</code>) from control-flow keywords (<code class="language-plaintext highlighter-rouge">if</code>/<code class="language-plaintext highlighter-rouge">then</code>/<code class="language-plaintext highlighter-rouge">else</code>) in OCaml:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">defface</span> <span class="nv">my-block-keyword-face</span>
+  <span class="o">'</span><span class="p">((</span><span class="no">t</span> <span class="ss">:inherit</span> <span class="nv">font-lock-keyword-face</span> <span class="ss">:weight</span> <span class="nv">bold</span><span class="p">))</span>
+  <span class="s">"Face for block-delimiting keywords."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-neocaml-block-keywords</span> <span class="p">()</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">treesit-font-lock-settings</span>
+        <span class="p">(</span><span class="nb">append</span> <span class="nv">treesit-font-lock-settings</span>
+                <span class="p">(</span><span class="nv">treesit-font-lock-rules</span>
+                 <span class="ss">:language</span> <span class="p">(</span><span class="nv">treesit-parser-language</span>
+                            <span class="p">(</span><span class="nb">car</span> <span class="p">(</span><span class="nv">treesit-parser-list</span><span class="p">)))</span>
+                 <span class="ss">:override</span> <span class="no">t</span>
+                 <span class="ss">:feature</span> <span class="ss">'keyword</span>
+                 <span class="o">'</span><span class="p">(</span><span class="nv">[</span><span class="s">"begin"</span> <span class="s">"end"</span> <span class="s">"struct"</span> <span class="s">"sig"</span> <span class="s">"object"</span><span class="nv">]</span>
+                   <span class="nv">@my-block-keyword-face</span><span class="p">))))</span>
+  <span class="p">(</span><span class="nv">treesit-font-lock-recompute-features</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'neocaml-base-mode-hook</span> <span class="nf">#'</span><span class="nv">my-neocaml-block-keywords</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">:override t</code> is important – without it, the new rule won’t overwrite
+faces already applied by the mode’s built-in rules. And the <code class="language-plaintext highlighter-rouge">:feature</code> keyword
+assigns the rule to a feature group, so it respects the level/feature system.</p>
+
+<p><strong>Note:</strong> The full query syntax is documented in the
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Pattern-Matching.html">Pattern Matching</a>
+section of the Emacs manual – it covers node types, field names, predicates,
+wildcards, and more.</p>
+
+<p>For comparison, here’s what you’d need in the old regex world to highlight a
+specific set of keywords with a different face:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Old world: fragile, doesn't understand syntax</span>
+<span class="p">(</span><span class="nv">font-lock-add-keywords</span> <span class="ss">'some-mode</span>
+  <span class="o">'</span><span class="p">((</span><span class="s">"\\&lt;\\(begin\\|end\\|struct\\|sig\\)\\&gt;"</span> <span class="o">.</span> <span class="ss">'my-block-keyword-face</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The regex version looks simpler, but it’ll match <code class="language-plaintext highlighter-rouge">begin</code> inside strings,
+comments, and anywhere else the text appears. The Tree-sitter version only
+matches actual keyword nodes in the syntax tree.</p>
+
+<h2 id="exploring-the-syntax-tree">Exploring the Syntax Tree</h2>
+
+<p>The killer feature for customization is <code class="language-plaintext highlighter-rouge">M-x treesit-explore-mode</code>. It opens a
+live view of the syntax tree for the current buffer. As you move point, the
+explorer highlights the corresponding node and shows its type, field name, and
+position.</p>
+
+<p>This is indispensable when writing custom font-lock rules. Want to know what
+node type OCaml labels are? Put point on one, check the explorer: it’s
+<code class="language-plaintext highlighter-rouge">label_name</code>. Want to highlight it? Write a query for <code class="language-plaintext highlighter-rouge">(label_name)</code>. No more
+guessing what regexp might work.</p>
+
+<p>Another useful tool is <code class="language-plaintext highlighter-rouge">M-x treesit-inspect-node-at-point</code>, which shows
+information about the node at point in the echo area without opening a separate
+window.</p>
+
+<h2 id="the-cheat-sheet">The Cheat Sheet</h2>
+
+<p>Here’s a quick reference for the key differences:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Aspect</th>
+      <th>Regex font-lock</th>
+      <th>Tree-sitter font-lock</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rules defined by</td>
+      <td><code class="language-plaintext highlighter-rouge">font-lock-keywords</code></td>
+      <td><code class="language-plaintext highlighter-rouge">treesit-font-lock-settings</code></td>
+    </tr>
+    <tr>
+      <td>Matching mechanism</td>
+      <td>Regular expressions on text</td>
+      <td>Queries on syntax tree nodes</td>
+    </tr>
+    <tr>
+      <td>Granularity control</td>
+      <td><code class="language-plaintext highlighter-rouge">font-lock-maximum-decoration</code></td>
+      <td><code class="language-plaintext highlighter-rouge">treesit-font-lock-level</code> + features</td>
+    </tr>
+    <tr>
+      <td>Adding rules</td>
+      <td><code class="language-plaintext highlighter-rouge">font-lock-add-keywords</code></td>
+      <td>Append to <code class="language-plaintext highlighter-rouge">treesit-font-lock-settings</code></td>
+    </tr>
+    <tr>
+      <td>Removing rules</td>
+      <td><code class="language-plaintext highlighter-rouge">font-lock-remove-keywords</code></td>
+      <td><code class="language-plaintext highlighter-rouge">treesit-font-lock-recompute-features</code></td>
+    </tr>
+    <tr>
+      <td>Suppressing rules</td>
+      <td><code class="language-plaintext highlighter-rouge">font-lock-ignore</code> (Emacs 29+)</td>
+      <td>Disable features via level or cherry-pick</td>
+    </tr>
+    <tr>
+      <td>Debugging</td>
+      <td><code class="language-plaintext highlighter-rouge">re-builder</code></td>
+      <td><code class="language-plaintext highlighter-rouge">treesit-explore-mode</code></td>
+    </tr>
+    <tr>
+      <td>Handles nesting</td>
+      <td>Poorly</td>
+      <td>Correctly (by definition)</td>
+    </tr>
+    <tr>
+      <td>Multi-line constructs</td>
+      <td>Fragile</td>
+      <td>Works naturally</td>
+    </tr>
+    <tr>
+      <td>Performance</td>
+      <td>O(n) per regexp per line</td>
+      <td>Incremental, only re-parses changes</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>The shift from regex to Tree-sitter font-lock is one of the bigger
+under-the-hood changes in modern Emacs. The customization model is different –
+you’re working with structured queries instead of text patterns – but once you
+internalize it, it’s arguably more intuitive. You say “highlight this kind of
+syntax node” instead of “highlight text that matches this pattern and hope it
+doesn’t match inside a string.”</p>
+
+<p>The feature system with its levels, cherry-picking, and custom rules gives you
+more control than the old <code class="language-plaintext highlighter-rouge">font-lock-maximum-decoration</code> ever did. And
+<code class="language-plaintext highlighter-rouge">treesit-explore-mode</code> makes it easy to discover what’s available.</p>
+
+<p>If you haven’t looked at your Tree-sitter mode’s font-lock features yet, try
+<code class="language-plaintext highlighter-rouge">M-x describe-variable RET treesit-font-lock-feature-list</code> in a Tree-sitter
+buffer. You might be surprised by how much you can tweak.</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Writing this article has been more helpful than I expected – halfway through, I realized my own neocaml had <code class="language-plaintext highlighter-rouge">function</code> banished to level 4 and <code class="language-plaintext highlighter-rouge">number</code> promoted to level 2. Physician, heal thyself. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

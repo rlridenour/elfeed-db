@@ -1,0 +1,275 @@
+<p>I got inspired to look into this topic after receiving the following obscure bug
+report for <a href="https://github.com/bbatsov/neocaml">neocaml</a>:</p>
+
+<blockquote>
+  <p>I had your package installed. First impressions were good, but then I had to
+uninstall it. The code formatting on save stopped working for some reason, and
+the quickest solution was to revert to the previous setup.</p>
+</blockquote>
+
+<p>I found this somewhat entertaining – neocaml is a major mode, it has nothing to
+do with code formatting. But I still started to wonder what kind of setup that
+user might have. So here we are!</p>
+
+<p>Code formatting is one of those things that shouldn’t require much thought –
+you pick a formatter, you run it, and your code looks consistent. In practice,
+Emacs gives you a surprising number of ways to get there, from built-in
+indentation commands to external formatters to LSP-powered solutions. This
+article covers the landscape and helps you pick the right approach.</p>
+
+<p>One thing to note upfront: most formatting solutions hook into saving the buffer,
+but there are two distinct patterns. The more common one is <em>format-then-save</em>
+(via <code class="language-plaintext highlighter-rouge">before-save-hook</code>) – the buffer is formatted before it’s written to disk,
+so the file is always in a formatted state. The alternative is <em>save-then-format</em>
+(via <code class="language-plaintext highlighter-rouge">after-save-hook</code>) – the file is saved first, then formatted and saved
+again. The second approach can be done asynchronously (the editor doesn’t block),
+but it means the file is briefly unformatted on disk. Keep this distinction in
+mind as we go through the options.</p>
+
+<h2 id="built-in-indentation-not-formatting">Built-in: Indentation, Not Formatting</h2>
+
+<p>Let’s get the terminology straight. Emacs has excellent built-in <em>indentation</em>
+support, but indentation is not the same as formatting. <code class="language-plaintext highlighter-rouge">indent-region</code> (<code class="language-plaintext highlighter-rouge">C-M-\</code>)
+adjusts leading whitespace according to the major mode’s rules. It won’t
+reformat long lines, reorganize imports, add or remove blank lines, or apply any
+of the opinionated style choices that modern formatters handle.</p>
+
+<p>That said, for many languages (especially Lisps), <code class="language-plaintext highlighter-rouge">indent-region</code> on the whole
+buffer is all the formatting you’ll ever need:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; A simple indent-buffer command (Emacs doesn't ship one)</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">indent-buffer</span> <span class="p">()</span>
+  <span class="s">"Indent the entire buffer."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">indent-region</span> <span class="p">(</span><span class="nv">point-min</span><span class="p">)</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p><strong>Tip:</strong> <code class="language-plaintext highlighter-rouge">whitespace-cleanup</code> is a nice complement – it handles trailing
+whitespace, mixed tabs/spaces, and empty lines at the beginning and end of the
+buffer. Adding it to <code class="language-plaintext highlighter-rouge">before-save-hook</code> keeps things tidy:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'before-save-hook</span> <span class="nf">#'</span><span class="nv">whitespace-cleanup</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h2 id="shelling-out-the-diy-approach">Shelling Out: The DIY Approach</h2>
+
+<p>The simplest way to run an external formatter is <code class="language-plaintext highlighter-rouge">shell-command-on-region</code>
+(<code class="language-plaintext highlighter-rouge">M-|</code>). With a prefix argument (<code class="language-plaintext highlighter-rouge">C-u M-|</code>), it replaces the region with the
+command’s output:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>C-u M-| prettier --stdin-filepath foo.js RET
+</code></pre></div></div>
+
+<p>(The <code class="language-plaintext highlighter-rouge">--stdin-filepath</code> flag doesn’t read from a file – it just tells Prettier
+which parser to use based on the filename extension.)</p>
+
+<p>You can wrap this in a command for repeated use:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">format-with-prettier</span> <span class="p">()</span>
+  <span class="s">"Format the current buffer with Prettier."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">point</span> <span class="p">(</span><span class="nv">point</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">shell-command-on-region</span>
+     <span class="p">(</span><span class="nv">point-min</span><span class="p">)</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">)</span>
+     <span class="s">"prettier --stdin-filepath foo.js"</span>
+     <span class="p">(</span><span class="nv">current-buffer</span><span class="p">)</span> <span class="no">t</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">goto-char</span> <span class="nv">point</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>This works, but it’s fragile – no error handling, no automatic file type
+detection, and cursor position is only approximately preserved. For anything
+beyond a quick one-off, you’ll want a proper package.</p>
+
+<h2 id="reformatterel-define-your-own-reformatters">reformatter.el: Define Your Own (Re)Formatters</h2>
+
+<p><a href="https://github.com/purcell/emacs-reformatter">reformatter.el</a> is a small
+library that generates formatter commands from a simple declaration. You define
+the formatter once, and it creates everything you need:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">reformatter-define</span> <span class="nv">black-format</span>
+  <span class="ss">:program</span> <span class="s">"black"</span>
+  <span class="ss">:args</span> <span class="o">'</span><span class="p">(</span><span class="s">"-q"</span> <span class="s">"-"</span><span class="p">)</span>
+  <span class="ss">:lighter</span> <span class="s">" Black"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This single form generates three things:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">black-format-buffer</code> – format the entire buffer</li>
+  <li><code class="language-plaintext highlighter-rouge">black-format-region</code> – format the selected region</li>
+  <li><code class="language-plaintext highlighter-rouge">black-format-on-save-mode</code> – a minor mode that formats on save</li>
+</ul>
+
+<p>Enabling format-on-save is then just:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'python-mode-hook</span> <span class="nf">#'</span><span class="nv">black-format-on-save-mode</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">reformatter.el</code> handles temp files, error reporting, and stdin/stdout piping.
+It also supports formatters that work on files instead of stdin (via <code class="language-plaintext highlighter-rouge">:stdin nil</code>
+and <code class="language-plaintext highlighter-rouge">:input-file</code>), and you can use buffer-local variables in <code class="language-plaintext highlighter-rouge">:program</code> and
+<code class="language-plaintext highlighter-rouge">:args</code> for per-project configuration via <code class="language-plaintext highlighter-rouge">.dir-locals.el</code>.</p>
+
+<p>I love the approach taken by this package! It’s explicit, you
+see exactly what’s being called, and the generated on-save mode plays nicely
+with the rest of your config.</p>
+
+<h2 id="format-all-zero-configuration">format-all: Zero Configuration</h2>
+
+<p><a href="https://github.com/lassik/emacs-format-all-the-code">format-all</a> takes a
+different approach – it auto-detects the right formatter for 70+ languages
+based on the major mode. You don’t define anything; it just works:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'prog-mode-hook</span> <span class="nf">#'</span><span class="nv">format-all-mode</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'prog-mode-hook</span> <span class="nf">#'</span><span class="nv">format-all-ensure-formatter</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The main command is <code class="language-plaintext highlighter-rouge">format-all-region-or-buffer</code>. The <code class="language-plaintext highlighter-rouge">format-all-mode</code> minor
+mode handles format-on-save. If you need to override the auto-detected formatter,
+set <code class="language-plaintext highlighter-rouge">format-all-formatters</code> (works well in <code class="language-plaintext highlighter-rouge">.dir-locals.el</code>):</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; In .dir-locals.el -- use black instead of autopep8 for Python</span>
+<span class="p">((</span><span class="nv">python-mode</span> <span class="o">.</span> <span class="p">((</span><span class="nv">format-all-formatters</span> <span class="o">.</span> <span class="p">((</span><span class="s">"Python"</span> <span class="nv">black</span><span class="p">))))))</span>
+</code></pre></div></div>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Or in your init file</span>
+<span class="p">(</span><span class="nv">setq-default</span> <span class="nv">format-all-formatters</span> <span class="o">'</span><span class="p">((</span><span class="s">"Python"</span> <span class="nv">black</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The trade-off is less control – you’re trusting the package’s formatter
+database, and debugging issues is harder when you don’t see the underlying
+command.</p>
+
+<h2 id="apheleia-async-and-cursor-aware">apheleia: Async and Cursor-Aware</h2>
+
+<p><a href="https://github.com/radian-software/apheleia">apheleia</a> is the most
+sophisticated option. It solves two problems the other packages don’t:</p>
+
+<ol>
+  <li><strong>Asynchronous formatting</strong> – it runs the formatter <em>after</em> save, so the
+editor never blocks. If you modify the buffer before formatting completes,
+the result is discarded.</li>
+  <li><strong>Cursor preservation</strong> – instead of replacing the entire buffer, it applies
+changes as <a href="https://en.wikipedia.org/wiki/Revision_Control_System">RCS</a>
+patches (a classic diff format from one of the earliest version control
+systems), so your cursor position and scroll state are maintained.</li>
+</ol>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Enable globally</span>
+<span class="p">(</span><span class="nv">apheleia-global-mode</span> <span class="mi">+1</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>apheleia auto-detects formatters like <code class="language-plaintext highlighter-rouge">format-all</code>, but you can configure things
+explicitly:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Chain multiple formatters (e.g., sort imports, then format)</span>
+<span class="p">(</span><span class="nb">setf</span> <span class="p">(</span><span class="nv">alist-get</span> <span class="ss">'python-mode</span> <span class="nv">apheleia-mode-alist</span><span class="p">)</span>
+      <span class="o">'</span><span class="p">(</span><span class="nv">isort</span> <span class="nv">black</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Formatter chaining is a killer feature – <code class="language-plaintext highlighter-rouge">isort</code> then <code class="language-plaintext highlighter-rouge">black</code>, <code class="language-plaintext highlighter-rouge">eslint</code> then
+<code class="language-plaintext highlighter-rouge">prettier</code>, etc. No other package handles this as cleanly.</p>
+
+<p><strong>Caveat:</strong> Because apheleia formats after save, the file on disk is briefly in
+an unformatted state. This is usually fine, but it can confuse tools that watch
+files for changes. It also doesn’t support TRAMP/remote files.</p>
+
+<h2 id="lsp-eglot-and-lsp-mode">LSP: eglot and lsp-mode</h2>
+
+<p>If you’re already using a language server, formatting is built in. The language
+server handles the formatting logic, and Emacs just sends the request.</p>
+
+<h3 id="eglot-built-in-since-emacs-29">eglot (built-in since Emacs 29)</h3>
+
+<p>The main commands are <code class="language-plaintext highlighter-rouge">eglot-format</code> (formats the active region, or the entire
+buffer if no region is active) and <code class="language-plaintext highlighter-rouge">eglot-format-buffer</code> (always formats the
+entire buffer).</p>
+
+<p>Format-on-save requires a hook – eglot doesn’t provide a toggle for it:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'eglot-managed-mode-hook</span>
+          <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+            <span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'before-save-hook</span> <span class="nf">#'</span><span class="nv">eglot-format-buffer</span> <span class="no">nil</span> <span class="no">t</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">nil t</code> makes the hook buffer-local, so it only fires in eglot-managed
+buffers.</p>
+
+<h3 id="lsp-mode">lsp-mode</h3>
+
+<p>The equivalents here are <code class="language-plaintext highlighter-rouge">lsp-format-buffer</code> and <code class="language-plaintext highlighter-rouge">lsp-format-region</code>.</p>
+
+<p>lsp-mode has a built-in option for format-on-save:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">lsp-format-buffer-on-save</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>It also supports on-type formatting (formatting as you type closing braces,
+semicolons, etc.) via <code class="language-plaintext highlighter-rouge">lsp-enable-on-type-formatting</code>, which is enabled by
+default.</p>
+
+<h3 id="lsp-caveats">LSP Caveats</h3>
+
+<ul>
+  <li>Formatting capabilities depend entirely on the language server. Some servers
+(like <code class="language-plaintext highlighter-rouge">gopls</code> or <code class="language-plaintext highlighter-rouge">rust-analyzer</code>) have excellent formatters; others may not
+support formatting at all.</li>
+  <li>The formatter’s configuration lives outside Emacs – in <code class="language-plaintext highlighter-rouge">.clang-format</code>,
+<code class="language-plaintext highlighter-rouge">pyproject.toml</code>, <code class="language-plaintext highlighter-rouge">.prettierrc</code>, etc. This is actually a feature if you’re
+working on a team, since the config is shared.</li>
+  <li>LSP formatting can be slow for large files since it’s a round-trip to the
+server process.</li>
+</ul>
+
+<h2 id="which-approach-should-you-use">Which Approach Should You Use?</h2>
+
+<p>There’s no single right answer, but here’s a rough guide:</p>
+
+<ul>
+  <li><strong>Lisps and simple indentation needs:</strong> Built-in <code class="language-plaintext highlighter-rouge">indent-region</code> is probably
+all you need.</li>
+  <li><strong>Specific formatter, full control:</strong> <code class="language-plaintext highlighter-rouge">reformatter.el</code> – explicit, simple,
+and predictable.</li>
+  <li><strong>Many languages, minimal config:</strong> <code class="language-plaintext highlighter-rouge">format-all</code> or <code class="language-plaintext highlighter-rouge">apheleia</code>. Pick
+<code class="language-plaintext highlighter-rouge">apheleia</code> if you want async formatting and cursor stability.</li>
+  <li><strong>Already using LSP:</strong> Just use <code class="language-plaintext highlighter-rouge">eglot-format</code> / <code class="language-plaintext highlighter-rouge">lsp-format-buffer</code>. One less
+package to maintain.</li>
+  <li><strong>Mixed setup:</strong> Nothing stops you from using LSP formatting for some languages
+and <code class="language-plaintext highlighter-rouge">reformatter.el</code> for others. Just be careful not to have two things
+fighting over format-on-save for the same mode.</li>
+</ul>
+
+<p><strong>Tip:</strong> Whichever approach you choose, consider enabling format-on-save per
+project via <code class="language-plaintext highlighter-rouge">.dir-locals.el</code> rather than globally. Not every project uses the
+same formatter (or any formatter at all), and formatting someone else’s
+unformatted codebase on save is a recipe for noisy diffs.</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; .dir-locals.el</span>
+<span class="p">((</span><span class="nv">python-mode</span> <span class="o">.</span> <span class="p">((</span><span class="nb">eval</span> <span class="o">.</span> <span class="p">(</span><span class="nv">black-format-on-save-mode</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<h2 id="epilogue">Epilogue</h2>
+
+<p>So many options, right? That’s so Emacs!</p>
+
+<p>I’ll admit that I don’t actually use any of the packages mentioned in this
+article – I learned about all of them while doing a bit of research for
+alternatives to the DIY and LSP approaches. That said, I have a very high
+opinion of everything done by <a href="https://github.com/purcell">Steve Purcell</a>
+(author of <code class="language-plaintext highlighter-rouge">reformatter.el</code>, many other Emacs packages, a popular <a href="https://github.com/purcell/emacs.d">Emacs
+Prelude-like config</a>, and co-maintainer of
+MELPA) and <a href="https://github.com/radian-software">Radon Rosborough</a> (author of
+<code class="language-plaintext highlighter-rouge">apheleia</code>, <code class="language-plaintext highlighter-rouge">straight.el</code>, and the
+<a href="https://github.com/radian-software/radian">Radian</a> Emacs config), so I have no
+issue endorsing packages created by them.</p>
+
+<p>I’m in camp LSP most of the time these days, and I’d guess most people are too.
+But if I weren’t, I’d probably take <code class="language-plaintext highlighter-rouge">apheleia</code> for a spin. Either way, it’s
+never bad to have options, right?</p>
+
+<p>There are languages where LSP isn’t as prevalent – all sorts of Lisp dialects,
+for instance – where something like <code class="language-plaintext highlighter-rouge">apheleia</code> or
+<code class="language-plaintext highlighter-rouge">reformatter.el</code> might come in handy. But then again, in Lisps <code class="language-plaintext highlighter-rouge">indent-region</code>
+works so well that you rarely need anything else. I’m a huge fan of
+<code class="language-plaintext highlighter-rouge">indent-region</code> myself – for any good Emacs mode, it’s all the formatting you
+need.</p>

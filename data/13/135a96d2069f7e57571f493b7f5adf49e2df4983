@@ -1,0 +1,1557 @@
+<div class="sticky-toc" id="org1cae9f6">
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org6bff848">Microsoft Azure pronunciation assessment</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#orga4d919f">Phonemes</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org4bc8f60">Analyzing multiple tongue-twisters from a single session</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#orgaee5691">Focusing on one word</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org06b04d8">Analyzing one tongue-twister across multiple sessions</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org731040d">Workflow</a>
+<ul>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org7918f06">Extracting parts of the recording</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org86dc0ee">Azure pronunciation assessment</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#orga00ca39">Phonemes with Allosaurus, Espeak, or Kokoro FastAPI</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org171cd32">Splitting into segments and making a table</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#org42a44b9">Collecting segments from multiple sessions</a></li>
+</ul>
+</li>
+</ul>
+</div>
+
+</div>
+
+<p>
+I'm working on learning French because it's fun and because I want to help my daughter with her French classes. Some sounds are particularly difficult because they don't exist in English, so they involve moving my tongue and my lips in ways that I'm not used to. I've been working on some sentences my tutor assigned me to help me with various sounds. I practice: 
+</p>
+
+<ul class="org-ul">
+<li>during the 45-minute virtual sessions with my tutor twice a week: I record this with OBS</li>
+<li>recording on my phone when I find myself with some spare time away from my computer, like when I'm waiting for my daughter</li>
+<li>recording on my computer with Emacs, subed-record, and ffmpeg</li>
+<li>just out loud, like when I'm skating or doing the dishes</li>
+</ul>
+
+<p>
+I use WhisperX to get the transcript and word timing data with speaker identification (diarization). I use subed-record in Emacs to correct the transcript, cut/split/trim audio segments, and compile them 
+</p>
+
+<p>
+I've been working on my processes for reviewing reference examples either from text-to-speech engines or my meeting audio,  recording and reviewing my attempts, and comparing them.
+</p>
+
+<p>
+I want to be able to quickly listen to my best attempts from a session, compare different versions, and keep track of my progress over time. I also want to figure out how to practice pronunciation in between sessions with my tutor while minimizing the risk of reinforcing mistakes. To segment the audio for review, I use WhisperX to get the transcript and word timing data with speaker identification (diarization). I use subed-record in Emacs to correct the transcript, cut/split/trim audio segments, and compile them. I want to make this process even easier.
+</p>
+
+<p>
+Some of the sounds I'm working on are:
+</p>
+
+<ul class="org-ul">
+<li>/​y/ as in mule and bu</li>
+<li>/​ʁ/ as in trottoir: making it with less air, but without it feeling like an "h" instead; also, transitioning to /​y/ as in brume</li>
+<li>/​œ/ as in cœur</li>
+<li>distinguishing between roue and rue</li>
+</ul>
+<div id="outline-container-org6bff848" class="outline-3">
+<h3 id="org6bff848">Microsoft Azure pronunciation assessment</h3>
+<div class="outline-text-3" id="text-org6bff848">
+<p>
+I've been thinking about how to practise more effectively in between my twice-weekly tutoring sessions. There's been a fair amount of research into computer-aided language training and pronunciation assessment, and I wonder how I can tweak my processes and interfaces to take advantage of what other people have learned. I think many apps use the confidence scores of Whisper-based speech recognition engines. Other services try to be more detailed. For example, <a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-pronunciation-assessment">Microsoft Azure offers a pronunciation assessment service</a> that scores audio samples on:
+</p>
+
+<ul class="org-ul">
+<li>accuracy: how closely phonemes match a native speaker's pronunciation</li>
+<li>fluency: how closely it matches a native speaker's silent breaks between words</li>
+<li>completeness: whether all the words were said</li>
+<li>pronunciation: the total score</li>
+<li>confidence</li>
+</ul>
+
+<p>
+Azure's syllable and phoneme analyses only work for the <code>en-US</code> locale, so I can't use them for <code>fr-FR</code>. That's okay, LLM pronunciation evaluation might work better for sentences than for words or phonemes anyway.<sup><a id="fnr.llm-pronunciation-assessment" class="footref" href="https://sachachua.com/blog/feed/index.xml#fn.llm-pronunciation-assessment" role="doc-backlink">1</a></sup>
+</p>
+
+<p>
+I'll share my results first, and then I'll describe my workflow.
+</p>
+
+<p>
+For example, here are some Azure scores for "Trois très grands trains traversent trois trop grandes rues", compared with a Kokoro TTS sample and its results when analyzing an audio segment of my teacher speaking (not included).
+</p>
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">&nbsp;</td>
+<td class="org-right"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-05-trois-tres-grand-reasonable.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-05-trois-tres-grand-reasonable.opus">Download the audio</a></audio></span> Mar 3</td>
+<td class="org-right"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-05-trois-tres-grand-bad.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-05-trois-tres-grand-bad.opus">Download the audio</a></audio></span> Bad</td>
+<td class="org-right"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-02-27-trois-tres-grand.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-02-27-trois-tres-grand.opus">Download the audio</a></audio></span> Kokoro</td>
+<td class="org-right">Tutor</td>
+</tr>
+
+<tr>
+<td class="org-left">Overall</td>
+<td class="org-right">94</td>
+<td class="org-right">44</td>
+<td class="org-right">97</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-left">Accuracy</td>
+<td class="org-right">93</td>
+<td class="org-right">63</td>
+<td class="org-right">96</td>
+<td class="org-right">100</td>
+</tr>
+
+<tr>
+<td class="org-left">Fluency</td>
+<td class="org-right">93</td>
+<td class="org-right">62</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+</tr>
+
+<tr>
+<td class="org-left">Completeness</td>
+<td class="org-right">100</td>
+<td class="org-right">33</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+</tr>
+
+<tr>
+<td class="org-left">Confidence</td>
+<td class="org-right">90</td>
+<td class="org-right">80</td>
+<td class="org-right">92</td>
+<td class="org-right">02</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+I'm not entirely sure how useful these numbers will be. It does distinguish between my current attempts and intentionally bad pronunciation, but I'm not sure how much I can trust it yet, or how useful it will be for guiding my attempts in between tutoring sessions. I can imagine a workflow where I listen to a reference, record my attempt, and replay the reference and the recording while displaying the scores, a waveform, and a spectrogram.
+</p>
+
+<p>
+Let's look at another example of the scores. The tongue-twister "La mule sûre court plus vite que le loup fou." might offer a more useful comparison because I have a hard time with the u sound in "mule".
+</p>
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">&nbsp;</td>
+<td class="org-right"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-03-la-mule-sure-court-plus-vite-que-le-loup-fou.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-03-la-mule-sure-court-plus-vite-que-le-loup-fou.opus">Download the audio</a></audio></span> Mar 3</td>
+<td class="org-right"><div class="audio">i <audio controls="1" preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-03-02-la-mule-sure-court-plus-vite-que-le-loup-fou.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-03-02-la-mule-sure-court-plus-vite-que-le-loup-fou.opus">Download the audio</a></audio></div> with tutor</td>
+<td class="org-right"><div class="audio">i <audio controls="1" preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-02-26-virelangues-script-36dea5a6d33eee1f787bc353455b3bdb.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-02-26-virelangues-script-36dea5a6d33eee1f787bc353455b3bdb.opus">Download the audio</a><track kind="captions" label="Captions" src="file:///home/sacha/proj/french/reference/2026-02-26-virelangues-script-36dea5a6d33eee1f787bc353455b3bdb.vtt" srclang="en" default=""></audio><div class="captions" style="display: none"></div></div> Kokoro</td>
+<td class="org-right">Tutor</td>
+</tr>
+
+<tr>
+<td class="org-left">Overall</td>
+<td class="org-right">84</td>
+<td class="org-right">94</td>
+<td class="org-right">100</td>
+<td class="org-right">95</td>
+</tr>
+
+<tr>
+<td class="org-left">Accuracy</td>
+<td class="org-right">96</td>
+<td class="org-right">95</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+</tr>
+
+<tr>
+<td class="org-left">Fluency</td>
+<td class="org-right">75</td>
+<td class="org-right">92</td>
+<td class="org-right">100</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-left">Completeness</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+</tr>
+
+<tr>
+<td class="org-left">Confidence</td>
+<td class="org-right">84</td>
+<td class="org-right">85</td>
+<td class="org-right">89</td>
+<td class="org-right">87</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<div id="outline-container-orga4d919f" class="outline-3">
+<h3 id="orga4d919f">Phonemes</h3>
+<div class="outline-text-3" id="text-orga4d919f">
+<p>
+What about trying to get the IPA and then doing some kind of comparison? I tried using <a href="https://github.com/xinjli/allosaurus">Allosaurus</a> and <a href="https://github.com/MontrealCorpusTools/Montreal-Forced-Aligner">Montreal Forced Aligner</a> for my audio samples for "La mule sûre court plus vite que le loup fou." I've also included IPA output from Kokoro TTS and espeak, which generate them from text, although I've removed the stress marks for easier comparison.
+</p>
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">Mar 3</td>
+<td class="org-left">naɛmis̪yʁkɔpluzitɑləkœnədufu</td>
+</tr>
+
+<tr>
+<td class="org-left">with tutor (Allosaurus)</td>
+<td class="org-left">lɛns̪ikɑlovitkɛlədufu</td>
+</tr>
+
+<tr>
+<td class="org-left">with tutor (MFA)</td>
+<td class="org-left">lamylsyʁkuʁplyvitkəlølufu</td>
+</tr>
+
+<tr>
+<td class="org-left">Tutor</td>
+<td class="org-left">lamilks̪yuəs̪ikətəlufu</td>
+</tr>
+
+<tr>
+<td class="org-left">Kokoro TTS reference</td>
+<td class="org-left">la myl syʁ kuʁ ply vit kə lə lu fu.</td>
+</tr>
+
+<tr>
+<td class="org-left">Espeak TTS reference</td>
+<td class="org-left">la mjul suɹə kɔt plʌs vaɪt kwɛ lə lup fu.</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+The IPA for a sentence is hard to read and compare. Maybe I can get Allosaurus to do word breaks, or maybe I can try a different tool. The phonemes from Montreal Forced Aligner look like they might be a little more manageable; I can see that the main difference is that I said <code>lø</code> instead of <code>lə</code>. I can get timing data from MFA, so I might be able to use that to break it up into words. It would be nice to get confidence data, though, since I'm pretty sure that <code>y</code> isn't solid yet.
+</p>
+</div>
+</div>
+<div id="outline-container-org4bc8f60" class="outline-3">
+<h3 id="org4bc8f60">Analyzing multiple tongue-twisters from a single session</h3>
+<div class="outline-text-3" id="text-org4bc8f60">
+<p>
+Here are some tongue-twister attempts from my March 6 session, annotated with the comments from my tutor. First, the list of tongue-twisters in this analysis.
+</p>
+
+<ol class="org-ol">
+<li>Maman peint un grand lapin blanc.</li>
+<li>Un enfant intelligent mange lentement.</li>
+<li>Le roi croit voir trois noix.</li>
+<li>Il est loin mais moins loin que ce coin.</li>
+<li>Le témoin voit le chemin loin.</li>
+<li>Moins de foin au loin ce matin.</li>
+<li>La laine beige sèche près du collège.</li>
+<li>La croquette sèche dans l’assiette.</li>
+<li>Elle mène son frère à l’hôtel.</li>
+<li>Le verre vert est très clair.</li>
+<li>Elle aimait manger et rêver.</li>
+<li>Le cœur seul pleure doucement.</li>
+<li>Le beurre fond dans le cœur chaud.</li>
+<li>Tu es sûr du futur ?</li>
+<li>Un mur dur bloque la rue.</li>
+</ol>
+
+<p>
+Then I can extract audio segments, transcribe the IPA, and send it to Azure for pronunciation analysis all in one go.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(my-subed-record-analyze-file-with-azure <span class="org-string">"~/proj/french/analysis/virelangues/2026-03-06-raphael-script.vtt"</span>)
+</code></pre>
+</div>
+
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">File</td>
+<td class="org-right">ID</td>
+<td class="org-left">Comments</td>
+<td class="org-right">All</td>
+<td class="org-right">Acc</td>
+<td class="org-right">Flu</td>
+<td class="org-right">Comp</td>
+<td class="org-right">Conf</td>
+<td class="org-left">Phonemes</td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01-01</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">85</td>
+<td class="org-right">92</td>
+<td class="org-right">78</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Maman peint un grand lapin blanc." tabindex="0">lɒmɒaɒʁɔnlat̪ɒlɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01-02</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">88</td>
+<td class="org-right">86</td>
+<td class="org-right">86</td>
+<td class="org-right">100</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="Maman peint un grand lapin blanc." tabindex="0">mamakɔaɒkul̪ɒlatalɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-03.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-03.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01-03</td>
+<td class="org-left">Ouais</td>
+<td class="org-right">68</td>
+<td class="org-right">73</td>
+<td class="org-right">69</td>
+<td class="org-right">67</td>
+<td class="org-right">86</td>
+<td class="org-left"><abbr title="Maman peint un grand lapin blanc." tabindex="0">lɒmɒaɒpzɒlɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-04.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-01-04.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01-04</td>
+<td class="org-left">Ouais</td>
+<td class="org-right">81</td>
+<td class="org-right">78</td>
+<td class="org-right">89</td>
+<td class="org-right">83</td>
+<td class="org-right">86</td>
+<td class="org-left"><abbr title="Maman peint un grand lapin blanc." tabindex="0">ɒenɒmɒt̪ɒʁɔlɒt̪alɒŋ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-02-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-02-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">02-01</td>
+<td class="org-left">Ouais, c'est bien</td>
+<td class="org-right">92</td>
+<td class="org-right">93</td>
+<td class="org-right">90</td>
+<td class="org-right">100</td>
+<td class="org-right">90</td>
+<td class="org-left"><abbr title="Un enfant intelligent mange lentement." tabindex="0">ɒjnɒwsɒnɛnt̪eleʒɔnmomuʃlɔns̪mɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-03-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-03-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">03-01</td>
+<td class="org-left">Uh huh</td>
+<td class="org-right">98</td>
+<td class="org-right">100</td>
+<td class="org-right">97</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">jal̪aʁwaɒll̪awandwa</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-04-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-04-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">04-01</td>
+<td class="org-left">Ouais, parfait</td>
+<td class="org-right">91</td>
+<td class="org-right">92</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Il est loin mais moins loin que ce coin." tabindex="0">ijelwamenmwdoakesekwaŋ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-05-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-05-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">05-01</td>
+<td class="org-left">X: témoin</td>
+<td class="org-right">83</td>
+<td class="org-right">82</td>
+<td class="org-right">90</td>
+<td class="org-right">83</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Le témoin voit le chemin loin." tabindex="0">etemwawaəʃemɒdwaŋ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-05-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-05-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">05-02</td>
+<td class="org-left">Ouais</td>
+<td class="org-right">92</td>
+<td class="org-right">88</td>
+<td class="org-right">96</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Le témoin voit le chemin loin." tabindex="0">et̪timwawaeʃemɒlwa</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-06-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-06-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">06-01</td>
+<td class="org-left">Mm hmm, parfait</td>
+<td class="org-right">89</td>
+<td class="org-right">93</td>
+<td class="org-right">94</td>
+<td class="org-right">86</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Moins de foin au loin ce matin." tabindex="0">wɒt̪iəwozwasənmɒtɒŋ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">07-01</td>
+<td class="org-left">X: près du collège</td>
+<td class="org-right">78</td>
+<td class="org-right">79</td>
+<td class="org-right">99</td>
+<td class="org-right">71</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="La laine beige sèche près du collège." tabindex="0">ɒmnteʁalol̪e</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">07-02</td>
+<td class="org-left">X: près</td>
+<td class="org-right">85</td>
+<td class="org-right">86</td>
+<td class="org-right">85</td>
+<td class="org-right">86</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="La laine beige sèche près du collège." tabindex="0">ɒjteʁatkœl̪es</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-03.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-07-03.opus">Download the audio</a></audio></span></td>
+<td class="org-right">07-03</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">90</td>
+<td class="org-right">93</td>
+<td class="org-right">99</td>
+<td class="org-right">86</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="La laine beige sèche près du collège." tabindex="0">ɒl̪mnteadəkol̪en</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-08-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-08-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">08-01</td>
+<td class="org-left">Ouais, c'est mieux</td>
+<td class="org-right">99</td>
+<td class="org-right">99</td>
+<td class="org-right">99</td>
+<td class="org-right">100</td>
+<td class="org-right">90</td>
+<td class="org-left"><abbr title="La croquette sèche dans l’assiette." tabindex="0">laokes̪estɒnlas̪iə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-08-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-08-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">08-02</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">97</td>
+<td class="org-right">96</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">90</td>
+<td class="org-left"><abbr title="La croquette sèche dans l’assiette." tabindex="0">laokes̪est̪ɒvɒnləs̪iən</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-09-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-09-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">09-01</td>
+<td class="org-left">Ouais, c'est bien</td>
+<td class="org-right">99</td>
+<td class="org-right">99</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Elle mène son frère à l’hôtel." tabindex="0">ɛnmɛnsɑnsʁɛajlot̪ɛn</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-10-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-10-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">10-01</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">87</td>
+<td class="org-right">88</td>
+<td class="org-right">99</td>
+<td class="org-right">83</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="Le verre vert est très clair." tabindex="0">nɛzaʁbɛʁejklə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-11-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-11-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">11-01</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Elle aimait manger et rêver." tabindex="0">elɒnmimaŋzeʁɒze</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">12-01</td>
+<td class="org-left">X: doucement</td>
+<td class="org-right">81</td>
+<td class="org-right">86</td>
+<td class="org-right">81</td>
+<td class="org-right">80</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="Le cœur seul pleure doucement." tabindex="0">ikaʁapjobil̪ədimɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">12-02</td>
+<td class="org-left">Ouais</td>
+<td class="org-right">82</td>
+<td class="org-right">83</td>
+<td class="org-right">76</td>
+<td class="org-right">100</td>
+<td class="org-right">86</td>
+<td class="org-left"><abbr title="Le cœur seul pleure doucement." tabindex="0">ikɑsuntius̪əmɑn</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-03.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-12-03.opus">Download the audio</a></audio></span></td>
+<td class="org-right">12-03</td>
+<td class="org-left">Ouais, c'est mieux</td>
+<td class="org-right">70</td>
+<td class="org-right">75</td>
+<td class="org-right">65</td>
+<td class="org-right">80</td>
+<td class="org-right">84</td>
+<td class="org-left"><abbr title="Le cœur seul pleure doucement." tabindex="0">lɛkɑsødius̪əmən</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-13-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-13-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">13-01</td>
+<td class="org-left">Ouais</td>
+<td class="org-right">85</td>
+<td class="org-right">85</td>
+<td class="org-right">85</td>
+<td class="org-right">86</td>
+<td class="org-right">84</td>
+<td class="org-left"><abbr title="Le beurre fond dans le cœur chaud." tabindex="0">lidəfɔdɑŋlikɑʁʃəl</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-14-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-14-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">14-01</td>
+<td class="org-left">Mm hmm</td>
+<td class="org-right">97</td>
+<td class="org-right">96</td>
+<td class="org-right">98</td>
+<td class="org-right">100</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="Tu es sûr du futur ?" tabindex="0">kel̪eid̪jefit̪joəʁ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-15-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-15-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">15-01</td>
+<td class="org-left">X: rue</td>
+<td class="org-right">84</td>
+<td class="org-right">90</td>
+<td class="org-right">78</td>
+<td class="org-right">100</td>
+<td class="org-right">84</td>
+<td class="org-left"><abbr title="Un mur dur bloque la rue." tabindex="0">ɒwl̪midijəlɔʁlɒʁs̪u</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-15-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-15-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">15-02</td>
+<td class="org-left">X: rue</td>
+<td class="org-right">84</td>
+<td class="org-right">87</td>
+<td class="org-right">88</td>
+<td class="org-right">83</td>
+<td class="org-right">83</td>
+<td class="org-left"><abbr title="Un mur dur bloque la rue." tabindex="0">ɒwmjd̪il̪ɔʁnɒku</abbr></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+The play buttons even work in Org Mode because I use a <a href="https://sachachua.com/dotemacs#audio">custom link type for audio links</a>.
+</p>
+
+<p>
+It would be useful to analyze one tongue-twister across multiple sessions to get a sense of my progress.
+</p>
+</div>
+</div>
+<div id="outline-container-orgaee5691" class="outline-3">
+<h3 id="orgaee5691">Focusing on one word</h3>
+<div class="outline-text-3" id="text-orgaee5691">
+<p>
+Here's a deep-dive on the word "mule" from my March 3 session. I exported the words using the WhisperX JSON. Both Azure speech recognition results and Allosaurus phonemes are all over the place when I try to run them on audio segments with individual words.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(my-subed-record-extract-words <span class="org-string">"mule"</span>  <span class="org-string">"/home/sacha/sync/recordings/processed/2026-03-03-raphael.json"</span> <span class="org-string">"/home/sacha/proj/french/analysis/mule/index.vtt"</span>)
+</code></pre>
+</div>
+
+
+<p>
+I manually adjusted some timestamps, removed some segments, and added a reference sample from <a href="https://en.wiktionary.org/wiki/mule#French">Wiktionary</a> (<a href="https://en.wiktionary.org/wiki/File:LL-Q150_(fra)-Mecanautes-mule.wav">source</a>, public domain). Here's the WebVTT file with the directives: <a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index.vtt">file:///home/sacha/proj/french/analysis/mule/index.vtt</a>
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orga39f30b"><code>(my-subed-record-analyze-file-with-azure <span class="org-string">"~/proj/french/analysis/mule/index.vtt"</span>)
+</code></pre>
+</div>
+
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">File</td>
+<td class="org-right">ID</td>
+<td class="org-left">Comments</td>
+<td class="org-right">WhisperX</td>
+<td class="org-right">All</td>
+<td class="org-right">Acc</td>
+<td class="org-right">Flu</td>
+<td class="org-right">Comp</td>
+<td class="org-right">Conf</td>
+<td class="org-left">Phonemes</td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01</td>
+<td class="org-left">Wiktionary - France</td>
+<td class="org-right">&nbsp;</td>
+<td class="org-right">97</td>
+<td class="org-right">95</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">77</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mel</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">02</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">92</td>
+<td class="org-right">80</td>
+<td class="org-right">68</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">78</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mi</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-03.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-03.opus">Download the audio</a></audio></span></td>
+<td class="org-right">03</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">91</td>
+<td class="org-right">80</td>
+<td class="org-right">68</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">79</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">nol̪ɒj</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-04.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-04.opus">Download the audio</a></audio></span></td>
+<td class="org-right">04</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">90</td>
+<td class="org-right">95</td>
+<td class="org-right">93</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">nyjɔl̪ɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-05.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-05.opus">Download the audio</a></audio></span></td>
+<td class="org-right">05</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">89</td>
+<td class="org-right">88</td>
+<td class="org-right">80</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">83</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">j</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-06.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-06.opus">Download the audio</a></audio></span></td>
+<td class="org-right">06</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">89</td>
+<td class="org-right">88</td>
+<td class="org-right">80</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">82</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">muə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-07.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-07.opus">Download the audio</a></audio></span></td>
+<td class="org-right">07</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">88</td>
+<td class="org-right">10</td>
+<td class="org-right">50</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">78</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">niə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-08.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-08.opus">Download the audio</a></audio></span></td>
+<td class="org-right">08</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">88</td>
+<td class="org-right">76</td>
+<td class="org-right">60</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">81</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mio</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-09.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-09.opus">Download the audio</a></audio></span></td>
+<td class="org-right">09</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">84</td>
+<td class="org-right">91</td>
+<td class="org-right">86</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">84</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mj</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-10.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-10.opus">Download the audio</a></audio></span></td>
+<td class="org-right">10</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">84</td>
+<td class="org-right">11</td>
+<td class="org-right">56</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">77</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">nj</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-11.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-11.opus">Download the audio</a></audio></span></td>
+<td class="org-right">11</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">83</td>
+<td class="org-right">6</td>
+<td class="org-right">31</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">79</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">jn</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-12.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-12.opus">Download the audio</a></audio></span></td>
+<td class="org-right">12</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">83</td>
+<td class="org-right">80</td>
+<td class="org-right">68</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">80</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mijə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-13.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-13.opus">Download the audio</a></audio></span></td>
+<td class="org-right">13</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">82</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">ɒ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-14.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-14.opus">Download the audio</a></audio></span></td>
+<td class="org-right">14</td>
+<td class="org-left">Got a small "oui"</td>
+<td class="org-right">80</td>
+<td class="org-right">1</td>
+<td class="org-right">5</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">84</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">ija</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-15.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-15.opus">Download the audio</a></audio></span></td>
+<td class="org-right">15</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">78</td>
+<td class="org-right">4</td>
+<td class="org-right">21</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">57</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mia</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-16.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-16.opus">Download the audio</a></audio></span></td>
+<td class="org-right">16</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">78</td>
+<td class="org-right">10</td>
+<td class="org-right">53</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">80</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">miə</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-17.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-17.opus">Download the audio</a></audio></span></td>
+<td class="org-right">17</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">75</td>
+<td class="org-right">10</td>
+<td class="org-right">52</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">77</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">we</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-18.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-18.opus">Download the audio</a></audio></span></td>
+<td class="org-right">18</td>
+<td class="org-left">Got a "non!"</td>
+<td class="org-right">75</td>
+<td class="org-right">8</td>
+<td class="org-right">44</td>
+<td class="org-right">0</td>
+<td class="org-right">0</td>
+<td class="org-right">85</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mjən</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-19.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-19.opus">Download the audio</a></audio></span></td>
+<td class="org-right">19</td>
+<td class="org-left">&nbsp;</td>
+<td class="org-right">72</td>
+<td class="org-right">79</td>
+<td class="org-right">66</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">78</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">mɛ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-20.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index-20.opus">Download the audio</a></audio></span></td>
+<td class="org-right">20</td>
+<td class="org-left">Bit of a y</td>
+<td class="org-right">72</td>
+<td class="org-right">79</td>
+<td class="org-right">66</td>
+<td class="org-right">100</td>
+<td class="org-right">100</td>
+<td class="org-right">79</td>
+<td class="org-left"><abbr title="Mule" tabindex="0">miə</abbr></td>
+</tr>
+</tbody>
+</table>
+
+
+
+<p>
+At the word level, the Azure pronunciation scores are all over the place, and so are the Allosaurus phonemes. For now, I think it might be better to tweak my interface so that I can more easily refer to the samples (text to speech or recordings extracted from my tutoring session) and compare new recordings, maybe with waveforms, spectrograms, and other plots.
+</p>
+
+<p>
+I like the progress I've made on a workflow for extracting and evaluating sentences or words. I'm looking forward to seeing what I can do once I understand a bit more of the research. Let me describe the workflow I have so far.
+</p>
+</div>
+</div>
+<div id="outline-container-org06b04d8" class="outline-3">
+<h3 id="org06b04d8">Analyzing one tongue-twister across multiple sessions</h3>
+<div class="outline-text-3" id="text-org06b04d8">
+<p>
+I can also compile different versions of one tongue-twister into one file to get a sense of my progress.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(my-subed-record-analyze-file-with-azure
+ (my-subed-record-collect-matching-subtitles
+ <span class="org-string">"Le roi croit voir trois noix"</span>
+ <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"~/sync/recordings/processed/2026-02-20-raphael-tongue-twisters.vtt"</span> . <span class="org-string">"Feb 20"</span>)
+   (<span class="org-string">"~/sync/recordings/processed/2026-02-22-virelangues-single.vtt"</span> . <span class="org-string">"Feb 22"</span>)
+   (<span class="org-string">"~/proj/french/recordings/2026-02-26-virelangues-script.vtt"</span> . <span class="org-string">"Feb 26"</span>)
+   (<span class="org-string">"~/proj/french/recordings/2026-02-27-virelangues-script.vtt"</span> . <span class="org-string">"Feb 27"</span>)
+   (<span class="org-string">"~/proj/french/recordings/2026-03-03-virelangues.vtt"</span> . <span class="org-string">"Mar 3"</span>)
+   (<span class="org-string">"~/proj/french/analysis/virelangues/2026-03-06-raphael-script.vtt"</span> . <span class="org-string">"Mar 6"</span>))
+ <span class="org-string">"~/proj/french/analysis/virelangues/Le-roi-croit-voir-trois-noix.vtt"</span>
+ nil <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-subed-simplify</span>))
+</code></pre>
+</div>
+
+
+<table>
+
+
+<colgroup>
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-left">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-right">
+
+<col class="org-left">
+</colgroup>
+<tbody>
+<tr>
+<td class="org-left">File</td>
+<td class="org-right">ID</td>
+<td class="org-left">Comments</td>
+<td class="org-right">All</td>
+<td class="org-right">Acc</td>
+<td class="org-right">Flu</td>
+<td class="org-right">Comp</td>
+<td class="org-right">Conf</td>
+<td class="org-left">Phonemes</td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-01.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-01.opus">Download the audio</a></audio></span></td>
+<td class="org-right">01</td>
+<td class="org-left">Feb 20</td>
+<td class="org-right">76</td>
+<td class="org-right">78</td>
+<td class="org-right">73</td>
+<td class="org-right">83</td>
+<td class="org-right">85</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">ɛmiwəkɔwɑtwɑsmɑs</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-02.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-02.opus">Download the audio</a></audio></span></td>
+<td class="org-right">02</td>
+<td class="org-left">Feb 22</td>
+<td class="org-right">97</td>
+<td class="org-right">98</td>
+<td class="org-right">97</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">jusɒl̪vwatlɒnwa</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-03.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-03.opus">Download the audio</a></audio></span></td>
+<td class="org-right">03</td>
+<td class="org-left">Feb 26</td>
+<td class="org-right">97</td>
+<td class="org-right">100</td>
+<td class="org-right">96</td>
+<td class="org-right">100</td>
+<td class="org-right">89</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">əkwɒwɑtwanwɑ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-04.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-04.opus">Download the audio</a></audio></span></td>
+<td class="org-right">04</td>
+<td class="org-left">Feb 27</td>
+<td class="org-right">96</td>
+<td class="org-right">95</td>
+<td class="org-right">97</td>
+<td class="org-right">100</td>
+<td class="org-right">87</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">jɛʀwɑl̪ɛvwɑtwɛnwɑ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-05.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-05.opus">Download the audio</a></audio></span></td>
+<td class="org-right">05</td>
+<td class="org-left">Mar 3</td>
+<td class="org-right">94</td>
+<td class="org-right">96</td>
+<td class="org-right">92</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">juwakwɒl̪dwɑwanwɑ</abbr></td>
+</tr>
+
+<tr>
+<td class="org-left"><span class="audio-icon"><audio preload="metadata" src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-06.opus?2026-03-11" type="audio/ogg"><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/Le-roi-croit-voir-trois-noix-06.opus">Download the audio</a></audio></span></td>
+<td class="org-right">06</td>
+<td class="org-left">Mar 6: : Uh huh</td>
+<td class="org-right">98</td>
+<td class="org-right">100</td>
+<td class="org-right">97</td>
+<td class="org-right">100</td>
+<td class="org-right">88</td>
+<td class="org-left"><abbr title="Le roi croit voir trois noix." tabindex="0">jal̪aʁwaɒll̪awandwa</abbr></td>
+</tr>
+</tbody>
+</table>
+
+
+<details><summary>Emacs Lisp code for collecting matching subtitles</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-collect-matching-subtitles</span> (text files output-file <span class="org-type">&amp;optional</span> match-fn transform-fn)
+  <span class="org-doc">"Find subtitles that match TEXT in FILES and write to OUTPUT-FILE.</span>
+<span class="org-doc">FILES can be a list of filenames or a list of (FILE . NOTE) pairs.</span>
+<span class="org-doc">By default, TEXT is an approximate match based on</span>
+<span class="org-doc">`</span><span class="org-doc"><span class="org-constant">subed-word-data-compare-normalized-string-distance</span></span><span class="org-doc">'.</span>
+<span class="org-doc">If TRANSFORM-FN is specified, use that on SUBTITLE-TEXT before comparing.</span>
+<span class="org-doc">If MATCH-FN is specified, use that to match instead. It will be called</span>
+<span class="org-doc">with the arguments input-text and subtitle-text.</span>
+<span class="org-doc">Return OUTPUT-FILE."</span>
+  (subed-create-file
+   output-file
+   (seq-mapcat
+    (<span class="org-keyword">lambda</span> (o)
+      (<span class="org-keyword">let</span> ((media-file (subed-guess-media-file nil (expand-file-name (<span class="org-keyword">if</span> (consp o) (car o) o)))))
+        (seq-keep
+         (<span class="org-keyword">lambda</span> (sub)
+           (<span class="org-keyword">when</span> transform-fn
+             (<span class="org-keyword">setf</span> (elt sub 3) (funcall transform-fn (elt sub 3))))
+           (<span class="org-keyword">when</span> (funcall (<span class="org-keyword">or</span> match-fn <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">subed-word-data-compare-normalized-string-distance</span>) text (elt sub 3))
+             <span class="org-comment-delimiter">;; </span><span class="org-comment">Add audio note if missing</span>
+             (<span class="org-keyword">unless</span> (<span class="org-keyword">or</span> (subed-record-get-directive <span class="org-string">"#+AUDIO"</span> (elt sub 4))
+                         (null media-file))
+               (<span class="org-keyword">setf</span> (elt sub 4)
+                     (subed-record-set-directive <span class="org-string">"#+AUDIO"</span> media-file (<span class="org-keyword">or</span> (elt sub 4) <span class="org-string">""</span>))))
+             <span class="org-comment-delimiter">;; </span><span class="org-comment">Prepend note if specified</span>
+             (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (consp o) (cdr o))
+               (<span class="org-keyword">let</span> ((current-note (subed-record-get-directive <span class="org-string">"#+NOTE"</span> (elt sub 4))))
+                 (<span class="org-keyword">setf</span> (elt sub 4)
+                       (subed-record-set-directive
+                        <span class="org-string">"#+NOTE"</span>
+                        (<span class="org-keyword">if</span> current-note
+                            (concat (cdr o) <span class="org-string">": "</span> current-note)
+                          (cdr o))
+                        (<span class="org-keyword">or</span> (elt sub 4) <span class="org-string">""</span>)))))
+             sub))
+         (subed-parse-file (car o)))))
+    files)
+   t)
+  output-file)
+</code></pre>
+</div>
+
+</details>
+</div>
+</div>
+<div id="outline-container-org731040d" class="outline-3">
+<h3 id="org731040d">Workflow</h3>
+<div class="outline-text-3" id="text-org731040d">
+</div>
+<div id="outline-container-org7918f06" class="outline-4">
+<h4 id="org7918f06">Extracting parts of the recording</h4>
+<div class="outline-text-4" id="text-org7918f06">
+<p>
+I use OBS to record both my microphone and the tutor's voice. I use <a href="https://github.com/m-bain/whisperX">WhisperX</a> to transcribe my recording with speaker diarization.
+</p>
+
+<details><summary>Shell script</summary>
+<div class="org-src-container">
+<pre class="src src-sh"><code><span class="org-comment-delimiter">#</span><span class="org-comment">!/bin/</span><span class="org-keyword">zsh</span>
+<span class="org-variable-name">WHISPER_ARGS</span>=(${(z)WHISPER_FLAGS})
+<span class="org-variable-name">MAX_LINE_WIDTH</span>=<span class="org-string">"${MAX_LINE_WIDTH:-50}"</span>
+<span class="org-variable-name">MODEL</span>=<span class="org-string">"${MODEL:-large-v2}"</span>
+<span class="org-keyword">for</span> FILE<span class="org-keyword"> in</span> <span class="org-string">"$@"</span>; <span class="org-keyword">do</span>
+    <span class="org-variable-name">text</span>=<span class="org-string">"${FILE%.*}.txt"</span>
+    <span class="org-keyword">if</span> [  -f <span class="org-string">"$text"</span> ]; <span class="org-keyword">then</span>
+       <span class="org-builtin">echo</span> <span class="org-string">"Skipping $FILE as it's already been transcribed."</span>
+    <span class="org-keyword">else</span>
+        ~/vendor/whisperx/.venv/bin/whisperx &#45;&#45;model <span class="org-string">"$MODEL"</span> &#45;&#45;diarize &#45;&#45;hf_token $<span class="org-variable-name">HUGGING_FACE_API_KEY</span> &#45;&#45;language fr &#45;&#45;align_model WAV2VEC2_ASR_LARGE_LV60K_960H &#45;&#45;compute_type int8 &#45;&#45;print_progress True &#45;&#45;max_line_width $<span class="org-variable-name">MAX_LINE_WIDTH</span> &#45;&#45;segment_resolution chunk &#45;&#45;max_line_count 1 &#45;&#45;initial_prompt <span class="org-string">"Emacs et Org Mode sont d'excellents outils. J'utilise Org-roam pour prendre des notes. Today I am recording a braindump about technical setups. C'est vraiment utile pour la productivit&#233;."</span> <span class="org-string">"$FILE"</span> $<span class="org-variable-name">WHISPER_FLAGS</span>
+        rm -f <span class="org-string">"${FILE%.*}.srt"</span>
+    <span class="org-keyword">fi</span>
+<span class="org-keyword">done</span>
+</code></pre>
+</div>
+
+</details>
+
+<p>
+I can review the VTT manually, but it's also useful to be able to quickly extract different attempts at the phrases or words. I added <code>subed-record-extract-all-approximately-matching-phrases</code> to <a href="https://github.com/sachac/subed-record/blob/main/subed-record.el">subed-record.el</a> so that I can generate a starting point with something like this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(subed-record-extract-all-approximately-matching-phrases
+   phrases
+   <span class="org-string">"/home/sacha/sync/recordings/processed/2026-03-06-raphael.json"</span>
+   <span class="org-string">"/home/sacha/proj/french/analysis/virelangues/2026-03-06-raphael-script.vtt"</span>)
+</code></pre>
+</div>
+
+
+<p>
+<mark>Ideas:</mark>
+</p>
+
+<ul class="org-ul">
+<li>Group by speaker ID to make it possible to extract phrases even with interstitial corrections.</li>
+<li>Add an optional parameter that lets me append to an existing file.</li>
+</ul>
+
+<p>
+Here's a copy of its output:
+<a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script-original.vtt">file:///home/sacha/proj/french/analysis/virelangues/2026-03-06-raphael-script-original.vtt</a>
+</p>
+
+
+<figure id="org6e0498a">
+<a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06_13-49-52.png"><img src="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06_13-49-52.png" alt="2026-03-06_13-49-52.png"></a>
+
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot with subed-waveform showing the waveforms for each segment</figcaption>
+</figure>
+
+<p>
+Based on the waveforms, I can see that some timestamps need to be adjusted, and some phrases may need to be duplicated, trimmed, or split. This is the file that I ended up with.
+</p>
+
+<p>
+<a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/2026-03-06-raphael-script.vtt">file:///home/sacha/proj/french/analysis/virelangues/2026-03-06-raphael-script.vtt</a>
+</p>
+
+<p>
+Sometimes I want to do a deep dive on a specific word. Here's another function that uses the WhisperX JSON data to extract just single words, like in my analysis of "mule".
+</p>
+
+<details><summary>Extracting words</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-extract-words</span> (word word-data-file output-file)
+  (<span class="org-keyword">let</span> ((media-file (subed-guess-media-file nil word-data-file)))
+    (subed-create-file
+     output-file
+     (mapcar (<span class="org-keyword">lambda</span> (o)
+               (list nil
+                     (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> o)
+                     (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> o)
+                     (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span> o)
+                     (format <span class="org-string">"#+AUDIO: %s\n#+WHISPER_SCORE: %d\n#+SPEAKER: %s"</span>
+                             media-file
+                             (* (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">score</span> o) 100)
+                             (<span class="org-keyword">or</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">speaker</span> o) <span class="org-string">""</span>))))
+             (sort
+              (seq-filter
+               (<span class="org-keyword">lambda</span> (o)
+                 (subed-word-data-compare-normalized-string-distance
+                   word
+                   (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span> o)))
+               (subed-word-data-parse-file
+                word-data-file))
+              <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">score</span> o))
+              <span class="org-builtin">:reverse</span> t))
+     t)))
+</code></pre>
+</div>
+
+</details>
+</div>
+</div>
+<div id="outline-container-org86dc0ee" class="outline-4">
+<h4 id="org86dc0ee">Azure pronunciation assessment</h4>
+<div class="outline-text-4" id="text-org86dc0ee">
+<p>
+I can use the following code from any subtitle of 30 seconds or less to automatically extract the audio for that subtitle and add a comment with the scores from Microsoft Azure pronunciation assessment. It needs an API key and region. I think the free tier includes 5 hours of speech each month, with additional hours priced at USD 0.66 per hour for short files less than 30 seconds (billed in 1-second increments). There's another API that can handle longer segments for USD 1.32 per hour (also included in the 5 hours free), but I'll probably need a Python or NodeJS program. Since I'm working with words and short sentences for now, I can use the REST API.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-subed-record-azure-assessment</span> nil)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-subed-record-azure-assess-pronunciation-lang</span> <span class="org-string">"fr-FR"</span>)
+<span class="org-comment-delimiter">;; </span><span class="org-comment">(my-subed-record-azure-assess-pronunciation "~/proj/french/analysis/mule/ref-france-sample.wav" "mule")</span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-azure-assess-pronunciation</span> (audio-file reference-text)
+  <span class="org-doc">"Send AUDIO-FILE to Azure for pronunciation assessment against REFERENCE-TEXT.</span>
+<span class="org-doc">Needs the AZURE_SPEECH_REGION and AZURE_SPEECH_KEY environment variables."</span>
+  (<span class="org-keyword">interactive</span> (list (read-file-name <span class="org-string">"Audio: "</span>)
+                     (read-string <span class="org-string">"Text: "</span>)))
+  (<span class="org-keyword">let*</span> ((url (format <span class="org-string">"https://%s.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=%s&amp;format=detailed"</span>
+                      (getenv <span class="org-string">"AZURE_SPEECH_REGION"</span>)
+                      (url-hexify-string my-subed-record-azure-assess-pronunciation-lang)))
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">1. Create the Configuration JSON</span>
+         (config-json (json-encode <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"ReferenceText"</span> . ,reference-text)
+                                     (<span class="org-string">"GradingSystem"</span> . <span class="org-string">"HundredMark"</span>)
+                                     (<span class="org-string">"Granularity"</span>   . <span class="org-string">"Phoneme"</span>)
+                                     (<span class="org-string">"Dimension"</span>     . <span class="org-string">"Comprehensive"</span>))))
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">2. Base64 encode the config</span>
+         (config-base64 (base64-encode-string (encode-coding-string config-json <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">utf-8</span>) t))
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">3. Prepare headers</span>
+         (headers <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"Ocp-Apim-Subscription-Key"</span> . ,(getenv <span class="org-string">"AZURE_SPEECH_KEY"</span>))
+                    (<span class="org-string">"Pronunciation-Assessment"</span>  . ,config-base64)
+                    (<span class="org-string">"Content-Type"</span>              . <span class="org-string">"audio/wav; codecs=audio/pcm; samplerate=16000"</span>)))
+         (data (plz <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">post</span> url
+                 <span class="org-builtin">:headers</span> headers
+                 <span class="org-builtin">:body</span> <span class="org-highlight-quoted-quote">`</span>(file ,audio-file)
+                 <span class="org-builtin">:as</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>)))
+    (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+      (kill-new (my-subed-record-azure-format-assessment data))
+      (message <span class="org-string">"%s"</span> (my-subed-record-azure-format-assessment data)))
+    data))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-azure-assess-pronunciation</span> (<span class="org-type">&amp;optional</span> beg end)
+  <span class="org-doc">"Assess the pronunciation of the current cue."</span>
+  (<span class="org-keyword">interactive</span> (<span class="org-keyword">if</span> (region-active-p)
+                   (list (region-beginning)
+                         (region-end))
+                 (list (subed-subtitle-start-pos)
+                       (<span class="org-keyword">save-excursion</span>
+                         (subed-jump-to-subtitle-end)
+                         (point)))))
+  (<span class="org-keyword">subed-for-each-subtitle</span> beg end t
+    (<span class="org-keyword">let*</span> ((temp-file (make-temp-file <span class="org-string">"subed-record-azure"</span> nil <span class="org-string">".wav"</span>))
+           (text (my-subed-simplify (subed-subtitle-text)))
+           data
+           score)
+      (subed-record-extract-audio-for-current-subtitle-to-file temp-file)
+      (<span class="org-keyword">setq</span> data
+            (my-azure-assess-pronunciation
+             temp-file
+             text))
+      (<span class="org-keyword">when</span> data
+        (subed-record-set-directive
+         <span class="org-string">"#+SCORE"</span>
+         (my-subed-record-azure-format-assessment data))
+        (<span class="org-keyword">setq</span> my-subed-record-azure-assessment data))
+      (delete-file temp-file)
+      data)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-azure-format-assessment</span> (<span class="org-type">&amp;optional</span> data)
+  (<span class="org-keyword">setq</span> data (<span class="org-keyword">or</span> data my-subed-record-azure-assessment))
+  (<span class="org-keyword">let-alist</span> (car (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">NBest</span> data))
+    (format <span class="org-string">"%d; A: %d, F: %d, C: %d, Conf: %d"</span>
+            (<span class="org-keyword">or</span> .PronunciationAssessment.PronScore .PronScore)
+            (<span class="org-keyword">or</span> .PronunciationAssessment.AccuracyScore .AccuracyScore)
+            (<span class="org-keyword">or</span> .PronunciationAssessment.FluencyScore .FluencyScore)
+            (<span class="org-keyword">or</span> .PronunciationAssessment.CompletenessScore .CompletenessScore)
+            (* 100.0 (<span class="org-keyword">or</span> .PronunciationAssessment.Confidence
+                         .Confidence)))))
+</code></pre>
+</div>
+
+</div>
+</div>
+<div id="outline-container-orga00ca39" class="outline-4">
+<h4 id="orga00ca39">Phonemes with Allosaurus, Espeak, or Kokoro FastAPI</h4>
+<div class="outline-text-4" id="text-orga00ca39">
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-subed-record-allosaurus-command</span> <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"/home/sacha/proj/french/.venv/bin/python3"</span> <span class="org-string">"-m"</span> <span class="org-string">"allosaurus.run"</span> <span class="org-string">"&#45;&#45;lang"</span> <span class="org-string">"fra"</span> <span class="org-string">"-i"</span>))
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-allosaurus-phonemes</span> (<span class="org-type">&amp;optional</span> beg end)
+  (<span class="org-keyword">interactive</span> (<span class="org-keyword">if</span> (region-active-p)
+                   (list (region-beginning)
+                         (region-end))
+                 (list (subed-subtitle-start-pos)
+                       (<span class="org-keyword">save-excursion</span>
+                         (subed-jump-to-subtitle-end)
+                         (point)))))
+  (<span class="org-keyword">subed-for-each-subtitle</span> beg end t
+    (<span class="org-keyword">let*</span> ((temp-file (make-temp-file <span class="org-string">"subed-record-allosaurus"</span> nil <span class="org-string">".wav"</span>)))
+      (subed-record-extract-audio-for-current-subtitle-to-file temp-file)
+      (subed-record-set-directive
+       <span class="org-string">"#+PHONEMES"</span>
+       (<span class="org-keyword">with-temp-buffer</span>
+         (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">call-process</span> (car my-subed-record-allosaurus-command)
+                nil t nil
+                (append
+                 (cdr my-subed-record-allosaurus-command)
+                 (list temp-file)))
+         (delete-file temp-file)
+         (replace-regexp-in-string <span class="org-string">" "</span> <span class="org-string">""</span> (buffer-string)))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-lang-espeak-ng-phonemes</span> (text)
+  (<span class="org-keyword">interactive</span> <span class="org-string">"MText: "</span>)
+  (<span class="org-keyword">let</span> ((data
+         (<span class="org-keyword">with-temp-buffer</span>
+           (call-process <span class="org-string">"espeak"</span> nil t nil <span class="org-string">"-q"</span> <span class="org-string">"&#45;&#45;ipa"</span> text)
+           (string-trim (buffer-string)))))
+    (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+      (kill-new data)
+      (message <span class="org-string">"%s"</span> data))
+    text))
+</code></pre>
+</div>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-french-kokoro-fastapi-phonemes</span> (s)
+  (<span class="org-keyword">interactive</span> <span class="org-string">"MText: "</span>)
+  (my-kokoro-fastapi-ensure)
+  (<span class="org-keyword">let</span> ((data (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">phonemes</span>
+                         (plz <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">post</span> <span class="org-string">"http://localhost:8880/dev/phonemize"</span>
+                           <span class="org-builtin">:headers</span> <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"Content-Type"</span> . <span class="org-string">"application/json"</span>))
+                           <span class="org-builtin">:body</span> (json-encode <span class="org-highlight-quoted-quote">`</span>((text . ,s)
+                                                (language . <span class="org-string">"fr-fr"</span>)))
+                           <span class="org-builtin">:as</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>))))
+    (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+      (kill-new data)
+      (message <span class="org-string">"%s"</span> data))
+    data))
+</code></pre>
+</div>
+
+</div>
+</div>
+<div id="outline-container-org171cd32" class="outline-4">
+<h4 id="org171cd32">Splitting into segments and making a table</h4>
+<div class="outline-text-4" id="text-org171cd32">
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-make-groups</span> (subtitles)
+  <span class="org-doc">"Come up with a good ID for attempts, grouping by cue text."</span>
+  (<span class="org-keyword">let*</span> ((group-num 0)
+         (sub-num 0)
+         (grouped <span class="org-comment-delimiter">; </span><span class="org-comment">((text . (start start start)) ...)</span>
+          (mapcar
+           (<span class="org-keyword">lambda</span> (o)
+             (cons (car o)
+                   (mapcar
+                    (<span class="org-keyword">lambda</span> (sub) (elt sub 1))
+                    (cdr o))))
+           (seq-group-by
+            (<span class="org-keyword">lambda</span> (o) (elt o 3))
+            (seq-remove (<span class="org-keyword">lambda</span> (o)
+                          (<span class="org-keyword">and</span> (elt o 4)
+                               (string-match <span class="org-string">"#\\+SKIP"</span> (elt o 4)))) <span class="org-warning">subtitles))))</span>
+         (one-group (= (length grouped) 1)))
+    (seq-mapcat
+     (<span class="org-keyword">lambda</span> (o)
+       (<span class="org-keyword">setq</span> group-num (1+ group-num))
+       (<span class="org-keyword">unless</span> one-group (<span class="org-keyword">setq</span> sub-num 0))
+       (seq-map
+        (<span class="org-keyword">lambda</span> (sub-start)
+          (<span class="org-keyword">setq</span> sub-num (1+ sub-num))
+          (cons sub-start (<span class="org-keyword">if</span> one-group
+                              (format <span class="org-string">"%02d"</span> sub-num)
+                            (format <span class="org-string">"%02d-%02d"</span> group-num sub-num))))
+        (cdr o)))
+     grouped)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-subed-record-analyze-file-with-azure</span> (vtt <span class="org-type">&amp;optional</span> always-create filter)
+  (<span class="org-keyword">with-current-buffer</span> (find-file-noselect vtt)
+    (<span class="org-keyword">let*</span> (results
+           filename
+           (ids (my-subed-record-make-groups
+                 (seq-filter
+                  (<span class="org-keyword">lambda</span> (o)
+                    (<span class="org-keyword">if</span> filter
+                        (string-match filter (elt o 3))
+                      <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">identity</span>))
+                  (subed-subtitle-list))))
+           id)
+      (<span class="org-keyword">subed-for-each-subtitle</span> (point-min) (point-max) t
+        (<span class="org-keyword">unless</span> (<span class="org-keyword">and</span> (subed-subtitle-comment)
+                     (string-match <span class="org-string">"#\\+SKIP"</span> (subed-subtitle-comment))
+                     (<span class="org-keyword">or</span> (null filter)
+                         (string-match filter (subed-subtitle-text))))
+          (<span class="org-keyword">setq</span> id (alist-get (subed-subtitle-msecs-start) ids))
+          (<span class="org-keyword">setq</span> filename (expand-file-name
+                          (format <span class="org-string">"%s-%s.opus"</span>
+                                  (file-name-base vtt)
+                                  id)
+                          (file-name-directory vtt)))
+          (<span class="org-keyword">when</span> (<span class="org-keyword">or</span> always-create (not (file-exists-p filename))) (subed-record-extract-audio-for-current-subtitle-to-file filename))
+          (<span class="org-keyword">unless</span> (string-match (regexp-quote <span class="org-string">"#+SCORE"</span>) (subed-subtitle-comment))
+            (my-subed-record-azure-assess-pronunciation))
+          (<span class="org-keyword">unless</span> (string-match (regexp-quote <span class="org-string">"#+PHONEMES"</span>) (subed-subtitle-comment))
+            (my-subed-record-allosaurus-phonemes))
+          (<span class="org-keyword">let*</span> ((comment (subed-subtitle-comment))
+                 (scores (mapcar (<span class="org-keyword">lambda</span> (o)
+                                   (<span class="org-keyword">if</span> (string-match (concat (regexp-quote o) <span class="org-string">": </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[0-9]+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span>) comment)
+                                       (match-string 1 comment)
+                                     <span class="org-string">""</span>))
+                                 <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"#+WHISPER_SCORE"</span> <span class="org-string">"#+SCORE"</span> <span class="org-string">"A"</span> <span class="org-string">"F"</span> <span class="org-string">"C"</span> <span class="org-string">"Conf"</span>)))
+                 (phonemes (<span class="org-keyword">when</span> (string-match <span class="org-string">"#\\+PHONEMES: </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span> comment)
+                             (match-string 1 comment)))
+                 (text (subed-subtitle-text))
+                 (extra-comment (<span class="org-keyword">when</span> (string-match <span class="org-string">"#\\+NOTE: </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span> comment) (match-string 1 comment))))
+            (<span class="org-keyword">push</span>
+             (append
+              (list (org-link-make-string (format <span class="org-string">"audio:%s?icon=t"</span> filename) <span class="org-string">"&#9654;&#65039;"</span>)
+                    id
+                    (<span class="org-keyword">or</span> extra-comment <span class="org-string">""</span>))
+              scores
+              (list
+               (org-link-make-string (concat <span class="org-string">"abbr:"</span> text) phonemes)))
+             results))))
+      (<span class="org-keyword">setq</span> results
+            (cons
+             <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"File"</span> <span class="org-string">"ID"</span> <span class="org-string">"Comments"</span> <span class="org-string">"WhisperX"</span> <span class="org-string">"All"</span> <span class="org-string">"Acc"</span> <span class="org-string">"Flu"</span> <span class="org-string">"Comp"</span> <span class="org-string">"Conf"</span> <span class="org-string">"Phonemes"</span>)
+             results))
+      (my-org-table-remove-blank-columns results t))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-table-remove-blank-columns</span> (data <span class="org-type">&amp;optional</span> has-header)
+  <span class="org-doc">"Remove blank columns from DATA.</span>
+<span class="org-doc">Skip the first line if HAS-HEADER is non-nil."</span>
+  (<span class="org-keyword">cl-loop</span>
+   for i from (1- (length (car results))) downto 1
+   do (<span class="org-keyword">unless</span> (delq nil
+                    (mapcar
+                     (<span class="org-keyword">lambda</span> (o)
+                       (<span class="org-keyword">and</span> (elt o i)
+                            (not (string= (elt o i) <span class="org-string">""</span>))))
+                     (<span class="org-keyword">if</span> has-header
+                         (cdr data)
+                       data)))
+        (<span class="org-keyword">setq</span> data
+              (mapcar
+               (<span class="org-keyword">lambda</span> (o)
+                 (seq-remove-at-position o i))
+               data))))
+  data)
+</code></pre>
+</div>
+
+</div>
+</div>
+<div id="outline-container-org42a44b9" class="outline-4">
+<h4 id="org42a44b9">Collecting segments from multiple sessions</h4>
+<div class="outline-text-4" id="text-org42a44b9">
+<p>
+First I collect a sample from different files
+</p>
+</div>
+</div>
+</div>
+<div id="blog-2026-03-french-pronunciation-assessment-with-azure-and-my-emacs-setup-footnotes">
+<h3 class="footnotes">Footnotes</h3>
+<div id="blog-2026-03-french-pronunciation-assessment-with-azure-and-my-emacs-setup-text-footnotes">
+
+<div class="footdef"><sup><a id="fn.llm-pronunciation-assessment" class="footnum" href="https://sachachua.com/blog/feed/index.xml#fnr.llm-pronunciation-assessment" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara"><a href="https://arxiv.org/html/2503.11229v1">Wang, K., He, L., Liu, K., Deng, Y., Wei, W., &amp; Zhao, S. (2025). <i>Exploring the potential of large multimodal models as effective alternatives for pronunciation assessment.</i> arXiv. https://arxiv.org/abs/2503.11229</a></p></div></div>
+
+
+</div>
+</div><div><a href="https://sachachua.com/blog/2026/03/french-pronunciation-assessment-with-azure-and-my-emacs-setup/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F03%2Ffrench-pronunciation-assessment-with-azure-and-my-emacs-setup%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

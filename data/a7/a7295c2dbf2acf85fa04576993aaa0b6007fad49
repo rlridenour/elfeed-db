@@ -1,0 +1,298 @@
+<div class="update" id="org4a3fba1">
+<ul class="org-ul">
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-03-13">[2026-03-13 Fri]</time></span>: Cleaned up links from Google</li>
+<li><span class="timestamp-wrapper"><time class="timestamp" datetime="2026-03-12">[2026-03-12 Thu]</time></span>: Simplified getting a section or finding the bolded text by using the Org Mode format instead.</li>
+</ul>
+
+</div>
+
+<p>
+During the sessions with my French tutor, I share a Google document so that we can mark the words where I need to practice my pronunciation some more or tweak the wording. Using Ctrl+B to make the word as bold is an easy way to make it jump out.
+</p>
+
+<p>
+I used to copy these changes into my Org Mode notes manually, but today I thought I'd try automating some of it.
+</p>
+
+<p>
+First, I need a script to download the HTML for a specified Google document. This is probably easier to do with the NodeJS library rather than with oauth2.el and <code>url-retrieve-synchronously</code> because of various authentication things.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-js"><code>require(<span class="org-string">'dotenv'</span>).config();
+<span class="org-keyword">const</span> { google } = require(<span class="org-string">'googleapis'</span>);
+
+<span class="org-keyword">async</span> <span class="org-keyword">function</span> download(<span class="org-variable-name">fileId</span>) {
+  <span class="org-keyword">const</span> <span class="org-variable-name">auth</span> = <span class="org-keyword">new</span> <span class="org-type">google.auth.GoogleAuth</span>({
+    scopes: [<span class="org-string">'https://www.googleapis.com/auth/drive.readonly'</span>],
+  });
+  <span class="org-keyword">const</span> <span class="org-variable-name">drive</span> = google.drive({ version: <span class="org-string">'v3'</span>, auth });
+  <span class="org-keyword">const</span> <span class="org-variable-name">htmlRes</span> = <span class="org-keyword">await</span> drive.files.<span class="org-keyword">export</span>({
+    fileId: fileId,
+    mimeType: <span class="org-string">'text/html'</span>
+  });
+  <span class="org-keyword">return</span> htmlRes.data;
+}
+
+<span class="org-keyword">async</span> <span class="org-keyword">function</span> main() {
+  console.log(<span class="org-keyword">await</span> download(process.argv.length &gt; 2 ? process.argv[2] : process.env[<span class="org-string">'DOC_ID'</span>]));
+}
+
+main();
+</code></pre>
+</div>
+
+
+<p>
+Then I can wrap a little bit of Emacs Lisp around it.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-google-doc-download-command</span>
+  (list <span class="org-string">"nodejs"</span> (expand-file-name <span class="org-string">"~/bin/download-google-doc-html.cjs"</span>)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-google-doc-html</span> (doc-id)
+  (<span class="org-keyword">when</span> (string-match <span class="org-string">"https://docs\\.google\\.com/document/d/</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+?</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">/"</span> doc-id)
+    (<span class="org-keyword">setq</span> doc-id (match-string 1 doc-id)))
+  (<span class="org-keyword">with-temp-buffer</span>
+    (apply <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">call-process</span> (car my-google-doc-download-command)
+           nil t nil (append (cdr my-google-doc-download-command) (list doc-id)))
+    (buffer-string)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-google-doc-clean-html</span> (html)
+  <span class="org-doc">"Remove links on spaces, replace Google links."</span>
+  (<span class="org-keyword">let</span> ((dom (<span class="org-keyword">with-temp-buffer</span>
+               (insert html)
+               (libxml-parse-html-region))))
+    (dom-search
+     dom
+     (<span class="org-keyword">lambda</span> (o)
+       (<span class="org-keyword">when</span> (eq (dom-tag o) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">a</span>)
+         (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span>)
+                    (string-match <span class="org-string">"https://</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">www\\.</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">?google\\.com/url\\?q="</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span>)))
+           (<span class="org-keyword">let*</span> ((parsed (url-path-and-query
+                           (url-generic-parse-url (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span>))))
+                  (params (url-parse-query-string (cdr parsed))))
+             (dom-set-attribute o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">href</span> (car (assoc-default <span class="org-string">"q"</span> params <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">string=</span>)))))
+         (<span class="org-keyword">let</span> ((text (string= (string-trim (dom-text o)) <span class="org-string">""</span>)))
+           (<span class="org-keyword">when</span> (string= text <span class="org-string">""</span>)
+             (<span class="org-keyword">setf</span> (car o) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">span</span>))))
+       (<span class="org-keyword">when</span> (<span class="org-keyword">and</span>
+              (string-match <span class="org-string">"font-weight:700"</span> (<span class="org-keyword">or</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">style</span>) <span class="org-string">""</span>))
+              (not (string-match <span class="org-string">"font-style:normal"</span> (<span class="org-keyword">or</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">style</span>) <span class="org-string">""</span>))))
+         (<span class="org-keyword">setf</span> (car o) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">strong</span>))
+       (<span class="org-keyword">when</span> (<span class="org-keyword">dom-attr</span> o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">style</span>)
+         (dom-remove-attribute o <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">style</span>))))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">bold text is actually represented as font-weight:700 instead</span>
+    (<span class="org-keyword">with-temp-buffer</span>
+      (svg-print dom)
+      (buffer-string))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-google-doc-org</span> (doc-id)
+  <span class="org-doc">"Return DOC-ID in Org Mode format."</span>
+  (pandoc-convert-stdio (my-google-doc-clean-html (my-google-doc-html doc-id)) <span class="org-string">"html"</span> <span class="org-string">"org"</span>))
+</code></pre>
+</div>
+
+
+<p>
+I have lots of sections in that document, including past journal entries, so I want to get a specific section by name.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-get-subtree-by-name</span> (org-text heading-name)
+  <span class="org-doc">"Return ORG-TEXT subtree for HEADING-NAME."</span>
+  (<span class="org-keyword">with-temp-buffer</span>
+    (insert org-text)
+    (org-mode)
+    (goto-char (point-min))
+    (<span class="org-keyword">let</span> ((org-trust-scanner-tags t))
+      (car (delq nil
+                 (org-map-entries
+                  (<span class="org-keyword">lambda</span> ()
+                    (<span class="org-keyword">when</span> (string= (org-entry-get (point) <span class="org-string">"ITEM"</span>) heading-name)
+                      (buffer-substring (point) (org-end-of-subtree))))))))))
+</code></pre>
+</div>
+
+
+<p>
+Now I can get the bolded words from a section of my notes, with just a sentence for context. I use pandoc to convert it to Org Mode syntax.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-lang-words-for-review-context-function</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">sentence-at-point</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">my-lang-tutor-notes-url</span> nil)
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-lang-tutor-notes</span> (section-name)
+  (my-org-get-subtree-by-name
+   (my-google-doc-org my-lang-tutor-notes-url)
+   section-name))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-lang-words-for-review</span> (section)
+  <span class="org-doc">"List the bolded words for review in SECTION."</span>
+  (<span class="org-keyword">let*</span> ((section (my-lang-tutor-notes section))
+         results)
+    (<span class="org-keyword">with-temp-buffer</span>
+      (insert section)
+      (org-mode)
+      (goto-char (point-min))
+      (org-map-entries
+       (<span class="org-keyword">lambda</span> ()
+         (org-end-of-meta-data t)
+         (<span class="org-keyword">while</span> (re-search-forward <span class="org-string">"\\*[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">* ].*?\\*"</span> nil t)
+           (<span class="org-keyword">cl-pushnew</span>
+            (replace-regexp-in-string
+             <span class="org-string">"[&#160;\n ]+"</span> <span class="org-string">" "</span>
+             (funcall my-lang-words-for-review-context-function))
+            results
+            <span class="org-builtin">:test</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>)))))
+    (nreverse results)))
+</code></pre>
+</div>
+
+
+<p>
+For example, when I run it on my <a href="https://sachachua.com/blog/2026/03/la-semaine-du-2-mars-au-8-mars/#entr-es-de-journal-la-semaine-du-2-mars-au-8-mars-dimanche-8-mars-sur-l-intelligence-artificielle">notes on artificial intelligence</a>, this is the list of bolded words and the sentences that contain them.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(my-lang-words-for-review <span class="org-string">"Sur l'intelligence artificielle"</span>)
+</code></pre>
+</div>
+
+
+<ul class="org-ul">
+<li>Je l'ai aussi utilisée pour faire des <b>recherches</b>.</li>
+<li>Je peux consacrer une petite partie de mon <b>budget</b> à des essais, mais je ne veux pas travailler davantage pour rentabiliser une dépense plus importante.</li>
+<li>Je n'ai pas le temps de concentration nécessaire pour justifier l'investissement dans mon propre matériel, et <b>sinon</b>, les progrès sont trop rapides pour m'engager dans une configuration spécifique.</li>
+<li>J'ai une conscience <b>aiguë</b> des limites cognitives ou physiques à cause des difficultés <b>de santé</b> de ma mère et de ma sœur, et de mes expériences avec mes limitations à cause du fait que je suis la personne principalement en charge de ma fille.</li>
+<li>Je lis très vite, mais je n'ai pas assez de patience pour les longs <b>contenus</b> vidéo ou audio.</li>
+<li>Je n'aime pas les textes qui <b>contiennent</b> beaucoup de remplissage.</li>
+<li>Beaucoup de gens ont une réaction forte contre l'IA pour plusieurs raisons qui <b>incluent</b> le battage médiatique excessif dont elle fait l'objet, son utilisation à mauvais escient, et <b>l'inondation de banalité</b> qu'elle produit.</li>
+<li><b>Je</b> réécris souvent la majorité du logiciel à l'exception d'un ou deux morceaux parce que ce code ne me convient pas.</li>
+<li>Je ne veux pas l'utiliser pour les <b>correctifs</b> que je veux soumettre à d'autres projets parce que le <b>code</b> ne me semble pas correct et je ne veux pas <b>gaspiller</b> le temps d'autres bénévoles.</li>
+<li>J'aime pouvoir lui donner trois dépôts git et des instructions pour générer un logiciel à partir d'un dépôt pour <b>un autre</b> via le troisième dépôt.</li>
+<li>Mais je ne veux pas le <b>publier</b> avant de réécrire et tout comprendre.</li>
+<li>Sans l'IA, je pourrais peut-être apprendre plus lentement avec l'aide <b>d'Internet</b>, qui a beaucoup de ressources comme<a href="https://vitrinelinguistique.oqlf.gouv.qc.ca/">https://vitrinelinguistique.oqlf.gouv.qc.ca/</a><a href="https://vitrinelinguistique.oqlf.gouv.qc.ca/">Vitrine linguistique</a>.</li>
+<li>Je veux profiter davantage, apprendre davantage avec <b>l'aide</b> de vraies personnes, complétée par l'aide de l'IA.</li>
+<li>J'adore les sous-titres simultanés, mais je n'ai pas toujours trouvé une méthode ou un système qui me <b>convienne</b>.</li>
+</ul>
+
+<p>
+I can then go into the WhisperX transcription JSON file and replay those parts for closer review.
+</p>
+
+<p>
+I can also tweak the context function to give me less information. For example, to limit it to the containing phrase, I can do this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-split-string-keep-delimiters</span> (string delimiter)
+  (<span class="org-keyword">when</span> string
+    (<span class="org-keyword">let</span> (results pos)
+      (<span class="org-keyword">with-temp-buffer</span>
+        (insert string)
+        (goto-char (point-min))
+        (<span class="org-keyword">setq</span> pos (point-min))
+        (<span class="org-keyword">while</span> (re-search-forward delimiter nil t)
+          (<span class="org-keyword">push</span> (buffer-substring pos (match-beginning 0)) results)
+          (<span class="org-keyword">setq</span> pos (match-beginning 0)))
+        (<span class="org-keyword">push</span> (buffer-substring pos (point-max)) results)
+        (nreverse results)))))
+
+(<span class="org-keyword">ert-deftest</span> <span class="org-function-name">my-split-string-keep-delimiters</span> ()
+ (<span class="org-keyword">should</span>
+  (equal (my-split-string-keep-delimiters
+          <span class="org-string">"Beaucoup de gens ont une r&#233;action forte contre l'IA pour plusieurs raisons qui *incluent*&#160;le battage m&#233;diatique excessif dont elle fait l'objet, son utilisation &#224; mauvais escient, et *l'inondation de banalit&#233;*&#160;qu'elle produit."</span>
+          <span class="org-string">", </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> que </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qui </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'ils? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'elles? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'on "</span>
+          )
+ )))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-lang-words-for-review-phrase-context</span> (<span class="org-type">&amp;optional</span> s)
+  (<span class="org-keyword">setq</span> s (replace-regexp-in-string <span class="org-string">"&#160;"</span> <span class="org-string">" "</span> (<span class="org-keyword">or</span> s (sentence-at-point))))
+  (string-join
+   (seq-filter (<span class="org-keyword">lambda</span> (s) (string-match <span class="org-string">"\\*"</span> s))
+               (my-split-string-keep-delimiters s <span class="org-string">", </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> parce que </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> que </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qui </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'ils? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'elles? </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> qu'on </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">|</span></span><span class="org-string"> pour "</span>))
+   <span class="org-string">" ... "</span>))
+
+(<span class="org-keyword">ert-deftest</span> <span class="org-function-name">my-lang-words-for-review-phrase-context</span> ()
+  (<span class="org-keyword">should</span>
+   (equal (my-lang-words-for-review-phrase-context
+           <span class="org-string">"Je peux consacrer une petite partie de mon *budget*&#160;&#224; des essais, mais je ne veux pas travailler davantage pour rentabiliser une d&#233;pense plus importante."</span>)
+          <span class="org-string">"Je peux consacrer une petite partie de mon *budget*&#160;&#224; des essais"</span>)))
+</code></pre>
+</div>
+
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">let</span> ((my-lang-words-for-review-context-function <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-lang-words-for-review-phrase-context</span>))
+  (my-lang-words-for-review <span class="org-string">"Sur l'intelligence artificielle"</span>))
+</code></pre>
+</div>
+
+
+<ul class="org-ul">
+<li>pour faire des <b>recherches</b>.</li>
+<li>Je peux consacrer une petite partie de mon <b>budget</b> à des essais</li>
+<li>, et <b>sinon</b></li>
+<li>J'ai une conscience <b>aiguë</b> des limites cognitives ou physiques à cause des difficultés <b>de santé</b> de ma mère et de ma sœur</li>
+<li>pour les longs <b>contenus</b> vidéo ou audio.</li>
+<li>Je n'aime pas les textes qui <b>contiennent</b> beaucoup de remplissage.</li>
+<li>qui <b>incluent</b> le battage médiatique excessif dont elle fait l'objet &hellip; , et <b>l'inondation de banalité</b></li>
+<li><b>Je</b> réécris souvent la majorité du logiciel à l'exception d'un ou deux morceaux</li>
+<li>pour les <b>correctifs</b> &hellip; parce que le <b>code</b> ne me semble pas correct et je ne veux pas <b>gaspiller</b> le temps d'autres bénévoles.</li>
+<li>pour <b>un autre</b> via le troisième dépôt.</li>
+<li>Mais je ne veux pas le <b>publier</b> avant de réécrire et tout comprendre.</li>
+<li>, je pourrais peut-être apprendre plus lentement avec l'aide <b>d'Internet</b></li>
+<li>, apprendre davantage avec <b>l'aide</b> de vraies personnes, complétée par l'aide de l'IA.</li>
+<li>qui me <b>convienne</b>.</li>
+</ul>
+
+<p>
+Now that I have a function for retrieving the HTML or Org Mode for a section, I can use that to wdiff against my current text to more easily spot wording changes.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-lang-tutor-notes-wdiff-org</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let</span> ((section (org-entry-get (point) <span class="org-string">"ITEM"</span>)))
+    (my-wdiff-strings
+     (replace-regexp-in-string
+      <span class="org-string">"&#160;"</span> <span class="org-string">" "</span>
+      (my-org-subtree-text-without-blocks))
+     (replace-regexp-in-string
+      <span class="org-string">"&#160;"</span> <span class="org-string">" "</span>
+      (my-lang-tutor-notes section)))))
+</code></pre>
+</div>
+
+
+<p>
+Related:
+</p>
+<ul class="org-ul">
+<li><code>my-wdiff-strings</code> is in <a href="https://sachachua.com/dotemacs#wdiff">Wdiff</a></li>
+<li><code>my-org-subtree-text-without-blocks</code> is in <a href="https://sachachua.com/dotemacs#org-mode-publishing-counting-words-without-blocks">Counting words without blocks</a></li>
+</ul>
+
+<p>
+Screenshot:
+</p>
+
+
+<figure id="org92c2ff5">
+<a href="https://sachachua.com/blog/2026/03/emacs-lisp-and-nodejs-getting-the-bolded-words-from-a-section-of-a-google-document/2026-03-12_11-28-24.png"><img src="https://sachachua.com/blog/2026/03/emacs-lisp-and-nodejs-getting-the-bolded-words-from-a-section-of-a-google-document/2026-03-12_11-28-24.png" alt="2026-03-12_11-28-24.png"></a>
+
+<figcaption><span class="figure-number">Figure 1: </span>wdiff</figcaption>
+</figure>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#multimedia-learning-french">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/03/emacs-lisp-and-nodejs-getting-the-bolded-words-from-a-section-of-a-google-document/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F03%2Femacs-lisp-and-nodejs-getting-the-bolded-words-from-a-section-of-a-google-document%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

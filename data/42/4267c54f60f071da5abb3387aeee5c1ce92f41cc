@@ -1,0 +1,801 @@
+
+<p class="wp-block-paragraph">Sensitive information is everywhere:</p>
+
+
+
+<ul class="wp-block-list">
+<li>from your user databases</li>
+
+
+
+<li>to your accounting software</li>
+
+
+
+<li>inside your backups</li>
+
+
+
+<li>on your smartphones</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph"><em>Names. Password hashes. Emails.</em><br><em>Financials. Customers. Quotes.</em><br><em>Configurations. Passwords.</em></p>
+
+
+
+<p class="wp-block-paragraph">Every company has their own threat model.</p>
+
+
+
+<p class="wp-block-paragraph">Yet &#8211; everyone should protect their most sensitive data.</p>
+
+
+
+<span id="more-8815"></span>
+
+
+
+<h3 class="wp-block-heading">The Linux Unified Key Setup (LUKS)</h3>
+
+
+
+<p class="wp-block-paragraph">LUKS is used for block device encryption.</p>
+
+
+
+<p class="wp-block-paragraph">An unencrypted header is followed by encrypted data.<br>The encrypted data can be accessed by a <strong>master key</strong> (volume key).<br>The master key is encrypted by <strong>every active user</strong> key.<br>User keys are derived from passphrases or keys.</p>
+
+
+
+<p class="wp-block-paragraph">This multi-layered encryption model allows users to change their keys &#8211; <strong>without</strong> re-encrypting the entire data block.</p>
+
+
+
+<p class="wp-block-paragraph">A LUKS2 encrypted device can have up to 32 key slots.<br>Each key slot contains the master key encrypted by the user key.</p>
+
+
+
+<h3 class="wp-block-heading">Creating A LUKS Encrypted Storage</h3>
+
+
+
+<p class="wp-block-paragraph">It is not possible to encrypt an already mounted and used device or partition.<br>Always backup the data before manipulating its configuration.</p>
+
+
+
+<p class="wp-block-paragraph">A LUKS encrypted volume can</p>
+
+
+
+<ol class="wp-block-list">
+<li>Reside in a partition</li>
+
+
+
+<li>Sit in an LVM volume</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Creating an encrypted volume and adding LVM inside it simplifies administration without breaking the security.</p>
+
+
+
+<h4 class="wp-block-heading">Step 1: Identify the target device</h4>
+
+
+
+<p class="wp-block-paragraph">List all block devices:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">lsblk</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Assume the new disk is:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">/dev/sdb</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Ensure it is <strong>unmounted</strong>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo umount /dev/sdb*</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Step 2: Initialize LUKS2 on the device</h4>
+
+
+
+<p class="wp-block-paragraph">Set up the LUKS header and key slots:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksFormat --type luks2 /dev/sdb</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You will be prompted to <strong>confirm the action</strong> and enter a passphrase.<br>This passphrase will be used to unlock the master key.</p>
+
+
+
+<h4 class="wp-block-heading">Step 3: Open the encrypted device</h4>
+
+
+
+<p class="wp-block-paragraph">Map it to a name, e.g., <code>cryptdata</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup open /dev/sdb cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">This creates a <strong>device mapper</strong> device at:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">/dev/mapper/cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Step 4: Optional – Create LVM inside the encrypted volume</h4>
+
+
+
+<p class="wp-block-paragraph">If you want <strong>logical volumes</strong> inside the encrypted container:</p>
+
+
+
+<p class="wp-block-paragraph">Create a physical volume (PV) on the encrypted device:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo pvcreate /dev/mapper/cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a volume group (VG):</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo vgcreate vg_data /dev/mapper/cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create logical volumes (LV), e.g., 50G for <code>data</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo lvcreate -L 50G -n data vg_data</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Step 5: Create filesystem on LV or raw encrypted device</h4>
+
+
+
+<p class="wp-block-paragraph">For LVM:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mkfs.ext4 /dev/vg_data/data</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Or directly on the LUKS device:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mkfs.ext4 /dev/mapper/cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Step 6: Mount the encrypted volume</h4>
+
+
+
+<p class="wp-block-paragraph">Create a mount point:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mkdir -p /mnt/securedata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Mount the LV or LUKS device:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mount /dev/vg_data/data /mnt/securedata</div><div class="cm-line"># Or for non-LVM:</div><div class="cm-line"># sudo mount /dev/mapper/cryptdata /mnt/securedata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Step 7: Auto-mount at boot (optional)</h4>
+
+
+
+<p class="wp-block-paragraph">Add the <strong>LUKS device</strong> to <code>/etc/crypttab</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">cryptdata /dev/sdb none luks</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Add the filesystem to <code>/etc/fstab</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">/dev/mapper/cryptdata  /mnt/securedata  ext4  defaults  0  2</div><div class="cm-line"># Or for LVM:</div><div class="cm-line"># /dev/vg_data/data /mnt/securedata ext4 defaults 0 2</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">On boot, you will be prompted for the passphrase.</p>
+
+
+
+<h4 class="wp-block-heading">Step 8: Verify</h4>
+
+
+
+<p class="wp-block-paragraph">Check mapping:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">lsblk</div><div class="cm-line">sudo cryptsetup status cryptdata</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Adding / Removing LUKS Keys</h3>
+
+
+
+<p class="wp-block-paragraph">Using LUKS2 enables the operator to use up to 32 key slots for user keys.<br></p>
+
+
+
+<p class="wp-block-paragraph">These keys can be:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>passphrases</li>
+
+
+
+<li>binary keys (keyfiles)</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Managing keys lets you add users, rotate passwords, or revoke access without re-encrypting the data.<br></p>
+
+
+
+<h4 class="wp-block-heading">Adding a New Passphrase</h4>
+
+
+
+<p class="wp-block-paragraph">To add a passphrase to the next available key slot:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksAddKey /dev/sdb</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You will be prompted to:<br></p>
+
+
+
+<ol class="wp-block-list">
+<li>Enter an <strong>existing passphrase</strong> to authorize changes.</li>
+
+
+
+<li>Enter the <strong>new passphrase</strong> you want to add.</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">The new passphrase occupies a free key slot automatically.<br></p>
+
+
+
+<h4 class="wp-block-heading">Adding a Keyfile (Binary Key)</h4>
+
+
+
+<p class="wp-block-paragraph">Keyfiles can be stored securely and used instead of typing a passphrase.<br></p>
+
+
+
+<p class="wp-block-paragraph">Create a keyfile (for example, 32 bytes from <code>/dev/urandom</code>):</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo dd if=/dev/urandom of=/root/cryptkey.bin bs=32 count=1</div><div class="cm-line">sudo chmod 600 /root/cryptkey.bin</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Add the keyfile to a free slot:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksAddKey /dev/sdb /root/cryptkey.bin</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You will be prompted for an <strong>existing passphrase</strong> to authorize the addition.<br></p>
+
+
+
+<p class="wp-block-paragraph">To open the volume with the keyfile:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup open /dev/sdb cryptdata --key-file /root/cryptkey.bin</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">Removing a Key from a Slot</h4>
+
+
+
+<p class="wp-block-paragraph">If a user no longer needs access, or a passphrase/keyfile is compromised, remove it:<br></p>
+
+
+
+<p class="wp-block-paragraph">List active keyslots:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksDump /dev/sdb</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Note the slot number (e.g., <code>slot 1</code>).<br></p>
+
+
+
+<p class="wp-block-paragraph">Remove the key from that slot:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksKillSlot /dev/sdb 1</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You will be prompted to enter a valid existing passphrase to authorize the removal.<br></p>
+
+
+
+<h4 class="wp-block-heading">Best Practices</h4>
+
+
+
+<ul class="wp-block-list">
+<li>Always <strong>keep at least one working passphrase/keyfile</strong>.<br>Losing all keys means <strong>permanent data loss</strong>.</li>
+
+
+
+<li>Store keyfiles <strong>offline</strong> or on secure hardware (HSM/USB).</li>
+
+
+
+<li>Rotate passphrases periodically for operational security.</li>
+
+
+
+<li>Test key removal in a safe environment before doing it on production volumes.</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Automatic Unlock With USB Keyfile</h3>
+
+
+
+<p class="wp-block-paragraph">A LUKS volume can be unlocked automatically at boot using a keyfile on a USB drive.<br>This is practical for headless servers or remote systems.<br></p>
+
+
+
+<h4 class="wp-block-heading">Step 1: Prepare the USB key</h4>
+
+
+
+<p class="wp-block-paragraph">Insert a USB drive (e.g., /dev/sdc) and format it:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo mkfs.ext4 /dev/sdc1</div><div class="cm-line">sudo mkdir -p /mnt/usbkey</div><div class="cm-line">sudo mount /dev/sdc1 /mnt/usbkey</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Copy the LUKS keyfile to the USB drive:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cp /root/cryptkey.bin /mnt/usbkey/</div><div class="cm-line">sudo chmod 400 /mnt/usbkey/cryptkey.bin</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Unmount the USB:</p>
+
+
+
+<pre class="wp-block-preformatted">sudo umount /mnt/usbkey
+</pre>
+
+
+
+<h4 class="wp-block-heading">Step 2: Configure crypttab</h4>
+
+
+
+<p class="wp-block-paragraph">Find the <strong>UUID</strong> of the USB partition containing the key:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo blkid /dev/sdc1</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Edit <code>/etc/crypttab</code> to reference the keyfile:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">cryptdata UUID=&lt;UUID-of-LUKS-device&gt; \</div><div class="cm-line">    /dev/disk/by-uuid/&lt;UUID-of-USB-partition&gt;:cryptkey.bin luks,tries=3</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Explanation:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>First field: <strong>mapper name</strong> (cryptdata)</li>
+
+
+
+<li>Second field: <strong>device to unlock</strong></li>
+
+
+
+<li>Third field: <strong>keyfile location on USB</strong></li>
+
+
+
+<li>Options: <code>luks,tries=3</code></li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Step 3: Test the configuration</h4>
+
+
+
+<ol class="wp-block-list">
+<li>Insert the USB drive.</li>
+
+
+
+<li>Reboot the server.</li>
+
+
+
+<li>The LUKS volume should unlock automatically without prompting for a passphrase.</li>
+</ol>
+
+
+
+<h4 class="wp-block-heading">Operational Notes</h4>
+
+
+
+<ul class="wp-block-list">
+<li>If the USB is missing, the system will <strong>prompt for a passphrase</strong>.</li>
+
+
+
+<li>Secure the USB physically to prevent unauthorized access.</li>
+
+
+
+<li>Periodically test unlocking to ensure reliability after updates.</li>
+
+
+
+<li>For multiple volumes, use separate keyfiles or a single USB with multiple keys.</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">LUKS Header Backup and Restore</h3>
+
+
+
+<p class="wp-block-paragraph">The LUKS header contains metadata and all keyslots.<br>If it is damaged or lost, the encrypted volume becomes inaccessible.<br>Regular header backups are essential, especially if you:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Add or remove keys</li>
+
+
+
+<li>Use external keyfiles</li>
+
+
+
+<li>Rotate passphrases</li>
+
+
+
+<li>Use LUKS volumes on production servers</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Backup the LUKS Header</h4>
+
+
+
+<p class="wp-block-paragraph">Create a safe backup of the header to a secure location:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksHeaderBackup /dev/sdb --header-backup-file \</div><div class="cm-line">     /root/cryptdata-header-backup.img</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Notes:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Store the backup <strong>offline or on a secure network location</strong>.</li>
+
+
+
+<li>Test restore procedures on a <strong>non-critical system</strong> to ensure integrity.</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Restore the LUKS Header</h4>
+
+
+
+<p class="wp-block-paragraph">If the header is corrupted or lost, restore it from backup:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre><code><div class="cm-line">sudo cryptsetup luksHeaderRestore /dev/sdb --header-backup-file \</div><div class="cm-line">     /root/cryptdata-header-backup.img</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Important:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Restoring the header <strong>overwrites all keyslots</strong>.</li>
+
+
+
+<li>Make sure you are restoring to the <strong>correct device</strong>.</li>
+
+
+
+<li>After restore, all existing passphrases/keyfiles will work again only if they were valid at the time of backup.</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Operational Best Practices</h4>
+
+
+
+<ul class="wp-block-list">
+<li>Backup the header <strong>before making key changes</strong>.</li>
+
+
+
+<li>Keep <strong>multiple copies</strong> in physically separated secure locations.</li>
+
+
+
+<li>Rotate passphrases only <strong>after a successful header backup</strong>.</li>
+
+
+
+<li>Treat the header backup with the <strong>same security level</strong> as your most sensitive data.</li>
+
+
+
+<li>Test both backup and restore workflows periodically.</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">LUKS protects your data on the device when it&#8217;s NOT opened.<br>Open LUKS devices are readable.<br>Managing the key slots, rotating the keys and backing up headers are the operator&#8217;s responsibility.<br></p>
+
+
+
+<p class="wp-block-paragraph"><strong>What LUKS can protect?</strong><br></p>
+
+
+
+<ul class="wp-block-list">
+<li>Servers when they&#8217;re turned off.</li>
+
+
+
+<li>Notebooks, mobile devices.</li>
+
+
+
+<li>External drives, pendrives when not attached.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Data security is every operator&#8217;s responsibility.</p>
+
+
+
+<p class="wp-block-paragraph"></p>

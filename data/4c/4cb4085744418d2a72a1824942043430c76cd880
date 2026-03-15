@@ -1,0 +1,69 @@
+<p>I recently started a long overdue update of <a href="https://github.com/bbatsov/prelude">Emacs
+Prelude</a>, rebasing it on Emacs 29 as the minimum supported
+version. This has been a great excuse to revisit a bunch of old configuration patterns and
+replace them with their modern built-in equivalents. One of the first things I updated was the
+classic <code class="language-plaintext highlighter-rouge">yes-or-no-p</code> hack.</p>
+
+<h2 id="the-problem">The Problem</h2>
+
+<p>By default, Emacs asks you to type out the full word <code class="language-plaintext highlighter-rouge">yes</code> or <code class="language-plaintext highlighter-rouge">no</code> for certain prompts –
+things like killing a modified buffer or deleting a file. The idea is that this extra friction
+prevents you from accidentally confirming something destructive, but in practice most people
+find it annoying and want to just hit <code class="language-plaintext highlighter-rouge">y</code> or <code class="language-plaintext highlighter-rouge">n</code>.</p>
+
+<h2 id="the-old-way">The Old Way</h2>
+
+<p>For decades, the standard solution was one of these:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">fset</span> <span class="ss">'yes-or-no-p</span> <span class="ss">'y-or-n-p</span><span class="p">)</span>
+
+<span class="c1">;; or equivalently:</span>
+<span class="p">(</span><span class="nv">defalias</span> <span class="ss">'yes-or-no-p</span> <span class="ss">'y-or-n-p</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This worked by literally replacing the <code class="language-plaintext highlighter-rouge">yes-or-no-p</code> function with <code class="language-plaintext highlighter-rouge">y-or-n-p</code> at runtime. Hacky,
+but effective – until native compilation came along in Emacs 28 and broke it. Native compilation
+can hardcode calls to C primitives, which means <code class="language-plaintext highlighter-rouge">fset</code>/<code class="language-plaintext highlighter-rouge">defalias</code> sometimes has no effect on
+<code class="language-plaintext highlighter-rouge">yes-or-no-p</code> calls that were already compiled. You’d set it up, and some prompts would still
+ask for <code class="language-plaintext highlighter-rouge">yes</code> or <code class="language-plaintext highlighter-rouge">no</code>. Not fun.</p>
+
+<h2 id="the-new-way">The New Way</h2>
+
+<p>Emacs 28 introduced the <code class="language-plaintext highlighter-rouge">use-short-answers</code> variable:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setopt</span> <span class="nv">use-short-answers</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>That’s it. Clean, discoverable, native-compilation-safe, and officially supported. It makes
+<code class="language-plaintext highlighter-rouge">yes-or-no-p</code> delegate to <code class="language-plaintext highlighter-rouge">y-or-n-p</code> internally, so it works correctly regardless of compilation
+strategy.</p>
+
+<p>If you’re maintaining a config that needs to support older Emacs versions as well, you can do:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">boundp</span> <span class="ss">'use-short-answers</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">setopt</span> <span class="nv">use-short-answers</span> <span class="no">t</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">fset</span> <span class="ss">'yes-or-no-p</span> <span class="ss">'y-or-n-p</span><span class="p">))</span>
+</code></pre></div></div>
+
+<h2 id="a-word-of-caution">A Word of Caution</h2>
+
+<p>The Emacs maintainers intentionally designed <code class="language-plaintext highlighter-rouge">yes-or-no-p</code> to slow you down for destructive
+operations. Enabling <code class="language-plaintext highlighter-rouge">use-short-answers</code> removes that friction entirely. In practice, I’ve never
+accidentally confirmed something I shouldn’t have with a quick <code class="language-plaintext highlighter-rouge">y</code>, but it’s worth knowing the
+tradeoff you’re making.</p>
+
+<h2 id="a-few-more-things">A Few More Things</h2>
+
+<p>If you’re using GUI Emacs, you might also want to disable dialog boxes for a consistent
+experience:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setopt</span> <span class="nv">use-dialog-box</span> <span class="no">nil</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>It’s also worth knowing that the related variable <code class="language-plaintext highlighter-rouge">read-answer-short</code> controls the same behavior
+for multi-choice prompts (the ones using <code class="language-plaintext highlighter-rouge">read-answer</code> internally). Setting <code class="language-plaintext highlighter-rouge">use-short-answers</code>
+affects both <code class="language-plaintext highlighter-rouge">yes-or-no-p</code> and <code class="language-plaintext highlighter-rouge">read-answer</code>.</p>
+
+<p>This is one of those small quality-of-life improvements that Emacs has been accumulating in
+recent versions. Updating Prelude has been a nice reminder of how many rough edges have been
+smoothed over. Keep hacking!</p>

@@ -1,0 +1,48 @@
+<figure><img data-recalc-dims="1" height="778" width="1360" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2025/06/glenn-shaferbrown.png?resize=1360%2C778&#038;ssl=1" alt="Glenn Fleishman, art by Shafer Brown" data-image-w="" data-image-h="" class=" jetpack-broken-image"></figure>
+<p>A powerful tool in the Finder arsenal is a simple checkbox: “Ignore ownership on this volume.” This option appears when you select any locally connected volume on your Mac that isn’t the startup volume and choose File: Get Info. Permissions controls who and, more importantly for this column, what can access data.</p>
+<figure class="pull-right"><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2026/02/get-info-ignore-ownership-set-bordered.png?ssl=1" alt="Screenshot of lower portion of Get Info dialog showing Ignore ownership set" data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>The Get Info dialog lets you set the option to ignore ownership on non-startup volumes.</figcaption></figure>
+<p>When you check the box, you override the normal permissions settings for a volume, which otherwise may restrict reading, writing, and viewing of folder contents to specific users or groups. Even if you’re the only user of your Mac, this can still cause problems, because your logged-in user doesn’t have permission to read and write everything.</p>
+<p>While you can typically override a prohibited operation by entering your administrator password when prompted, that doesn’t always work. And any software that needs unattended access to a folder or volume can be denied, sometimes silently. I discovered a problem with this when Time Machine told me on my laptop that it couldn’t perform a backup to a Time Machine-designed folder on my Mac Studio’s external volume.<sup id="fnref-38677-folder"><a href="https://sixcolors.com#fn-38677-folder" class="jetpack-footnote" title="Read footnote.">1</a></sup></p>
+<p>When I checked this external volume, it was marked as read-only. Using Get Info, I saw that the “Ignore ownership” checkbox had been… ignored! It was now unchecked. Permissions are divided into owners and groups, and the owner was <code>system</code>, which is a privileged user, and allowed Read &amp; Write. One group was listed as <code>wheel</code>, which is a special group that <code>system</code> belongs to, and marked as “Read only.” The <code>everyone</code> group was also included, and also set to “Read only.”</p>
+<p>Peculiar.</p>
+<h2>The Transmit is coming from inside the app</h2>
+<p>Looking at log data, the only clue appeared to be a lot of errors with Panic’s <a href="https://panic.com/transmit/">Transmit</a> file-transfer app:</p>
+<p><code>2026-02-27 08:55:06.561417-0800 0x1ed4930  Error  0x0 0 0 kernel: (Sandbox) System Policy: Transmit(16376) deny(1) file-read-xattr /Volumes/EvoLution 8TB/.Spotlight-V100</code></p>
+<p>It looked like Transmit couldn’t read a number of files on the external volume in question during some routine operation. I had a tab open in Transmit passively displaying that volume’s contents, as I had downloaded a remote file to a folder on it. Apparently, Transmit polls local volumes in the background to check contents.</p>
+<p>The answer was found in macOS’s app privacy controls, which prevent apps without permission from accessing all kinds of data, organized into categories in System Settings: Privacy &amp; Security. I’d recently updated Transmit, and this apparently reset access in the Full Disk Access section of Privacy &amp; Security, even though I know I had previously granted access.</p>
+<p>Another clue was in the <code>/var/db/volinfo.database</code> file, which I didn’t know existed before researching this problem. This file contains a list of volumes by their Volume UUID (Universally Unique Identifier), which is how macOS ensures that two identically named volumes don’t conflict, as they have unique IDs at the system level. A <code>00000001</code> indicates permission is not ignored; a <code>00000000</code> means it is ignored!</p>
+<p>You can find this datum most easily in Disk Utility: select the volume, then click Info. Under “File system UUID,” you’ll see the number. This may be a short string of hexadecimal (base 16) digits for an HFS+ or Apple RAID volume, or a long one for APFS volumes. For instance, one APFS volume I was having trouble with has the UUID <code>92EA5511-1DD7-3881-84B9-ED0637645FC2</code>.</p>
+<figure><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2026/02/disk-utility-uuid-bordered.png?ssl=1" alt="Screenshot of Info dialog from Disk Utility showing volumes details, including the volume UUID." data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>Disk Utility lets you find the volume UUID, which you can use to troubleshoot read-only volume issues.</figcaption></figure>
+<p>The <code>volinfo.database</code> file isn’t updated when “Ignore ownership” changes; instead, it’s appended. Only the last state is referenced at startup, but it’s a strange way to manage this file. When I examine it, I can see the thrashing of the ownership state:</p>
+<p><code>92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000001<br>
+92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000000<br>
+92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000001<br>
+92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000000<br>
+92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000001<br>
+92EA5511-1DD7-3881-84B9-ED0637645FC2: 00000000</code></p>
+<p>When I looked at the Full Disk Access panel, sure enough, Transmit was disabled. I enabled it and expected to now be rewarded with the read-only status no longer mysteriously appearing.</p>
+<p>Sadly, it wasn’t that easy.</p>
+<h2>A double negative proves to be positive</h2>
+<p>The next day, the volume is back to read-only. This time, however, I notice that, even though there’s no datestamp in the <code>volinfo.database</code> file, it updates whenever it’s modified. So, using <code>ls -l /var/db/volinfo.database</code> in Terminal, I could see that at 11 p.m., it changed back to read-only. After a little bit of contemplating what might be running at that time, I realized it was Bombich Software’s <a href="https://bombich.com">Carbon Copy Cloner</a>.</p>
+<p>While I use Time Machine and Backblaze, I also perform a clone of my startup volume using CCC as extra duct tape on top of my suspenders and belt.</p>
+<p>I looked through CCC’s settings and found “Don’t preserve permissions” under Troubleshooting Settings. That certainly seemed like it could be the issue. I also found that I could use a Postflight option to set a shell (or <code>bash</code>) script that could run after the clone update was complete.</p>
+<p><code>#!/bin/bash<br>
+sleep 5<br>
+vsdbutil -a /Volumes/EvoLution\ 8TB<br>
+mount -u -o noowners /Volumes/EvoLution\ 8TB</code></p>
+<p>That script uses the <code>vsdbutil</code> utility to restore the volume’s status to the correct value. And then the <code>mount</code> operation reloads permissions in place. It worked!</p>
+<figure class="pull-right"><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2026/03/dont-preserve-permissions-bordered.png?ssl=1" alt="Screen capture of File Copying Settings in Carbon Copy Cloner" data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>The permissions being preserved are those on the volume from which data is copied—of course!</figcaption></figure>
+<p>But in the meantime, I sent an email to Bombich and heard back from the eponymous Mike Bombich, who said that I had created a backup job that had a conflict: CCC has to enable specific ownership (not “ignore”) on the volume it’s writing to because I was backing up a startup volume. Without ownership enabled, a full restore wouldn’t work. The issue of “preserving permissions” is about the permissions on the <em>source</em> volume, not the <em>destination</em> volume.</p>
+<p>The short answer was that I needed to check the “Don’t preserve permissions” box after enabling “Ignore ownership” on the external volume to prevent the external volume from becoming read-only. I don’t know why this just started to crop up, but this is clearly the issue.</p>
+<p>Mike also helpfully noted that my backup wasn’t restorable for a variety of reasons, and I’d be better off repartitioning my striped RAID external drive to create a standalone APFS volume that CCC could clone directly to. Mike’s been at this a long time!</p>
+<h2>For further reading</h2>
+<p>If you’d like to learn more about using commands in the Terminal app, I’ll be darned, but Joe Kissell has a freshly updated book on the topic, <em><a href="https://www.takecontrolbooks.com/command-line/?PT=6COLORS">Take Control of the Mac Command Line with Terminal</a></em>, revised January of this year.</p>
+<p>[<em>Got a question for the column? You can email glenn@sixcolors.com or use</em> <code>/glenn</code> <em>in our <a href="https://sixcolors.com/subscribe/">subscriber-only</a> Discord community.</em>]</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-38677-folder">
+You can use a special sharing setup to turn any folder into a Time Machine destination. Go to System Settings: General: Sharing, click the info “i” to the right of File Sharing, and Control/right-click any shared folder or volume, then choose Advanced Options. <a href="https://sixcolors.com#fnref-38677-folder" title="Return to main content.">↩</a>
+</li>
+</ol>
+</div>

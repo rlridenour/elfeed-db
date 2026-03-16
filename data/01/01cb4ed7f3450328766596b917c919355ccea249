@@ -1,0 +1,223 @@
+<p>The other day someone filed <a href="https://github.com/bbatsov/neocaml/issues/28">an issue</a> against
+my <a href="https://github.com/bbatsov/neocaml">neocaml</a> package, reporting surprising behavior with
+<code class="language-plaintext highlighter-rouge">delete-pair</code>. My first reaction was – wait, <code class="language-plaintext highlighter-rouge">delete-pair</code>? I’ve been using Emacs for over 20
+years and I wasn’t sure I had <em>ever</em> used this command. Time for some investigation!</p>
+
+<h2 id="what-is-delete-pair">What is <code class="language-plaintext highlighter-rouge">delete-pair</code>?</h2>
+
+<p><code class="language-plaintext highlighter-rouge">delete-pair</code> is a built-in Emacs command (defined in <code class="language-plaintext highlighter-rouge">lisp/emacs-lisp/lisp.el</code>) that deletes a
+pair of matching characters – typically parentheses, brackets, braces, or quotes. You place
+point on an opening delimiter, invoke <code class="language-plaintext highlighter-rouge">delete-pair</code>, and it removes both the opening and closing
+delimiter.</p>
+
+<p>Given that it lives in <code class="language-plaintext highlighter-rouge">lisp.el</code>, it was clearly designed with Lisp editing in mind
+originally. And it was probably quite handy back in the day – before <code class="language-plaintext highlighter-rouge">paredit</code> came along and
+made <code class="language-plaintext highlighter-rouge">delete-pair</code> largely redundant for Lisp hackers.</p>
+
+<p>Here’s a simple example. Given the following code (with point on the opening parenthesis):</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="n">print_endline</span> <span class="s2">"hello"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Running <code class="language-plaintext highlighter-rouge">M-x delete-pair</code> gives you:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">print_endline</span> <span class="s2">"hello"</span>
+</code></pre></div></div>
+
+<p>Simple and useful! Yet <code class="language-plaintext highlighter-rouge">delete-pair</code> has <strong>no default keybinding</strong>, which probably explains why
+so few people know about it. If you want to use it regularly, you’ll need to bind it yourself:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">global-set-key</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-s-d"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">delete-pair</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Pick whatever keybinding works for you, of course. There’s no universally agreed upon binding for
+this one.</p>
+
+<h2 id="the-gotcha">The Gotcha</h2>
+
+<p>The issue that was reported boiled down to <code class="language-plaintext highlighter-rouge">delete-pair</code> not always finding the correct matching
+delimiter. It uses <code class="language-plaintext highlighter-rouge">forward-sexp</code> under the hood to find the matching closer, which means its
+accuracy depends entirely on the buffer’s syntax table and the major mode’s parsing
+capabilities. For languages with complex or unusual syntax, this can sometimes lead to the wrong
+delimiter being removed – not great when you’re trying to be surgical about your edits.</p>
+
+<h2 id="alternatives-for-pair-management">Alternatives for Pair Management</h2>
+
+<p>If you work with paired delimiters frequently, <code class="language-plaintext highlighter-rouge">delete-pair</code> is just one tool in a rich
+ecosystem. Here’s a quick overview of the alternatives:</p>
+
+<h3 id="paredit">paredit</h3>
+
+<p><a href="https://paredit.org">paredit</a> is the gold standard for structured editing of Lisp code. I’ve
+been a heavy <code class="language-plaintext highlighter-rouge">paredit</code> user for as long as I can remember – if you write any Lisp-family
+language, it’s indispensable. <code class="language-plaintext highlighter-rouge">paredit</code> gives you <code class="language-plaintext highlighter-rouge">paredit-splice-sexp</code> (bound to <code class="language-plaintext highlighter-rouge">M-s</code> by
+default), which removes the surrounding delimiters while keeping the contents intact. There’s
+also <code class="language-plaintext highlighter-rouge">paredit-raise-sexp</code> (<code class="language-plaintext highlighter-rouge">M-r</code>), which replaces the enclosing sexp with the sexp at point –
+another way to get rid of delimiters. And of course, <code class="language-plaintext highlighter-rouge">paredit</code> prevents you from creating
+unbalanced expressions in the first place, which is a huge win.</p>
+
+<p>Once you’ve got <code class="language-plaintext highlighter-rouge">paredit</code> in your muscle memory, you’ll never think about <code class="language-plaintext highlighter-rouge">delete-pair</code> again
+(as I clearly haven’t).</p>
+
+<p>Let’s see these commands in action. In the examples below, <code class="language-plaintext highlighter-rouge">|</code> marks the position of point.</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">paredit-splice-sexp</code></strong> (<code class="language-plaintext highlighter-rouge">M-s</code>) – removes the surrounding delimiters:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Before (point anywhere inside the inner parens):</span>
+<span class="p">(</span><span class="nv">foo</span> <span class="p">(</span><span class="nv">bar| baz) quux)
+
+;; After M-s:
+(foo bar|</span> <span class="nv">baz</span> <span class="nv">quux</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong><code class="language-plaintext highlighter-rouge">paredit-raise-sexp</code></strong> (<code class="language-plaintext highlighter-rouge">M-r</code>) – replaces the enclosing sexp with the sexp at point:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Before:</span>
+<span class="p">(</span><span class="nv">foo</span> <span class="p">(</span><span class="nv">bar| baz) quux)
+
+;; After M-r:
+(foo bar|</span> <span class="nv">quux</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Notice the difference: <code class="language-plaintext highlighter-rouge">splice</code> keeps all the siblings, <code class="language-plaintext highlighter-rouge">raise</code> keeps only the sexp at point and
+discards everything else inside the enclosing delimiters.</p>
+
+<h3 id="smartparens">smartparens</h3>
+
+<p><a href="https://github.com/Fuco1/smartparens">smartparens</a> is the most feature-rich option and works
+across all languages, not just Lisps. For unwrapping pairs, it offers a whole family of commands:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">sp-unwrap-sexp</code> – removes the enclosing pair delimiters, keeping the content</li>
+  <li><code class="language-plaintext highlighter-rouge">sp-backward-unwrap-sexp</code> – same, but operating backward</li>
+  <li><code class="language-plaintext highlighter-rouge">sp-splice-sexp</code> (<code class="language-plaintext highlighter-rouge">M-D</code>) – removes delimiters and integrates content into the parent expression</li>
+  <li><code class="language-plaintext highlighter-rouge">sp-splice-sexp-killing-backward</code> / <code class="language-plaintext highlighter-rouge">sp-splice-sexp-killing-forward</code> – splice while killing content in one direction</li>
+</ul>
+
+<p>Here’s how the key ones look in practice:</p>
+
+<p><strong><code class="language-plaintext highlighter-rouge">sp-unwrap-sexp</code></strong> – removes the next pair’s delimiters:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Before (point on the opening bracket):
+</span><span class="n">result</span> <span class="o">=</span> <span class="n">calculate</span><span class="p">(</span><span class="o">|</span><span class="p">[</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">])</span>
+
+<span class="c1"># After sp-unwrap-sexp:
+</span><span class="n">result</span> <span class="o">=</span> <span class="n">calculate</span><span class="p">(</span><span class="o">|</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong><code class="language-plaintext highlighter-rouge">sp-splice-sexp</code></strong> (<code class="language-plaintext highlighter-rouge">M-D</code>) – works like paredit’s splice, removes the innermost enclosing pair:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Before (point anywhere inside the parens):
+</span><span class="n">result</span> <span class="o">=</span> <span class="n">calculate</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="o">|</span><span class="n">y</span><span class="p">)</span>
+
+<span class="c1"># After M-D:
+</span><span class="n">result</span> <span class="o">=</span> <span class="n">calculate</span> <span class="n">x</span> <span class="o">+</span> <span class="o">|</span><span class="n">y</span>
+</code></pre></div></div>
+
+<p><strong><code class="language-plaintext highlighter-rouge">sp-splice-sexp-killing-backward</code></strong> – splices, but also kills everything before point:</p>
+
+<div class="language-python highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1"># Before:
+</span><span class="n">result</span> <span class="o">=</span> <span class="p">[</span><span class="n">first</span><span class="p">,</span> <span class="n">second</span><span class="p">,</span> <span class="o">|</span><span class="n">third</span><span class="p">,</span> <span class="n">fourth</span><span class="p">]</span>
+
+<span class="c1"># After sp-splice-sexp-killing-backward:
+</span><span class="n">result</span> <span class="o">=</span> <span class="o">|</span><span class="n">third</span><span class="p">,</span> <span class="n">fourth</span>
+</code></pre></div></div>
+
+<p>I used <code class="language-plaintext highlighter-rouge">smartparens</code> for a while for non-Lisp languages, but eventually found it a bit heavy for
+my needs.</p>
+
+<h3 id="electric-pair-mode">electric-pair-mode</h3>
+
+<p><code class="language-plaintext highlighter-rouge">electric-pair-mode</code> is the built-in option (since Emacs 24.1) that automatically inserts
+matching delimiters when you type an opening one. It’s lightweight, requires zero configuration,
+and works surprisingly well for most use cases. I’ve been using it as my go-to solution for
+non-Lisp languages for a while now.</p>
+
+<p>The one thing <code class="language-plaintext highlighter-rouge">electric-pair-mode</code> <em>doesn’t</em> offer is any way to unwrap/remove paired
+delimiters. The closest it gets is deleting both delimiters when you backspace between an
+adjacent empty pair (e.g., <code class="language-plaintext highlighter-rouge">(|)</code> – pressing backspace removes both parens). But that’s it –
+there’s no unwrap command. That’s where <code class="language-plaintext highlighter-rouge">delete-pair</code> comes in handy as a complement.</p>
+
+<h3 id="a-note-on-vims-surroundvim">A Note on Vim’s surround.vim</h3>
+
+<p>Having played with Vim and its various
+<a href="https://github.com/tpope/vim-surround">surround.vim</a>-like plugins over the years, I have to
+admit – I kind of miss that experience in Emacs, at least for removing paired
+delimiters. <code class="language-plaintext highlighter-rouge">surround.vim</code> makes it dead simple: <code class="language-plaintext highlighter-rouge">ds(</code> deletes surrounding parens, <code class="language-plaintext highlighter-rouge">ds"</code> deletes
+surrounding quotes. It works uniformly across all file types and feels very natural.</p>
+
+<p>In Emacs, the story is more fragmented – <code class="language-plaintext highlighter-rouge">paredit</code> handles it beautifully for Lisps,
+<code class="language-plaintext highlighter-rouge">smartparens</code> does it for everything but is a heavyweight dependency, and <code class="language-plaintext highlighter-rouge">electric-pair-mode</code>
+just… doesn’t do it at all. <code class="language-plaintext highlighter-rouge">delete-pair</code> is the closest thing to a universal built-in
+solution, but its lack of a default keybinding and its reliance on <code class="language-plaintext highlighter-rouge">forward-sexp</code> make it a bit
+rough around the edges.</p>
+
+<p>If you’re using <code class="language-plaintext highlighter-rouge">electric-pair-mode</code> and want a simple <code class="language-plaintext highlighter-rouge">surround.vim</code>-style “delete surrounding
+pair” command without pulling in a big package, here’s a little hack that does the trick:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">delete-surrounding-pair</span> <span class="p">(</span><span class="nb">char</span><span class="p">)</span>
+  <span class="s">"Delete the nearest surrounding pair of CHAR.
+CHAR should be an opening delimiter like (, [, {, or \".
+Works by searching backward for the opener and forward for the closer."</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"cDelete surrounding pair: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">pairs</span> <span class="o">'</span><span class="p">((</span><span class="nv">?\(</span> <span class="o">.</span> <span class="nv">?\)</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">?\[</span> <span class="o">.</span> <span class="nv">?\]</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">?{</span> <span class="o">.</span> <span class="nv">?}</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">?\"</span> <span class="o">.</span> <span class="nv">?\"</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">?\'</span> <span class="o">.</span> <span class="nv">?\'</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nv">?\`</span> <span class="o">.</span> <span class="nv">?\`</span><span class="p">)))</span>
+         <span class="p">(</span><span class="nv">closer</span> <span class="p">(</span><span class="nb">or</span> <span class="p">(</span><span class="nv">alist-get</span> <span class="nb">char</span> <span class="nv">pairs</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nb">error</span> <span class="s">"Unknown pair character: %c"</span> <span class="nb">char</span><span class="p">))))</span>
+    <span class="p">(</span><span class="nv">save-excursion</span>
+      <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">orig</span> <span class="p">(</span><span class="nv">point</span><span class="p">)))</span>
+        <span class="c1">;; Find and delete the opener</span>
+        <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nv">search-backward</span> <span class="p">(</span><span class="nv">char-to-string</span> <span class="nb">char</span><span class="p">)</span> <span class="no">nil</span> <span class="no">t</span><span class="p">)</span>
+          <span class="p">(</span><span class="nv">delete-char</span> <span class="mi">1</span><span class="p">)</span>
+          <span class="c1">;; Find and delete the closer (adjust for removed char)</span>
+          <span class="p">(</span><span class="nv">goto-char</span> <span class="p">(</span><span class="nb">1-</span> <span class="nv">orig</span><span class="p">))</span>
+          <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nv">search-forward</span> <span class="p">(</span><span class="nv">char-to-string</span> <span class="nv">closer</span><span class="p">)</span> <span class="no">nil</span> <span class="no">t</span><span class="p">)</span>
+            <span class="p">(</span><span class="nv">delete-char</span> <span class="mi">-1</span><span class="p">)))))))</span>
+
+<span class="p">(</span><span class="nv">global-set-key</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-s-d"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">delete-surrounding-pair</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Now you can hit <code class="language-plaintext highlighter-rouge">M-s-d (</code> to delete surrounding parens, <code class="language-plaintext highlighter-rouge">M-s-d "</code> for quotes, etc. It’s
+deliberately naive – no syntax awareness, no nesting support – so it won’t play well with
+delimiters inside strings or comments (it’ll happily match a paren in a comment if that’s what
+it finds first). But for quick, straightforward edits it gets the job done.</p>
+
+<p><strong>TIP:</strong> If you’re looking for something closer to the <code class="language-plaintext highlighter-rouge">surround.vim</code> experience in Emacs (without going
+full <code class="language-plaintext highlighter-rouge">smartparens</code>), check out <a href="https://github.com/mkleehammer/surround">surround.el</a>. It’s a
+lightweight package (available on MELPA) that provides <code class="language-plaintext highlighter-rouge">surround.vim</code>-style operations –
+deleting, changing, and adding surrounding pairs – all through a single keymap. It supports both
+“inner” and “outer” text selection modes and works uniformly across file types, which makes it a
+nice middle ground between <code class="language-plaintext highlighter-rouge">delete-pair</code> and <code class="language-plaintext highlighter-rouge">smartparens</code>.</p>
+
+<h3 id="when-to-use-what">When to Use What</h3>
+
+<p>My current setup is:</p>
+
+<ul>
+  <li><strong>Lisp languages</strong> (Emacs Lisp, Clojure, Common Lisp, etc.): <code class="language-plaintext highlighter-rouge">paredit</code>, no contest.</li>
+  <li><strong>Everything else</strong>: <code class="language-plaintext highlighter-rouge">electric-pair-mode</code> for auto-pairing (I rarely need to unwrap something outside of Lisps)</li>
+</ul>
+
+<p>I think <code class="language-plaintext highlighter-rouge">surround.el</code> will pair well with <code class="language-plaintext highlighter-rouge">electric-pair-mode</code>, but I discovered it only recently
+and I’ve yet to try it out in practice.</p>
+
+<p>If you want a more powerful structural editing experience across all languages, <code class="language-plaintext highlighter-rouge">smartparens</code> is
+hard to beat. It’s just more than I personally need outside of Lisp.</p>
+
+<h2 id="wrapping-up">Wrapping Up</h2>
+
+<p>One of the greatest aspects of Emacs is that we get to learn (or relearn) something about it
+every other day. Even after decades of daily use, there are always more commands lurking in the
+corners, patiently waiting to be discovered.</p>
+
+<p>Now, if you’ll excuse me, I’m going to immediately forget about <code class="language-plaintext highlighter-rouge">delete-pair</code> again. Keep hacking!</p>
+
+<p><strong>Update:</strong> A reader pointed me to <a href="https://www.reddit.com/r/emacs/comments/1ohr4uy/tip_use_deletepair_to_change_surroundings_similar/">this Reddit
+thread</a>
+with more tips on using <code class="language-plaintext highlighter-rouge">delete-pair</code> (including using it to change surrounding
+delimiters, <code class="language-plaintext highlighter-rouge">surround.vim</code>-style). Worth a read if you want to get more mileage
+out of it.</p>

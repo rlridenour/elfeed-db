@@ -1,0 +1,170 @@
+<p>Yet another <a href="https://github.com/bbatsov/neocaml">neocaml</a> issue taught me
+something I didn’t know about Emacs. Someone
+<a href="https://github.com/bbatsov/neocaml/issues/32">requested</a> that the docs show
+how to customize font-lock faces <em>per mode</em> rather than globally. The suggested
+approach used <code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> – a function I’d never heard of, despite
+20+ years of daily Emacs use. Time to dig in.</p>
+
+<h2 id="the-problem">The Problem</h2>
+
+<p>Let’s say you want type names in OCaml buffers to be displayed in a different
+color than in, say, Python buffers. The naive approach is to use <code class="language-plaintext highlighter-rouge">custom-set-faces</code>
+or <code class="language-plaintext highlighter-rouge">set-face-attribute</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'font-lock-type-face</span> <span class="no">nil</span> <span class="ss">:foreground</span> <span class="s">"DarkGreen"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This works, but it’s a <strong>global</strong> change – every buffer that uses
+<code class="language-plaintext highlighter-rouge">font-lock-type-face</code> will now show types in dark green.</p>
+
+<h3 id="when-global-is-fine">When Global is Fine</h3>
+
+<p>To be fair, global face customization is perfectly valid in several scenarios:</p>
+
+<ul>
+  <li>
+    <p><strong>Your theme doesn’t cover certain faces.</strong> Many themes only style a subset of
+the faces that various packages define. If a face looks wrong or unstyled, a
+global <code class="language-plaintext highlighter-rouge">set-face-attribute</code> or <code class="language-plaintext highlighter-rouge">custom-set-faces</code> is the quickest fix.</p>
+  </li>
+  <li>
+    <p><strong>Your theme makes choices you disagree with.</strong> I recently ran into this with
+the <a href="https://github.com/catppuccin/emacs">Catppuccin theme</a> – the styling of
+<code class="language-plaintext highlighter-rouge">font-lock-variable-name-face</code> didn’t match how I expected it to look, so I
+<a href="https://github.com/catppuccin/emacs/pull/212">filed a PR</a>. It got closed
+because different modes interpret that face inconsistently (definitions in
+Elisp, references in C), making a universal fix impractical for the theme.
+That’s exactly the kind of situation where you’d want to override the face
+yourself.</p>
+  </li>
+  <li>
+    <p><strong>You want consistent styling everywhere.</strong> If you just want <em>all</em> comments
+to be italic, or <em>all</em> strings to use a specific color regardless of mode,
+global is the way to go. No need to complicate things with per-buffer
+remapping.</p>
+  </li>
+</ul>
+
+<h3 id="when-global-isnt-enough">When Global Isn’t Enough</h3>
+
+<p>The problem comes when you bounce between several languages (and let’s be
+honest, most of us do) and you want different visual treatment depending
+on the mode. Not all modes use the built-in font-lock faces consistently, and for
+some – especially markup languages – there’s a lot of room for improvisation
+in how faces get applied. A global change to <code class="language-plaintext highlighter-rouge">font-lock-keyword-face</code> might
+look great in your Python buffers but terrible in your Org files.</p>
+
+<p>That’s where buffer-local face remapping comes in.</p>
+
+<h2 id="enter-face-remap-add-relative">Enter <code class="language-plaintext highlighter-rouge">face-remap-add-relative</code></h2>
+
+<p><code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> has been around since <strong>Emacs 23</strong> (it lives in
+<code class="language-plaintext highlighter-rouge">face-remap.el</code>), and it does exactly what the name suggests – it remaps a face
+<em>relative</em> to its current definition, and only in the current buffer. The change
+is buffer-local, so it won’t leak into other buffers.</p>
+
+<p>Here’s the basic usage:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">face-remap-add-relative</span> <span class="ss">'font-lock-type-face</span> <span class="ss">:foreground</span> <span class="s">"DarkGreen"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>To apply this automatically in a specific mode, hook it up:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-ocaml-faces</span> <span class="p">()</span>
+  <span class="s">"Customize faces for OCaml buffers."</span>
+  <span class="p">(</span><span class="nv">face-remap-add-relative</span> <span class="ss">'font-lock-type-face</span> <span class="ss">:foreground</span> <span class="s">"DarkGreen"</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">face-remap-add-relative</span> <span class="ss">'font-lock-function-name-face</span> <span class="ss">:weight</span> <span class="ss">'bold</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'neocaml-mode-hook</span> <span class="nf">#'</span><span class="nv">my-ocaml-faces</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Now OCaml buffers get their own face tweaks while everything else stays
+untouched. You can do the same for any mode – just swap the hook and
+adjust the faces to taste.</p>
+
+<h2 id="the-magic-cookie">The Magic “Cookie”</h2>
+
+<p><code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> returns a <em>cookie</em> – a token you’ll need if you want
+to undo the remapping later. If you’re just setting things up in a mode hook
+and leaving them, you can ignore the cookie. But if you want to toggle the
+remapping on and off, you’ll need to hold onto it:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">defvar-local</span> <span class="nv">my-type-face-cookie</span> <span class="no">nil</span>
+  <span class="s">"Cookie for type face remapping."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-toggle-type-face</span> <span class="p">()</span>
+  <span class="s">"Toggle custom type face in current buffer."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">if</span> <span class="nv">my-type-face-cookie</span>
+      <span class="p">(</span><span class="k">progn</span>
+        <span class="p">(</span><span class="nv">face-remap-remove-relative</span> <span class="nv">my-type-face-cookie</span><span class="p">)</span>
+        <span class="p">(</span><span class="k">setq</span> <span class="nv">my-type-face-cookie</span> <span class="no">nil</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">message</span> <span class="s">"Type face remapping removed"</span><span class="p">))</span>
+    <span class="p">(</span><span class="k">setq</span> <span class="nv">my-type-face-cookie</span>
+          <span class="p">(</span><span class="nv">face-remap-add-relative</span> <span class="ss">'font-lock-type-face</span>
+                                   <span class="ss">:foreground</span> <span class="s">"DarkGreen"</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">message</span> <span class="s">"Type face remapping applied"</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>Note the use of <code class="language-plaintext highlighter-rouge">defvar-local</code> – since face remapping is buffer-local, your
+cookie variable should be too.</p>
+
+<p>A cleaner approach is to wrap this in a minor mode:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">defvar-local</span> <span class="nv">my-type-remap-cookie</span> <span class="no">nil</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">define-minor-mode</span> <span class="nv">my-type-remap-mode</span>
+  <span class="s">"Minor mode to remap type face in current buffer."</span>
+  <span class="ss">:lighter</span> <span class="s">" TypeRemap"</span>
+  <span class="p">(</span><span class="k">if</span> <span class="nv">my-type-remap-mode</span>
+      <span class="p">(</span><span class="k">setq</span> <span class="nv">my-type-remap-cookie</span>
+            <span class="p">(</span><span class="nv">face-remap-add-relative</span> <span class="ss">'font-lock-type-face</span>
+                                     <span class="ss">:foreground</span> <span class="s">"DarkGreen"</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">when</span> <span class="nv">my-type-remap-cookie</span>
+      <span class="p">(</span><span class="nv">face-remap-remove-relative</span> <span class="nv">my-type-remap-cookie</span><span class="p">)</span>
+      <span class="p">(</span><span class="k">setq</span> <span class="nv">my-type-remap-cookie</span> <span class="no">nil</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<h2 id="related-functionality">Related Functionality</h2>
+
+<p>A few more things worth knowing in this area:</p>
+
+<ul>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">face-remap-set-base</code></strong> – sets the <em>base</em> remapping for a face in the current
+buffer. Unlike <code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> (which layers on top of the existing
+face), this <em>replaces</em> the face definition entirely for that buffer. Use this
+when you want to completely override a face rather than tweak it.</p>
+  </li>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">buffer-face-mode</code></strong> / <strong><code class="language-plaintext highlighter-rouge">buffer-face-set</code></strong> – a built-in minor mode that
+remaps the <code class="language-plaintext highlighter-rouge">default</code> face in the current buffer. This is what powers
+<code class="language-plaintext highlighter-rouge">M-x buffer-face-set</code> and is handy if you want a different base font in
+specific buffers (say, a proportional font for prose and a monospace font
+for code).</p>
+  </li>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">text-scale-adjust</code></strong> (<code class="language-plaintext highlighter-rouge">C-x C-=</code> / <code class="language-plaintext highlighter-rouge">C-x C--</code>) – the familiar text scaling
+commands actually use <code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> under the hood to remap the
+<code class="language-plaintext highlighter-rouge">default</code> face. So if you’ve ever zoomed text in a single buffer, you’ve been
+using face remapping without knowing it.</p>
+  </li>
+  <li>
+    <p><strong><code class="language-plaintext highlighter-rouge">face-remapping-alist</code></strong> – the buffer-local variable where all of this state
+is stored. You generally shouldn’t manipulate it directly (that’s what the
+functions above are for), but it’s useful for debugging – check its value in
+a buffer to see what remappings are active.</p>
+  </li>
+</ul>
+
+<h2 id="wrapping-up">Wrapping Up</h2>
+
+<p>I have to admit – I’m a bit embarrassed that <code class="language-plaintext highlighter-rouge">face-remap-add-relative</code> has been
+sitting in Emacs since version 23 and I’d never once used it. Probably because
+I never felt the need for per-mode face customizations – but I can certainly see
+why others would, especially when working across languages with very different
+syntax highlighting conventions.</p>
+
+<p>Working on <a href="https://github.com/bbatsov/neocaml">neocaml</a> has been a gold mine of
+learning (and relearning). I’m happy to keep sharing the things I discover along
+the way. Keep hacking!</p>

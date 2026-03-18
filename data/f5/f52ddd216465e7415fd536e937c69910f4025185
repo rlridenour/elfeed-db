@@ -1,0 +1,140 @@
+<p>If you maintain a tree-sitter major mode that has a REPL (comint) companion,
+you’ve probably wondered: can the REPL input get the same syntax highlighting
+and indentation as source buffers? The answer is yes – and the infrastructure
+has been in Emacs since 29.1. It’s just not widely known yet.</p>
+
+<!--more-->
+
+<p>I ran into this while working on <a href="https://github.com/bbatsov/neocaml">neocaml</a>,
+my tree-sitter major mode for OCaml. The OCaml REPL buffer used simple
+regex-based <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> for input, which was definitely a step backward from
+the rich highlighting in source buffers.</p>
+
+<p>Initially I didn’t even bother to research using <code class="language-plaintext highlighter-rouge">tree-sitter</code> font-lock in
+comint, as assumed that would be something quite complicated. Turns out the fix
+was surprisingly easy.</p>
+
+<h2 id="font-lock-comint-fontify-input-mode">Font-Lock: <code class="language-plaintext highlighter-rouge">comint-fontify-input-mode</code></h2>
+
+<p>Emacs 29.1 introduced <code class="language-plaintext highlighter-rouge">comint-fontify-input-mode</code>, a minor mode that fontifies
+input regions in comint buffers through an <strong>indirect buffer</strong>. The idea is
+simple:</p>
+
+<ol>
+  <li>You tell comint which major mode to use for input via
+<code class="language-plaintext highlighter-rouge">comint-indirect-setup-function</code>.</li>
+  <li>Comint creates an indirect buffer and runs that mode in it.</li>
+  <li>When fontifying, comint splits the buffer into output and input regions.
+Output gets the comint buffer’s own font-lock; input is fontified in the
+indirect buffer using the full major mode – including tree-sitter.</li>
+</ol>
+
+<p>Here’s all it took for neocaml’s REPL:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-derived-mode</span> <span class="nv">neocaml-repl-mode</span> <span class="nv">comint-mode</span> <span class="s">"OCaml-REPL"</span>
+  <span class="c1">;; ... existing setup ...</span>
+
+  <span class="c1">;; Tree-sitter fontification for REPL input</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">comint-indirect-setup-function</span> <span class="nf">#'</span><span class="nv">neocaml-mode</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">comint-fontify-input-mode</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>That’s it. REPL input now gets the exact same tree-sitter font-lock as <code class="language-plaintext highlighter-rouge">.ml</code>
+buffers. The existing <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> for output (error messages, warnings,
+<code class="language-plaintext highlighter-rouge">val</code>/<code class="language-plaintext highlighter-rouge">type</code> results) keep working as before – they only apply to output
+regions.</p>
+
+<p><strong>Important:</strong> <code class="language-plaintext highlighter-rouge">comint-fontify-input-mode</code> is incompatible with
+<code class="language-plaintext highlighter-rouge">comint-use-prompt-regexp</code> – the two features can’t be active at the same
+time. Most modern comint-derived modes don’t set <code class="language-plaintext highlighter-rouge">comint-use-prompt-regexp</code> to
+<code class="language-plaintext highlighter-rouge">t</code>, so this usually isn’t an issue.</p>
+
+<h3 id="whos-already-doing-this">Who’s Already Doing This</h3>
+
+<p>Two built-in modes use this approach:</p>
+
+<ul>
+  <li><strong>shell.el</strong> sets up <code class="language-plaintext highlighter-rouge">sh-mode</code> in the indirect buffer (enabled by default via
+<code class="language-plaintext highlighter-rouge">shell-fontify-input-enable</code>)</li>
+  <li><strong>ielm.el</strong> sets up <code class="language-plaintext highlighter-rouge">emacs-lisp-mode</code> (enabled by default via
+<code class="language-plaintext highlighter-rouge">ielm-fontify-input-enable</code>)</li>
+</ul>
+
+<p>On the third-party side, <a href="https://github.com/nverno/inf-lua">inf-lua</a> and
+<a href="https://github.com/nverno/ts-repl">ts-repl</a> both use this pattern with
+tree-sitter modes. And now there’s also <code class="language-plaintext highlighter-rouge">neocaml</code>, of course. :-)</p>
+
+<h2 id="indentation-comint-indent-input-line-default">Indentation: <code class="language-plaintext highlighter-rouge">comint-indent-input-line-default</code></h2>
+
+<p>Comint also provides indentation delegation via <code class="language-plaintext highlighter-rouge">comint-indent-input-line-default</code>
+and <code class="language-plaintext highlighter-rouge">comint-indent-input-region-default</code>. When you set these as
+<code class="language-plaintext highlighter-rouge">indent-line-function</code> and <code class="language-plaintext highlighter-rouge">indent-region-function</code>, pressing TAB on an input
+line delegates indentation to the indirect buffer’s <code class="language-plaintext highlighter-rouge">indent-line-function</code> –
+which will be <code class="language-plaintext highlighter-rouge">treesit-indent</code> if the indirect buffer runs a tree-sitter mode.</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setq-local</span> <span class="nv">indent-line-function</span> <span class="nf">#'</span><span class="nv">comint-indent-input-line-default</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">setq-local</span> <span class="nv">indent-region-function</span> <span class="nf">#'</span><span class="nv">comint-indent-input-region-default</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong>shell.el</strong> already does this. For your own REPL modes, you can add these two
+lines alongside the font-lock setup.</p>
+
+<h3 id="the-caveat">The Caveat</h3>
+
+<p>Here’s where things get tricky. Tree-sitter parsers are <strong>shared between
+indirect and base buffers</strong> (this is by design – see
+<a href="https://debbugs.gnu.org/cgi/bugreport.cgi?bug=59693">bug#59693</a>). When
+<code class="language-plaintext highlighter-rouge">treesit-indent</code> runs in the indirect buffer, the parser it uses sees the
+<strong>entire</strong> comint buffer – prompts, output, previous commands, everything. The
+parse tree will be full of errors from non-code content.</p>
+
+<p>Font-lock handles this gracefully because <code class="language-plaintext highlighter-rouge">comint-fontify-input-mode</code> only
+applies fontification results to input regions, so garbled parses of output
+regions are harmless. But indentation is different – <code class="language-plaintext highlighter-rouge">treesit-indent</code> looks at
+the node context around point, and a broken parse tree can confuse it.</p>
+
+<p>In practice, it works better than you’d expect.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup> For simple multi-line
+expressions, the local tree-sitter nodes at the cursor position are often
+correct enough for reasonable indentation. But for deeply nested multi-line
+input, the results can be off.</p>
+
+<p>Because of this, I chose not to enable indentation delegation by default in
+neocaml’s REPL. Instead, it’s documented as an opt-in configuration for
+adventurous users.</p>
+
+<h2 id="the-recipe">The Recipe</h2>
+
+<p>If you maintain a tree-sitter mode with a comint REPL, here’s the minimal
+pattern:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-derived-mode</span> <span class="nv">my-repl-mode</span> <span class="nv">comint-mode</span> <span class="s">"My-REPL"</span>
+  <span class="c1">;; ... your existing setup ...</span>
+
+  <span class="c1">;; Font-lock: full tree-sitter highlighting for input</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">comint-indirect-setup-function</span> <span class="nf">#'</span><span class="nv">my-ts-mode</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">comint-fontify-input-mode</span><span class="p">)</span>
+
+  <span class="c1">;; Indentation: delegate to tree-sitter (experimental)</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">indent-line-function</span> <span class="nf">#'</span><span class="nv">comint-indent-input-line-default</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">indent-region-function</span> <span class="nf">#'</span><span class="nv">comint-indent-input-region-default</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Consider making these features opt-in via defcustoms, especially the indentation
+part. And remember that your existing <code class="language-plaintext highlighter-rouge">font-lock-keywords</code> for output
+highlighting (errors, warnings, result values) will continue working – they
+don’t conflict with <code class="language-plaintext highlighter-rouge">comint-fontify-input-mode</code>.</p>
+
+<h2 id="the-end">The End</h2>
+
+<p>That’s it. Two overlooked comint features, a few lines of setup, and your REPL
+goes from basic regex highlighting to full tree-sitter support.</p>
+
+<p>Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Depends on your expectations, of course. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

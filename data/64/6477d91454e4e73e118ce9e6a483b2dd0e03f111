@@ -1,0 +1,157 @@
+<p>It’s been a while since the last
+<a href="https://github.com/bbatsov/super-save/">super-save</a> release. The last time I
+<a href="/blog/2018/09/29/super-save-0-dot-3/">wrote about it</a> was back in 2018,
+when I boldly proclaimed:</p>
+
+<blockquote>
+  <p>It seems that now super-save is beyond perfect, so don’t expect the next
+release any time soon!</p>
+</blockquote>
+
+<p>Famous last words. There <em>was</em> a 0.4 release in 2023 (adding a predicate system,
+buffer exclusions, silent saving, and trailing whitespace cleanup), but I never
+got around to writing about it. The package has been rock solid for years and I
+just didn’t pay it much attention – it quietly did its job, which is kind of the
+whole point of an auto-save package.</p>
+
+<h2 id="a-bit-of-history">A Bit of History</h2>
+
+<p>The idea behind <code class="language-plaintext highlighter-rouge">super-save</code> goes all the way back to a <a href="https://batsov.com/articles/2012/03/08/emacs-tip-number-5-save-buffers-automatically-on-buffer-or-window-switch/">blog post I wrote in
+2012</a>
+about auto-saving buffers on buffer and window switches. I had been using
+IntelliJ IDEA for Java development and loved that it would save your files
+automatically whenever the editor lost focus. No manual <code class="language-plaintext highlighter-rouge">C-x C-s</code>, no thinking
+about it. I wanted the same behavior in Emacs.</p>
+
+<p>Back then, the implementation was crude – <code class="language-plaintext highlighter-rouge">defadvice</code> on <code class="language-plaintext highlighter-rouge">switch-to-buffer</code>,
+<code class="language-plaintext highlighter-rouge">other-window</code>, and the <code class="language-plaintext highlighter-rouge">windmove</code> commands. That code lived in <a href="https://github.com/bbatsov/prelude">Emacs
+Prelude</a> for a few years before I extracted
+it into a standalone package in 2015. <code class="language-plaintext highlighter-rouge">super-save</code> was born.</p>
+
+<h2 id="what-prompted-this-release">What Prompted This Release</h2>
+
+<p>Yesterday I stumbled upon
+<a href="https://github.com/jamescherti/buffer-guardian.el">buffer-guardian.el</a>, a
+package with very similar goals to <code class="language-plaintext highlighter-rouge">super-save</code>. Its README has a <a href="https://github.com/jamescherti/buffer-guardian.el?tab=readme-ov-file#how-does-buffer-guardian-compare-with-super-save">comparison
+with
+super-save</a>
+that highlighted some valid points – mainly that <code class="language-plaintext highlighter-rouge">super-save</code> was still relying
+on advising specific commands for buffer-switch detection, while newer Emacs
+hooks like <code class="language-plaintext highlighter-rouge">window-buffer-change-functions</code> and
+<code class="language-plaintext highlighter-rouge">window-selection-change-functions</code> could do the job more reliably.</p>
+
+<p>The thing is, those hooks didn’t exist when <code class="language-plaintext highlighter-rouge">super-save</code> was created, and I
+didn’t rush to adopt them while Emacs 27 was still new and I wanted to support
+older Emacsen. But it’s 2026 now – Emacs 27.1 is ancient history. Time to
+modernize!</p>
+
+<h2 id="whats-new-in-05">What’s New in 0.5</h2>
+
+<p>This is the biggest <code class="language-plaintext highlighter-rouge">super-save</code> release in years! Here are the highlights:</p>
+
+<h3 id="modern-bufferwindow-switch-detection">Modern buffer/window switch detection</h3>
+
+<p>Buffer and window switches are now detected via
+<code class="language-plaintext highlighter-rouge">window-buffer-change-functions</code> and <code class="language-plaintext highlighter-rouge">window-selection-change-functions</code>,
+controlled by the new <code class="language-plaintext highlighter-rouge">super-save-when-buffer-switched</code> option (enabled by
+default). This catches <em>all</em> buffer switches – keyboard commands, mouse clicks,
+custom functions – unlike the old approach of advising individual (yet central)
+commands.</p>
+
+<h3 id="modern-focus-handling">Modern focus handling</h3>
+
+<p>Frame focus loss is now detected via <code class="language-plaintext highlighter-rouge">after-focus-change-function</code> instead of the
+obsolete <code class="language-plaintext highlighter-rouge">focus-out-hook</code>, controlled by <code class="language-plaintext highlighter-rouge">super-save-when-focus-lost</code> (also
+enabled by default).</p>
+
+<h3 id="soft-deprecated-trigger-system">Soft-deprecated trigger system</h3>
+
+<p>With the new hooks in place, both <code class="language-plaintext highlighter-rouge">super-save-triggers</code> and
+<code class="language-plaintext highlighter-rouge">super-save-hook-triggers</code> now default to <code class="language-plaintext highlighter-rouge">nil</code>. You can still use them for edge
+cases, but for the vast majority of users, the built-in hooks cover everything.</p>
+
+<h3 id="org-src-and-edit-indirect-support">org-src and edit-indirect support</h3>
+
+<p><code class="language-plaintext highlighter-rouge">super-save</code> now knows how to save <code class="language-plaintext highlighter-rouge">org-src</code> edit buffers (via
+<code class="language-plaintext highlighter-rouge">org-edit-src-save</code>) and <code class="language-plaintext highlighter-rouge">edit-indirect</code> buffers (via <code class="language-plaintext highlighter-rouge">edit-indirect--commit</code>).
+Both are enabled by default and controlled by <code class="language-plaintext highlighter-rouge">super-save-handle-org-src</code> and
+<code class="language-plaintext highlighter-rouge">super-save-handle-edit-indirect</code>.</p>
+
+<h3 id="safer-predicates">Safer predicates</h3>
+
+<p>Two new default predicates prevent data loss: <code class="language-plaintext highlighter-rouge">verify-visited-file-modtime</code>
+avoids overwriting files modified outside Emacs, and a directory existence check
+prevents errors when a file’s parent directory has been removed. Predicate
+evaluation is also wrapped in <code class="language-plaintext highlighter-rouge">condition-case</code> now, so a broken custom predicate
+logs a warning instead of silently disabling all auto-saving.</p>
+
+<h3 id="emacs-271-required">Emacs 27.1 required</h3>
+
+<p>This allowed cleaning up the code and relying on modern APIs.</p>
+
+<h2 id="upgrading">Upgrading</h2>
+
+<p>For most users, upgrading is seamless – the new defaults just work. If you had
+a custom <code class="language-plaintext highlighter-rouge">super-save-triggers</code> list for buffer-switching commands, you can
+probably remove it entirely:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Before: manually listing every command that switches buffers</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">super-save-triggers</span>
+      <span class="o">'</span><span class="p">(</span><span class="nv">switch-to-buffer</span> <span class="nv">other-window</span> <span class="nv">windmove-up</span> <span class="nv">windmove-down</span>
+        <span class="nv">windmove-left</span> <span class="nv">windmove-right</span> <span class="nv">next-buffer</span> <span class="nv">previous-buffer</span><span class="p">))</span>
+
+<span class="c1">;; After: the window-system hooks catch all of these automatically</span>
+<span class="c1">;; Just delete the above and use the defaults!</span>
+</code></pre></div></div>
+
+<p>If you need to add triggers for commands that <em>don’t</em> involve a buffer switch
+(like <code class="language-plaintext highlighter-rouge">ace-window</code>), <code class="language-plaintext highlighter-rouge">super-save-triggers</code> is still available for that.</p>
+
+<p>A clean 0.5 setup looks something like this:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">super-save</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:config</span>
+  <span class="c1">;; Save buffers automatically when Emacs is idle</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">super-save-auto-save-when-idle</span> <span class="no">t</span><span class="p">)</span>
+  <span class="c1">;; Don't display "Wrote file..." messages in the echo area</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">super-save-silent</span> <span class="no">t</span><span class="p">)</span>
+  <span class="c1">;; Disable the built-in auto-save (backup files) since super-save handles it</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">auto-save-default</span> <span class="no">nil</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">super-save-mode</span> <span class="mi">+1</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>It’s also worth noting that Emacs 26.1 introduced <code class="language-plaintext highlighter-rouge">auto-save-visited-mode</code>,
+which saves file-visiting buffers to their actual files after an idle delay.
+This overlaps with <code class="language-plaintext highlighter-rouge">super-save-auto-save-when-idle</code>, so if you prefer using
+the built-in for idle saves, you can combine the two:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">super-save</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:config</span>
+  <span class="c1">;; Don't display "Wrote file..." messages in the echo area</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">super-save-silent</span> <span class="no">t</span><span class="p">)</span>
+  <span class="c1">;; Disable the built-in auto-save (backup files)</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">auto-save-default</span> <span class="no">nil</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">super-save-mode</span> <span class="mi">+1</span><span class="p">))</span>
+
+<span class="c1">;; Let the built-in auto-save-visited-mode handle idle saves</span>
+<span class="p">(</span><span class="nv">auto-save-visited-mode</span> <span class="mi">+1</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h2 id="burst-driven-development-strikes-again">Burst-Driven Development Strikes Again</h2>
+
+<p>Most of my Emacs packages are a fine example of what I like to call
+<a href="https://batsov.com/articles/2025/11/16/burst-driven-development-my-approach-to-oss-projects-maintenance/">burst-driven
+development</a>
+– long periods of stability punctuated by short intense bursts of activity. I
+hadn’t touched <code class="language-plaintext highlighter-rouge">super-save</code> in years, then spent a few hours modernizing the
+internals, adding a test suite, improving the documentation, and cutting a
+release. It was fun to revisit the package after all this time and bring it up to
+2026 standards.</p>
+
+<p>If you’ve been using <code class="language-plaintext highlighter-rouge">super-save</code>, update to 0.5 and enjoy the improvements. If
+you haven’t tried it yet – give it a shot. Your poor fingers might thanks for you this,
+as pressing <code class="language-plaintext highlighter-rouge">C-x C-s</code> non-stop is hard work!</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>

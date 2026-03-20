@@ -1,0 +1,137 @@
+ 
+<p><img src="https://cdn.blot.im/blog_c4a729f3205a44e5a9669523ddfb8b2e/_image_cache/9e504949-34a4-4d13-a541-0032c2c31bfc.png" alt="Emacs" width="512" height="512" data-action="zoom"><span class="caption">Emacs</span></p>
+
+<p>Haven’t written an update on my usage of Emacs for a while. Decided to stop tweaking the configuration to concentrate on getting familiar with what I have setup. That lasted for two seconds. Emacs developers are coming up with new things and I have severe FOMO. I have additions.</p>
+<h2 id="kirigami">Kirigami</h2>
+<p><a href="https://github.com/jamescherti/kirigami.el" target="_blank">Kirigami</a> “The kirigami Emacs package provides a unified method to fold and unfold text in Emacs across a diverse set of Emacs modes.” One set of keybindings to open/close folds across a wide range of modes, including markdown-mode, outline-mode and org-mode.</p>
+<p>This is my general.el setup for kirigami</p>
+<pre><code> ;; kirigami
+  "k" '(nil :which-key "kirigami")
+  "kc" '(kirigami-close-folds :which-key "close all")
+  "ko" '(kirigami-open-folds :which-key "open all")
+  "kp" '(kirigami-open-fold :which-key "open at point")
+  "kr" '(kirigami-open-fold-rec :which-key "open rec")
+  "kt" '(kirigami-toggle-fold :which-key "toggle folds")</code></pre>
+<h2 id="visible-marks">Visible Marks</h2>
+<p><a href="https://melpa.org/#/visible-mark" target="_blank">visible-mark - MELPA</a> and <a href="https://codeberg.org/ideasman42/emacs-visible-mark" target="_blank">ideasman42/emacs-visible-mark - Codeberg.org</a> Minor mode to highlight mark(s). Allows setting the number of marks to display, and the faces to display them.</p>
+<p>These are my settings for visual-mark</p>
+<pre><code>(defface visible-mark-active
+  '((((type tty) (class mono)))
+    (t (:background "magenta"))) "")
+(setq visible-mark-max 2)
+(setq visible-mark-faces `(visible-mark-face1 visible-mark-face2))
+(use-package visible-mark
+  :ensure t)
+(global-visible-mark-mode 1)</code></pre>
+<h2 id="javelin">Javelin</h2>
+<p><a href="https://github.com/DamianB-BitFlipper/javelin.el/tree/9516e3729b8cd85d6b02fd1940ec10638c6706cb" target="_blank">DamianB-BitFlipper/javelin.el at 9516e3729b8cd85d6b02fd1940ec10638c6706cb</a></p>
+<p>Described by the author as “Quick file bookmarks for Emacs, inspired by ThePrimeagen’s Harpoon. Pin files to numbered positions (1-9) for instant access. Positions are automatically separated by project and git branch.”</p>
+<p>I like it. The only problem is that the list doesn’t last across restarts of Emacs. Have to figure out how to achieve that.</p>
+<h2 id="opml-to-org-mode">OPML to Org-mode</h2>
+<p>I bought <a href="https://www.omnigroup.com/omnioutliner" target="_blank">OmniOutliner 6 Pro</a>. That produces OPML files. I wanted to be able to convert them to Org-mode. Gemini helped.</p>
+<pre><code>;; Converting OPML to Org-mode
+
+(defun my/opml-to-org-with-notes (opml-file)
+  "Convert an OPML file's 'outline' elements and their notes into Org-mode."
+  (interactive "fSelect OPML file: ")
+  (let* ((xml (xml-parse-file opml-file))
+         ;; Standard OPML structure is &lt;opml&gt;&lt;body&gt;...&lt;/body&gt;&lt;/opml&gt;
+         (body (car (xml-get-children (car xml) 'body)))
+         (outlines (xml-get-children body 'outline))
+         (new-buf (generate-new-buffer "*OPML Import with Notes*")))
+    (with-current-buffer new-buf
+      (org-mode)
+      (cl-labels ((parse-outline (nodes level)
+                    (dolist (node nodes)
+                      (let* ((attrs (xml-node-attributes node))
+                             (text (cdr (assoc 'text attrs)))
+                             (note (or (cdr (assoc '_note attrs)) 
+                                       (cdr (assoc 'description attrs))))
+                             (children (xml-get-children node 'outline)))
+                        ;; Create Heading
+                        (insert (make-string level ?*) " " (or text "Untitled") "\n")
+                        ;; Insert Note (if it exists)
+                        (when note
+                          (insert note "\n"))
+                        ;; Recurse for nested nodes
+                        (when children
+                          (parse-outline children (1+ level)))))))
+        (parse-outline outlines 1))
+      (goto-char (point-min)))
+    (switch-to-buffer new-buf)))</code></pre>
+<h2 id="appine">Appine</h2>
+<p><a href="https://github.com/chaoswork/appine" target="_blank">chaoswork/appine: Appine</a></p>
+<p>“Appine means”App in Emacs”, which is an Emacs plugin using a Dynamic Module that allows you to embed native macOS views (WebKit, PDFKit, Quick look PreviewView, etc.) directly inside Emacs windows.”</p>
+<p>This is my Appine setup:</p>
+<pre><code>;; appine
+(use-package appine
+  :straight (appine :type git :host github :repo "chaoswork/appine")
+  :custom
+  ;; enables opening URLs and files with Appine, default is nil
+  (appine-enable-open-in-org-mode nil) 
+  :config
+  ;; Optional: Set default keybindings
+  (global-set-key (kbd "C-x a w") 'appine-open-web-split)
+  (global-set-key (kbd "C-x a o") 'appine-open-file-split))</code></pre>
+<p>Turned off <code>(appine-enable-open-in-org-mode nil)</code>. I don’t want links to be opened in org-mode without me specifically wanting it. When the link opens in Emacs, I don’t have the ability to zoom in/out. I am old, I need that for most sites.</p>
+<p>My general.el setup for Appine.</p>
+<pre><code>  ;; Windows
+  "w" '(nil :which-key "window")
+  "ww" '(appine-open-web-split :which-key "appine-web")
+  "wf" '(appine-open-file-split :which-key "appine-file")</code></pre>
+<h2 id="buffer-guardian">buffer-guardian</h2>
+<p><a href="https://www.jamescherti.com/buffer-guardian-el-automatically-save-emacs-buffers/" target="_blank">buffer-guardian.el – Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle) | James Cherti</a></p>
+<p>Saves you from having to continuously save your document. It automatically saves when the buffer loses focus.</p>
+<p>There is an alternative to this package, <a href="https://emacsredux.com/blog/2026/03/18/super-save-0-dot-5/" target="_blank">super-save 0.5: Modernized and Better Than Ever | Emacs Redux</a>.</p>
+<p>My setup for buffer-guardian is:</p>
+<pre><code>(use-package buffer-guardian
+  :custom
+  ;; When non-nil, include remote files in the auto-save process
+  (buffer-guardian-inhibit-saving-remote-files nil)
+
+  ;; When non-nil, buffers visiting nonexistent files are not saved
+  (buffer-guardian-inhibit-saving-nonexistent-files t)
+
+  ;; Save the buffer even if the window change results in the same buffer
+  (buffer-guardian-save-on-same-buffer-window-change t)
+
+  ;; Non-nil to enable verbose mode to log when a buffer is automatically saved
+  (buffer-guardian-verbose nil)
+
+  ;; Save all buffers after N seconds of user idle time. (Disabled by default)
+  ;; (buffer-guardian-save-all-buffers-idle 30)
+
+  :hook
+  (after-init . buffer-guardian-mode))</code></pre>
+<h2 id="isearch-lazy-count">isearch-lazy-count</h2>
+<p><a href="https://emacsredux.com/blog/2026/03/15/isearch-lazy-count/" target="_blank">isearch-lazy-count: Built-in Search Match Counting | Emacs Redux</a></p>
+<p>This is useful. My setup:</p>
+<pre><code>#+begin_src emacs-lisp
+;;customizing isearch
+(setopt isearch-lazy-count t)
+(setopt lazy-count-prefix-format nil)
+(setopt lazy-count-suffix-format " [%s/%s]")
+#+end_src</code></pre>
+<h2 id="markdown-table-wrap">markdown-table-wrap</h2>
+<p><a href="https://github.com/dnouri/markdown-table-wrap/tree/71a1cec53bf9d7875126b4cd557b2c00ae52b576" target="_blank">dnouri/markdown-table-wrap at 71a1cec53bf9d7875126b4cd557b2c00ae52b576</a></p>
+<p>Markdown tables wrapped to a defined character width.</p>
+<p>My setup:</p>
+<pre><code>#+begin_src emacs-lisp
+;; markdown-table-wrap
+(use-package markdown-table-wrap
+  :ensure t
+  :config
+  (markdown-table-wrap table-text 60))
+#+end_src</code></pre>
+<h2 id="surround.el">surround.el</h2>
+<p><a href="https://emacsredux.com/blog/2026/03/17/surround-el-vim-style-pair-editing-comes-to-emacs/" target="_blank">surround.el: Vim-Style Pair Editing Comes to Emacs | Emacs Redux</a></p>
+<p>Useful package to delete paired delimiters.</p>
+<p>My setup:</p>
+<pre><code>#+begin_src emacs-lisp
+(use-package surround
+  :ensure t
+  :bind-keymap ("M-'" . surround-keymap))
+#+end_src</code></pre>
+<h2 id="conclusion">Conclusion</h2>
+<p>Using Emacs every day. My comfort with the program is increasing. I am learning and I am having a blast. That is all I have for now.</p>
+<p>macosxguru</p> 

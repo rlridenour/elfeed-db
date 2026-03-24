@@ -1,0 +1,339 @@
+<p>
+I'm having fun exploring which things might actually be easier to do by voice than by typing. For example, after I wrote some code to <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-expanding-yasnippet-by-voice">expand yasnippets by voice</a>, I realized that it was easier to:
+</p>
+
+<ol class="org-ol">
+<li>press my shortcut,</li>
+<li>say "okay, define interactive function",</li>
+<li>and then press my shortcut again,</li>
+</ol>
+
+<p>
+than to:
+</p>
+
+<ol class="org-ol">
+<li>mentally say it,</li>
+<li>get the first initials,</li>
+<li>type in "dfi",</li>
+<li>and press Tab to expand.</li>
+</ol>
+
+<p>
+Another area where I do this kind of mental translation for keyboard shortcuts is when I categorize dozens of Emacs-related links each week for <a href="https://sachachua.com/blog/category/emacs-news">Emacs News</a>. I used to do this by hand. Then I wrote a function to try to guess the category based on regular expressions (<code>my-emacs-news-guess-category</code> in <a href="https://raw.githubusercontent.com/sachac/emacs-news/refs/heads/master/index.org">emacs-news/index.org</a>, which is large). Then I set up a menu that lets me <a href="https://sachachua.com/blog/2019/06/making-a-numpad-based-hydra-for-categorizing-org-list-items/">press numbers corresponding to the most frequent categories</a> and use tab completion for the rest. 1 is Emacs Lisp, 2 is Emacs development, 3 is Emacs configuration, 4 is appearance, 5 is navigation, and so on. It's not very efficient, but some of it has at least gotten into muscle memory, which is also part of why it's hard to change the mapping. I don't come across that many links for Emacs development or Spacemacs, and I could probably change them to something else, but&hellip; Anyway.
+</p>
+
+
+<figure id="org36cd391">
+<a href="https://sachachua.com/blog/2026/03/categorizing-emacs-news-items-by-voice-in-org-mode/2026-03-23_20-38-33.png"><img src="https://sachachua.com/blog/2026/03/categorizing-emacs-news-items-by-voice-in-org-mode/2026-03-23_20-38-33.png" alt="2026-03-23_20-38-33.png"></a>
+
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot of my menu for categorizing links</figcaption>
+</figure>
+
+<p>
+I wanted to see if I could categorize links by voice instead. I might not always be able to count on being able to type a lot, and it's always fun to experiment with other modes of input. Here's a demonstration showing how Emacs can automatically open the URLs, wait for voice input, and categorize the links using a reasonably close match. The <code>*Messages*</code> buffer displays the recognized output to help with debugging.
+</p>
+
+<div class="media-post" id="org09d244a">
+<p>
+</p><figure><video controls="1" src="https://sachachua.com/blog/2026/03/categorizing-emacs-news-items-by-voice-in-org-mode/2026-03-23-compressed.webm" type="video/webm"><a href="https://sachachua.com/blog/2026/03/categorizing-emacs-news-items-by-voice-in-org-mode/2026-03-23-compressed.webm">Download the video</a></video><figcaption><div>Screencast with audio: categorizing links by voice</div></figcaption></figure>
+<p></p>
+
+</div>
+
+<p>
+This is how it works:
+</p>
+
+<ol class="org-ol">
+<li>It starts an <code>ffmpeg</code> recording process.</li>
+<li>It starts <a href="https://github.com/snakers4/silero-vad">Silero voice activity detection</a>.</li>
+<li>When it detects that speech has ended, it use <code>curl</code> to send the WAV to an OpenAI-compatible server (in my case, <a href="https://speaches.ai/">Speaches</a> with the <code>Systran/faster-whisper-base.en</code> model) for transcription, along with a prompt to try to influence the recognition.</li>
+<li>It compares the result with the candidates using <code>string-distance</code> for an approximate match. It calls the code to move the current item to the right category, creating the category if needed.</li>
+</ol>
+
+<p>
+Since this doesn't always result in the right match, I added an Undo command. I also have a Delete command for removing the current item, Scroll Up and Scroll Down, and a way to quit.
+</p>
+<div id="outline-container-categorizing-emacs-news-items-by-voice-in-org-mode-initial-thoughts" class="outline-3">
+<h3 id="categorizing-emacs-news-items-by-voice-in-org-mode-initial-thoughts">Initial thoughts</h3>
+<div class="outline-text-3" id="text-categorizing-emacs-news-items-by-voice-in-org-mode-initial-thoughts">
+<p>
+I used it to categorize lots of links in this week's Emacs News, and I think it's promising. I loved the way my hands didn't have to hover over the number keys or move between those and the characters. Using voice activity detection meant that I could just keep dictating categories instead of pressing keyboard shortcuts or using the foot pedal I recently dusted off. There's a slight delay, of course, but I think it's worth it. If this settles down and becomes a solid part of my workflow, I might even be able to knit or hand-sew while doing this step, or simply do some stretching exercises.
+</p>
+
+<p>
+<b>What about using streaming speech recognition?</b> I've written some code to <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-streaming-speech-recognition-into-emacs-using-google-chrome-web-speech-api">use streaming speech recognition</a>, but the performance wasn't good enough when I tried it on my laptop (Lenovo P52 released in 2018, no configured GPU under Linux). The streaming server dropped audio segments in order to try to catch up. I'd rather have everything transcribed at the level of the model I want, even if I have to wait a little while. I also tried <a href="https://sachachua.com/dotemacs/index.html#writing-and-editing-speech-recognition-streaming-speech-recognition-into-emacs-using-google-chrome-web-speech-api">using the Web Speech API in Google Chrome for real-time speech transcription</a>, but it's a little finicky. I'm happy with the performance I get from either <a href="https://sachachua.com/blog/2026/01/queue-multiple-transcriptions-with-whisper-el-speech-recognition/">manually queueing speech segments</a> or <a href="https://sachachua.com/blog/2026/01/using-silero-voice-activity-detection-to-automatically-queue-multiple-transcriptions-with-natrys-whisper-el/">using VAD</a> and then using batch speech recognition with a model that's kept in memory (which is why I use a local server instead of a command-line tool). Come to think of it, I should try this with a higher-quality model like medium or large, just in case the latency turns out to be not that much more for this use case.
+</p>
+
+<p>
+<b>What about external voice control systems</b> like <a href="https://talonvoice.com/">Talon Voice</a> or <a href="https://www.cursorless.org/">Cursorless</a>? They seem like neat ideas and lots of people use them. I think hacking something into Emacs with full access to its internals could be lots of fun too.
+</p>
+
+<p>
+A <i>lot</i> of people have experimented with voice input for Emacs over the years. It could be fun to pick up ideas for commands and grammars. Some examples:
+</p>
+
+<ul class="org-ul">
+<li><a href="https://www.youtube.com/watch?v=8SkdfdXWYaI">Using Python to Code by Voice - YouTube</a> (2013)</li>
+<li><a href="https://github.com/jgarvin/mandimus">jgarvin/mandimus: Use speech recognition to command your computer and Emacs. · GitHub</a></li>
+<li><a href="https://github.com/ErikPrantare/cursorfree.el">ErikPrantare/cursorfree.el: Edit and navigate from anywhere in the buffer · GitHub</a></li>
+<li><a href="https://git.sr.ht/~lepisma/emacs-speech-input/tree/master/item/README.org">~lepisma/emacs-speech-input</a> - uses the idea of a voice cursor, uses an LLM to execute editing instructions</li>
+</ul>
+
+<p>
+<b>What about automating myself out of this loop?</b> I've considered training a classifier or sending the list to a large language model to categorize links in order to set more reasonable defaults, but I think I'd still want manual control, since the fun is in getting a sense of all the cool things that people are tinkering around with in the Emacs community. I found that with voice control, it was easier for me to say the category than to look for the category it suggested and then say "Okay" to accept the default. If I display the suggested category in a buffer with very large text (and possibly category-specific background colours), then I can quickly glance at it or use my peripheral vision. But yeah, it's probably easier to look at a page and say "Org Mode" than to look at the page, look at the default text, see if it matches Org Mode, and then say okay if it is.
+</p>
+</div>
+</div>
+<div id="outline-container-categorizing-emacs-news-items-by-voice-in-org-mode-ideas-for-next-steps" class="outline-3">
+<h3 id="categorizing-emacs-news-items-by-voice-in-org-mode-ideas-for-next-steps">Ideas for next steps</h3>
+<div class="outline-text-3" id="text-categorizing-emacs-news-items-by-voice-in-org-mode-ideas-for-next-steps">
+<p>
+I wonder how to line up several categories. I could probably rattle off a few without waiting for the next one to load, and just pause when I'm not sure. Maybe while there's a reasonably good match within the first 1-3 words, I'll take candidates from the front of the queue. Or I could delimit it with another easily-recognized word, like "next".
+</p>
+
+<p>
+I want to make a more synchronous version of this idea so that I can have a speech-enabled drop-in replacement that I can use as my <code>y-or-n-p</code> while still being able to type <code>y</code> or <code>n</code>. This probably involves using <code>sit-for</code> and polling to see if it's done. And then I can use that to play Twenty Questions, but also to do more serious stuff. It would also be nice to have replacements for <code>read-string</code> and <code>completing-read</code>, since those block Emacs until the user enters something.
+</p>
+
+<p>
+I might take a side-trip into a conversational interface for M-x doctor and M-x dunnet, because why not. Naturally, it also makes sense to voice-enable <a href="https://github.com/xenodium/agent-shell">agent-shell</a> and <a href="https://github.com/karthink/gptel">gptel</a> interactions.
+</p>
+
+<p>
+I'd like to figure out a number- or word-based completion mechanism so that I can control Reddit link replacement as well, since I want to select from a list of links from the page. Maybe something similar to the way <a href="https://github.com/jcaw/voicemacs">voicemacs adds numbers to helm and company</a> or how <a href="http://www.cb1.com/~john/computing/emacs/handsfree/flexi-choose.html">flexi-choose.el</a> works.
+</p>
+
+<p>
+I'm also thinking about how I can shift seamlessly between typing and speaking, like when I want to edit a link title. Maybe I can check if I'm in the minibuffer and what kind of minibuffer I'm in, perhaps like the way <a href="https://github.com/oantolin/embark">Embark</a> does.
+</p>
+
+<p>
+It would be really cool to define speech commands by reusing the keymap structure that menus also use. This is how to <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Easy-Menu.html">define a menu</a> in Emacs Lisp:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">easy-menu-define</span> words-menu global-map
+  <span class="org-doc">"Menu for word navigation commands."</span>
+  <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"Words"</span>
+     [<span class="org-string">"Forward word"</span> forward-word]
+     [<span class="org-string">"Backward word"</span> backward-word]))
+</code></pre>
+</div>
+
+
+<p>
+and this is how to <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Modifying-Menus.html">set just one binding</a>:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(keymap-set-after my-menu <span class="org-string">"&lt;drink&gt;"</span>
+  <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"Drink"</span> . drink-command) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">eat</span>)
+</code></pre>
+</div>
+
+
+<p>
+That makes sense to reuse for speech commands. I'd also like to be able to specify aliases while hiding them or collapsing them for a "What can I say" help view&hellip; Also, if keymaps work, then maybe minor modes or transient maps could work? This sort of feels like it should be the voice equivalent of a transient map.
+</p>
+</div>
+</div>
+<div id="outline-container-categorizing-emacs-news-items-by-voice-in-org-mode-the-code-so-far" class="outline-3">
+<h3 id="categorizing-emacs-news-items-by-voice-in-org-mode-the-code-so-far">The code so far</h3>
+<div class="outline-text-3" id="text-categorizing-emacs-news-items-by-voice-in-org-mode-the-code-so-far">
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-emacs-news-categorize-with-voice</span> (<span class="org-type">&amp;optional</span> skip-browse)
+  (<span class="org-keyword">interactive</span> (list current-prefix-arg))
+  (<span class="org-keyword">unless</span> skip-browse
+    (my-spookfox-browse))
+  (speech-input-cancel-recording)
+  (<span class="org-keyword">let</span> ((default (<span class="org-keyword">if</span> (fboundp <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">my-emacs-news-guess-category</span>) (my-emacs-news-guess-category))))
+    (speech-input-from-list
+     (<span class="org-keyword">if</span> default
+         (format <span class="org-string">"Category (%s): "</span> default)
+       <span class="org-string">"Category: "</span>)
+     <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"Org Mode"</span> <span class="org-string">"Org"</span> <span class="org-string">"Org Mode"</span>)
+       <span class="org-string">"Other"</span>
+       <span class="org-string">"Emacs Lisp"</span>
+       <span class="org-string">"Coding"</span>
+       (<span class="org-string">"Emacs configuration"</span> <span class="org-string">"Config"</span> <span class="org-string">"Configuration"</span>)
+       (<span class="org-string">"Appearance"</span> <span class="org-string">"Appearance"</span>)
+       (<span class="org-string">"Default"</span> <span class="org-string">"Okay"</span> <span class="org-string">"Default"</span>)
+       <span class="org-string">"Community"</span>
+       <span class="org-string">"AI"</span>
+       <span class="org-string">"Writing"</span>
+       (<span class="org-string">"Reddit"</span> <span class="org-string">"Read it"</span> <span class="org-string">"Reddit"</span>)
+       <span class="org-string">"Shells"</span>
+       <span class="org-string">"Navigation"</span>
+       <span class="org-string">"Fun"</span>
+       (<span class="org-string">"Dired"</span> <span class="org-string">"Directory"</span> <span class="org-string">"Dir ed"</span>)
+       (<span class="org-string">"Mail, news, and chat"</span> <span class="org-string">"News"</span> <span class="org-string">"Mail"</span> <span class="org-string">"Chat"</span>)
+       <span class="org-string">"Multimedia"</span>
+       <span class="org-string">"Scroll down"</span>
+       <span class="org-string">"Scroll up"</span>
+       <span class="org-string">"Web"</span>
+       <span class="org-string">"Delete"</span>
+       <span class="org-string">"Skip"</span>
+       <span class="org-string">"Undo"</span>
+       (<span class="org-string">"Quit"</span> <span class="org-string">"Quit"</span> <span class="org-string">"Cancel"</span> <span class="org-string">"All done"</span>))
+     (<span class="org-keyword">lambda</span> (result text)
+       (message <span class="org-string">"Recognized %s original %s"</span> result text)
+       (<span class="org-keyword">pcase</span> result
+         (<span class="org-string">"Undo"</span>
+          (undo)
+          (my-emacs-news-categorize-with-voice t))
+         (<span class="org-string">"Skip"</span>
+          (forward-line)
+          (my-emacs-news-categorize-with-voice))
+         (<span class="org-string">"Quit"</span>
+          (message <span class="org-string">"All done."</span>)
+          (speech-input-cancel-recording))
+         (<span class="org-string">"Reddit"</span>
+          (my-emacs-news-replace-reddit-link)
+          (my-emacs-news-categorize-with-voice t))
+         (<span class="org-string">"Scroll down"</span>
+          (my-spookfox-scroll-down)
+          (my-emacs-news-categorize-with-voice t))
+         (<span class="org-string">"Scroll up"</span>
+          (my-spookfox-scroll-up)
+          (my-emacs-news-categorize-with-voice t))
+         (<span class="org-string">"Delete"</span>
+          (delete-line)
+          (undo-boundary)
+          (my-emacs-news-categorize-with-voice))
+         (<span class="org-string">"Default"</span>
+          (my-org-move-current-item-to-category
+           (concat default <span class="org-string">":"</span>))
+          (undo-boundary)
+          (my-emacs-news-categorize-with-voice))
+         (_
+          (my-org-move-current-item-to-category
+           (concat result <span class="org-string">":"</span>))
+          (undo-boundary)
+          (my-emacs-news-categorize-with-voice))))
+     t)))
+</code></pre>
+</div>
+
+
+<p>
+It uses <a href="https://sachachua.com/dotemacs#spookfox">Spookfox to control Firefox from Emacs</a>:
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org22d90d7"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-spookfox-scroll-down</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (spookfox-js-injection-eval-in-active-tab <span class="org-string">"window.scrollBy(0, document.documentElement.clientHeight);"</span> t))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-spookfox-scroll-up</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (spookfox-js-injection-eval-in-active-tab <span class="org-string">"window.scrollBy(0, -document.documentElement.clientHeight);"</span>))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orga82aa0d"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-spookfox-background-tab</span> (url <span class="org-type">&amp;rest</span> args)
+  <span class="org-doc">"Open URL as a background tab."</span>
+  (<span class="org-keyword">if</span> spookfox&#45;&#45;connected-clients
+      (spookfox-tabs&#45;&#45;request (cl-first spookfox&#45;&#45;connected-clients) <span class="org-string">"OPEN_TAB"</span> <span class="org-highlight-quoted-quote">`</span>(<span class="org-builtin">:url</span> ,url))
+    (browse-url url)))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+It also uses these functions for <a href="https://sachachua.com/dotemacs#digital-index-piles-with-emacs">categorizing Org Mode items</a>:
+</p>
+
+<p>
+
+</p><div class="org-src-container">
+<pre class="src src-emacs-lisp" id="org955687d"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-move-current-item-to-category</span> (category)
+    <span class="org-doc">"Move current list item under CATEGORY earlier in the list.</span>
+<span class="org-doc">  CATEGORY can be a string or a list of the form (text indent regexp).</span>
+<span class="org-doc">  Point should be on the next line to process, even if a new category</span>
+<span class="org-doc">  has been inserted."</span>
+    (<span class="org-keyword">interactive</span> (list (completing-read <span class="org-string">"Category: "</span> (my-org-get-list-categories))))
+    (<span class="org-keyword">when</span> category
+      (<span class="org-keyword">let*</span> ((col (current-column))
+             (item (point-at-bol))
+             (struct (org-list-struct))
+             (category-text (<span class="org-keyword">if</span> (stringp category) category (elt category 0)))
+             (category-indent (<span class="org-keyword">if</span> (stringp category) 2 (+ 2 (elt category 1))))
+             (category-regexp (<span class="org-keyword">if</span> (stringp category) category (elt category 2)))
+             (end (elt (car (last struct)) 6))
+             (pos (point))
+             s)
+        (<span class="org-keyword">setq</span> s (org-remove-indentation (buffer-substring-no-properties item (org-list-get-item-end item struct))))
+        (<span class="org-keyword">save-excursion</span>
+          (<span class="org-keyword">if</span> (string= category-text <span class="org-string">"x"</span>)
+              (org-list-send-item item <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">delete</span> struct)
+            (goto-char (caar struct))
+            (<span class="org-keyword">if</span> (re-search-forward (concat <span class="org-string">"^ *- +"</span> category-regexp) end t)
+                (<span class="org-keyword">progn</span>
+                  <span class="org-comment-delimiter">;; </span><span class="org-comment">needs a patch to ol.el to check if stringp</span>
+                  (org-list-send-item item (point-at-bol) struct)
+                  (org-move-item-down)
+                  (org-indent-item))
+              (goto-char end)
+              (org-list-insert-item
+               (point-at-bol)
+               struct (org-list-prevs-alist struct))
+              (<span class="org-keyword">let</span> ((old-struct (copy-tree struct)))
+                (org-list-set-ind (point-at-bol) struct 0)
+                (org-list-struct-fix-bul struct (org-list-prevs-alist struct))
+                (org-list-struct-apply-struct struct old-struct))
+              (goto-char (point-at-eol))
+              (insert category-text)
+              (org-list-send-item item <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> struct)
+              (org-indent-item)
+              (org-indent-item))
+            (recenter))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">my-org-guess-list-category</span> (<span class="org-type">&amp;optional</span> categories)
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">require</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">cl-lib</span>)
+  (<span class="org-keyword">unless</span> categories
+    (<span class="org-keyword">setq</span> categories
+          (my-helm-org-list-categories-init-candidates)))
+  (<span class="org-keyword">let*</span> ((beg (line-beginning-position))
+         (end (line-end-position))
+         (string (buffer-substring-no-properties beg end))
+         (found
+          (cl-member string
+                     categories
+                     <span class="org-builtin">:test</span>
+                     (<span class="org-keyword">lambda</span> (string cat-entry)
+                       (<span class="org-keyword">unless</span> (string= (car cat-entry) <span class="org-string">"x"</span>)
+                         (string-match (regexp-quote (downcase (car cat-entry)))
+                                       string))))))
+    (<span class="org-keyword">when</span> (car found)
+      (my-org-move-current-item-to-category
+       (cdr (car found)))
+      t)))
+</code></pre>
+</div>
+
+
+<p></p>
+
+<p>
+For the <code>speech-input</code> functions, experimental code is at <a href="https://codeberg.org/sachac/speech-input">https://codeberg.org/sachac/speech-input</a> .
+</p>
+</div>
+</div>
+<div><a href="https://sachachua.com/blog/2026/03/categorizing-emacs-news-items-by-voice-in-org-mode/index.org">View Org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KMER8FH7NZT56ENT0NHE36Q0" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F03%2Fcategorizing-emacs-news-items-by-voice-in-org-mode%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

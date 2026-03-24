@@ -1,0 +1,498 @@
+<p>
+Thinkpad laptops, e.g. mine Thinkpad X220, has a lot of functional
+keys. Some of them work without any problems — they are passed by the
+underlying kernel to the X server and it recognizes them as a usual
+key symbols: <code>XF86AudioMute</code>, <code>XF86AudioRaiseVolume</code>, <code>XF86AudioNext</code>, etc.
+But some special keys are not passed to the X server from the
+underlying OS layers.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/manual-thinkpad-functional-keys.png" alt="Screenshots from Thinkpad X220 manual with schematic image of laptop with highlighted function keys and ThinkVantage key." align="center" width="80%" />
+</p>
+<p class="fignum"><i>Screenshot with functional keys from Thinkpad X220 manual</i></p>
+</div>
+
+<p>
+For example, there are:
+</p>
+<ul class="org-ul">
+<li>ThinkVantage key.</li>
+<li>Fn+F2 key — it should lock the computer.</li>
+<li>Fn+F3 key — it should enable energy preservation mode by default.</li>
+<li>Fn+F5 — toggles state of wireless devices in the system.</li>
+<li>Fn+Space — enables screen magnifier.</li>
+<li>Round key at the left of the ThinkVantage key — it should toggle the
+microphone state.</li>
+</ul>
+
+<p>
+But these keys are still visible by the OS (thanks to the <code>acpi_ibm</code>
+kernel module!) and the <code>devd</code> daemon receives the corresponding events
+when user presses the mentioned functional key. So, it is possible to
+use this daemon to map these keys for something useful.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/images/stickers/d3shik_drgn-thinking-blue-claws.png" alt="d3shik_drgn-thinking-blue-claws.png" align="center" width="20%" />
+</p>
+<p class="fignum"><i>Author: D3shik (<a href="https://t.me/dashihome">https://t.me/dashihome</a>)</i></p>
+</div>
+
+<p>
+Likewise problem exists for some Thinkpad-specific indicators.
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/static/manual-thinkpad-indicators.png" alt="Screenshot from Thinkpad X220 manual with schematic image of laptop with pointers to the indicators." align="center" width="80%" />
+</p>
+<p class="fignum"><i>Screenshot with laptop's indicators from Thinkpad X220 manual</i></p>
+</div>
+
+<p>
+While the ThinkLight or indicator on the "Mute" button is controlled
+solely by hardware and works even in the <del>BIOS</del> Libreboot — the LED on
+the "Mic toggle" button doesn't toggle it's state when I press this
+button.
+</p>
+<div class="outline-2">
+<h2>TOC&#xa0;&#xa0;&#xa0;<span class="tag"></span></h2>
+<div class="outline-text-2">
+<ul class="org-ul">
+<li><a href="#devd-settings">Intercepting functional key presses with devd</a></li>
+<li><a href="#shell-script-key-presses">Processing functional keypresses with shell script</a></li>
+<li><a href="#acpi-ibm-led">ACPI IBM module settings for LEDs</a>
+<ul class="org-ul">
+<li><a href="#thinklight-morse-sos">(Bonus section) Alert with Morse code and ThinkLight</a></li>
+</ul></li>
+</ul>
+</div>
+</div>
+<div id="outline-container-devd-settings" class="outline-2">
+<h2 id="devd-settings">Intercepting functional key presses with devd</h2>
+<div class="outline-text-2" id="text-devd-settings">
+<p>
+First of all, it is necessary to understand which events are
+intercepted by <code>devd</code> when user presses the mentioned functional keys.
+So, I stopped the <code>devd</code> daemon and launch it from a <code>root</code> user with <code>-d</code>
+argument — to look at the events printed in the terminal. E.g. this is
+how looks like the event for <code>Fn+F2</code> keypress:
+</p>
+<pre class="example">
+Popping table
+Processing event '!system=ACPI subsystem=IBM type=\_SB_.PCI0.LPCB.EC__.HKEY notify=0x02'
+Pushing table
+setting *=!system=ACPI subsystem=IBM type=\_SB_.PCI0.LPCB.EC__.HKEY notify=0x02
+setting _=system=ACPI subsystem=IBM type=\_SB_.PCI0.LPCB.EC__.HKEY notify=0x02
+setting timestamp=1770849066.826698
+setting vm_guest=none
+setting system=ACPI
+setting subsystem=IBM
+setting type=\_SB_.PCI0.LPCB.EC__.HKEY
+setting notify=0x02
+Processing notify event
+</pre>
+
+<p>
+So, after some experimenting with keys, which I want to use, I got the
+next codes:
+</p>
+<table border="2" cellspacing="0" cellpadding="6" frame="void">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-right" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Buttons</th>
+<th scope="col" class="org-right">notify code</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Fn+F2</td>
+<td class="org-right">0x02</td>
+</tr>
+
+<tr>
+<td class="org-left">Fn+F3</td>
+<td class="org-right">0x03</td>
+</tr>
+
+<tr>
+<td class="org-left">Fn+F5</td>
+<td class="org-right">0x05</td>
+</tr>
+
+<tr>
+<td class="org-left">Fn+Space</td>
+<td class="org-right">0x14</td>
+</tr>
+
+<tr>
+<td class="org-left">ThinkVantage</td>
+<td class="org-right">0x18</td>
+</tr>
+
+<tr>
+<td class="org-left">Mic toggle</td>
+<td class="org-right">0x1b</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+The other event parameters are the same for all the keys:
+</p>
+<pre class="example">
+system=ACPI
+subsystem=IBM
+type=\_SB_.PCI0.LPCB.EC__.HKEY
+</pre>
+
+<p>
+Next steps are simple — just create a rule for <code>devd</code>, which intercepts
+the desired events and calls a some command — the most simple way is
+just to call the shell-script with pressed key name as an argument.
+</p>
+
+<p>
+I placed the <code>devd</code> rules for buttons to the
+<code>/usr/local/etc/devd/thinkpad.conf</code> (see the <code>man 5 devd.conf</code> for syntax
+explanation):
+</p>
+<pre class="example">
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x02";
+       action "/root/bin/thinkpad_keys.tcsh lock";
+};
+
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x03";
+       action "/root/bin/thinkpad_keys.tcsh batt";
+};
+
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x05";
+       action "/root/bin/thinkpad_keys.tcsh radio";
+};
+
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x14";
+       action "/root/bin/thinkpad_keys.tcsh space";
+};
+
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x18";
+       action "/root/bin/thinkpad_keys.tcsh thinkvantage";
+};
+
+notify 100 {
+       match "system"      "ACPI";
+       match "subsystem"   "IBM";
+       match "type"        "\\_SB_.PCI0.LPCB.EC__.HKEY";
+       match "notify"      "0x1b";
+       action "/root/bin/thinkpad_keys.tcsh mictoggle";
+};
+</pre>
+
+<p>
+Then, restarted devd with <code>service devd restart</code> command.
+</p>
+</div>
+</div>
+<div id="outline-container-shell-script-key-presses" class="outline-2">
+<h2 id="shell-script-key-presses">Processing functional keypresses with shell script</h2>
+<div class="outline-text-2" id="text-shell-script-key-presses">
+<p>
+As I mentioned before, the script just receives some string as an
+argument when user presses some function key. The strings are the
+next:
+</p>
+<ul class="org-ul">
+<li><code>"lock"</code> for Fn+F2</li>
+<li><code>"batt"</code> for Fn+F3</li>
+<li><code>"radio"</code> for Fn+F5</li>
+<li><code>"space"</code> for Fn+Space</li>
+<li><code>"thinkvantage"</code> for blue ThinkVantage button</li>
+<li><code>"mictoggle"</code> for "Mic toggle" button.</li>
+</ul>
+
+<p>
+Dispatching of execution flow with these string is simple — just check
+what we received an argument and it is not empty, then use <code>switch case</code>
+for tcsh script:
+</p>
+<div class="org-src-container">
+<pre class="src src-tcsh"><span style="color: #909995;">#</span><span style="color: #909995;">!/bin/</span><span style="color: #489100; font-weight: bold;">tcsh</span>
+
+<span style="color: #489100; font-weight: bold;">if</span> ( { <span style="color: #53676d; font-weight: bold;">test</span> <span style="color: #009c8f;">"$1"</span> } == 0 ) <span style="color: #489100; font-weight: bold;">then</span>
+        <span style="color: #489100; font-weight: bold;">exit</span> 2
+<span style="color: #489100; font-weight: bold;">else if</span> ( { <span style="color: #53676d; font-weight: bold;">test</span> -z <span style="color: #009c8f;">"$1"</span> } ) <span style="color: #489100; font-weight: bold;">then</span>
+        <span style="color: #489100; font-weight: bold;">exit</span> 1
+endif
+
+<span style="color: #0072d4;">switch</span> ( $<span style="color: #0072d4;">1</span> )
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"lock"</span>:
+                breaksw
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"batt"</span>:
+                breaksw
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"radio"</span>:
+                breaksw
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"space"</span>:
+                breaksw
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"thinkvantage"</span>:
+                breaksw
+        <span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"mictoggle"</span>:
+                breaksw
+        default:
+                breaksw
+endsw
+</pre>
+</div>
+
+<p>
+Then, in each <code>case</code> the necessary program is launched. I didn't come up
+with actions for <code>Fn+F3</code> and <code>Fn+F5</code> buttons, but:
+</p>
+<ul class="org-ul">
+<li><code>Fn+F2</code> obviously locks screen with xlock</li>
+<li><code>Fn+F5</code> launches <code>wifimgr</code> — the GTK2 frontend for <code>wpa_supplicant</code></li>
+<li><code>Fn+Space</code> launches <code>xmag</code> — magnifier tool for X server</li>
+<li>"Mic toggle" button — obviously toggles the microphone state via the
+<code>mixer</code>.</li>
+</ul>
+
+<div class="org-src-container">
+<pre class="src src-tcsh"><span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"lock"</span>:
+    setenv DISPLAY :0
+    xhost +local:root
+    mdo -u drag0n /bin/tcsh -c <span style="color: #009c8f;">"setenv DISPLAY :0 &amp;&amp; /usr/local/bin/xlock &amp;"</span>
+    breaksw
+<span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"batt"</span>:
+    breaksw
+<span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"radio"</span>:
+    setenv DISPLAY :0
+    setenv GDK_SCALE 0.5
+    setenv GDK_DPI_SCALE 2
+    xhost +local:root
+    /usr/local/bin/wifimgr &amp;
+    breaksw
+<span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"space"</span>:
+    setenv DISPLAY :0
+    xhost +local:root
+    mdo -u drag0n /bin/tcsh -c <span style="color: #ad8900; font-weight: bold;">\</span>
+        <span style="color: #009c8f;">"setenv DISPLAY :0 &amp;&amp; /usr/local/bin/xmag -source 512x512 -mag 3 &amp;"</span>
+    breaksw
+<span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"thinkvantage"</span>:
+    breaksw
+<span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"mictoggle"</span>:
+    mixer mic.mute=toggle
+    breaksw
+</pre>
+</div>
+
+<p>
+<b>Note:</b> to launch X applications it is necessary to set the proper
+<code>DISPLAY</code> variable for <code>root</code> first. And also allow localhost connections
+from root to my user's X server via the <code>xhost</code>. Also, there are some
+environment variables necessary for GTK applications.
+</p>
+</div>
+</div>
+<div id="outline-container-acpi-ibm-led" class="outline-2">
+<h2 id="acpi-ibm-led">ACPI IBM module settings for LEDs</h2>
+<div class="outline-text-2" id="text-acpi-ibm-led">
+<p>
+OK, for now I'm able to toggle microphone state with the corresponding
+button. But, the LED on this button is still not in use.
+</p>
+
+<p>
+Fortunately, <code>acpi_ibm</code> kernel module comes to the rescue. It provides
+one useful sysctl variable: <code>dev.acpi_ibm.0.mic_led</code>. The next command
+could be used to light up the LED on the "Mic toggle" button:
+</p>
+<pre class="example">
+doas sysctl dev.acpi_ibm.0.mic_led=1
+</pre>
+
+<p>
+And the next command turns off the LED:
+</p>
+<pre class="example">
+doas sysctl dev.acpi_ibm.0.mic_led=0
+</pre>
+
+<p>
+So, to match LED state with real state of microphone the next lines
+were added to the aforementioned shell script for <code>devd</code>:
+</p>
+<div class="org-src-container">
+<pre class="src src-tcsh"><span style="color: #489100; font-weight: bold;">case</span> <span style="color: #009c8f;">"mictoggle"</span>:
+    mixer mic.mute=toggle
+    <span style="color: #489100; font-weight: bold;">if</span> ( { <span style="color: #53676d; font-weight: bold;">test</span> <span style="color: #8762c6; font-weight: bold;">`mixer mic.mute`</span> == <span style="color: #009c8f;">"mic.mute=on"</span> } ) <span style="color: #489100; font-weight: bold;">then</span>
+        sysctl dev.acpi_ibm.0.mic_led=1
+    <span style="color: #489100; font-weight: bold;">else</span>
+        sysctl dev.acpi_ibm.0.mic_led=0
+    endif
+    breaksw
+</pre>
+</div>
+
+<p>
+One little addition is left. That if I turn off the mic, then
+powercycle the laptop? The microphone state will be saved by the OS,
+but the LED will be obviously turned off. To synchronize mic and LED
+states, I used this damn simple startup service:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #909995;">#</span><span style="color: #909995;">!/bin/</span><span style="color: #489100; font-weight: bold;">sh</span>
+<span style="color: #909995;">#</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">PROVIDE: micled</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">REQUIRE: DAEMON</span>
+<span style="color: #909995;"># </span><span style="color: #909995;">KEYWORD: nojail shutdown</span>
+<span style="color: #909995;">#</span>
+
+. /etc/rc.subr
+
+<span style="color: #0072d4;">name</span>=<span style="color: #009c8f;">"micled"</span>
+<span style="color: #0072d4;">desc</span>=<span style="color: #009c8f;">"Synchronize mic and LED states"</span>
+<span style="color: #0072d4;">rcvar</span>=<span style="color: #009c8f;">"micled_enable"</span>
+load_rc_config $<span style="color: #0072d4;">name</span>
+
+: ${<span style="color: #0072d4;">micled_enable</span>:=<span style="color: #009c8f;">"NO"</span>}
+
+<span style="color: #0072d4;">start_cmd</span>=<span style="color: #009c8f;">"${name}_sync"</span>
+<span style="color: #0072d4;">stop_cmd</span>=<span style="color: #009c8f;">"${name}_sync"</span>
+<span style="color: #0072d4;">restart_cmd</span>=<span style="color: #009c8f;">"${name}_sync"</span>
+<span style="color: #0072d4;">status_cmd</span>=<span style="color: #009c8f;">"${name}_sync"</span>
+
+<span style="color: #0072d4;">micled_sync</span>()
+{
+    <span style="color: #489100; font-weight: bold;">if</span> [ $(mixer mic.mute) == <span style="color: #009c8f;">"mic.mute=on"</span> ]; <span style="color: #489100; font-weight: bold;">then</span>
+        sysctl dev.acpi_ibm.0.mic_led=1 &gt; /dev/null
+    <span style="color: #489100; font-weight: bold;">else</span>
+        sysctl dev.acpi_ibm.0.mic_led=0 &gt; /dev/null
+    <span style="color: #489100; font-weight: bold;">fi</span>
+    <span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"Mic state synced with LED"</span>
+}
+
+run_rc_command <span style="color: #009c8f;">"$1"</span>
+</pre>
+</div>
+</div>
+<div id="outline-container-thinklight-morse-sos" class="outline-3">
+<h3 id="thinklight-morse-sos">(Bonus section) Alert with Morse code and ThinkLight</h3>
+<div class="outline-text-3" id="text-thinklight-morse-sos">
+<p>
+The <code>acpi_ibm</code> could not only operate with Thinkpad specific things via
+sysctl variables. It also provides the <a href="https://man.freebsd.org/cgi/man.cgi?query=led&amp;sektion=4&amp;manpath=FreeBSD+15.0-RELEASE+and+Ports">led(4)</a> interface to the
+ThinkLight!
+</p>
+
+
+<div class="figure">
+<p><img src="/assets/images/stickers/d3shik_drgn-surprised.png" alt="d3shik_drgn-surprised.png" align="center" width="20%" />
+</p>
+<p class="fignum"><i>Author: D3shik (<a href="https://t.me/dashihome">https://t.me/dashihome</a>)</i></p>
+</div>
+
+<p>
+So, with the help of <a href="https://man.freebsd.org/cgi/man.cgi?query=morse&amp;apropos=0&amp;sektion=6&amp;manpath=FreeBSD+15.0-RELEASE+and+Ports&amp;format=html">morse(6)</a> program it is possible to transmit
+messages with the speed of light. For example, to signal "SOS" with
+ThinkLight this command, launched from <code>root</code>, could be used:
+</p>
+<pre class="example">
+morse -l "SOS" &gt; /dev/led/thinklight
+</pre>
+
+<p>
+The ThinkLight will blink "SOS" signal indefinitely. To stop it and
+turn off ThinkLight the next command is necessary:
+</p>
+<pre class="example">
+echo "0" &gt; /dev/led/thinklight
+</pre>
+
+<p>
+Thusly, I decided to use this little feature to signal about low
+battery level. Because the big red notification on the center of the
+screen is not enough for me.
+</p>
+
+<p>
+This script is used to blink "SOS" three times by ThinkLight then turn
+off the LED:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #909995;">#</span><span style="color: #909995;">!/bin/</span><span style="color: #489100; font-weight: bold;">sh</span>
+
+/usr/bin/morse -l <span style="color: #009c8f;">"SOS"</span> &gt; /dev/led/thinklight
+sleep 13
+<span style="color: #53676d; font-weight: bold;">echo</span> <span style="color: #009c8f;">"0"</span> &gt; /dev/led/thinklight
+</pre>
+</div>
+
+<p>
+Then, I just added it to the <code>/usr/local/etc/doas.conf</code> to be able to
+launch this script from root without entering the password. And
+inserted corresponding command to the proper section of AwesomeWM
+configuration:
+</p>
+<div class="org-src-container">
+<pre class="src src-lua"><span style="color: #909995;">-- </span><span style="color: #909995;">Timer to show notification about low battery:</span>
+gears.timer {
+    timeout = 60,
+    call_now = <span style="color: #0072d4; font-weight: bold;">true</span>,
+    autostart = <span style="color: #0072d4; font-weight: bold;">true</span>,
+    <span style="color: #0072d4;">callback</span> = <span style="color: #489100; font-weight: bold;">function</span>()
+        vicious.call_async(
+            vicious.widgets.bat, <span style="color: #009c8f;">"$2"</span>, <span style="color: #009c8f;">"0"</span>,
+            <span style="color: #489100; font-weight: bold;">function</span>(<span style="color: #0072d4;">data</span>)
+                <span style="color: #489100; font-weight: bold;">local</span> <span style="color: #0072d4;">battery_level</span> = <span style="color: #53676d; font-weight: bold;">tonumber</span>(data)
+                <span style="color: #489100; font-weight: bold;">if</span> battery_level &lt; 4 <span style="color: #489100; font-weight: bold;">then</span>
+                    naughty.notify {
+                        text = <span style="color: #53676d; font-weight: bold;">string</span>.<span style="color: #53676d; font-weight: bold;">format</span>(<span style="color: #009c8f;">"Battery is low!\n%d%% is left!"</span>, battery_level),
+                        urgency = <span style="color: #009c8f;">"critical"</span>,
+                        position = <span style="color: #009c8f;">"top_middle"</span>,
+                        icon = beautiful.icon_battery_0,
+                        preset = naughty.config.presets.critical
+                    }
+                    awful.spawn.easy_async_with_shell(<span style="color: #009c8f;">"doas /home/drag0n/.bin/battery_sos.sh"</span>, <span style="color: #489100; font-weight: bold;">function</span>(<span style="color: #0072d4;">_</span>)
+                    <span style="color: #489100; font-weight: bold;">end</span>)
+                <span style="color: #489100; font-weight: bold;">end</span>
+        <span style="color: #489100; font-weight: bold;">end</span>)
+    <span style="color: #489100; font-weight: bold;">end</span>
+}
+</pre>
+</div>
+
+<p>
+Done! Now, when the battery level is too low — I receive both
+notification and blinking ThinkLight LED.
+</p>
+</div>
+</div>
+</div>

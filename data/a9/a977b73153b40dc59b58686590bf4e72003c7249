@@ -1,0 +1,151 @@
+<p>While working on <a href="https://github.com/erlang/emacs-erlang-ts/">erlang-ts-mode</a>
+recently, someone asked me how I reload the mode’s code while developing it. I
+realized that while the answer is obvious to me after years of Emacs Lisp
+hacking, it’s not obvious at all to people who are just getting started with
+Emacs Lisp development. So here’s a short practical guide.</p>
+
+<!--more-->
+
+<h2 id="the-problem">The Problem</h2>
+
+<p>Most Emacs users learn early on that you can evaluate Emacs Lisp with commands
+like <code class="language-plaintext highlighter-rouge">eval-buffer</code> (<code class="language-plaintext highlighter-rouge">M-x eval-buffer</code>), <code class="language-plaintext highlighter-rouge">eval-defun</code> (<code class="language-plaintext highlighter-rouge">C-M-x</code>), and
+<code class="language-plaintext highlighter-rouge">eval-expression</code> (<code class="language-plaintext highlighter-rouge">M-:</code>). These work great for most code – but they have a
+blind spot: <code class="language-plaintext highlighter-rouge">defvar</code> and <code class="language-plaintext highlighter-rouge">defcustom</code>.</p>
+
+<p>By design, <code class="language-plaintext highlighter-rouge">defvar</code> only sets a variable if it’s not already bound. This means
+that if you change the default value of a <code class="language-plaintext highlighter-rouge">defvar</code> in your source and then run
+<code class="language-plaintext highlighter-rouge">eval-buffer</code>, the old value sticks around. The same applies to <code class="language-plaintext highlighter-rouge">defcustom</code>.
+Here’s a quick example:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-mode-default-indent</span> <span class="mi">2</span><span class="p">)</span>  <span class="c1">;; eval-buffer sets this to 2</span>
+
+<span class="c1">;; Now change it to 4 in source:</span>
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-mode-default-indent</span> <span class="mi">4</span><span class="p">)</span>  <span class="c1">;; eval-buffer does NOTHING -- still 2</span>
+</code></pre></div></div>
+
+<p>This is intentional – loading a library shouldn’t clobber user
+customizations. But when you’re <em>developing</em> a package, it’s a real pain. You
+change a default, re-evaluate, and wonder why nothing happened.</p>
+
+<p>The same issue applies to faces defined with <code class="language-plaintext highlighter-rouge">defface</code> – re-evaluating the
+definition won’t update an already-defined face.</p>
+
+<h2 id="the-approaches">The Approaches</h2>
+
+<p>Here are all the approaches I know of, roughly ordered from lightest to heaviest.</p>
+
+<h3 id="1-eval-defun-on-individual-forms">1. <code class="language-plaintext highlighter-rouge">eval-defun</code> on Individual Forms</h3>
+
+<p>Here’s something that surprises many people: <code class="language-plaintext highlighter-rouge">eval-defun</code> (<code class="language-plaintext highlighter-rouge">C-M-x</code>) <strong>does</strong>
+handle <code class="language-plaintext highlighter-rouge">defvar</code>, <code class="language-plaintext highlighter-rouge">defcustom</code>, and <code class="language-plaintext highlighter-rouge">defface</code> specially. When you place point
+inside a <code class="language-plaintext highlighter-rouge">defvar</code> form and hit <code class="language-plaintext highlighter-rouge">C-M-x</code>, it unconditionally sets the variable to
+the new value, ignoring the “only if unbound” semantics.</p>
+
+<p>This is different from <code class="language-plaintext highlighter-rouge">eval-buffer</code> and <code class="language-plaintext highlighter-rouge">eval-region</code>, which respect the
+normal <code class="language-plaintext highlighter-rouge">defvar</code> behavior.</p>
+
+<p>So if you’ve only changed a few forms, <code class="language-plaintext highlighter-rouge">C-M-x</code> on each one is the fastest
+approach. It’s what I use most of the time during development.</p>
+
+<h3 id="2-setq-via-eval-expression">2. <code class="language-plaintext highlighter-rouge">setq</code> via <code class="language-plaintext highlighter-rouge">eval-expression</code></h3>
+
+<p>If you just need to reset one variable quickly, hit <code class="language-plaintext highlighter-rouge">M-:</code> and type:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">my-mode-default-indent</span> <span class="mi">4</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Quick and dirty, but it works. This won’t re-evaluate any other code, so it’s
+only useful for tweaking individual values.</p>
+
+<h3 id="3-load-file">3. <code class="language-plaintext highlighter-rouge">load-file</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">M-x load-file</code> lets you load an <code class="language-plaintext highlighter-rouge">.el</code> file from disk. The difference from
+<code class="language-plaintext highlighter-rouge">require</code> is that <code class="language-plaintext highlighter-rouge">require</code> skips loading entirely if the feature is already in
+the <code class="language-plaintext highlighter-rouge">features</code> list, while <code class="language-plaintext highlighter-rouge">load-file</code> always reads and evaluates the file. That
+said, it still respects <code class="language-plaintext highlighter-rouge">defvar</code> semantics, so already-bound variables won’t be
+updated – you’d need <code class="language-plaintext highlighter-rouge">eval-defun</code> or <code class="language-plaintext highlighter-rouge">unload-feature</code> for that.</p>
+
+<p>Where <code class="language-plaintext highlighter-rouge">load-file</code> really helps is when you want to reload a file that isn’t the
+one you’re currently editing – e.g., a dependency within your package, or a
+file that doesn’t have a <code class="language-plaintext highlighter-rouge">provide</code> form.</p>
+
+<h3 id="4-unload-feature--require">4. <code class="language-plaintext highlighter-rouge">unload-feature</code> + <code class="language-plaintext highlighter-rouge">require</code></h3>
+
+<p>This is the “clean reload” approach:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">unload-feature</span> <span class="ss">'my-mode</span> <span class="no">t</span><span class="p">)</span>  <span class="c1">;; the t means "force, even if other things depend on it"</span>
+<span class="p">(</span><span class="nb">require</span> <span class="ss">'my-mode</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">unload-feature</code> removes everything the feature defined – variables, functions,
+hooks, etc. Then <code class="language-plaintext highlighter-rouge">require</code> loads it fresh. This is the closest thing to a
+clean slate without restarting Emacs.</p>
+
+<p>A few caveats:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">unload-feature</code> can be disruptive. If the feature added hooks or advice,
+unloading should clean those up, but edge cases exist.</li>
+  <li>It only works for features that were loaded via <code class="language-plaintext highlighter-rouge">provide</code>/<code class="language-plaintext highlighter-rouge">require</code>. If you
+loaded a file with <code class="language-plaintext highlighter-rouge">load-file</code>, there’s no feature to unload.</li>
+  <li>Some complex packages don’t survive <code class="language-plaintext highlighter-rouge">unload-feature</code> cleanly. For most
+packages (like a typical major mode), it works well.</li>
+</ul>
+
+<p>You can bind this to a key for quick access during development:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-reload-feature</span> <span class="p">(</span><span class="nv">feature</span><span class="p">)</span>
+  <span class="s">"Unload and reload FEATURE."</span>
+  <span class="p">(</span><span class="nv">interactive</span>
+   <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nb">intern</span> <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Reload feature: "</span>
+                                  <span class="nv">features</span> <span class="no">nil</span> <span class="no">t</span><span class="p">))))</span>
+  <span class="p">(</span><span class="nv">unload-feature</span> <span class="nv">feature</span> <span class="no">t</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">require</span> <span class="nv">feature</span><span class="p">))</span>
+</code></pre></div></div>
+
+<h3 id="5-restart-emacs">5. Restart Emacs</h3>
+
+<p>The nuclear option. When nothing else works or when you’ve made lots of changes
+and don’t trust the runtime state, just restart. With <code class="language-plaintext highlighter-rouge">desktop-save-mode</code> or a
+session manager, this is less painful than it sounds.</p>
+
+<p>If you use Emacs in daemon mode, <code class="language-plaintext highlighter-rouge">M-x restart-emacs</code> (from the
+<a href="https://github.com/iqbalansari/restart-emacs">restart-emacs</a> package) or
+the built-in <code class="language-plaintext highlighter-rouge">restart-emacs</code> (Emacs 29+) makes this quick.</p>
+
+<h2 id="dont-forget-to-re-activate-the-mode">Don’t Forget to Re-activate the Mode</h2>
+
+<p>One thing that trips people up: after reloading the code (via any of the above
+methods), you also need to re-activate the mode in existing buffers. Just run
+<code class="language-plaintext highlighter-rouge">M-x my-mode</code> – this re-runs the mode function and re-applies keymaps, hooks,
+font-lock settings, etc. Without this step, existing buffers will still be
+running the old code.</p>
+
+<p>For minor modes, toggle off and on: <code class="language-plaintext highlighter-rouge">M-x my-minor-mode</code> twice.</p>
+
+<h2 id="my-workflow">My Workflow</h2>
+
+<p>For what it’s worth, here’s what my typical mode development workflow looks
+like:</p>
+
+<ol>
+  <li>Edit the source file.</li>
+  <li><code class="language-plaintext highlighter-rouge">C-M-x</code> on the specific forms I changed.</li>
+  <li>Switch to a test buffer and re-activate the mode with <code class="language-plaintext highlighter-rouge">M-x my-mode</code>.</li>
+  <li>If things are weird, <code class="language-plaintext highlighter-rouge">unload-feature</code> + <code class="language-plaintext highlighter-rouge">require</code> for a clean reload.</li>
+  <li>Restart Emacs only when I’ve changed something fundamental (like autoloads or
+package metadata).</li>
+</ol>
+
+<p>Most of the time, steps 1-3 are all I need.</p>
+
+<h2 id="wrapping-up">Wrapping Up</h2>
+
+<p>The thing to remember is that <code class="language-plaintext highlighter-rouge">defvar</code>/<code class="language-plaintext highlighter-rouge">defcustom</code>/<code class="language-plaintext highlighter-rouge">defface</code> are intentionally
+designed not to override existing values, and most evaluation commands respect
+this. Once you know that <code class="language-plaintext highlighter-rouge">eval-defun</code> is the exception (it <em>does</em> force the
+update) and that <code class="language-plaintext highlighter-rouge">unload-feature</code> gives you a clean slate, reloading code during
+development is pretty simple.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>

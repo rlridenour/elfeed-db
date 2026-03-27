@@ -1,0 +1,270 @@
+<p>Today’s topic came up while I was going over the list of open Prelude issues
+after doing the recent 2.0 release.</p>
+
+<p><a href="https://paredit.org">Paredit</a> and
+<a href="https://github.com/Fuco1/smartparens">smartparens</a> are structural
+editing packages that keep your parentheses balanced and let you
+manipulate s-expressions as units – essential tools for anyone writing
+Lisp. Paredit has been around since 2005 and its keybindings have
+become muscle memory for a generation of Lisp programmers (yours truly
+included). Smartparens inherits the same keymap when used with
+<code class="language-plaintext highlighter-rouge">sp-use-paredit-bindings</code>.</p>
+
+<p>The problem is that some of those keybindings conflict with standard
+Emacs key prefixes that didn’t exist when paredit was written – or
+that have grown more important over time.</p>
+
+<!--more-->
+
+<h2 id="the-commands-and-their-conflicts">The Commands and Their Conflicts</h2>
+
+<p>Before getting to solutions, let’s look at each problematic command –
+what it does, where paredit puts it, and what it shadows.</p>
+
+<h3 id="splice--m-s">Splice – <code class="language-plaintext highlighter-rouge">M-s</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-splice-sexp</code> (or <code class="language-plaintext highlighter-rouge">sp-splice-sexp</code> in smartparens) removes
+the enclosing delimiters around point, “splicing” the contents into
+the parent expression:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before (point on "b"):</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="p">(</span><span class="nf">b</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w"> </span><span class="n">d</span><span class="p">)</span><span class="w">
+
+</span><span class="c1">;; after splice:</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="p">)</span><span class="w">
+</span></code></pre></div></div>
+
+<p>The conflict: Emacs uses <code class="language-plaintext highlighter-rouge">M-s</code> as the <code class="language-plaintext highlighter-rouge">search-map</code> prefix (since
+Emacs 23). Paredit’s splice binding shadows <code class="language-plaintext highlighter-rouge">M-s o</code> (<code class="language-plaintext highlighter-rouge">occur</code>), <code class="language-plaintext highlighter-rouge">M-s .</code>
+(<code class="language-plaintext highlighter-rouge">isearch-forward-symbol-at-point</code>), and any <code class="language-plaintext highlighter-rouge">M-s</code>-prefixed bindings
+from packages like consult (<code class="language-plaintext highlighter-rouge">consult-line</code>, <code class="language-plaintext highlighter-rouge">consult-ripgrep</code>, etc.).
+If you use a completion framework like Vertico + Consult, this one
+really hurts.</p>
+
+<h3 id="convolute--m-">Convolute – <code class="language-plaintext highlighter-rouge">M-?</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-convolute-sexp</code> (or <code class="language-plaintext highlighter-rouge">sp-convolute-sexp</code>) swaps the nesting
+of two enclosing forms. Specifically, it takes the head of the outer
+form and moves it inside the inner one:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before (point on "c"):</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="p">(</span><span class="nf">b</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="p">))</span><span class="w">
+
+</span><span class="c1">;; after convolute -- "a" moved from outer to inner:</span><span class="w">
+</span><span class="p">(</span><span class="nf">b</span><span class="w"> </span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="p">))</span><span class="w">
+</span></code></pre></div></div>
+
+<p>The conflict: Emacs uses <code class="language-plaintext highlighter-rouge">M-?</code> for <code class="language-plaintext highlighter-rouge">xref-find-references</code> (since
+Emacs 25). If you use LSP (Eglot or lsp-mode), paredit’s convolute
+binding shadows “find all references” – one of the most useful LSP
+features.</p>
+
+<h3 id="slurp--c-right">Slurp – <code class="language-plaintext highlighter-rouge">C-&lt;right&gt;</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-forward-slurp-sexp</code> (or <code class="language-plaintext highlighter-rouge">sp-forward-slurp-sexp</code>) expands
+the current sexp forward by pulling the next sibling inside the
+closing delimiter:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before:</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="n">c</span><span class="w">
+
+</span><span class="c1">;; after slurp -- "c" pulled inside:</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w">
+</span></code></pre></div></div>
+
+<h3 id="barf--c-left">Barf – <code class="language-plaintext highlighter-rouge">C-&lt;left&gt;</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-forward-barf-sexp</code> (or <code class="language-plaintext highlighter-rouge">sp-forward-barf-sexp</code>) is the
+opposite – it pushes the last element out past the closing delimiter:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before:</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="n">c</span><span class="p">)</span><span class="w">
+
+</span><span class="c1">;; after barf -- "c" pushed out:</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="p">)</span><span class="w"> </span><span class="n">c</span><span class="w">
+</span></code></pre></div></div>
+
+<p>The conflict for both: <code class="language-plaintext highlighter-rouge">C-&lt;right&gt;</code> and <code class="language-plaintext highlighter-rouge">C-&lt;left&gt;</code> override
+<code class="language-plaintext highlighter-rouge">right-word</code> and <code class="language-plaintext highlighter-rouge">left-word</code>. Fine if you’re in a Lisp buffer and
+know what you’re doing, but surprising if you expected word-level
+movement.</p>
+
+<h3 id="splice-killing-backward--m-up">Splice-killing-backward – <code class="language-plaintext highlighter-rouge">M-&lt;up&gt;</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-splice-sexp-killing-backward</code> splices (removes delimiters)
+and also kills everything <em>before</em> point within the sexp:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before (point on "c"):</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="p">)</span><span class="w">
+
+</span><span class="c1">;; after splice-killing-backward -- "a b" killed, parens removed:</span><span class="w">
+</span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="w">
+</span></code></pre></div></div>
+
+<h3 id="splice-killing-forward--m-down">Splice-killing-forward – <code class="language-plaintext highlighter-rouge">M-&lt;down&gt;</code></h3>
+
+<p><code class="language-plaintext highlighter-rouge">paredit-splice-sexp-killing-forward</code> does the same but kills
+everything <em>after</em> point:</p>
+
+<div class="language-clojure highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; before (point on "b"):</span><span class="w">
+</span><span class="p">(</span><span class="nf">a</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="n">d</span><span class="p">)</span><span class="w">
+
+</span><span class="c1">;; after splice-killing-forward -- "c d" killed, parens removed:</span><span class="w">
+</span><span class="n">a</span><span class="w"> </span><span class="n">b</span><span class="w">
+</span></code></pre></div></div>
+
+<p>The conflict for both: <code class="language-plaintext highlighter-rouge">M-&lt;up&gt;</code> and <code class="language-plaintext highlighter-rouge">M-&lt;down&gt;</code> clash with
+<code class="language-plaintext highlighter-rouge">org-metaup</code>/<code class="language-plaintext highlighter-rouge">org-metadown</code> in Org mode, paragraph movement in some
+configs, and window manager shortcuts on some Linux desktops.</p>
+
+<h2 id="what-to-do-about-it">What to Do About It</h2>
+
+<p>The good news is that both Matus Goljer (a.k.a. Fuco1, the smartparens
+author) and Magnar Sveen (a.k.a. Magnars, the author of
+<code class="language-plaintext highlighter-rouge">expand-region</code>, <code class="language-plaintext highlighter-rouge">multiple-cursors</code> and many other popular packages)
+have solved these conflicts in their own configs. Their approaches are
+worth borrowing.</p>
+
+<p>The examples below use smartparens. For paredit, replace
+<code class="language-plaintext highlighter-rouge">smartparens-mode-map</code> with <code class="language-plaintext highlighter-rouge">paredit-mode-map</code> and <code class="language-plaintext highlighter-rouge">sp-*</code> commands
+with their <code class="language-plaintext highlighter-rouge">paredit-*</code> equivalents.</p>
+
+<h3 id="splice-m-s">Splice (<code class="language-plaintext highlighter-rouge">M-s</code>)</h3>
+
+<p>Matus’s approach is to rebind to <code class="language-plaintext highlighter-rouge">M-D</code> (meta-shift-d). The mnemonic
+is nice – <code class="language-plaintext highlighter-rouge">M-d</code> kills a word, <code class="language-plaintext highlighter-rouge">M-D</code> “kills the delimiters.” This is
+probably the most widely copied alternative:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-s"</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-D"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">sp-splice-sexp</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Magnar’s approach is to rebind to <code class="language-plaintext highlighter-rouge">s-s</code> (super-s). Clean if you’re on
+macOS where Super is the Command key:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-s"</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s-s"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">sp-splice-sexp</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>You can use both – <code class="language-plaintext highlighter-rouge">M-D</code> everywhere, <code class="language-plaintext highlighter-rouge">s-s</code> as a macOS bonus.</p>
+
+<h3 id="convolute-m-">Convolute (<code class="language-plaintext highlighter-rouge">M-?</code>)</h3>
+
+<p>Convolute-sexp is one of paredit’s more obscure commands. If you use
+LSP or xref regularly, freeing <code class="language-plaintext highlighter-rouge">M-?</code> for <code class="language-plaintext highlighter-rouge">xref-find-references</code> is
+a net win:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-?"</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>If you actually use convolute-sexp, rebind it to something under
+a less contested prefix.</p>
+
+<h3 id="slurpbarf-c-arrow">Slurp/barf (<code class="language-plaintext highlighter-rouge">C-&lt;arrow&gt;</code>)</h3>
+
+<p>Magnar moves these to Super:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"C-&lt;right&gt;"</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"C-&lt;left&gt;"</span><span class="p">)</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s-&lt;right&gt;"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">sp-forward-slurp-sexp</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">define-key</span> <span class="nv">smartparens-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"s-&lt;left&gt;"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">sp-forward-barf-sexp</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Matus keeps the <code class="language-plaintext highlighter-rouge">C-&lt;arrow&gt;</code> bindings (accepting the conflict). This
+one’s really a matter of taste – if word-level movement with
+<code class="language-plaintext highlighter-rouge">C-&lt;arrow&gt;</code> matters to you, move them. If you’re a Lisp programmer
+who slurps more than they word-move, keep them.</p>
+
+<h3 id="splice-killing-m-up--m-down">Splice-killing (<code class="language-plaintext highlighter-rouge">M-&lt;up&gt;</code> / <code class="language-plaintext highlighter-rouge">M-&lt;down&gt;</code>)</h3>
+
+<p>Matus uses <code class="language-plaintext highlighter-rouge">C-M-&lt;backspace&gt;</code> and <code class="language-plaintext highlighter-rouge">C-M-&lt;delete&gt;</code>. Magnar uses
+<code class="language-plaintext highlighter-rouge">s-&lt;up&gt;</code> and <code class="language-plaintext highlighter-rouge">s-&lt;down&gt;</code>. Both work well.</p>
+
+<h2 id="the-smartparens-alternative">The Smartparens Alternative</h2>
+
+<p>If you’re using smartparens (rather than paredit), there’s actually a
+simpler option – just use smartparens’ own default keybinding set
+instead of the paredit compatibility bindings. Set
+<code class="language-plaintext highlighter-rouge">sp-base-key-bindings</code> to <code class="language-plaintext highlighter-rouge">'sp</code> (or just don’t set it at all) and
+call <code class="language-plaintext highlighter-rouge">sp-use-smartparens-bindings</code> instead of
+<code class="language-plaintext highlighter-rouge">sp-use-paredit-bindings</code>.</p>
+
+<p>The default smartparens bindings already avoid most of the conflicts
+above:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Command</th>
+      <th>Paredit binding</th>
+      <th>Smartparens binding</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>splice</td>
+      <td><code class="language-plaintext highlighter-rouge">M-s</code></td>
+      <td><code class="language-plaintext highlighter-rouge">M-D</code></td>
+    </tr>
+    <tr>
+      <td>convolute</td>
+      <td><code class="language-plaintext highlighter-rouge">M-?</code></td>
+      <td>(unbound)</td>
+    </tr>
+    <tr>
+      <td>slurp</td>
+      <td><code class="language-plaintext highlighter-rouge">C-&lt;right&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">C-&lt;right&gt;</code></td>
+    </tr>
+    <tr>
+      <td>barf</td>
+      <td><code class="language-plaintext highlighter-rouge">C-&lt;left&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">C-&lt;left&gt;</code></td>
+    </tr>
+    <tr>
+      <td>splice-killing-backward</td>
+      <td><code class="language-plaintext highlighter-rouge">M-&lt;up&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">C-M-&lt;backspace&gt;</code></td>
+    </tr>
+    <tr>
+      <td>splice-killing-forward</td>
+      <td><code class="language-plaintext highlighter-rouge">M-&lt;down&gt;</code></td>
+      <td><code class="language-plaintext highlighter-rouge">C-M-&lt;delete&gt;</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The two big wins are splice moving to <code class="language-plaintext highlighter-rouge">M-D</code> (freeing <code class="language-plaintext highlighter-rouge">search-map</code>)
+and convolute not being bound at all (freeing <code class="language-plaintext highlighter-rouge">xref-find-references</code>).
+The slurp/barf conflict with word movement remains, but that’s a
+trade-off most Lisp programmers are happy to make.</p>
+
+<h2 id="what-about-me">What about me?</h2>
+
+<p>I don’t use most of the commands shadowed by Paredit, so I didn’t
+even think about the conflicts much before today. Given that I’m a
+macOS user these days I like Magnar’s approach to solving the
+conflicts. But I’m also sooo used to pressing <code class="language-plaintext highlighter-rouge">M-s</code>… Decisions,
+decisions…</p>
+
+<p>I definitely think everyone should free up <code class="language-plaintext highlighter-rouge">M-?</code>, given the default is quite
+important command. For me this was never much of a problem in the past (until
+the LSP era) as I’ve always used Projectile’s wrappers around <code class="language-plaintext highlighter-rouge">xref</code> commands –
+<code class="language-plaintext highlighter-rouge">projectile-find-references</code> (<code class="language-plaintext highlighter-rouge">s-p ?</code> or <code class="language-plaintext highlighter-rouge">C-c p ?</code>) instead of
+<code class="language-plaintext highlighter-rouge">xref-find-references</code>, and <code class="language-plaintext highlighter-rouge">projectile-find-tag</code> (<code class="language-plaintext highlighter-rouge">s-p j</code> or <code class="language-plaintext highlighter-rouge">C-c p j</code>) instead
+of <code class="language-plaintext highlighter-rouge">xref-find-definitions</code>. Projectile scopes these to the current project
+automatically, which is what I usually want anyway.</p>
+
+<p>I don’t really care about any commands with arrows in them, as I’m
+using an HHKB keyboard and it’s not really fun to press arrows on
+it…</p>
+
+<h2 id="the-bottom-line">The Bottom Line</h2>
+
+<p>Paredit’s defaults made perfect sense in 2005. Twenty years later,
+Emacs has grown <code class="language-plaintext highlighter-rouge">search-map</code>, xref, and a whole ecosystem of packages
+that expect those keys to be available. If you’ve been living with
+these conflicts out of habit, take five minutes to rebind – your
+future self will thank you.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>

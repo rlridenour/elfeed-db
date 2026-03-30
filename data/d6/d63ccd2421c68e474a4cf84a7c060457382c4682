@@ -1,0 +1,306 @@
+<p>Creating Emacs color themes is a topic I hadn’t thought much about in recent
+years. My first theme (<a href="https://github.com/bbatsov/zenburn-emacs">Zenburn</a>)
+has been in maintenance mode for ages, and
+<a href="https://github.com/bbatsov/solarized-emacs">Solarized</a> mostly runs
+itself at this point. But working on my ports of
+<a href="https://github.com/bbatsov/emacs-tokyo-themes">Tokyo (Night) Themes</a> and
+<a href="https://github.com/bbatsov/batppuccin-emacs">Catppuccin (Batppuccin)</a> made me
+re-examine the whole topic with fresh eyes. The biggest shift I’ve noticed is
+that multi-variant themes (light/dark/high-contrast from a shared codebase) have
+become the norm rather than the exception, and that pattern naturally leads to
+reusable theming infrastructure.</p>
+
+<p>The task has always been simultaneously easy and hard. Easy because <code class="language-plaintext highlighter-rouge">deftheme</code>
+and <code class="language-plaintext highlighter-rouge">custom-theme-set-faces</code> are well-documented and do exactly what you’d
+expect. Hard because the real challenge was never the mechanics – it’s knowing
+<em>which</em> faces to theme and keeping your color choices consistent across hundreds
+of them.</p>
+
+<p><strong>Note:</strong> In Emacs, a <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Faces.html">face</a>
+is a named set of visual attributes – foreground color, background, bold,
+italic, underline, etc. – that controls how a piece of text looks. Themes work
+by setting faces to match a color palette. See also the Elisp manual’s section
+on <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Custom-Themes.html">custom themes</a>
+for the full API.</p>
+
+<!--more-->
+
+<h2 id="the-classic-approach">The Classic Approach</h2>
+
+<p>The traditional way to create an Emacs theme is to write a <code class="language-plaintext highlighter-rouge">deftheme</code> form,
+then set faces one by one with <code class="language-plaintext highlighter-rouge">custom-theme-set-faces</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">deftheme</span> <span class="nv">my-cool-theme</span> <span class="s">"A cool theme."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">custom-theme-set-faces</span>
+ <span class="ss">'my-cool-theme</span>
+ <span class="c1">;; The `t` means "all display types" -- you can also specify different</span>
+ <span class="c1">;; colors for different displays (GUI vs 256-color terminal, etc.)</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">default</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="s">"#c0caf5"</span> <span class="ss">:background</span> <span class="s">"#1a1b26"</span><span class="p">))))</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">font-lock-keyword-face</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="s">"#bb9af7"</span><span class="p">))))</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">font-lock-string-face</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="s">"#9ece6a"</span><span class="p">))))</span>
+ <span class="c1">;; ... 200+ more faces</span>
+ <span class="p">)</span>
+
+<span class="p">(</span><span class="nv">provide-theme</span> <span class="ss">'my-cool-theme</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This works fine and gives you total control. Many excellent themes are built
+exactly this way. In practice, a lot of new themes start their life as copies of
+existing themes – mostly to avoid the leg-work of discovering which faces to
+define. You grab a well-maintained theme, swap the colors, and you’re halfway
+there.</p>
+
+<p>That said, the approach has a couple of pain points:</p>
+
+<ul>
+  <li>You need to know what faces exist. Emacs has dozens of built-in faces, and
+every popular package adds its own. Miss a few and your theme looks polished
+in some buffers but broken in others. <code class="language-plaintext highlighter-rouge">list-faces-display</code> is your friend
+here, but it only shows faces that are currently loaded.</li>
+  <li>Consistency is on you. With hundreds of face definitions, it’s easy to use
+slightly different shades for things that should look the same, or to pick a
+color that clashes with your palette. Nothing enforces coherence – you have
+to do that yourself.</li>
+  <li>Maintaining multiple variants is tedious. Want a light and dark version?
+You’re duplicating most of the face definitions with different colors.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></li>
+</ul>
+
+<p>One more gotcha: some packages use variables instead of faces for their colors
+(e.g., <code class="language-plaintext highlighter-rouge">hl-todo-keyword-faces</code>, <code class="language-plaintext highlighter-rouge">ansi-color-names-vector</code>). You can set those
+with <code class="language-plaintext highlighter-rouge">custom-theme-set-variables</code>, but you have to know they exist first. It’s
+easy to think you’ve themed everything via faces and then discover a package
+that hard-codes colors in a defcustom.</p>
+
+<p>How big of a problem the face tracking is depends on your scope. If you only
+care about built-in Emacs faces, it’s pretty manageable – that’s what most of
+the bundled themes do (check <code class="language-plaintext highlighter-rouge">wombat</code>, <code class="language-plaintext highlighter-rouge">deeper-blue</code>, or <code class="language-plaintext highlighter-rouge">tango</code> – they
+define faces almost exclusively for packages that ship with Emacs and don’t
+touch third-party packages at all). But if you want your theme to look good in
+<code class="language-plaintext highlighter-rouge">magit</code>, <code class="language-plaintext highlighter-rouge">corfu</code>, <code class="language-plaintext highlighter-rouge">vertico</code>, <code class="language-plaintext highlighter-rouge">transient</code>, and a dozen other popular packages,
+you’re signing up for ongoing maintenance. A new version of <code class="language-plaintext highlighter-rouge">magit</code> adds a face
+and suddenly your theme has gaps you didn’t know about.</p>
+
+<p>I still do things this way for Tokyo Themes and Batppuccin, but the more themes
+I maintain the more I wonder if that’s overkill.</p>
+
+<h2 id="every-multi-variant-theme-is-a-mini-framework">Every Multi-Variant Theme Is a Mini Framework</h2>
+
+<p>Here’s something worth pointing out: any theme that ships multiple variants is
+already a framework of sorts, whether it calls itself one or not. The moment you
+factor out the palette from the face definitions so that multiple variants can
+share the same code, you’ve built the core of a theming engine.</p>
+
+<p>Take Tokyo Themes as an example. There are four variants (night, storm, moon, day), but the face
+definitions live in a single shared file (<code class="language-plaintext highlighter-rouge">tokyo-themes.el</code>). Each variant is a
+thin wrapper – just a <code class="language-plaintext highlighter-rouge">deftheme</code>, a palette alist, and a call to the shared
+<code class="language-plaintext highlighter-rouge">tokyo--apply-theme</code> function:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">require</span> <span class="ss">'tokyo-themes</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">deftheme</span> <span class="nv">tokyo-night</span> <span class="s">"A clean dark theme inspired by Tokyo city lights."</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">tokyo--apply-theme</span> <span class="ss">'tokyo-night</span> <span class="nv">tokyo-night-colors-alist</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">provide-theme</span> <span class="ss">'tokyo-night</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>That’s the entire theme file. The palette is defined elsewhere, and the face
+logic is shared – which is exactly how you solve the variant duplication problem
+mentioned earlier. In theory, anyone could define a new palette alist and call
+<code class="language-plaintext highlighter-rouge">tokyo--apply-theme</code> to create a fifth variant. The infrastructure is already
+there – it’s just not explicitly marketed as a “framework.”</p>
+
+<p>This is exactly how the theming features of packages like Solarized and
+Modus evolved. They started as regular themes, grew variants, factored out
+the shared code, and eventually exposed that machinery to users.</p>
+
+<h2 id="meta-themes">Meta-Themes</h2>
+
+<p>Some theme packages went a step further and turned their internal infrastructure
+into an explicit theming API.</p>
+
+<h3 id="solarized">Solarized</h3>
+
+<p><a href="https://github.com/bbatsov/solarized-emacs">solarized-emacs</a> started as a
+straight port of Ethan Schoonover’s Solarized palette, but over time it grew
+the ability to create entirely new themes from custom palettes. You can use
+<code class="language-plaintext highlighter-rouge">solarized-create-theme-file-with-palette</code> to generate a new theme by supplying
+just 10 colors (2 base + 8 accent) – it derives all the intermediate shades
+and maps them to the full set of faces:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">solarized-create-theme-file-with-palette</span> <span class="ss">'dark</span> <span class="ss">'my-solarized-dark</span>
+  <span class="o">'</span><span class="p">(</span><span class="s">"#002b36"</span> <span class="s">"#fdf6e3"</span>                         <span class="c1">;; base colors</span>
+    <span class="s">"#b58900"</span> <span class="s">"#cb4b16"</span> <span class="s">"#dc322f"</span> <span class="s">"#d33682"</span>     <span class="c1">;; accents</span>
+    <span class="s">"#6c71c4"</span> <span class="s">"#268bd2"</span> <span class="s">"#2aa198"</span> <span class="s">"#859900"</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>This is how Solarized’s own variants (dark, light, gruvbox, zenburn, etc.) are
+built internally. I’ll admit, though, that I always found it a bit weird to ship
+themes like Gruvbox and Zenburn under the Solarized umbrella. If you install
+<code class="language-plaintext highlighter-rouge">solarized-emacs</code> and find a <code class="language-plaintext highlighter-rouge">solarized-gruvbox-dark</code> theme in the list, the
+natural reaction is “wait, what does Gruvbox have to do with Solarized?” The
+answer is “nothing, really – they just share the theming engine.” That makes
+perfect sense once you understand the architecture, but I think it’s confusing
+for newcomers. It was part of the reason I was never super excited about this
+direction for <code class="language-plaintext highlighter-rouge">solarized-emacs</code>.</p>
+
+<h3 id="modus-themes">Modus Themes</h3>
+
+<p>The <a href="https://github.com/protesilaos/modus-themes">modus-themes</a> take a
+different approach. Rather than generating new theme files, they offer deep
+runtime customization through palette overrides:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">modus-themes-common-palette-overrides</span>
+      <span class="o">'</span><span class="p">((</span><span class="nv">bg-main</span> <span class="s">"#1a1b26"</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">fg-main</span> <span class="s">"#c0caf5"</span><span class="p">)</span>
+        <span class="p">(</span><span class="kt">keyword</span> <span class="nv">magenta-warmer</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>You can override any named color in the palette without touching the theme
+source. The result feels like a different theme, but it’s still Modus under the
+hood with all its accessibility guarantees. The overrides apply to whichever
+Modus variant you load, and <code class="language-plaintext highlighter-rouge">modus-themes-toggle</code> switches between variants
+while keeping your overrides intact. Protesilaos’s
+<a href="https://github.com/protesilaos/ef-themes">ef-themes</a> share the same
+architecture.</p>
+
+<h2 id="theming-frameworks">Theming Frameworks</h2>
+
+<p>If you want to create something brand new rather than customize an existing
+theme family, there are a couple of frameworks designed for this.</p>
+
+<h3 id="autothemer">Autothemer</h3>
+
+<p><a href="https://github.com/jasonm23/autothemer">autothemer</a> provides a macro that
+replaces the verbose <code class="language-plaintext highlighter-rouge">custom-theme-set-faces</code> boilerplate with a cleaner,
+palette-driven approach:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">autothemer-deftheme</span>
+ <span class="nv">my-theme</span> <span class="s">"A theme using autothemer."</span>
+ <span class="c1">;; Display classes: 24-bit GUI, 256-color terminal, 16-color terminal</span>
+ <span class="p">((((</span><span class="nc">class</span> <span class="nv">color</span><span class="p">)</span> <span class="p">(</span><span class="nv">min-colors</span> <span class="mi">16777216</span><span class="p">))</span> <span class="p">((</span><span class="nc">class</span> <span class="nv">color</span><span class="p">)</span> <span class="p">(</span><span class="nv">min-colors</span> <span class="mi">256</span><span class="p">))</span> <span class="no">t</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">my-bg</span>    <span class="s">"#1a1b26"</span> <span class="s">"black"</span>   <span class="s">"black"</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">my-fg</span>    <span class="s">"#c0caf5"</span> <span class="s">"white"</span>   <span class="s">"white"</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">my-red</span>   <span class="s">"#f7768e"</span> <span class="s">"red"</span>     <span class="s">"red"</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">my-green</span> <span class="s">"#9ece6a"</span> <span class="s">"green"</span>   <span class="s">"green"</span><span class="p">))</span>
+
+ <span class="c1">;; Face specs -- just reference palette names, no display class noise</span>
+ <span class="p">((</span><span class="nv">default</span>         <span class="p">(</span><span class="ss">:foreground</span> <span class="nv">my-fg</span> <span class="ss">:background</span> <span class="nv">my-bg</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">font-lock-keyword-face</span> <span class="p">(</span><span class="ss">:foreground</span> <span class="nv">my-red</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">font-lock-string-face</span>  <span class="p">(</span><span class="ss">:foreground</span> <span class="nv">my-green</span><span class="p">))))</span>
+</code></pre></div></div>
+
+<p>You define your palette once as named colors with fallback values for different
+display capabilities (GUI frames and terminals support different color depths,
+so themes need appropriate fallbacks for each). Then you reference those names in
+face specs without worrying about display classes again. Autothemer also provides
+some nice extras like SVG palette previews and helpers for discovering unthemed
+faces.</p>
+
+<h3 id="base16--tinted-theming">Base16 / Tinted Theming</h3>
+
+<p><a href="https://github.com/tinted-theming/base16-emacs">base16-emacs</a> is part of the
+larger <a href="https://github.com/tinted-theming">Tinted Theming</a> ecosystem. The idea
+is that you define a scheme as 16 colors in a YAML file, and a builder
+generates themes for Emacs (and every other editor/terminal) from a shared
+template. You don’t write Elisp at all – you write YAML and run a build step.</p>
+
+<p>This is great if you want one palette to rule all your tools, but you give up
+fine-grained control over individual Emacs faces. The generated themes cover a
+good set of faces, but they might not handle every niche package you use.</p>
+
+<h2 id="from-scratch-vs-framework-pros-and-cons">From Scratch vs. Framework: Pros and Cons</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>From Scratch</th>
+      <th>Meta-Theme / Framework</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Control</td>
+      <td>Total – every face is yours</td>
+      <td>Constrained by what the framework exposes</td>
+    </tr>
+    <tr>
+      <td>Consistency</td>
+      <td>You enforce it manually</td>
+      <td>The framework helps (palette-driven)</td>
+    </tr>
+    <tr>
+      <td>Coverage</td>
+      <td>You add faces as you discover them</td>
+      <td>Inherited from the base theme/template</td>
+    </tr>
+    <tr>
+      <td>Maintenance</td>
+      <td>You track upstream face changes</td>
+      <td>Shifted to the meta-theme maintainers</td>
+    </tr>
+    <tr>
+      <td>Multiple variants</td>
+      <td>Duplicate or factor out yourself</td>
+      <td>Built-in support</td>
+    </tr>
+    <tr>
+      <td>Learning curve</td>
+      <td>Just <code class="language-plaintext highlighter-rouge">deftheme</code></td>
+      <td>Framework-specific API</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="when-to-use-what">When to Use What</h2>
+
+<p>I guess relatively few people end up creating theme packages, but here’s a
+bit of general advice for them.</p>
+
+<p>If you want total control over every face and you’re willing to put in the
+maintenance work, roll your own. This makes sense for themes with a strong
+design vision where you want to make deliberate choices about every element.
+It’s more work, but nothing stands between you and the result you want.</p>
+
+<p>If you mostly like an existing theme but want different colors, customizing a
+meta-theme (Modus, Solarized, ef-themes) is a good bet. You get battle-tested
+face coverage for free, and the palette override approach means you can tweak
+things without forking. Keep in mind, though, that the face coverage problem
+doesn’t disappear – you’re just shifting it to the meta-theme maintainers. How
+comprehensive and up-to-date things stay depends entirely on how diligent they
+are.</p>
+
+<p>If you’re creating something new but don’t want to deal with the boilerplate,
+use a framework. Autothemer is the best fit if you want to stay in Elisp and
+have fine control. Base16/Tinted Theming is the pick if you want one palette
+definition across all your tools.</p>
+
+<h2 id="parting-thoughts">Parting Thoughts</h2>
+
+<p>I’m still a “classic” – I like rolling out my themes from scratch. There’s
+something satisfying about hand-picking the color for every face. But I won’t
+pretend it doesn’t get tedious, especially when you maintain several themes
+across multiple variants. Every time a package adds new faces, that’s more
+work for me.</p>
+
+<p>If I were starting fresh today, I’d seriously consider Autothemer or building on
+top of a meta-theme (extracted from my existing theme packages). The time you
+save on maintenance is time you can spend on what actually matters – making
+your theme look good.</p>
+
+<p>On the topic of maintenance – one area where AI tools can actually help is
+extracting the relevant faces from a list of packages you want to support.
+Instead of loading each package, running <code class="language-plaintext highlighter-rouge">list-faces-display</code>, and eyeballing
+what’s new, you can ask an LLM to scan the source and give you the face
+definitions. It’s also handy for periodically syncing your theme against the
+latest versions of those packages to catch newly added faces. Not glamorous
+work, but exactly the kind of tedium that AI is good at.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Later on you’ll see that’s a pretty easy problem to address. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

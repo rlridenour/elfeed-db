@@ -1,0 +1,140 @@
+<p>Most theme families these days ship both light and dark variants. For example,
+<a href="https://github.com/bbatsov/emacs-tokyo-themes">Tokyo Themes</a> has <code class="language-plaintext highlighter-rouge">tokyo-day</code>
+(light) alongside <code class="language-plaintext highlighter-rouge">tokyo-night</code>, <code class="language-plaintext highlighter-rouge">tokyo-storm</code>, and <code class="language-plaintext highlighter-rouge">tokyo-moon</code> (all dark).
+<a href="https://github.com/bbatsov/batppuccin-emacs">Batppuccin</a> has <code class="language-plaintext highlighter-rouge">batppuccin-latte</code>
+(light) and <code class="language-plaintext highlighter-rouge">batppuccin-mocha</code>, <code class="language-plaintext highlighter-rouge">batppuccin-macchiato</code>, <code class="language-plaintext highlighter-rouge">batppuccin-frappe</code>
+(dark). But switching between them manually gets old fast. Here are a few ways
+to automate it.</p>
+
+<!--more-->
+
+<h2 id="following-the-os-appearance-macos--emacs-plus">Following the OS Appearance (macOS + Emacs Plus)</h2>
+
+<p>If you’re using <a href="https://github.com/d12frosted/homebrew-emacs-plus">Emacs Plus</a>
+on macOS (which many Mac users do), you get the hook
+<code class="language-plaintext highlighter-rouge">ns-system-appearance-change-functions</code>. This is <strong>not</strong> part of core Emacs –
+it’s a <a href="https://github.com/d12frosted/homebrew-emacs-plus/blob/master/patches/emacs-28/system-appearance.patch">patch</a>
+that Emacs Plus applies on top of the NS build. The hook fires
+whenever macOS switches between light and dark mode, passing the symbol <code class="language-plaintext highlighter-rouge">light</code>
+or <code class="language-plaintext highlighter-rouge">dark</code> as an argument. All you need is:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-apply-theme</span> <span class="p">(</span><span class="nv">appearance</span><span class="p">)</span>
+  <span class="s">"Load theme based on APPEARANCE (light or dark)."</span>
+  <span class="p">(</span><span class="nb">mapc</span> <span class="nf">#'</span><span class="nv">disable-theme</span> <span class="nv">custom-enabled-themes</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">pcase</span> <span class="nv">appearance</span>
+    <span class="p">(</span><span class="ss">'light</span> <span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'tokyo-day</span> <span class="no">t</span><span class="p">))</span>
+    <span class="p">(</span><span class="ss">'dark</span> <span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'tokyo-night</span> <span class="no">t</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'ns-system-appearance-change-functions</span> <span class="nf">#'</span><span class="nv">my-apply-theme</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>That’s it. When you flip the system appearance (or the OS does it automatically
+based on time of day), Emacs follows along. The <code class="language-plaintext highlighter-rouge">mapc</code> line disables any
+currently active themes first – without it, <code class="language-plaintext highlighter-rouge">load-theme</code> stacks the new theme
+on top of the old one, which can cause weird color bleed between the two.</p>
+
+<p>This approach is nice because it keeps Emacs in sync with every other app on
+your system. If you’re on macOS with Emacs Plus, this is probably the simplest
+option.</p>
+
+<p><strong>Note:</strong> This only works with Emacs Plus’s patched NS build. If you’re using a
+vanilla Emacs build, or you’re on Linux/Windows, read on.</p>
+
+<h2 id="following-the-os-appearance-cross-platform">Following the OS Appearance (Cross-Platform)</h2>
+
+<p>If you want OS appearance tracking without writing the hook yourself, or you
+need it on a platform other than macOS, check out
+<a href="https://github.com/LionyxML/auto-dark-emacs">auto-dark</a>. It detects OS-level
+dark/light mode changes on macOS, Linux (via D-Bus/GNOME), Windows, and even
+Android (Termux):</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">auto-dark</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">auto-dark-themes</span> <span class="o">'</span><span class="p">((</span><span class="nv">batppuccin-mocha</span><span class="p">)</span> <span class="p">(</span><span class="nv">batppuccin-latte</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">auto-dark-mode</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>The value is a list of two lists – dark theme(s) first, light theme(s) second.
+The extra nesting is there because you can stack multiple themes per mode (e.g.,
+a base theme plus an overlay). For a single theme per mode, the format above is
+all you need. <code class="language-plaintext highlighter-rouge">auto-dark</code> polls the system appearance every few seconds and
+switches accordingly. It also provides <code class="language-plaintext highlighter-rouge">auto-dark-dark-mode-hook</code> and
+<code class="language-plaintext highlighter-rouge">auto-dark-light-mode-hook</code> if you want to run extra code on each switch.</p>
+
+<h2 id="time-based-switching-with-circadianel">Time-Based Switching with circadian.el</h2>
+
+<p>If you want theme switching based on time of day regardless of your OS, take a
+look at <a href="https://github.com/guidoschmidt/circadian.el">circadian.el</a>. It can
+switch themes at fixed times or based on your local sunrise/sunset:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">circadian</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:config</span>
+  <span class="p">(</span><span class="k">setq</span> <span class="nv">circadian-themes</span> <span class="o">'</span><span class="p">((</span><span class="ss">:sunrise</span> <span class="o">.</span> <span class="nv">batppuccin-latte</span><span class="p">)</span>
+                            <span class="p">(</span><span class="ss">:sunset</span>  <span class="o">.</span> <span class="nv">batppuccin-mocha</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">circadian-setup</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>You can also use fixed hours if you prefer:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">circadian-themes</span> <span class="o">'</span><span class="p">((</span><span class="s">"8:00"</span>  <span class="o">.</span> <span class="nv">batppuccin-latte</span><span class="p">)</span>
+                          <span class="p">(</span><span class="s">"20:00"</span> <span class="o">.</span> <span class="nv">batppuccin-mocha</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>For sunrise/sunset to work, set <code class="language-plaintext highlighter-rouge">calendar-latitude</code> and <code class="language-plaintext highlighter-rouge">calendar-longitude</code> in
+your config. <code class="language-plaintext highlighter-rouge">circadian.el</code> uses Emacs’s built-in solar calculations, so no
+external services are needed.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<h2 id="rolling-your-own-with-run-at-time">Rolling Your Own with run-at-time</h2>
+
+<p>If you don’t want an extra dependency, you can do something basic with
+<code class="language-plaintext highlighter-rouge">run-at-time</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-set-theme-for-time</span> <span class="p">()</span>
+  <span class="s">"Switch theme based on current hour."</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">hour</span> <span class="p">(</span><span class="nv">string-to-number</span> <span class="p">(</span><span class="nv">format-time-string</span> <span class="s">"%H"</span><span class="p">))))</span>
+    <span class="p">(</span><span class="nb">mapc</span> <span class="nf">#'</span><span class="nv">disable-theme</span> <span class="nv">custom-enabled-themes</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&lt;=</span> <span class="mi">8</span> <span class="nv">hour</span> <span class="mi">19</span><span class="p">)</span>
+        <span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'tokyo-day</span> <span class="no">t</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'tokyo-night</span> <span class="no">t</span><span class="p">))))</span>
+
+<span class="c1">;; Run now and repeat every hour</span>
+<span class="p">(</span><span class="nv">run-at-time</span> <span class="no">t</span> <span class="mi">3600</span> <span class="nf">#'</span><span class="nv">my-set-theme-for-time</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>It’s crude compared to <code class="language-plaintext highlighter-rouge">circadian.el</code>, but it works and you can tweak the
+schedule however you like.</p>
+
+<h2 id="which-one-should-you-pick">Which One Should You Pick?</h2>
+
+<ul>
+  <li><strong>macOS with Emacs Plus and want zero dependencies?</strong> The
+<code class="language-plaintext highlighter-rouge">ns-system-appearance-change-functions</code> hook is all you need.</li>
+  <li><strong>Want OS tracking on Linux/Windows too?</strong> <code class="language-plaintext highlighter-rouge">auto-dark</code> has you covered.</li>
+  <li><strong>Prefer time-based switching?</strong> <code class="language-plaintext highlighter-rouge">circadian.el</code> is the polished option;
+the DIY <code class="language-plaintext highlighter-rouge">run-at-time</code> approach works if you want to keep things minimal.</li>
+</ul>
+
+<p>What about me? Well, I’m on macOS these days and I do enable the auto-switch
+between light/dark mode there. So, normally I’d pick the first option, but
+there’s a small catch - I really dislike light themes for programming and I’m
+using only dark variants day and night, so I don’t really need theme
+auto-switching in Emacs.</p>
+
+<p><strong>Note:</strong> One thing to keep in mind: if you’re using any of these, remove any static
+<code class="language-plaintext highlighter-rouge">load-theme</code> call from your init file – let the auto-switching mechanism handle
+theme loading, otherwise the two will fight on startup.</p>
+
+<p>As usual, there’s no shortage of ways to solve this in Emacs. Are you doing
+auto-switching of themes yourself? Which is your favorite approach?</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Am I the only one impressed by the fact that the <code class="language-plaintext highlighter-rouge">calendar</code> package can calculate things like sunrise and sunset? <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

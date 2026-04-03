@@ -1,0 +1,59 @@
+ 
+          <p>The other day, I decided it was finally time. It was finally time to open Emacs to demonstrate certain code functionalities in class. The result was predictable: it caused further confusion among already confused students. The root cause wasn&rsquo;t switching out a familiar WebStorm-like environment for an esoteric IDE but rather the way the code was presented.</p>
+<p>Most classrooms come equipped with crappy projectors that are experts in washing out colours and blurring otherwise perfectly crisp text. My first instinct after opening up an editor in class is to zoom in. That always worked well enough&mdash;either by pinching on the trackpad (<em>oooh</em> look at that smooth zooming animation in IntelliJ!) or by pressing <code>⌘+</code>. That zoom never worked that great in Sublime as the tree view didn&rsquo;t budge, but it worked well enough for the few lines of code that needed selecting and highlighting.</p>
+<p>Naturally, in Emacs, I bound <code>s-+</code> to <code>text-scale-adjust</code> and continued to press <code>⌘+</code> as I have been doing so for the past decade. The story wouldn&rsquo;t end there otherwise there wasn&rsquo;t enough for me to write here. Same problem existed: the tree view didn&rsquo;t budge. But the worst problem was that the line numbers in the fringe didn&rsquo;t zoom either resulting in a very jumpy point every time I navigated to another line. I felt embarrassed.</p>
+<p>Also naturally, that evening, more Elisp hacking took place.</p>
+<p>The result is <code>bb/presentation-mode</code>, a switch to make ad-hoc theme and window configuration adjustments that turns the editor into something the projector no longer chokes on. Here&rsquo;s a before and after screenshot:</p>
+<p>
+<figure><a href="https://brainbaking.com/post/2026/02/a-note-on-presenting-code-in-emacs/presentation-mode.jpg" class="lbox">
+		<img src="https://brainbaking.com/post/2026/02/a-note-on-presenting-code-in-emacs/presentation-mode.jpg" loading="lazy" title="Left: the default light theme. Right: the same screen with presentation mode enabled." data-pagefind-index-attrs="title">
+	</a>
+	
+		<figcaption>Left: the default light theme. Right: the same screen with presentation mode enabled.</figcaption></figure>
+</p>
+<p>What exactly does this presentation switch do?</p>
+<ul>
+<li>The obvious text enlargement, but globally this time by styling the <code>'default</code> font directly. There&rsquo;s nothing theme-specific in the presentation function. Instead, I set a flag <code>bb/presentation-mode-active-p</code> and force a theme reload that triggers my usual theme customisation hooks. This also increases the font of the minibuffer which is handy for following what <code>find-file</code> does. I also slightly increased line spacing.</li>
+<li>I took some inspiration from the presentation mode in IntelliJ to slightly enlarge and move the modeline to the top (replaced by the LSP breadcrumbs<sup id="fnref:1"><a href="#fn:1" class="footnote-ref" role="doc-noteref">1</a></sup> if active as in the screenshot). For brevity, some info in there is removed, such as the perspective name.</li>
+<li>Increase the contrast. Since I use Doom themes, <code>doom-darken</code> and <code>doom-lighten</code> are my friends. Based on the current active theme&mdash;<code>is-dark</code> can be deduced with built-in functionality: <code>(eq (frame-parameter nil 'background-mode) 'dark)</code>. Pay special attention to the <code>hl-line</code> face that highlights the current line.</li>
+<li>Speaking of contrast, move from a &ldquo;selection mode&rdquo; to a &ldquo;highlight mode&rdquo; by simply changing the background colour of the <code>region</code> face. When I want to direct the students&rsquo; attention to specific lines or blocks of code, I can simply select it. Apparently, Emacs has support for blinking text but that was a bit too much.</li>
+<li>Make Treemacs play along. I have a custom treemacs theme customisation hook. Font locks and confusing face inheritance made it difficult to increase this as well.</li>
+<li>Hide the <code>tab-line</code> tabs by temporarily disabling that mode.</li>
+</ul>
+<p>I wanted to maintain the ability to switch between a light/dark mode on the fly even from within presentation mode, and to further zoom in locally with <code>text-scale-adjust</code> if needed without further blowing up the project tree and the modeline.</p>
+<p>As usual, you can find my &ldquo;bakemacs&rdquo; Emacs config <a href="https://codeberg.org/wouterg/bakemacs/src/branch/main/config">in the Git repository</a>.</p>
+<p>At this point, you might be slightly confused: <em>what do you mean a presentation mode? you&rsquo;re merely zooming in!</em> You are correct. This is not a true presentation mode in the same vein as for instance Ankit Gadiya&rsquo;s <a href="https://ankit.earth/blog/my-emacs-presentation-stack/">Emacs Presentation Stack</a>. I don&rsquo;t want to present text in Org mode that look like slides. Instead, I just want to demo some code. I want to be able to split a window, open an Eshell, run some tests, show where the files are relative to the others in a tree view, and highlight specific functions.</p>
+<p>My use case as a teacher is limited to showcasing how very simple projects should work, from the code to the tools around it. It&rsquo;s often hard for students to follow what I&rsquo;m doing if I <em>alt-tab</em> to a terminal, then switch back to an editor, then zoom in, then zoom back out, &hellip; So the plan is to try and come across as a little more consistent. I&rsquo;m not very fluent in Emacs let alone in embedded shells&mdash;dummy or otherwise&mdash;so we&rsquo;ll see how this pans out in the future.</p>
+<hr>
+<p>Since writing this last week and using my new presentation mode a bit more in class, a few more problems popped up. First, although <code>text-scale-adjust</code> is designed to &ldquo;work buffer-local only&rdquo;, it also scales the line numbers. We knew that, but I still want to zoom in further if needed (most of the time). I was showcasing a REPL in split screen and <code>s-+</code> only zoomed in one of the two visible buffers&hellip; Ouch. Fix:</p>
+<div class="highlight"><pre tabindex="0" style="color:#d8dee9;background-color:#2e3440;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-text-size-adjust:none;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#eceff4">(</span><span style="color:#81a1c1">defun</span> bb/text-scale-all-buffers <span style="color:#eceff4">(</span>level<span style="color:#eceff4">)</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#a3be8c">&#34;Apply a specific text-scale LEVEL to all buffers.&#34;</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#eceff4">(</span><span style="color:#81a1c1">interactive</span> <span style="color:#a3be8c">&#34;nScale level: &#34;</span><span style="color:#eceff4">)</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#eceff4">(</span><span style="color:#81a1c1">setq</span> bb/text-scale-current level<span style="color:#eceff4">)</span>
+</span></span><span style="display:flex;"><span>  <span style="color:#eceff4">(</span><span style="color:#81a1c1">dolist</span> <span style="color:#eceff4">(</span>buf <span style="color:#eceff4">(</span><span style="color:#88c0d0">buffer-list</span><span style="color:#eceff4">))</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#eceff4">(</span><span style="color:#81a1c1">with-current-buffer</span> buf
+</span></span><span style="display:flex;"><span>        <span style="color:#eceff4">(</span>text-scale-set level<span style="color:#eceff4">))))</span>
+</span></span></code></pre></div><p>But then if you open up a new buffer you&rsquo;re screwed again, so you&rsquo;ll need another hook into <code>change-major-mode-after-body-hook</code> to set the scale there. I kind of hacked the buffer-local one to be global except for UI text.</p>
+<p>Next problem: zooming in on Markdown files didn&rsquo;t scale code blocks. Huh? After scratching my head a bit, it turned out to be <a href="https://github.com/emacsmirror/mixed-pitch">mixed-pitch</a>&rsquo;s fault, or rather a config error on my part. Do not set <code>mixed-pitch-set-height</code> to <code>t</code>.</p>
+<div class="footnotes" role="doc-endnotes">
+<hr>
+<ol>
+<li id="fn:1">
+<p>This was in fact another bug as the modeline is very annoying to &ldquo;flip&rdquo;. <code>setq-default</code> isn&rsquo;t enough if existing buffers are already initialized and I ended up looping through all open ones to reconfigure each one.&#160;<a href="#fnref:1" class="footnote-backref" role="doc-backlink">&#x21a9;&#xfe0e;</a></p>
+</li>
+</ol>
+</div>
+
+
+          
+          <p>
+            Related topics: /
+                  <a href="https://brainbaking.com/tags/emacs">emacs</a> /</span>
+          </p>
+          
+          <p>
+            By <a href="/about">Wouter Groeneveld</a> on 17 February 2026.&nbsp;
+            <a href="mailto:hifromrss@brainbaking.com?subject=Re: A%20Note%20On%20Presenting%20Code%20in%20Emacs">Reply via email</a>.
+          </p>
+          
+      

@@ -1,0 +1,237 @@
+<p><em>By Robert Smith</em></p>
+<p>Fabrice Bellard came up with a computationally efficient formula for
+calculating the <em>n</em>th hexadecimal digit of $\pi$ without calculating any of
+the previous <em>n</em>&#8722;1. It&rsquo;s called
+<a href="https://en.wikipedia.org/wiki/Bellard%27s_formula">Bellard&rsquo;s formula</a>.
+It wasn&rsquo;t the first of its kind, but in terms of computational efficiency,
+it was a substantial improvement over the original, elegant
+<a href="https://en.wikipedia.org/wiki/Bailey%E2%80%93Borwein%E2%80%93Plouffe_formula">Bailey-Borwein-Plouffe formula</a>.
+Due to the trio&rsquo;s discovery, these formulas are often called <em>BBP-type formulas</em>.</p>
+<p>Over the years, numerous BBP-type formulas have been discovered. In fact,
+<a href="https://www.davidhbailey.com/dhbpapers/bbp-formulas.pdf">Bailey</a> gives us
+a recipe to search for them using integer-relation algorithms. In
+simple terms, we can just guess formulas, and run a computation to see if
+it likely equals $\pi$ with high confidence. If we do find one, then we
+can use it as a conjecture to prove formally.</p>
+<p>Like Bellard and many others, I ran a variant of Bailey&rsquo;s recipe, effectively
+doing a brute-force search, highly optimized and in parallel. The search yielded
+another formula that is computationally more efficient than Bellard&rsquo;s formula. The
+identity is as follows:</p>
+<p>$$
+\pi = \sum_{k=0}^{\infty} \frac{1}{4096^k} \left( \frac{1}{6k+1}
+- \frac{2^{-5}}{6k+3}
++ \frac{2^{-8}}{6k+5}
++ \frac{2}{8k+1}
+- \frac{2^{-5}}{8k+5}
++ \frac{2^{-1}}{12k+3}
+- \frac{2^{-4}}{12k+7}
+- \frac{2^{-8}}{12k+11} \right).
+$$</p>
+<p>It converges at a rate of 12 bits per term. We will prove convergence, and then
+prove the identity itself (with a little computer assistance). As it turns out,
+an equivalent form of this formula was already discovered, which we will discuss
+as well. Finally, we&rsquo;ll show a very simple implementation in Common Lisp.</p>
+<h2 id="proof-of-convergence">Proof of convergence</h2>
+<p>Write the series as $S := \sum_{k=0}^{\infty} 4096^{-k}R(k)$. Since
+$R(k)\in O(1/k)$, convergence is dominated by the geometric term $4096^{-k}$:</p>
+<p>$$
+\lim_{k \to \infty} \left\vert \frac{R(k+1)}{4096^{k+1}} \middle/ \frac{R(k)}{4096^{k}} \right\vert = \frac{1}{4096}.
+$$</p>
+<p>By the ratio test, the series converges absolutely. Since $4096 = 2^{12}$,
+each additional term contributes exactly 12 bits of precision.</p>
+<p>Bellard&rsquo;s formula converges at 10 bits per term and requires the evaluation
+of 7 fractions. The above converges at 12 bits per term, and requires the
+evaluation of 8 fractions. So while we require 20% fewer terms, each term
+requires about 14% more arithmetic. So, net-net, this formula is approximately
+5-6% more efficient.</p>
+<h2 id="proof-of-identity-via-a-definite-integral">Proof of identity via a definite integral</h2>
+<p>Consider $1/(nk+j) = \int_{0}^{1} x^{nk+j-1} dx$. For positive integers $n$ and $b$, we get</p>
+<p>$$
+\sum_{k=0}^{\infty} \frac{1}{b^k}\cdot\frac{1}{nk+j} = \sum_{k=0}^{\infty} \int_{0}^{1} \left(\frac{x^n}{b}\right)^k x^{j-1} dx.
+$$</p>
+<p>We can swap the sum and integral via the Lebesgue dominated convergence theorem, since the
+power series $\sum (x^n/b)^k$ converges uniformly for $x \in [0, 1]$ and $b &gt; 1$. Using this
+and summing the geometric series gives:</p>
+<p>$$
+\int_{0}^{1} x^{j-1} \sum_{k=0}^{\infty} \left(\frac{x^n}{b}\right)^k dx = \int_{0}^{1} \frac{x^{j-1}}{1 - x^n/b} dx.
+$$</p>
+<p>We now apply this to $S$ termwise with $b=4096=2^{12}$:</p>
+<p>$$
+S = \int_0^1 \left( \frac{x^{0}}{1 - \frac{x^6}{2^{12}}}
+- 2^{-5} \frac{x^{2}}{1 - \frac{x^6}{2^{12}}}
++ 2^{-8} \frac{x^{4}}{1 - \frac{x^6}{2^{12}}}
++ 2 \frac{x^{0}}{1 - \frac{x^8}{2^{12}}}
+- 2^{-5} \frac{x^{4}}{1 - \frac{x^8}{2^{12}}}
++ 2^{-1} \frac{x^{2}}{1 - \frac{x^{12}}{2^{12}}}
+- 2^{-4} \frac{x^{6}}{1 - \frac{x^{12}}{2^{12}}}
+- 2^{-8} \frac{x^{10}}{1 - \frac{x^{12}}{2^{12}}}
+\right) dx.
+$$</p>
+<p>At this point, you could try to algebra your way through, expanding, using the
+substitution $x=2u$, etc. ultimately yielding a nice denominator
+$(u^2\pm 2u+2)(u^6-64)(u^{12}-1)$. Maybe compute some residues. Or, just CAS your
+way through.</p>
+<pre tabindex="0"><code>% fricas
+FriCAS Computer Algebra System
+Version: FriCAS 2025.12.23git built with sbcl 2.5.2.1852-1f3beec71
+Timestamp: Wed Mar 4 12:41:38 EST 2026
+-----------------------------------------------------------------------------
+Issue )copyright to view copyright notices.
+Issue )summary for a summary of useful system commands.
+Issue )quit to leave FriCAS and return to shell.
+-----------------------------------------------------------------------------
+(1) -&gt; f := (1/(1 - x^6/4096))
+- (1/32)*x^2/(1 - x^6/4096)
++ (1/256)*x^4/(1 - x^6/4096)
++ 2*1/(1 - x^8/4096)
+- (1/32)*x^4/(1 - x^8/4096)
++ (1/2)*x^2/(1 - x^12/4096)
+- (1/16)*x^6/(1 - x^12/4096)
+- (1/256)*x^10/(1 - x^12/4096);
+Type: Fraction(Polynomial(Fraction(Integer)))
+(2) -&gt; normalize(integrate(f, x = 0..1))
+3 1 11 19 1
+(2) 2 atan(-) - 2 atan(-) + 2 atan(--) + 2 atan(--) + 2 atan(-)
+2 2 24 48 4
+Type: Expression(Fraction(Integer))
+</code></pre><p>So now we just need to show the arctans all collapse to $\pi$. Recall the identity</p>
+<p>$$
+\tan^{-1} a \pm \tan^{-1} b = \tan^{-1}\left(\frac{a\pm b}{1\mp ab}\right).
+$$</p>
+<p>The sum of the first four terms can be calculated easily in Common Lisp:</p>
+<pre tabindex="0"><code>% sbcl --no-inform
+* (defun combine (a b) (/ (+ a b) (- 1 (* a b))))
+COMBINE
+* (reduce #'combine '(3/2 -1/2 11/24 19/48))
+4
+</code></pre><p>So we have $2\big(\tan^{-1}4 + \tan^{-1}(1/4)\big)$, and with our final elementary trig
+identity $\tan^{-1} (a/b) = \pi/2 - \tan^{-1} (b/a)$, we find $S = \pi$.</p>
+<h2 id="a-new-discovery">A new discovery?</h2>
+<p>Of course, I was excited to find this formula, but after some internet spelunking, it turns out
+it had already been discovered by <a href="https://web.archive.org/web/20181225155904if_/http://gery.huvent.pagesperso-orange.fr:80/index_explorer_net.htm">GÃ©ry Huvent</a>
+and <a href="http://www.pi314.net/eng/hypergse6.php">Boris GourÃ©vitch</a>, perhaps independently. GourÃ©vitch
+doesn&rsquo;t credit Huvent as he does with other formulas, but he does say
+&ldquo;[&hellip;] furthermore, we can obtain BBP formula [&hellip;] by using what Gery Huvent calls
+the denomination tables [&hellip;].&rdquo; Daisuke Takahashi cites Huvent&rsquo;s website in
+<a href="https://tsukuba.repo.nii.ac.jp/record/2001720/files/RJ_51-1-177.pdf">this 2019 paper</a> published in
+<em>The Ramanujan Journal</em>. In all cases, they write the formula in the following way:</p>
+<p>$$
+\frac{1}{128} \sum _{k=0}^{\infty} \frac{1}{2^{12k}}\left(
+\frac{768}{24 k+3}+\frac{512}{24k+4}+\frac{128}{24 k+6}-\frac{16}{24 k+12}-\frac{16}{24 k+14}-\frac{12}{24
+k+15}+\frac{2}{24 k+20}-\frac{1}{24 k+22}\right),
+$$</p>
+<p>which is structurally equivalent to $S$.</p>
+<p>Despite having been known already, this formula doesn&rsquo;t appear to be <em>well</em> known. As such, I
+hope this blog post brings more attention to it.</p>
+<h2 id="simple-implementation">Simple implementation</h2>
+<p>Here is a simple implementation of digit extraction using BBP-type formulas in
+Common Lisp:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-lisp">(defun %pow2-mod (exponent modulus)
+(cond
+((<span style="color: #a6e22e;">=</span> modulus <span style="color: #ae81ff;">1</span>) <span style="color: #ae81ff;">0</span>)
+((<span style="color: #a6e22e;">zerop</span> exponent) <span style="color: #ae81ff;">1</span>)
+(<span style="color: #66d9ef;">t</span>
+(<span style="color: #66d9ef;">let</span> ((result <span style="color: #ae81ff;">1</span>)
+(base (<span style="color: #a6e22e;">mod</span> <span style="color: #ae81ff;">2</span> modulus))
+(e exponent))
+(loop <span style="color: #e6db74;">:while</span> (<span style="color: #a6e22e;">plusp</span> e) <span style="color: #e6db74;">:do</span>
+(when (<span style="color: #a6e22e;">oddp</span> e)
+(setf result (<span style="color: #a6e22e;">mod</span> (<span style="color: #a6e22e;">*</span> result base) modulus)))
+(setf base (<span style="color: #a6e22e;">mod</span> (<span style="color: #a6e22e;">*</span> base base) modulus)
+e (<span style="color: #a6e22e;">ash</span> e <span style="color: #ae81ff;">-1</span>)))
+result))))
+(defun %scaled-frac-of-power-two (exponent denom)
+(cond
+((<span style="color: #a6e22e;">&gt;=</span> exponent <span style="color: #ae81ff;">0</span>)
+(<span style="color: #66d9ef;">let</span> ((residue (%pow2-mod exponent denom)))
+(<span style="color: #a6e22e;">floor</span> (<span style="color: #a6e22e;">ash</span> residue *precision-bits*) denom)))
+(<span style="color: #66d9ef;">t</span>
+(<span style="color: #66d9ef;">let</span> ((effective-bits (<span style="color: #a6e22e;">+</span> *precision-bits* exponent)))
+(<span style="color: #66d9ef;">if</span> (<span style="color: #a6e22e;">minusp</span> effective-bits)
+<span style="color: #ae81ff;">0</span>
+(<span style="color: #a6e22e;">floor</span> (<span style="color: #a6e22e;">ash</span> <span style="color: #ae81ff;">1</span> effective-bits) denom))))))
+(defun %series-scaled-frac (bit-index bbp-series k-step global-shift alternating-p)
+<span style="color: #75715e;">;; A series is a list of series terms. A series term is a quadruple</span>
+<span style="color: #75715e;">;; (SIGN SHIFT DENOM-MULTIPLIER DENOM-OFFSET) representing the summand</span>
+<span style="color: #75715e;">;; SIGN * 2^SHIFT / (DENOM_MULTIPLIER * k + DENOM_OFFSET).</span>
+(<span style="color: #66d9ef;">let*</span> ((modulus (<span style="color: #a6e22e;">ash</span> <span style="color: #ae81ff;">1</span> *precision-bits*))
+(max-shift (loop <span style="color: #e6db74;">:for</span> term <span style="color: #e6db74;">:in</span> bbp-series <span style="color: #e6db74;">:maximize</span> (<span style="color: #a6e22e;">second</span> term)))
+(k-max (<span style="color: #a6e22e;">max</span> <span style="color: #ae81ff;">0</span> (<span style="color: #a6e22e;">ceiling</span> (<span style="color: #a6e22e;">+</span> bit-index <span style="color: #75715e;">; conservative bound</span>
+global-shift
+max-shift
+*precision-bits*
+*guard-bits*)
+k-step))))
+(loop <span style="color: #e6db74;">:with</span> acc <span style="color: #e6db74;">:=</span> <span style="color: #ae81ff;">0</span>
+<span style="color: #e6db74;">:for</span> k <span style="color: #e6db74;">:from</span> <span style="color: #ae81ff;">0</span> <span style="color: #e6db74;">:to</span> k-max <span style="color: #e6db74;">:do</span>
+(<span style="color: #66d9ef;">let</span> ((k-sign (<span style="color: #66d9ef;">if</span> (and alternating-p (<span style="color: #a6e22e;">oddp</span> k)) <span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">1</span>))
+(k-factor (<span style="color: #a6e22e;">*</span> k-step k)))
+(dolist (term bbp-series)
+(destructuring-bind (term-sign shift den-mul den-add) term
+(<span style="color: #66d9ef;">let*</span> ((denom (<span style="color: #a6e22e;">+</span> den-add (<span style="color: #a6e22e;">*</span> den-mul k)))
+(exponent (<span style="color: #a6e22e;">+</span> bit-index global-shift shift (<span style="color: #a6e22e;">-</span> k-factor)))
+(piece (%scaled-frac-of-power-two exponent denom))
+(signed (<span style="color: #a6e22e;">*</span> k-sign term-sign)))
+(when (<span style="color: #a6e22e;">plusp</span> piece)
+(setf acc (<span style="color: #a6e22e;">mod</span> (<span style="color: #a6e22e;">+</span> acc (<span style="color: #a6e22e;">*</span> signed piece)) modulus)))))))
+<span style="color: #e6db74;">:finally</span> (return acc))))
+(defun %nth-hex-from-series (n terms k-step global-shift alternating-p)
+(<span style="color: #66d9ef;">let*</span> ((bit-index (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">4</span> n)))
+(<span style="color: #a6e22e;">ldb</span> (<span style="color: #a6e22e;">byte</span> <span style="color: #ae81ff;">4</span> (<span style="color: #a6e22e;">-</span> *precision-bits* <span style="color: #ae81ff;">4</span>))
+(%series-scaled-frac bit-index
+terms
+k-step
+global-shift
+alternating-p))))
+</code></pre></div><p>This implementation uses Lisp&rsquo;s arbitrary precision integer arithmetic.
+A &ldquo;real&rdquo; implementation would use more efficient arithmetic, but
+this will suffice for some basic testing. Now we can write functions
+to use the Bellard formula and the new formula:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-lisp">(defparameter +bellard-terms+
+<span style="color: #f92672;">'</span>((<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">5</span> <span style="color: #ae81ff;">4</span> <span style="color: #ae81ff;">1</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">0</span> <span style="color: #ae81ff;">4</span> <span style="color: #ae81ff;">3</span>)
+(<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">8</span> <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">1</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">6</span> <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">3</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">2</span> <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">5</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">2</span> <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">7</span>)
+(<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">0</span> <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">9</span>)))
+(defun bellard-nth-hex (n)
+(%nth-hex-from-series (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">4</span> n) +bellard-terms+ <span style="color: #ae81ff;">10</span> <span style="color: #ae81ff;">-6</span> <span style="color: #66d9ef;">t</span>))
+(defparameter +new-terms+
+<span style="color: #f92672;">'</span>((<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">0</span> <span style="color: #ae81ff;">6</span> <span style="color: #ae81ff;">1</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">-5</span> <span style="color: #ae81ff;">6</span> <span style="color: #ae81ff;">3</span>)
+(<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">-8</span> <span style="color: #ae81ff;">6</span> <span style="color: #ae81ff;">5</span>)
+(<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">1</span> <span style="color: #ae81ff;">8</span> <span style="color: #ae81ff;">1</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">-5</span> <span style="color: #ae81ff;">8</span> <span style="color: #ae81ff;">5</span>)
+(<span style="color: #ae81ff;">+1</span> <span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">12</span> <span style="color: #ae81ff;">3</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">-4</span> <span style="color: #ae81ff;">12</span> <span style="color: #ae81ff;">7</span>)
+(<span style="color: #ae81ff;">-1</span> <span style="color: #ae81ff;">-8</span> <span style="color: #ae81ff;">12</span> <span style="color: #ae81ff;">11</span>)))
+(defun new-nth-hex (n)
+(%nth-hex-from-series (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">4</span> n) +new-terms+ <span style="color: #ae81ff;">12</span> <span style="color: #ae81ff;">0</span> <span style="color: #66d9ef;">nil</span>))
+</code></pre></div><p>Let&rsquo;s make sure they agree for the first 1000 hex digits:</p>
+<pre tabindex="0"><code>CL-USER&gt; (loop :for i :below 1000
+:always (= (bellard-nth-hex i) (new-nth-hex i)))
+T
+</code></pre><p>And now let&rsquo;s look at timing comparisons. Here&rsquo;s a little driver:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-lisp">(defun compare-timings (n)
+(<span style="color: #66d9ef;">flet</span> ((time-it (f n)
+(sb-ext:gc <span style="color: #e6db74;">:full</span> <span style="color: #66d9ef;">t</span>)
+(<span style="color: #66d9ef;">let</span> ((start (<span style="color: #a6e22e;">get-internal-real-time</span>)))
+(<span style="color: #a6e22e;">funcall</span> f n)
+(<span style="color: #a6e22e;">-</span> (<span style="color: #a6e22e;">get-internal-real-time</span>) start))))
+(loop <span style="color: #e6db74;">:repeat</span> n
+<span style="color: #e6db74;">:for</span> index <span style="color: #e6db74;">:=</span> <span style="color: #ae81ff;">1</span> <span style="color: #e6db74;">:then</span> (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">10</span> index)
+<span style="color: #e6db74;">:for</span> bellard <span style="color: #e6db74;">:=</span> (time-it <span style="color: #a6e22e;">#'</span>bellard-nth-hex index)
+<span style="color: #e6db74;">:for</span> new <span style="color: #e6db74;">:=</span> (time-it <span style="color: #a6e22e;">#'</span>new-nth-hex index)
+<span style="color: #e6db74;">:do</span> (<span style="color: #a6e22e;">format</span> <span style="color: #66d9ef;">t</span> <span style="color: #e6db74;">"~v,' D: new is ~A% faster than bellard~%"</span> n index
+(<span style="color: #a6e22e;">round</span> (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">100</span> (<span style="color: #a6e22e;">-</span> bellard new)) bellard)))))
+</code></pre></div><p>And the results if the timing up to the one millionth hexadecimal digit:</p>
+<pre tabindex="0"><code>CL-USER&gt; (compare-timings 7)
+1 : new is 81% faster than bellard
+10 : new is 7% faster than bellard
+100 : new is 6% faster than bellard
+1000 : new is 5% faster than bellard
+10000 : new is 4% faster than bellard
+100000 : new is 3% faster than bellard
+1000000: new is 4% faster than bellard
+</code></pre><p>As predicted, though imperfect a test, it&rsquo;s consistently faster across a few orders of magnitude.</p>

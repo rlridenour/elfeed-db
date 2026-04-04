@@ -1,0 +1,194 @@
+<p>When talking to Lisp programmers, you often hear something like, &ldquo;adapt Lisp to your problem, not your problem to Lisp.&rdquo; The basic idea is this: if Lisp doesn&rsquo;t let you easily write a solution to your problem because it lacks some fundamental constructs that make expressing solutions easy, then add them to Lisp first, then write your solution.</p>
+<p>That sounds all good and well in the abstract, and maybe we could even come up with some toy examples&mdash;say, defining HTTP request routing logic in a nice DSL. But where&rsquo;s a real example of this that&rsquo;s not artificial or overengineered?</p>
+<p>Recently, on Twitter, I butted into the middle of an exchange between <a href="https://x.com/Ngnghm">@Ngnghm</a> (a famous Lisp programmer) and <a href="https://x.com/korulang">@korulang</a> (an account dedicated to a new language called Koru) about Lisp. I&rsquo;m oversimplifying, but it went something like this:</p>
+<ul>
+<li>Lisp is slow.</li>
+<li>No it&rsquo;s not!</li>
+<li>Yes it is!</li>
+<li>No it&rsquo;s not!</li>
+<li>Then prove it!</li>
+</ul>
+<p>Now, there&rsquo;s plenty of evidence online that Common Lisp has reasonably good compilers that produce reasonably good machine code, and so the question became more nuanced: Can Lisp be realistically competitive with C without ending up being a mess of unidiomatic code?</p>
+<p>Our interlocutor @korulang proposed a benchmark, the &ldquo;nbody&rdquo; benchmark from the <a href="https://benchmarksgame-team.pages.debian.net/benchmarksgame/description/nbody.html#nbody">Computer Language Benchmarks Game</a>. This was of particular interest to them, because they used it as an object of study for their Koru language. To quote <a href="https://www.korulang.org/blog/idiomatic-kernels-match-specialized-c">their blog post</a>:</p>
+<blockquote>
+<p>We wanted Koru kernels to land in the same ballpark as idiomatic C, Rust, and Zig.</p>
+<p>The result was stronger than that.</p>
+<p>Our fused n-body kernel, written in straightforward Koru kernel style, came in faster than the plain reference implementations. Every implementation here is "naive" &mdash; the obvious, idiomatic version a competent programmer would write in each language. No tricks, no hand-tuning, no -ffast-math: [&hellip;]</p>
+</blockquote>
+<p>and they proceeded to show Koru being 14% faster than C and 106% faster than Lisp.</p>
+<p>Now, putting aside that some of the code and blog post were written with LLMs, there are many questions that are left unanswered here, since computer architecture and operating system matter a lot (where did these benchmarks run?). Moreover, the author buries the lede a little bit and proceeds to show how we might write &ldquo;unidiomatic&rdquo; C to match the performance of Koru.</p>
+<p>I&rsquo;m not concerned about nitpicking their approach or rigorously evaluating their claims, but I would like to dwell on this common refrain: &ldquo;idiomatic&rdquo;. What is that supposed to mean?</p>
+<p>&ldquo;Idiomatic code&rdquo; in the context of programming means something like &ldquo;representative of a fluent computer programmer&rdquo; and &ldquo;aligned with the peculiar characteristics of the language&rdquo;. In some sense, idiomatic code in a particular language shouldn&rsquo;t stand out amongst other code in that language, and idiomatic code should, in some sense, portray the identity of the language itself.</p>
+<p>Idiomatic C is the C that uses terse names, simple loops, and unsafe arithmetic.</p>
+<p>Idiomatic Haskell is the Haskell that uses short functions, higher-order abstractions, immutable data structures, and safe constructs.</p>
+<p>What about idiomatic Lisp? Well, here&rsquo;s the rub. A fluent programmer at Lisp doesn&rsquo;t reach for one paradigmatic toolbox; they weave in and out of imperative, functional, object-oriented, etc. styles without much of a second thought. There&rsquo;s a sort of &ldquo;meta&rdquo; characteristic to Lisp programming: you&rsquo;re programming the language almost as much as you&rsquo;re programming the program.</p>
+<p>Yes, Lisp has loops, but &ldquo;loopy code&rdquo; isn&rsquo;t intrinsically &ldquo;Lispy code&rdquo;. Yes, Lisp has objects, but &ldquo;OOPy code&rdquo; isn&rsquo;t intrinsically &ldquo;Lispy code&rdquo;. In my opinion, what makes code &ldquo;Lispy&rdquo; is whether or not the programmer used Lisp&rsquo;s metaprogramming and/or built-in multi-paradigm facilities to a reasonable degree to make the solution to their problem efficient and easy to understand in some global sense. For some problems, that may be &ldquo;loopy&rdquo; or &ldquo;OOPy&rdquo; or something else. It&rsquo;s finding a Pareto-efficient syntactic and semantic combination offered by the language, or perhaps one of the programmer&rsquo;s own creation.</p>
+<p>So we get back to the @korulang benchmark challenge. Looking at <a href="https://github.com/korulang/koru/tree/main/tests/regression/900_EXAMPLES_SHOWCASE/910_LANGUAGE_SHOOTOUT/nbody">their repository</a>:</p>
+<ul>
+<li><code>nbody.c</code> looks like idiomatic C;</li>
+<li><code>nbody.hs</code> looks like wildly unidiomatic Haskell, but the problem is, the idiomatic version would probably be slower;</li>
+<li><code>nbody.lisp</code> looks reasonable, though it could easily be improved, but loopy; and</li>
+<li>The Koru solution <code>kernel_fused.kz</code> looks idiomatic, as far as I can tell for not knowing anything about Koru.</li>
+</ul>
+<p>I hesitate to say <code>nbody.lisp</code> is idiomatic. It&rsquo;s <em>reasonable</em>, it&rsquo;s <em>straightforward</em> to any imperative-minded programmer, but it&rsquo;s not Lispy. That doesn&rsquo;t make it good or bad, but it does lead to the grand question:</p>
+<p><strong>Can we use Common Lisp to express a solution to the nbody benchmark in a way that reads more naturally than a direct-from-C port?</strong></p>
+<p>I would say that, at face value, Koru&rsquo;s solution is along the lines of what is more natural relative to the problem itself. Here are the essential bits.</p>
+<pre tabindex="0"><code>~std.kernel:shape(Body) {
+x: f64, y: f64, z: f64,
+vx: f64, vy: f64, vz: f64,
+mass: f64,
+}
+~std.kernel:init(Body) {
+{ x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, mass: SOLAR_MASS },
+{ x: 4.84143144246472090e+00, y: -1.16032004402742839e+00, z: -1.03622044471123109e-01, vx: 1.66007664274403694e-03 * DAYS_PER_YEAR, vy: 7.69901118419740425e-03 * DAYS_PER_YEAR, vz: -6.90460016972063023e-05 * DAYS_PER_YEAR, mass: 9.54791938424326609e-04 * SOLAR_MASS },
+{ x: 8.34336671824457987e+00, y: 4.12479856412430479e+00, z: -4.03523417114321381e-01, vx: -2.76742510726862411e-03 * DAYS_PER_YEAR, vy: 4.99852801234917238e-03 * DAYS_PER_YEAR, vz: 2.30417297573763929e-05 * DAYS_PER_YEAR, mass: 2.85885980666130812e-04 * SOLAR_MASS },
+{ x: 1.28943695621391310e+01, y: -1.51111514016986312e+01, z: -2.23307578892655734e-01, vx: 2.96460137564761618e-03 * DAYS_PER_YEAR, vy: 2.37847173959480950e-03 * DAYS_PER_YEAR, vz: -2.96589568540237556e-05 * DAYS_PER_YEAR, mass: 4.36624404335156298e-05 * SOLAR_MASS },
+{ x: 1.53796971148509165e+01, y: -2.59193146099879641e+01, z: 1.79258772950371181e-01, vx: 2.68067772490389322e-03 * DAYS_PER_YEAR, vy: 1.62824170038242295e-03 * DAYS_PER_YEAR, vz: -9.51592254519715870e-05 * DAYS_PER_YEAR, mass: 5.15138902046611451e-05 * SOLAR_MASS },
+}
+| kernel k |&gt;
+std.kernel:step(0..iterations)
+|&gt; std.kernel:pairwise {
+const dx = k.x - k.other.x;
+const dy = k.y - k.other.y;
+const dz = k.z - k.other.z;
+const dsq = dx*dx + dy*dy + dz*dz;
+const mag = DT / (dsq * @sqrt(dsq));
+k.vx -= dx * k.other.mass * mag;
+k.vy -= dy * k.other.mass * mag;
+k.vz -= dz * k.other.mass * mag;
+k.other.vx += dx * k.mass * mag;
+k.other.vy += dy * k.mass * mag;
+k.other.vz += dz * k.mass * mag;
+}
+|&gt; std.kernel:self {
+k.x += DT * k.vx;
+k.y += DT * k.vy;
+k.z += DT * k.vz;
+}
+| computed c |&gt;
+capture({ energy: @as(f64, 0) })
+| as acc |&gt;
+for(0..5)
+| each i |&gt;
+captured { energy: acc.energy + 0.5*c[i].mass*(c[i].vx*c[i].vx+c[i].vy*c[i].vy+c[i].vz*c[i].vz) }
+|&gt; for(i+1..5)
+| each j |&gt;
+captured { energy: acc.energy - c[i].mass*c[j].mass / @sqrt((c[i].x-c[j].x)*(c[i].x-c[j].x)+(c[i].y-c[j].y)*(c[i].y-c[j].y)+(c[i].z-c[j].z)*(c[i].z-c[j].z)) }
+| captured final |&gt;
+std.io:print.blk {
+{{ final.energy:d:.9 }}
+}
+</code></pre><p>Can we achieve something similar in Lisp?</p>
+<p>First, let&rsquo;s make a baseline. I&rsquo;m running Ubuntu Noble with a &ldquo;AMD RYZEN AI MAX+ PRO 395&rdquo; with a clock speed that varies between 0.6-5 GHz. I am also using SBCL 2.6.3 and gcc 13.3. Using <code>nbody.lisp</code> as a starting point, <a href="https://raw.githubusercontent.com/stylewarning/lisp-random/refs/heads/master/nbody/conventional.lisp">I modified it</a> for a few easy wins. I&rsquo;ll call this version <code>nbody-lisp-conventional</code>. A quick benchmark reveals that the loopy Lisp code is only about 20% slower than the C code compiled with <code>gcc -O3 -ffast-math -march=native</code>.</p>
+<pre tabindex="0"><code>$ ./nbody-lisp-conventional 50000000
+-0.169286396
+timing: 2000 ms
+$ ./nbody-c 50000000
+-0.169286396
+timing: 1662 ms
+</code></pre><p>As a Lisp programmer, it&rsquo;s not surprising that it&rsquo;s a little slower. The number of person-years that have gone into C compilers to optimize idiomatic C code makes the development effort behind SBCL, the most popular open-source Lisp compiler, look like a rounding error.</p>
+<p>Now that we have a baseline, our goal is to come up with a nicer Lisp program that also improves the timing.</p>
+<p>Our approach will be simple. We will create a <code>library.lisp</code> that contains new language constructs of a similar ilk to Koru, and we will use them to implement the nbody benchmark in <code>impl.lisp</code>. Some rules:</p>
+<ul>
+<li>No compile-time precomputation or caching. I can&rsquo;t just compute the answer at compile time, or cache a sub-computation that makes the full one trivial.</li>
+<li>No fundamental algorithm changes. I can&rsquo;t use a different integrator, for example.</li>
+<li>Using assembly is allowed, but it must only make use of the facilities offered by the Lisp compiler (i.e., no external tools), and the implementation of nbody itself must be understandable without knowing assembly. In other words, it should be sufficiently hidden, and in principle easily substitutable with portable code.</li>
+<li>Library code must be in principle useful for other similar tasks. It should not be hyper-specialized to this specific problem instance, but instead be useful for this general class of problems.</li>
+</ul>
+<p>The third rule is more rigorous than it looks. It means we can&rsquo;t just have a <code>solve-nbody</code> problem which dispatches to assembly.</p>
+<p>To accomplish the above, we define a kernel DSL. The DSL allows us to express how elements of a composite transform, maintaining just enough invariants to allow them to be handled efficiently. These kernels are then compiled into efficient code, more efficient than ordinary loopy Lisp allows for.</p>
+<p>Our attention will be focused on a proof-of-concept library of functionality for writing particle simulators. The operators we define are:</p>
+<ul>
+<li><code>define-kernel-shape</code>: Define the data to be transformed by each kernel. This would be the data to characterize the static and dynamic properties of a particle in motion, as well as the number of particles under consideration.</li>
+<li><code>define-kernel-step</code>: Define a kernel as a sequence of existing ones.</li>
+<li><code>define-self-kernel</code>: Define a read-write kernel that operates on each element independently, without access to other elements (i.e., a <em>map</em> operation).</li>
+<li><code>define-pairwise-kernel</code>: Define a read-write kernel that operates on all pairs of elements, reduced by symmetry (i.e., <code>(i,j)</code> and <code>(j,i)</code> are considered only once).</li>
+<li><code>define-reduction-kernel</code>: Define a read-only kernel that does reduction of a sequence into a single value (i.e., a <em>reduce</em> operation).</li>
+</ul>
+<p>This collection of five operators forms a miniature, re-usable language. These broadly recapitulate those of Koru, and allow us to write something that looks like this:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-lisp">(defconstant +solar-mass+ (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">4d0</span> pi pi))
+(defconstant +days-per-year+ <span style="color: #ae81ff;">365.24d0</span>)
+(defconstant +dt+ <span style="color: #ae81ff;">0.01d0</span>)
+(define-kernel-shape body <span style="color: #ae81ff;">5</span>
+x y z vx vy vz mass)
+(defparameter *system*
+(make-body-system
+(<span style="color: #a6e22e;">list</span> <span style="color: #e6db74;">:x</span> <span style="color: #ae81ff;">0d0</span> <span style="color: #e6db74;">:y</span> <span style="color: #ae81ff;">0d0</span> <span style="color: #e6db74;">:z</span> <span style="color: #ae81ff;">0d0</span>
+<span style="color: #e6db74;">:vx</span> <span style="color: #ae81ff;">0d0</span> <span style="color: #e6db74;">:vy</span> <span style="color: #ae81ff;">0d0</span> <span style="color: #e6db74;">:vz</span> <span style="color: #ae81ff;">0d0</span>
+<span style="color: #e6db74;">:mass</span> +solar-mass+)
+<span style="color: #f92672;">...</span>))
+(define-pairwise-kernel advance-forces (s body dt)
+(<span style="color: #66d9ef;">let*</span> ((dx (<span style="color: #a6e22e;">-</span> i.x j.x))
+(dy (<span style="color: #a6e22e;">-</span> i.y j.y))
+(dz (<span style="color: #a6e22e;">-</span> i.z j.z))
+(dsq (<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">*</span> dx dx) (<span style="color: #a6e22e;">*</span> dy dy)) (<span style="color: #a6e22e;">*</span> dz dz)))
+(mag (<span style="color: #a6e22e;">/</span> dt (<span style="color: #a6e22e;">*</span> dsq (<span style="color: #a6e22e;">sqrt</span> dsq)))))
+(<span style="color: #66d9ef;">let</span> ((dm-j (<span style="color: #a6e22e;">*</span> mag j.mass))
+(dm-i (<span style="color: #a6e22e;">*</span> mag i.mass)))
+(decf i.vx (<span style="color: #a6e22e;">*</span> dx dm-j))
+(decf i.vy (<span style="color: #a6e22e;">*</span> dy dm-j))
+(decf i.vz (<span style="color: #a6e22e;">*</span> dz dm-j))
+(incf j.vx (<span style="color: #a6e22e;">*</span> dx dm-i))
+(incf j.vy (<span style="color: #a6e22e;">*</span> dy dm-i))
+(incf j.vz (<span style="color: #a6e22e;">*</span> dz dm-i)))))
+(define-self-kernel advance-positions (s body dt)
+(incf self.x (<span style="color: #a6e22e;">*</span> dt self.vx))
+(incf self.y (<span style="color: #a6e22e;">*</span> dt self.vy))
+(incf self.z (<span style="color: #a6e22e;">*</span> dt self.vz)))
+(define-reduction-kernel (energy e <span style="color: #ae81ff;">0d0</span>) (s body)
+(<span style="color: #e6db74;">:self</span>
+(<span style="color: #a6e22e;">+</span> e (<span style="color: #a6e22e;">*</span> (<span style="color: #a6e22e;">*</span> <span style="color: #ae81ff;">0.5d0</span> self.mass)
+(<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">*</span> self.vx self.vx) (<span style="color: #a6e22e;">*</span> self.vy self.vy))
+(<span style="color: #a6e22e;">*</span> self.vz self.vz)))))
+(<span style="color: #e6db74;">:pair</span>
+(<span style="color: #66d9ef;">let*</span> ((dx (<span style="color: #a6e22e;">-</span> i.x j.x))
+(dy (<span style="color: #a6e22e;">-</span> i.y j.y))
+(dz (<span style="color: #a6e22e;">-</span> i.z j.z)))
+(<span style="color: #a6e22e;">-</span> e (<span style="color: #a6e22e;">/</span> (<span style="color: #a6e22e;">*</span> i.mass j.mass)
+(<span style="color: #a6e22e;">sqrt</span> (<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">+</span> (<span style="color: #a6e22e;">*</span> dx dx) (<span style="color: #a6e22e;">*</span> dy dy))
+(<span style="color: #a6e22e;">*</span> dz dz))))))))
+(define-kernel-step run-simulation (system body n <span style="color: #e6db74;">:params</span> ((dt <span style="color: #66d9ef;">double-float</span>)))
+(advance-forces dt)
+(advance-positions dt))
+</code></pre></div><p>Well, in fact, this isn&rsquo;t an ideal approximation, it&rsquo;s almost exactly <a href="https://raw.githubusercontent.com/stylewarning/lisp-random/refs/heads/master/nbody/impl.lisp">how it turned out</a>. Given this is a proof of concept, we sometimes have to write some Lisp things a little funny. For example, you&rsquo;ll notice we write:</p>
+<pre tabindex="0"><code>(+ (+ (* dx dx) (* dy dy)) (* dz dz))
+</code></pre><p>instead of the far more readable</p>
+<pre tabindex="0"><code>(+ (* dx dx) (* dy dy) (* dz dz))
+</code></pre><p>Both are completely valid and both can be used. So why the former? It is a result of a limitation of a little feature I built in: auto-vectorization. The vectorizer walks the mathematical expressions and replaces them with fast SIMD variants instead. Here&rsquo;s a little fragment showing this rewrite rule:</p>
+<div class="highlight"><pre tabindex="0"><code class="language-lisp"><span style="color: #f92672;">...</span>
+(case (<span style="color: #a6e22e;">car</span> expr)
+<span style="color: #75715e;">;; (+ a (* b c)) -&gt; fmadd(a,b,c)</span>
+((<span style="color: #a6e22e;">+</span>)
+(<span style="color: #66d9ef;">let</span> ((args (<span style="color: #a6e22e;">cdr</span> expr)))
+(cond
+((and (<span style="color: #a6e22e;">=</span> (<span style="color: #a6e22e;">length</span> args) <span style="color: #ae81ff;">2</span>) (mul-p (<span style="color: #a6e22e;">second</span> args)))
+<span style="color: #f92672;">`</span>(%%fmadd-pd <span style="color: #f92672;">,</span>(xf (<span style="color: #a6e22e;">first</span> args))
+<span style="color: #f92672;">,</span>(xf (<span style="color: #a6e22e;">second</span> (<span style="color: #a6e22e;">second</span> args)))
+<span style="color: #f92672;">,</span>(xf (<span style="color: #a6e22e;">third</span> (<span style="color: #a6e22e;">second</span> args)))))
+<span style="color: #f92672;">...</span>
+</code></pre></div><p>The implementation of these kernel macros in <a href="https://raw.githubusercontent.com/stylewarning/lisp-random/refs/heads/master/nbody/library.lisp"><code>library.lisp</code></a> weighs in at just under 700 lines, and includes optional x64 SIMD auto-vectorization.</p>
+<p>Well, for the nail biting moment, how does it compare? I made a <a href="https://raw.githubusercontent.com/stylewarning/lisp-random/refs/heads/master/nbody/Makefile">Makefile</a> that compares the idiomatic C against the loopy Lisp against our kernel DSL Lisp. It does a median-of-3. Running this on my computer gives:</p>
+<pre tabindex="0"><code>$ make bench
+=== C (gcc -O3 -ffast-math) ===
+-0.169286396
+runs: 1657 1664 1653 ms
+median: 1657 ms
+=== Lisp (SBCL, conventional loops) ===
+-0.169286396
+runs: 1991 2009 2005 ms
+median: 2005 ms
+=== Lisp (SBCL, kernel syntax) ===
+-0.169286396
+runs: 1651 1651 1652 ms
+median: 1651 ms
+</code></pre><p>So, in fact, we have matched the performance of C almost exactly. Furthermore, the generated code is still not as lean as it could be. Not to put too fine a point on it, but, <strong>&lt;100 lines of Lisp</strong>, supported by</p>
+<ul>
+<li>700 lines of library code and about 4 hours of my time; and</li>
+<li>500k lines of its host compiler <code>sbcl</code></li>
+</ul>
+<p><strong>has performance parity and greater readability/reusability than &lt;100 lines of C</strong>, supported by</p>
+<ul>
+<li>~5,000k lines of just the C part of its host compiler <code>gcc</code>.</li>
+</ul>
+<p>None of this is to make an argument that Lisp is &ldquo;better&rdquo;, or that there isn&rsquo;t merit to <em>avoiding</em> custom DSLs in certain circumstances, or that the world doesn&rsquo;t have room for more custom home-grown compilers and parsers, but I think this is the clearest possible, quasi-realistic demonstration that idiomatic Lisp can be as fast as idiomatic C without tremendous work, whilst netting additional benefits unique to Lisp.</p>
+<p>All code is available <a href="https://github.com/stylewarning/lisp-random/tree/master/nbody">here</a>.</p>

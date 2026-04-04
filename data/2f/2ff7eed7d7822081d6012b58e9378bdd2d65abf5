@@ -1,0 +1,95 @@
+<p>This is another article inspired by my recent cleanup of <a href="https://github.com/bbatsov/prelude">Prelude</a> and my
+<a href="https://github.com/bbatsov/emacs.d">personal Emacs config</a>, following the one on
+<a href="/blog/2026/04/04/repeat-mode/">repeat-mode</a>. I’ve been going through the Emacs 28-30
+changelogs looking for features I had overlooked, and this small one from Emacs 28
+turned out to be a real gem.</p>
+
+<p>Ever noticed how <code class="language-plaintext highlighter-rouge">M-x</code> shows you <em>every</em> command, including ones that
+make no sense in your current buffer? Org commands while editing Ruby,
+Magit commands in a shell buffer, that sort of thing. It’s not a huge
+deal if you know what you’re looking for, but it adds noise to the
+candidate list – especially if you’re using a completion framework
+like Vertico or Ivy that shows everything at a glance.</p>
+
+<p>Emacs 28 added a simple way to fix this:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">read-extended-command-predicate</span>
+      <span class="nf">#'</span><span class="nv">command-completion-default-include-p</span><span class="p">)</span>
+</code></pre></div></div>
+
+<!--more-->
+
+<p>With this setting, <code class="language-plaintext highlighter-rouge">M-x</code> hides commands that declare themselves
+inapplicable to the current major mode from the completion candidates.
+So if you’re in a Python buffer, you won’t see <code class="language-plaintext highlighter-rouge">dired-do-rename</code> or
+<code class="language-plaintext highlighter-rouge">clojure-align</code> cluttering your results.</p>
+
+<p>How does the filtering actually work? <code class="language-plaintext highlighter-rouge">command-completion-default-include-p</code>
+looks at the modes a command declares it belongs to (via the <code class="language-plaintext highlighter-rouge">interactive</code>
+form) or checks its <code class="language-plaintext highlighter-rouge">completion-predicate</code> symbol property. If no modes are
+declared and there’s no completion predicate, the command is included as
+usual – so existing commands that haven’t been updated are not affected.</p>
+
+<p>Emacs actually ships with three predicates you can choose from (plus <code class="language-plaintext highlighter-rouge">nil</code>
+for no filtering):</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">command-completion-default-include-p</code> – the safe default. Excludes
+commands tagged for other modes, includes everything else.</li>
+  <li><code class="language-plaintext highlighter-rouge">command-completion-using-modes-and-keymaps-p</code> – more aggressive. Shows
+commands tagged for the current mode <em>plus</em> any command that has a
+keybinding in the buffer’s active keymaps. Also always includes
+<code class="language-plaintext highlighter-rouge">customize-*</code> commands. Untagged commands without keybindings are hidden.</li>
+  <li><code class="language-plaintext highlighter-rouge">command-completion-using-modes-p</code> – the strictest option. Only shows
+commands explicitly tagged for the current mode. Untagged commands are
+hidden too, so this can be quite aggressive.</li>
+</ul>
+
+<p>I’d recommend starting with <code class="language-plaintext highlighter-rouge">command-completion-default-include-p</code> since
+it’s the most conservative – it won’t hide anything that hasn’t explicitly
+opted in to the filtering.</p>
+
+<p>Package authors can declare mode affiliation by adding a mode specification
+to the <code class="language-plaintext highlighter-rouge">interactive</code> form:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-foo-command</span> <span class="p">()</span>
+  <span class="s">"Do something useful in foo-mode."</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="no">nil</span> <span class="nv">foo-mode</span><span class="p">)</span>
+  <span class="o">...</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">nil</code> is the interactive spec (no arguments in this case), and <code class="language-plaintext highlighter-rouge">foo-mode</code>
+tells Emacs this command is only relevant in <code class="language-plaintext highlighter-rouge">foo-mode</code> buffers. If a command
+applies to multiple modes, just list them all:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">cider-eval-defun-at-point</span> <span class="p">()</span>
+  <span class="s">"Evaluate the top-level form at point."</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="no">nil</span> <span class="nv">clojure-mode</span> <span class="nv">clojure-ts-mode</span><span class="p">)</span>
+  <span class="o">...</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This is handy for packages like CIDER that need to work in both the
+classic <code class="language-plaintext highlighter-rouge">clojure-mode</code> and the newer Tree-sitter-based <code class="language-plaintext highlighter-rouge">clojure-ts-mode</code>.</p>
+
+<p>As for how well this works in practice – many built-in commands
+already declare their applicable modes, so you’ll see a noticeably
+cleaner <code class="language-plaintext highlighter-rouge">M-x</code> right away. Third-party package adoption is growing
+but uneven. Commands that haven’t been updated will simply continue
+to show up everywhere, same as before – so there’s no downside to
+enabling this.</p>
+
+<h2 id="a-note-for-verticoorderless-users">A Note for Vertico/Orderless Users</h2>
+
+<p>If you followed the <a href="https://github.com/minad/vertico#configuration">Vertico sample
+configuration</a>,
+you’ll find this setting already there – commented out. It was
+shipped that way because it was new at the time and some users found
+the disappearing commands surprising. It’s been stable for years now
+and works great with Vertico, Orderless, and Marginalia. Just
+uncomment it and enjoy a less noisy <code class="language-plaintext highlighter-rouge">M-x</code>.</p>
+
+<p>Commands that are filtered out aren’t gone – the filtering only
+affects completion candidates. If you type the full command name at
+the <code class="language-plaintext highlighter-rouge">M-x</code> prompt it will still execute just fine.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>

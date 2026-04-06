@@ -1,0 +1,201 @@
+<div class="wp-block-post-excerpt"><p class="wp-block-post-excerpt__excerpt">About 30 years ago, I had an idea for a coding game inspired by Nomic. It occurred to me last month that all of the tools I need are readily available now. </p></div>
+
+
+<h2 class="wp-block-heading">Pen-and-paper Nomic</h2>
+
+
+
+<p>The pen-and-paper game of <a href="https://en.wikipedia.org/wiki/Nomic" title="">Nomic</a> (by Peter Suber) has an <a href="https://web.archive.org/web/20200310063900/http://legacy.earlham.edu/~peters/writing/nomic.htm#initial%20set" title="">initial ruleset</a> which describes how one proposes changes to the rules, how one gets those changes ratified, a way to award points when someone&#8217;s rule change is ratified, and a rule declaring that the winner is the first player to amass 100 points. Some of the rules are mutable and some are immutable and there are rules about turning mutable rules into immutable ones and vice-versa.</p>
+
+
+
+<p>The game was meant to show some of the paradoxes of self-amendment. It was meant to lead people into situations where it was clear that certain actions were both legal (or even mandatory) and illegal.</p>
+
+
+
+<p>A drastically simplified starting set of rules might look like:</p>
+
+
+
+<ul class="wp-block-list">
+<li>There are these players: Alice, Bob, Carol, David, and Mel.</li>
+
+
+
+<li>Any of the players can propose a change to these rules at any time when there is not already an outstanding proposal.</li>
+
+
+
+<li>When a player makes a proposal, all players (including the player making the proposal) must immediately vote: Yay or Nay.</li>
+
+
+
+<li>If a proposal garners more Yay than Nay votes, it takes effect immediately. Otherwise, the proposal is rejected.</li>
+
+
+
+<li>The winner is the first person to score 100 points.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">Nomic in Code</h2>
+
+
+
+<p>So, 30 years ago, I had the idea that it would be fabulous to write some code to referee a Nomic game. However, because interpretation of the rules is so horrendously human, it felt impossible. Today, in 2026, it seems one could maybe get Claude, Gemini, or some other LLM to referee. But, this doesn&#8217;t much interest me, either, really. I cannot get any of them to keep track of something that I made them write down. I cannot imagine that I would be happy with their interpretation of whether my move is legal given the current state of the rules nor to amend the rules appropriately if my move is legal.</p>
+
+
+
+<p>What felt slightly more attainable 30 years ago would be to make it a battle in code:</p>
+
+
+
+<ul class="wp-block-list">
+<li>The players propose deltas to the current code.</li>
+
+
+
+<li>The players vote on which deltas to approve.</li>
+
+
+
+<li>If the resulting code declares you the winner, you win.</li>
+</ul>
+
+
+
+<p>This was nice and all, but it was also too static. The rules about who can vote and how votes are tallied and such wouldn&#8217;t be subject to change.</p>
+
+
+
+<h2 class="wp-block-heading">Nomic in Code in 2026</h2>
+
+
+
+<p>Fast-forward to last month. Last month, I realized that with the GitHub API interface, I could implement a very Nomic-ish pull request battle game. I can:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Gather information about all of the open pull requests on a repository,</li>
+
+
+
+<li>Checkout a copy of the current <code class="codecolorer text default"><span class="text">main</span></code> branch of that <strong>same</strong> repository,</li>
+
+
+
+<li>Run the code on the <code class="codecolorer text default"><span class="text">main</span></code> branch of that repository and give it the information that I collected about the open pull requests, and</li>
+
+
+
+<li>Have the code on the <code class="codecolorer text default"><span class="text">main</span></code> branch tell me which open pull requests (if any) to accept or reject.</li>
+</ul>
+
+
+
+<p>To be truly in Nomic&#8217;s full spirit, it would be nice to allow the code in the repository to interact with the GitHub API on its own. Alas, that would immediately let the players vote in changes that expose my GitHub tokens, so it would be a gaping security hole&mdash;not only because it would let users impersonate me but because it would let them end-around the actual code in the repository to make changes to the <code class="codecolorer text default"><span class="text">main</span></code> branch in the repository.</p>
+
+
+
+<p>So, as it is, I have a <a href="https://github.com/nklein/cl-nomic-supervisor" title="">supervisor</a> written in Common Lisp which handles all of the interaction with GitHub and various game repositories (one to <a href="https://github.com/nklein/cl-nomic-game" title="">play in Common Lisp</a>, one to <a href="https://github.com/nklein/js-nomic-game" title="">play in JavaScript</a>, and one to <a href="https://github.com/nklein/py-nomic-game" title="">play in Python</a>). The supervisor:</p>
+
+
+
+<ul class="wp-block-list">
+<li>fetches all of the open pull requests;</li>
+
+
+
+<li>annotates each pull request with:
+<ul class="wp-block-list">
+<li>all of the reviews on the pull request,</li>
+
+
+
+<li>all of the comments on the pull request, and</li>
+
+
+
+<li>all of the commits on the pull request;</li>
+</ul>
+</li>
+
+
+
+<li>clones the <code class="codecolorer text default"><span class="text">main</span></code> branch of the game repository;</li>
+
+
+
+<li>runs the game code from that <code class="codecolorer text default"><span class="text">main</span></code> branch giving it the annotated list of open pull requests encoded as JSON on standard input;</li>
+
+
+
+<li>reads the JSON-encoded output from the game code; and</li>
+
+
+
+<li>acts accordingly.</li>
+</ul>
+
+
+
+<p>The game code, given a list of open pull requests can reply with one of the following messages:</p>
+
+
+<div class="codecolorer-container javascript blackboard" style="overflow: auto; white-space: nowrap; width: 435px;"><div class="javascript codecolorer"><span style="color: #009900;">&#123;</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;decision&quot;</span><span style="color: #339933;">:</span> <span style="color: #3366CC;">&quot;winner&quot;</span><span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;name&quot;</span><span style="color: #339933;">:</span> name<span style="color: #339933;">-</span>of<span style="color: #339933;">-</span>winner<span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;message&quot;</span><span style="color: #339933;">:</span> optional<span style="color: #339933;">-</span>reason<span style="color: #339933;">-</span>for<span style="color: #339933;">-</span>decision<br />
+<span style="color: #009900;">&#125;</span><br />
+<span style="color: #009900;">&#123;</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;decision&quot;</span><span style="color: #339933;">:</span> <span style="color: #3366CC;">&quot;accept&quot;</span><span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;id&quot;</span><span style="color: #339933;">:</span> id<span style="color: #339933;">-</span>number<span style="color: #339933;">-</span>of<span style="color: #339933;">-</span>pull<span style="color: #339933;">-</span>request<span style="color: #339933;">-</span>to<span style="color: #339933;">-</span>accept<span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;message&quot;</span><span style="color: #339933;">:</span> optional<span style="color: #339933;">-</span>reason<span style="color: #339933;">-</span>for<span style="color: #339933;">-</span>decision<br />
+<span style="color: #009900;">&#125;</span><br />
+<span style="color: #009900;">&#123;</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;decision&quot;</span><span style="color: #339933;">:</span> <span style="color: #3366CC;">&quot;reject&quot;</span><span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;id&quot;</span><span style="color: #339933;">:</span> id<span style="color: #339933;">-</span>number<span style="color: #339933;">-</span>of<span style="color: #339933;">-</span>pull<span style="color: #339933;">-</span>request<span style="color: #339933;">-</span>to<span style="color: #339933;">-</span>reject<span style="color: #339933;">,</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;message&quot;</span><span style="color: #339933;">:</span> optional<span style="color: #339933;">-</span>reason<span style="color: #339933;">-</span>for<span style="color: #339933;">-</span>decision<br />
+<span style="color: #009900;">&#125;</span><br />
+<span style="color: #009900;">&#123;</span><br />
+&nbsp; <span style="color: #3366CC;">&quot;decision&quot;</span><span style="color: #339933;">:</span> <span style="color: #3366CC;">&quot;defer&quot;</span><br />
+<span style="color: #009900;">&#125;</span></div></div>
+
+
+<p>The <code class="codecolorer javascript default"><span class="javascript"><span style="color: #3366CC;">&quot;defer&quot;</span></span></code> decision means that there is not enough information at the moment. Maybe, in the future, with other pull requests or other comments or reviews we will be able to make some <em>move</em>.</p>
+
+
+
+<p>If the game code replies with anything that isn&#8217;t one of the four types of replies shown above, the supervisor assumes the latest merge broke the code and reverts the change.</p>
+
+
+
+<h2 class="wp-block-heading">The Ask</h2>
+
+
+
+<p>I haven&#8217;t been able to drum up enough players for a game in any of my regular haunts. So, I am looking for tolerant players who will help me give it a test run or two to work out the kinks in the supervisor. Some areas where I forsee potential issues:</p>
+
+
+
+<ul class="wp-block-list">
+<li>There may be scenarios that cause the game to reach an impasse.</li>
+
+
+
+<li>There are probably some GitHub responses that the supervisor doesn&#8217;t do the right thing with (in fact, I think I just thought of a situation that a malicious player could do if they are a collaborator rather than doing this through forked repos).</li>
+
+
+
+<li>There might be special issues related to pull requests coming in from forks rather than within the repo which I cannot test without making myself a second GitHub account.</li>
+
+
+
+<li>Who can say what the optimal number of players is, at this point?</li>
+</ul>
+
+
+
+<p>So, if you&#8217;re tolerant of some bumps in the process, have a GitHub account (or will make one), and are interested in a Common Lisp battle of pull requests, let me know so we can get a game going.</p><p>The post <a href="http://nklein.com/2026/04/nomic-coding-game/">Nomic Coding Game</a> first appeared on <a href="http://nklein.com">nklein software</a>.</p>

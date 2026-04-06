@@ -1,0 +1,264 @@
+<p>
+<video controls="1" src="https://archive.org/download/yay-emacs-11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/ye11-find-function.mp4" poster="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/2026-04-05-19-25-03.png" type="video/mp4"><track kind="subtitles" label="Captions" src="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/Yay%20Emacs%2011:%20Fix%20find-function%20for%20Emacs%20Lisp%20from%20org-babel%20or%20scratch.vtt" srclang="en" default=""><span>Video not supported. Thumbnail:<br><img src="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/2026-04-05-19-25-03.png" alt="Thumbnail"></span></video>
+</p>
+
+<p>
+<a href="https://archive.org/details/yay-emacs-11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch">Watch on Internet Archive</a>, <a href="https://youtube.com/live/PKkV1Tbev_Y">watch/comment on YouTube</a>, <a href="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/Yay%20Emacs%2011:%20Fix%20find-function%20for%20Emacs%20Lisp%20from%20org-babel%20or%20scratch.vtt">download captions</a>, or <a href="mailto:sacha@sachachua.com">email me</a>
+</p>
+
+
+<p>
+Where can you define an Emacs Lisp function so
+that you can use <code>find-function</code> to jump to it
+again later?
+</p>
+
+<ul class="org-ul">
+<li><b>A: In an indirect buffer</b> from Org Mode source
+block with your favorite eval function like
+<code>eval-defun</code> <label class="hint"><input type="checkbox"> <span class="hint-desc">(hint)</span><span class="hint-text">nope</span></label>
+
+<ul class="org-ul">
+<li><p>
+<code>C-c '</code> (<code>org-edit-special</code>) inside the block; execute the defun with <code>C-M-x</code> (<code>eval-defun</code>), <code>C-x C-e</code> (<code>eval-last-sexp</code>), or <code>eval-buffer</code>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>    (<span class="org-keyword">defun</span> <span class="org-function-name">my-test-1</span> () (message <span class="org-string">"Hello"</span>))
+</code></pre>
+</div>
+</li>
+</ul></li>
+
+<li><p>
+<b>B: In an Org Mode file</b> by executing the block
+with C-c C-c <label class="hint"><input type="checkbox"> <span class="hint-desc">(hint)</span><span class="hint-text">nope</span></label>
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>  (<span class="org-keyword">defun</span> <span class="org-function-name">my-test-2</span> () (message <span class="org-string">"Hello"</span>))
+</code></pre>
+</div>
+</li>
+
+<li><p>
+<b>C: In a .el file</b> <label class="hint"><input type="checkbox"> <span class="hint-desc">(hint)</span><span class="hint-text">yup</span></label>
+</p>
+
+<p>
+<a href="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/test-search-function.el">file:///tmp/test-search-function.el</a> : execute the defun with <code>C-M-x</code> (<code>eval-defun</code>), <code>C-x C-e</code> (<code>eval-last-sexp</code>), or <code>eval-buffer</code>
+</p></li>
+
+<li><p>
+<b>D: In a scratch buffer,</b> other temporary buffer,
+or really any buffer thanks to eval-last-sexp
+<label class="hint"><input type="checkbox"> <span class="hint-desc">(hint)</span><span class="hint-text">nope</span></label>
+</p>
+
+<p>
+<code>(defun my-test-4 () (message "Hello"))</code>
+</p></li>
+</ul>
+
+<p>
+Only option C works - it's gotta be in an .el file for
+<code>find-function</code> to find it. But I love jumping to
+function definitions using <code>find-function</code> or
+<code>lispy-goto-symbol</code> (which is bound to <code>M-.</code> if
+you use <a target="_blank" href="https://melpa.org/#/lispy">lispy</a> and set up <code>lispy-mode</code>) so
+that I can look at or change how something works.
+It can be a little frustrating when I try to jump
+to a definition and it says, "Don't know where
+blahblahblah is defined." I just defined it five
+minutes ago! It's there in one of my other
+buffers, don't make me look for it myself.
+Probably this will get fixed in Emacs core
+someday, but no worries, we can work around it
+today with a little bit of advice.
+</p>
+
+<p>
+I did some digging around in the source code.
+Turns out that <code>symbol-file</code> can't find the
+function definition in the <code>load-history</code> variable
+if you're not in a .el file, so
+<code>find-function-search-for-symbol</code> gets called with
+<code>nil</code> for the library, which causes the error.
+(<a href="https://github.com/emacs-mirror/emacs/blob/master/lisp/subr.el">emacs:subr.el</a>)
+</p>
+
+<p>
+I wrote some advice that searches in any open
+<code>emacs-lisp-mode</code> buffers or in a list of other
+files, like my Emacs configuration.
+This is how I activate it:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> sacha-elisp-find-function-search-extra <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"~/sync/emacs/Sacha.org"</span>))
+(advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">find-function-search-for-symbol</span> <span class="org-builtin">:around</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">sacha-elisp-find-function-search-for-symbol</span>)
+</code></pre>
+</div>
+
+
+<p>
+Now I should be able to jump to all those
+functions wherever they're defined.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(my-test-1)
+(my-test-2)
+(my-test-3)
+(my-test-4)
+</code></pre>
+</div>
+
+
+<p>
+Note that by default, <code>M-.</code> in <code>emacs-lisp-mode</code> uses <code>xref-find-definitions</code>, which seems to really want files. I haven't figured out a good workaround for that yet, but <a target="_blank" href="https://melpa.org/#/lispy">lispy-mode</a> makes <code>M-.</code> work and gives me a bunch of other great shortcuts, so I'd recommend checking that out.
+</p>
+
+<p>
+Here's the source code for the find function thing:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-elisp-find-function-search-extra</span>
+  nil
+  <span class="org-doc">"List of filenames to search for functions."</span>)
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-elisp-find-function-search-for-symbol</span> (fn symbol type library <span class="org-type">&amp;rest</span> _)
+  <span class="org-doc">"Find SYMBOL with TYPE in Emacs Lisp buffers or `</span><span class="org-doc"><span class="org-constant">sacha-find-function-search-extra</span></span><span class="org-doc">'.</span>
+<span class="org-doc">Prioritize buffers that do not have associated files, such as Org Src</span>
+<span class="org-doc">buffers or *scratch*. Note that the fallback search uses \"^([</span><span class="org-doc"><span class="org-negation-char">^</span></span><span class="org-doc"> )]+\" so that</span>
+<span class="org-doc">it isn't confused by preceding forms.</span>
+
+<span class="org-doc">If LIBRARY is specified, fall back to FN.</span>
+
+<span class="org-doc">Activate this with:</span>
+
+<span class="org-doc">(advice-add 'find-function-search-for-symbol</span>
+<span class="org-doc"> :around #'sacha-org-babel-find-function-search-for-symbol-in-dotemacs)"</span>
+  (<span class="org-keyword">if</span> (null library)
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Could not find library; search my-dotemacs-file just in case</span>
+      (<span class="org-keyword">progn</span>
+        (<span class="org-keyword">while</span> (<span class="org-keyword">and</span> (symbolp symbol) (get symbol <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">definition-name</span>))
+          (<span class="org-keyword">setq</span> symbol (get symbol <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">definition-name</span>)))
+        (<span class="org-keyword">catch</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">found</span>
+          (mapc
+           (<span class="org-keyword">lambda</span> (buffer-or-file)
+             (<span class="org-keyword">with-current-buffer</span> (<span class="org-keyword">if</span> (bufferp buffer-or-file)
+                                      buffer-or-file
+                                    (find-file-noselect buffer-or-file))
+               (<span class="org-keyword">let*</span> ((regexp-symbol
+                       (<span class="org-keyword">or</span> (<span class="org-keyword">and</span> (symbolp symbol)
+                                (alist-get type (get symbol <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">find-function-type-alist</span>)))
+                           (alist-get type find-function-regexp-alist)))
+                      (form-matcher-factory
+                       (<span class="org-keyword">and</span> (functionp (cdr-safe regexp-symbol))
+                            (cdr regexp-symbol)))
+                      (regexp-symbol (<span class="org-keyword">if</span> form-matcher-factory
+                                         (car regexp-symbol)
+                                       regexp-symbol))
+
+                      (case-fold-search)
+                      (regexp (<span class="org-keyword">if</span> (functionp regexp-symbol) regexp-symbol
+                                (format (symbol-value regexp-symbol)
+                                        <span class="org-comment-delimiter">;; </span><span class="org-comment">Entry for ` (backquote) macro in loaddefs.el,</span>
+                                        <span class="org-comment-delimiter">;; </span><span class="org-comment">(defalias (quote \`)..., has a \ but</span>
+                                        <span class="org-comment-delimiter">;; </span><span class="org-comment">(symbol-name symbol) doesn't.  Add an</span>
+                                        <span class="org-comment-delimiter">;; </span><span class="org-comment">optional \ to catch this.</span>
+                                        (concat <span class="org-string">"\\\\?"</span>
+                                                (regexp-quote (symbol-name symbol)))))))
+                 (<span class="org-keyword">save-restriction</span>
+                   (widen)
+                   (<span class="org-keyword">with-syntax-table</span> emacs-lisp-mode-syntax-table
+                     (goto-char (point-min))
+                     (<span class="org-keyword">if</span> (<span class="org-keyword">if</span> (functionp regexp)
+                             (funcall regexp symbol)
+                           (<span class="org-keyword">or</span> (re-search-forward regexp nil t)
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">`</span><span class="org-comment"><span class="org-constant">regexp</span></span><span class="org-comment">' matches definitions using known forms like</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">`</span><span class="org-comment"><span class="org-constant">defun</span></span><span class="org-comment">', or `</span><span class="org-comment"><span class="org-constant">defvar</span></span><span class="org-comment">'.  But some functions/variables</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">are defined using special macros (or functions), so</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">if `</span><span class="org-comment"><span class="org-constant">regexp</span></span><span class="org-comment">' can't find the definition, we look for</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">something of the form "(SOMETHING &lt;symbol&gt; ...)".</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">This fails to distinguish function definitions from</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">variable declarations (or even uses thereof), but is</span>
+                               <span class="org-comment-delimiter">;; </span><span class="org-comment">a good pragmatic fallback.</span>
+                               (re-search-forward
+                                (concat <span class="org-string">"^([</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string"> )]+"</span> find-function-space-re <span class="org-string">"['(]?"</span>
+                                        (regexp-quote (symbol-name symbol))
+                                        <span class="org-string">"\\_&gt;"</span>)
+                                nil t)))
+                         (<span class="org-keyword">progn</span>
+                           (beginning-of-line)
+                           (<span class="org-keyword">throw</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">found</span>
+                                   (cons (current-buffer) (point))))
+                       (<span class="org-keyword">when-let*</span> ((find-expanded
+                                    (<span class="org-keyword">when</span> (trusted-content-p)
+                                      (find-function&#45;&#45;search-by-expanding-macros
+                                       (current-buffer) symbol type
+                                       form-matcher-factory))))
+                         (<span class="org-keyword">throw</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">found</span>
+                                 (cons (current-buffer)
+                                       find-expanded)))))))))
+           (delq nil
+                 (append
+                  (sort
+                   (match-buffers <span class="org-highlight-quoted-quote">'</span>(derived-mode . emacs-lisp-mode))
+                   <span class="org-builtin">:key</span> (<span class="org-keyword">lambda</span> (o) (<span class="org-keyword">or</span> (buffer-file-name o) <span class="org-string">""</span>)))
+                  sacha-elisp-find-function-search-extra)))))
+    (funcall fn symbol type library)))
+</code></pre>
+</div>
+
+
+<p>
+I even figured out how to <span title="(ignore (ert &quot;sacha-elisp&#45;&#45;find-function-search-for-symbol&#45;&#45;.*&quot;))">write tests for it</span>:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">ert-deftest</span> <span class="org-function-name">sacha-elisp&#45;&#45;find-function-search-for-symbol&#45;&#45;in-buffer</span> ()
+  (<span class="org-keyword">let</span> ((sym (make-temp-name <span class="org-string">"&#45;&#45;test-fn"</span>))
+        buffer)
+    (<span class="org-keyword">unwind-protect</span>
+        (<span class="org-keyword">with-temp-buffer</span>
+          (emacs-lisp-mode)
+          (insert (format <span class="org-string">";; Comment\n(defun %s () (message \"Hello\"))"</span> sym))
+          (eval-last-sexp nil)
+          (<span class="org-keyword">setq</span> buffer (current-buffer))
+          (<span class="org-keyword">with-temp-buffer</span>
+            (<span class="org-keyword">let</span> ((pos (sacha-elisp-find-function-search-for-symbol nil (intern sym) nil nil)))
+              (<span class="org-keyword">should</span> (equal (car pos) buffer))
+              (<span class="org-keyword">should</span> (equal (cdr pos) 12)))))
+      (fmakunbound (intern sym)))))
+
+(<span class="org-keyword">ert-deftest</span> <span class="org-function-name">sacha-elisp&#45;&#45;find-function-search-for-symbol&#45;&#45;in-file</span> ()
+  (<span class="org-keyword">let*</span> ((sym (make-temp-name <span class="org-string">"&#45;&#45;test-fn"</span>))
+         (temp-file (make-temp-file
+                     <span class="org-string">"test-"</span> nil <span class="org-string">".org"</span>
+                     (format
+                      <span class="org-string">"#+begin_src emacs-lisp\n;; Comment\n(defun %s () (message \"Hello\"))\n#+end_src"</span>
+                      sym)))
+         (sacha-elisp-find-function-search-extra (list temp-file))
+         buffer)
+    (<span class="org-keyword">unwind-protect</span>
+        (<span class="org-keyword">with-temp-buffer</span>
+          (<span class="org-keyword">let</span> ((pos (sacha-elisp-find-function-search-for-symbol nil (intern sym) nil nil)))
+            (<span class="org-keyword">should</span> (equal (buffer-file-name (car pos)) temp-file))
+            (<span class="org-keyword">should</span> (equal (cdr pos) 35))))
+      (delete-file temp-file))))
+</code></pre>
+</div>
+
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#org-mode-org-babel-fix-find-function-when-i-ve-evaluated-something-from-org-babel">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/04/ye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch/index.org">View Org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01KNFTFSC3D0K7XH1JW1XTF6QG" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F04%2Fye11-fix-find-function-for-emacs-lisp-from-org-babel-or-scratch%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

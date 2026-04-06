@@ -1,0 +1,180 @@
+<p>Way back in 2013 I wrote about <a href="/blog/2013/09/05/a-proper-replacement-for-flet/">the deprecation of
+<code class="language-plaintext highlighter-rouge">flet</code></a> and how
+<code class="language-plaintext highlighter-rouge">noflet</code> could fill the gap. Thirteen years later, it’s probably time
+for a proper overview of what replaced <code class="language-plaintext highlighter-rouge">flet</code> in <code class="language-plaintext highlighter-rouge">cl-lib</code> and when to
+use each option.</p>
+
+<p>Emacs Lisp doesn’t have a built-in way to define local functions (the
+way <code class="language-plaintext highlighter-rouge">let</code> defines local variables), so <code class="language-plaintext highlighter-rouge">cl-lib</code> provides several macros
+for this. If you’ve ever been confused by <code class="language-plaintext highlighter-rouge">cl-flet</code>, <code class="language-plaintext highlighter-rouge">cl-labels</code>, and
+<code class="language-plaintext highlighter-rouge">cl-letf</code> – you’re not alone. The naming doesn’t make the distinctions
+obvious, and the documentation is a bit dry. Let’s try to fix that.</p>
+
+<!--more-->
+
+<h2 id="a-bit-of-history">A Bit of History</h2>
+
+<p>The original <code class="language-plaintext highlighter-rouge">flet</code> (from the old <code class="language-plaintext highlighter-rouge">cl</code> package) let you temporarily
+override a function’s definition. It worked by swapping out the
+function’s <code class="language-plaintext highlighter-rouge">symbol-function</code> cell and restoring it when the body
+finished – essentially a dynamic <code class="language-plaintext highlighter-rouge">let</code> for functions:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Old-style flet (deprecated since Emacs 24.3)</span>
+<span class="p">(</span><span class="k">flet</span> <span class="p">((</span><span class="nv">some-function</span> <span class="p">()</span> <span class="s">"overridden result"</span><span class="p">))</span>
+  <span class="c1">;; Everything here, including called functions, sees the override</span>
+  <span class="p">(</span><span class="nv">some-function</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>This was very handy for testing (stubbing impure functions), but it
+conflated two different things into one macro:</p>
+
+<ol>
+  <li>Defining local helper functions (a lexical concept)</li>
+  <li>Temporarily overriding a global function (a dynamic concept)</li>
+</ol>
+
+<p>When <code class="language-plaintext highlighter-rouge">cl</code> was reorganized into <code class="language-plaintext highlighter-rouge">cl-lib</code> in Emacs 24.3, <code class="language-plaintext highlighter-rouge">flet</code> was
+split into separate macros for each use case. This also brought the
+lexical variants in line with Common Lisp semantics, where <code class="language-plaintext highlighter-rouge">flet</code> and
+<code class="language-plaintext highlighter-rouge">labels</code> are lexically scoped.</p>
+
+<h2 id="the-three-replacements">The Three Replacements</h2>
+
+<h3 id="cl-flet-local-functions-no-recursion">cl-flet: Local Functions (No Recursion)</h3>
+
+<p><code class="language-plaintext highlighter-rouge">cl-flet</code> binds function names lexically within its body. The key
+thing to understand is that the binding is only visible in the body
+forms – not inside the function’s own definition, and not to any
+functions you call:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">cl-flet</span> <span class="p">((</span><span class="nv">double</span> <span class="p">(</span><span class="nv">n</span><span class="p">)</span> <span class="p">(</span><span class="nb">*</span> <span class="nv">n</span> <span class="mi">2</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">double</span> <span class="mi">21</span><span class="p">))</span> <span class="c1">; =&gt; 42</span>
+</code></pre></div></div>
+
+<p>Because it’s lexical, <code class="language-plaintext highlighter-rouge">cl-flet</code> cannot override functions seen by
+other code:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-helper</span> <span class="p">()</span> <span class="p">(</span><span class="nb">+</span> <span class="mi">1</span> <span class="mi">2</span><span class="p">))</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-caller</span> <span class="p">()</span> <span class="p">(</span><span class="nv">my-helper</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nv">cl-flet</span> <span class="p">((</span><span class="nv">my-helper</span> <span class="p">()</span> <span class="mi">999</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">my-caller</span><span class="p">))</span>  <span class="c1">; =&gt; 3, NOT 999!</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">my-caller</code> still sees the original <code class="language-plaintext highlighter-rouge">my-helper</code>. This is the
+fundamental difference from the old <code class="language-plaintext highlighter-rouge">flet</code>.</p>
+
+<p>There’s also <code class="language-plaintext highlighter-rouge">cl-flet*</code>, which is to <code class="language-plaintext highlighter-rouge">cl-flet</code> what <code class="language-plaintext highlighter-rouge">let*</code> is to
+<code class="language-plaintext highlighter-rouge">let</code> – each binding can reference the ones before it.</p>
+
+<p>Use <code class="language-plaintext highlighter-rouge">cl-flet</code> when you just need a simple local helper and don’t need
+recursion. Think of it as <code class="language-plaintext highlighter-rouge">let</code> for functions.</p>
+
+<h3 id="cl-labels-local-functions-with-recursion">cl-labels: Local Functions (With Recursion)</h3>
+
+<p><code class="language-plaintext highlighter-rouge">cl-labels</code> is like <code class="language-plaintext highlighter-rouge">cl-flet</code>, but the function <em>is</em> visible inside
+its own body and inside the bodies of sibling bindings. This makes
+recursion and mutual recursion possible:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">cl-labels</span> <span class="p">((</span><span class="nv">factorial</span> <span class="p">(</span><span class="nv">n</span><span class="p">)</span>
+              <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">&lt;=</span> <span class="nv">n</span> <span class="mi">1</span><span class="p">)</span> <span class="mi">1</span>
+                <span class="p">(</span><span class="nb">*</span> <span class="nv">n</span> <span class="p">(</span><span class="nv">factorial</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">n</span> <span class="mi">1</span><span class="p">))))))</span>
+  <span class="p">(</span><span class="nv">factorial</span> <span class="mi">10</span><span class="p">))</span> <span class="c1">; =&gt; 3628800</span>
+</code></pre></div></div>
+
+<p>This would blow up with <code class="language-plaintext highlighter-rouge">cl-flet</code> because <code class="language-plaintext highlighter-rouge">factorial</code> wouldn’t be
+defined inside its own body.</p>
+
+<p>Mutual recursion works too:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">cl-labels</span> <span class="p">((</span><span class="nv">my-even-p</span> <span class="p">(</span><span class="nv">n</span><span class="p">)</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">=</span> <span class="nv">n</span> <span class="mi">0</span><span class="p">)</span> <span class="no">t</span> <span class="p">(</span><span class="nv">my-odd-p</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">n</span> <span class="mi">1</span><span class="p">))))</span>
+            <span class="p">(</span><span class="nv">my-odd-p</span> <span class="p">(</span><span class="nv">n</span><span class="p">)</span> <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">=</span> <span class="nv">n</span> <span class="mi">0</span><span class="p">)</span> <span class="no">nil</span> <span class="p">(</span><span class="nv">my-even-p</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">n</span> <span class="mi">1</span><span class="p">)))))</span>
+  <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">my-even-p</span> <span class="mi">4</span><span class="p">)</span> <span class="p">(</span><span class="nv">my-odd-p</span> <span class="mi">3</span><span class="p">)))</span> <span class="c1">; =&gt; (t t)</span>
+</code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">cl-labels</code> when your local functions need to call themselves or
+each other.</p>
+
+<p><strong>Note:</strong> <code class="language-plaintext highlighter-rouge">cl-labels</code> requires <code class="language-plaintext highlighter-rouge">lexical-binding</code> to be <code class="language-plaintext highlighter-rouge">t</code> in the file (which
+it really should be for any modern Emacs Lisp code).</p>
+
+<h3 id="cl-letf-temporary-global-override">cl-letf: Temporary Global Override</h3>
+
+<p>This is the one that actually replaces the old <code class="language-plaintext highlighter-rouge">flet</code>’s dynamic
+behavior. <code class="language-plaintext highlighter-rouge">cl-letf</code> temporarily rebinds a generalized place (anything
+<code class="language-plaintext highlighter-rouge">setf</code> can handle) and restores it on exit:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-helper</span> <span class="p">()</span> <span class="p">(</span><span class="nb">+</span> <span class="mi">1</span> <span class="mi">2</span><span class="p">))</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-caller</span> <span class="p">()</span> <span class="p">(</span><span class="nv">my-helper</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nv">cl-letf</span> <span class="p">(((</span><span class="nb">symbol-function</span> <span class="ss">'my-helper</span><span class="p">)</span> <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span> <span class="mi">999</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">my-caller</span><span class="p">))</span>  <span class="c1">; =&gt; 999</span>
+</code></pre></div></div>
+
+<p>Now <code class="language-plaintext highlighter-rouge">my-caller</code> <em>does</em> see the override, because <code class="language-plaintext highlighter-rouge">cl-letf</code> modifies the
+actual <code class="language-plaintext highlighter-rouge">symbol-function</code> cell of <code class="language-plaintext highlighter-rouge">my-helper</code> – just like the old <code class="language-plaintext highlighter-rouge">flet</code> did.
+The original definition is restored when the body exits, even on error.</p>
+
+<p>The syntax is a bit verbose because <code class="language-plaintext highlighter-rouge">cl-letf</code> isn’t specific to
+functions – it’s a general-purpose temporary binding macro for any
+<code class="language-plaintext highlighter-rouge">setf</code>-able place. <code class="language-plaintext highlighter-rouge">(symbol-function 'name)</code> is a “generalized
+variable” that refers to the function stored in a symbol’s function
+cell – it’s just one of many places <code class="language-plaintext highlighter-rouge">cl-letf</code> can bind. For example:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; Temporarily silence messages</span>
+<span class="p">(</span><span class="nv">cl-letf</span> <span class="p">(((</span><span class="nb">symbol-function</span> <span class="ss">'message</span><span class="p">)</span> <span class="nf">#'</span><span class="k">ignore</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">do-something-noisy</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Use <code class="language-plaintext highlighter-rouge">cl-letf</code> when you need the old dynamic <code class="language-plaintext highlighter-rouge">flet</code> behavior – typically
+for testing (stubbing functions) or temporarily suppressing/redirecting
+behavior.</p>
+
+<h2 id="quick-reference">Quick Reference</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th> </th>
+      <th>Scope</th>
+      <th>Recursion</th>
+      <th>Overrides global?</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">cl-flet</code></td>
+      <td>Lexical</td>
+      <td>No</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">cl-labels</code></td>
+      <td>Lexical</td>
+      <td>Yes</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">cl-letf</code></td>
+      <td>Dynamic</td>
+      <td>N/A</td>
+      <td>Yes</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>In other words:</p>
+
+<ul>
+  <li>Default to <code class="language-plaintext highlighter-rouge">cl-flet</code> for local helpers. It’s the simplest and
+most predictable.</li>
+  <li>Reach for <code class="language-plaintext highlighter-rouge">cl-labels</code> when you need recursion or mutual
+recursion in local functions.</li>
+  <li>Use <code class="language-plaintext highlighter-rouge">cl-letf</code> only when you genuinely need dynamic override –
+mainly in tests. Modifying global function cells is a sharp tool and
+it’s not thread-safe, so keep it contained.</li>
+</ul>
+
+<hr />
+
+<p>That’s all I have for you today. Keep hacking!</p>

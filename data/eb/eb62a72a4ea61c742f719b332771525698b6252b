@@ -1,0 +1,291 @@
+<blockquote>
+  <p>Good artists borrow, great artists steal.</p>
+
+  <p>– Pablo Picasso</p>
+</blockquote>
+
+<p>After spending the past couple of weeks updating
+<a href="https://github.com/bbatsov/prelude">Prelude</a> and my <a href="https://github.com/bbatsov/emacs.d">personal Emacs
+config</a>, I figured it wouldn’t
+hurt to see what the competition has been up to. I hadn’t done a
+proper survey of other people’s configs in years, and the Emacs
+landscape has changed quite a bit since the last time I looked.</p>
+
+<p>So I went through <a href="https://github.com/doomemacs/doomemacs">Doom Emacs</a>,
+<a href="https://github.com/purcell/emacs.d">Purcell’s emacs.d</a>, <a href="https://github.com/seagle0128/.emacs.d">Centaur
+Emacs</a>, <a href="https://github.com/protesilaos/dotfiles">Prot’s
+dotfiles</a>, and a handful of
+others. Here are some of the most interesting things I found – settings
+and tricks that I either didn’t know about or had forgotten about
+entirely.</p>
+
+<!--more-->
+
+<h2 id="performance-tweaks">Performance Tweaks</h2>
+
+<h3 id="disable-bidirectional-text-scanning-doom-emacs">Disable Bidirectional Text Scanning (Doom Emacs)</h3>
+
+<p>If you don’t edit right-to-left languages (Arabic, Hebrew, etc.),
+Emacs is doing a bunch of work on every redisplay cycle for nothing.
+These settings tell Emacs to assume left-to-right text everywhere and
+skip the bidirectional parenthesis algorithm:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setq-default</span> <span class="nv">bidi-display-reordering</span> <span class="ss">'left-to-right</span>
+              <span class="nv">bidi-paragraph-direction</span> <span class="ss">'left-to-right</span><span class="p">)</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">bidi-inhibit-bpa</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The difference is hard to measure in small buffers, but in large files
+(think multi-thousand-line JSON or log files) it adds up. Doom enables
+this unconditionally and I’ve never seen anyone complain about it.</p>
+
+<h3 id="skip-fontification-during-input-doom-emacs">Skip Fontification During Input (Doom Emacs)</h3>
+
+<p>Emacs normally fontifies (syntax-highlights) text even while you’re
+actively typing. This can cause micro-stutters, especially in
+tree-sitter modes or large buffers. One setting fixes it:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">redisplay-skip-fontification-on-input</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Emacs will defer fontification until you stop typing. In practice you
+never notice the delay – the highlighting catches up instantly – but
+scrolling and typing may feel smoother.</p>
+
+<h3 id="increase-process-output-buffer-for-lsp-doom-purcell-centaur">Increase Process Output Buffer for LSP (Doom, Purcell, Centaur)</h3>
+
+<p>The default <code class="language-plaintext highlighter-rouge">read-process-output-max</code> is 64KB, which is still quite
+conservative. Modern LSP servers like <code class="language-plaintext highlighter-rouge">rust-analyzer</code> or <code class="language-plaintext highlighter-rouge">clangd</code> routinely
+send multi-megabyte responses. Bumping this reduces the number of
+read calls Emacs has to make:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">read-process-output-max</span> <span class="p">(</span><span class="nb">*</span> <span class="mi">4</span> <span class="mi">1024</span> <span class="mi">1024</span><span class="p">))</span> <span class="c1">; 4MB</span>
+</code></pre></div></div>
+
+<p>If you use eglot (or lsp-mode), this is basically free performance.
+Three of the most popular configs out there all set it – that should
+tell you something.</p>
+
+<p><strong>Note:</strong> I’m really surprised I didn’t discover this one sooner.
+Probably that’s because I rarely work on big projects these days.</p>
+
+<h3 id="dont-render-cursors-in-non-focused-windows-doom-emacs">Don’t Render Cursors in Non-Focused Windows (Doom Emacs)</h3>
+
+<p>If you have several windows visible, Emacs draws a cursor in each of
+them – even the ones you’re not working in. It also highlights
+selections in non-focused windows. Two settings to stop that:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">setq-default</span> <span class="nv">cursor-in-non-selected-windows</span> <span class="no">nil</span><span class="p">)</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">highlight-nonselected-windows</span> <span class="no">nil</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This is mostly a visual preference (I don’t mind the phantom cursors
+but I know some people find them distracting), but it also reduces rendering work.</p>
+
+<p>All four of these performance settings are safe to add unconditionally
+– they have no downsides for the vast majority of users.</p>
+
+<h2 id="kill-ring-emacss-clipboard-history-and-clipboard">Kill Ring (Emacs’s Clipboard History) and Clipboard</h2>
+
+<h3 id="save-the-clipboard-before-killing-purcell-prot-centaur">Save the Clipboard Before Killing (Purcell, Prot, Centaur)</h3>
+
+<p>Here’s a scenario: you copy a URL from your browser, switch to Emacs,
+kill a line with <code class="language-plaintext highlighter-rouge">C-k</code>, and then try to yank the URL you copied earlier with <code class="language-plaintext highlighter-rouge">C-y</code>.
+Gone. The kill replaced it on the clipboard.</p>
+
+<p>This setting makes Emacs save the existing clipboard content into the
+kill ring <em>before</em> overwriting it:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">save-interprogram-paste-before-kill</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Now <code class="language-plaintext highlighter-rouge">C-y</code> gets the kill, and <code class="language-plaintext highlighter-rouge">M-y</code> gets you back to the URL. Such a
+small thing, but it eliminates a genuinely annoying problem.</p>
+
+<h3 id="no-duplicates-in-the-kill-ring-doom-prot">No Duplicates in the Kill Ring (Doom, Prot)</h3>
+
+<p>Kill the same line three times and you get three identical entries in
+the kill ring, wasting slots. This deduplicates them:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">kill-do-not-save-duplicates</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<h3 id="persist-the-kill-ring-across-sessions-doom-prot">Persist the Kill Ring Across Sessions (Doom, Prot)</h3>
+
+<p>Most configs that use <code class="language-plaintext highlighter-rouge">savehist-mode</code> only persist search rings. But
+<code class="language-plaintext highlighter-rouge">savehist</code> can save any variable – including the kill ring. Add it
+and you get clipboard history that survives restarts:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">savehist-additional-variables</span>
+      <span class="o">'</span><span class="p">(</span><span class="nv">search-ring</span> <span class="nv">regexp-search-ring</span> <span class="nv">kill-ring</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>One thing to watch out for: the kill ring can accumulate text
+properties (fonts, overlays, etc.) that bloat the savehist file. Doom
+strips them before saving:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'savehist-save-hook</span>
+          <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+            <span class="p">(</span><span class="k">setq</span> <span class="nv">kill-ring</span>
+                  <span class="p">(</span><span class="nb">mapcar</span> <span class="nf">#'</span><span class="nv">substring-no-properties</span>
+                          <span class="p">(</span><span class="nv">cl-remove-if-not</span> <span class="nf">#'</span><span class="nb">stringp</span> <span class="nv">kill-ring</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>Probably overkill for most people, but it’s good to be aware of if
+your savehist file starts growing suspiciously large.</p>
+
+<h2 id="editing">Editing</h2>
+
+<h3 id="auto-chmod-scripts-on-save-multiple-configs">Auto-Chmod Scripts on Save (Multiple Configs)</h3>
+
+<p>If you create a file that starts with <code class="language-plaintext highlighter-rouge">#!</code> (a shebang line), it should
+be executable. But you always forget to <code class="language-plaintext highlighter-rouge">chmod +x</code> it, run the script,
+get “Permission denied”, curse, go back, chmod, try again. This hook
+does it automatically:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'after-save-hook</span>
+          <span class="nf">#'</span><span class="nv">executable-make-buffer-file-executable-if-script-p</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Save a file with a shebang, and Emacs <code class="language-plaintext highlighter-rouge">chmod +x</code>es it for you. One
+of those things that should arguably be a default.</p>
+
+<p><strong>Note:</strong> Okay, I have to admit I’ve always known this one, but seeing
+it in so many configs made me want to include it here.</p>
+
+<h3 id="sane-syntax-in-re-builder-multiple-configs">Sane Syntax in re-builder (Multiple Configs)</h3>
+
+<p><code class="language-plaintext highlighter-rouge">re-builder</code> (<code class="language-plaintext highlighter-rouge">M-x re-builder</code>) is an interactive tool for developing
+regexps – you type a pattern and see matches highlighted live in the
+target buffer. The problem is the default syntax: <code class="language-plaintext highlighter-rouge">read</code>. In read
+syntax, you have to double-escape everything, so a word boundary is
+<code class="language-plaintext highlighter-rouge">\\&lt;</code> and a group is <code class="language-plaintext highlighter-rouge">\\(...\\)</code>. It’s the regexp equivalent of
+trying to type with oven mitts on.</p>
+
+<p>Switch to string syntax and things look like normal Emacs regexps:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">reb-re-syntax</span> <span class="ss">'string</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Now <code class="language-plaintext highlighter-rouge">\&lt;</code> is <code class="language-plaintext highlighter-rouge">\&lt;</code> and <code class="language-plaintext highlighter-rouge">\(foo\)</code> is <code class="language-plaintext highlighter-rouge">\(foo\)</code>. Much less painful.</p>
+
+<p><strong>See also:</strong> If you want live feedback on the regexp <em>structure</em> as
+you type it (color-coded groups, character classes, etc.), check out
+<a href="/blog/2026/04/06/minibuffer-regexp-mode/">minibuffer-regexp-mode</a>
+– a new built-in mode in Emacs 30.</p>
+
+<h3 id="prevent-ffap-from-pinging-hostnames-centaur-emacs">Prevent ffap from Pinging Hostnames (Centaur Emacs)</h3>
+
+<p>Ever had Emacs freeze for a few seconds when you ran
+<code class="language-plaintext highlighter-rouge">find-file-at-point</code> (or a command that uses it internally)? If the
+text under point looks like a hostname – say, <code class="language-plaintext highlighter-rouge">something.com</code> in a
+comment – ffap tries to ping it to check if it’s reachable. On a
+slow or firewalled network, that’s a multi-second hang.</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">ffap-machine-p-known</span> <span class="ss">'reject</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This tells ffap to never try network lookups. If you actually want to
+open a remote file, you can type the path explicitly.</p>
+
+<h2 id="windows">Windows</h2>
+
+<h3 id="proportional-window-resizing-purcell-prot">Proportional Window Resizing (Purcell, Prot)</h3>
+
+<p>When you split a window with <code class="language-plaintext highlighter-rouge">C-x 2</code> or <code class="language-plaintext highlighter-rouge">C-x 3</code>, Emacs halves the
+current window. If you already have a multi-window layout, this can
+produce one awkwardly tiny window while others stay large. With this
+setting, <em>all</em> windows in the frame resize proportionally:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">window-combination-resize</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>The difference is subtle but makes multi-window layouts feel more
+balanced without manual resizing.</p>
+
+<h3 id="reversible-c-x-1-purcell">Reversible <code class="language-plaintext highlighter-rouge">C-x 1</code> (Purcell)</h3>
+
+<p><code class="language-plaintext highlighter-rouge">C-x 1</code> (<code class="language-plaintext highlighter-rouge">delete-other-windows</code>) is the nuclear option – it nukes
+your entire window layout to focus on one buffer. Then you spend the
+next minute recreating the layout you just destroyed.</p>
+
+<p>With <code class="language-plaintext highlighter-rouge">winner-mode</code> and a small wrapper, you can make <code class="language-plaintext highlighter-rouge">C-x 1</code>
+toggle: press it once to go single-window, press it again to restore
+the previous layout:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">winner-mode</span> <span class="mi">+1</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">toggle-delete-other-windows</span> <span class="p">()</span>
+  <span class="s">"Delete other windows in frame if any, or restore previous window config."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">and</span> <span class="nv">winner-mode</span>
+           <span class="p">(</span><span class="nb">equal</span> <span class="p">(</span><span class="nv">selected-window</span><span class="p">)</span> <span class="p">(</span><span class="nv">next-window</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">winner-undo</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">delete-other-windows</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nv">global-set-key</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"C-x 1"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">toggle-delete-other-windows</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Just drop this into your config as-is – it’s self-contained. This is
+one of those tricks where once you have it, you can’t imagine going
+back.</p>
+
+<h2 id="misc">Misc</h2>
+
+<h3 id="faster-mark-popping-purcell-centaur-prot">Faster Mark Popping (Purcell, Centaur, Prot)</h3>
+
+<p>The mark ring is one of Emacs’s most underused navigation features.
+Every time you jump somewhere – <code class="language-plaintext highlighter-rouge">isearch</code>, <code class="language-plaintext highlighter-rouge">M-&lt;</code>, <code class="language-plaintext highlighter-rouge">M-&gt;</code>,
+<code class="language-plaintext highlighter-rouge">goto-line</code>, <code class="language-plaintext highlighter-rouge">imenu</code>, and many more – Emacs pushes your old position
+onto the mark ring. <code class="language-plaintext highlighter-rouge">C-u C-SPC</code> pops it, jumping you back.</p>
+
+<p>The annoyance: you need <code class="language-plaintext highlighter-rouge">C-u C-SPC</code> every single time. With this
+setting, after the first <code class="language-plaintext highlighter-rouge">C-u C-SPC</code> you can keep pressing just
+<code class="language-plaintext highlighter-rouge">C-SPC</code> to continue popping:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">set-mark-command-repeat-pop</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>This pairs beautifully with <code class="language-plaintext highlighter-rouge">repeat-mode</code> if you have it enabled
+(and you should – see <a href="/blog/2026/04/04/repeat-mode/">my earlier post on repeat-mode</a>).</p>
+
+<h3 id="recenter-after-save-place-restores-position-doom-emacs">Recenter After save-place Restores Position (Doom Emacs)</h3>
+
+<p><code class="language-plaintext highlighter-rouge">save-place-mode</code> is great – it remembers where you were in each file
+and jumps back there when you reopen it. The problem is that it can
+leave your cursor on the last visible line of the window, which is
+disorienting. This advice recenters the view after the jump:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">advice-add</span> <span class="ss">'save-place-find-file-hook</span> <span class="ss">:after</span>
+            <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="k">&amp;rest</span> <span class="nv">_</span><span class="p">)</span>
+              <span class="p">(</span><span class="nb">when</span> <span class="nv">buffer-file-name</span> <span class="p">(</span><span class="nb">ignore-errors</span> <span class="p">(</span><span class="nv">recenter</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>Small thing, but it makes reopening files feel much more natural.</p>
+
+<h3 id="auto-select-help-windows-prot">Auto-Select Help Windows (Prot)</h3>
+
+<p>When you press <code class="language-plaintext highlighter-rouge">C-h f</code> or <code class="language-plaintext highlighter-rouge">C-h v</code>, Emacs opens the help buffer but
+leaves your cursor in the original window. You almost always want to
+read the help right away, so you end up pressing <code class="language-plaintext highlighter-rouge">C-x o</code> every
+single time. This fixes it:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">help-window-select</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><strong>Bonus:</strong> Many of the configs I surveyed also use built-in lazy
+isearch counting (showing “match N of M” in the minibuffer) instead
+of third-party packages like <code class="language-plaintext highlighter-rouge">anzu</code>. I recently wrote about that in
+<a href="/blog/2026/03/15/isearch-lazy-count/">a dedicated post</a>.</p>
+
+<hr />
+
+<p>The funny thing about all of this is how much overlap there is between
+configs. Half of these tricks appear in three or four of the configs I
+surveyed. At this point I’m convinced there are about 200 essential
+Emacs settings floating around in the collective unconscious, and
+every serious config independently converges on roughly the same
+subset. Picasso was right – we all steal from each other, and the
+kill ring makes it embarrassingly easy. <code class="language-plaintext highlighter-rouge">M-w</code> and move on.</p>
+
+<p>That’s all I have for you today! Keep hacking!</p>

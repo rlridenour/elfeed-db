@@ -1,0 +1,180 @@
+<p><em>I wrote on this <a href="https://www.darkchestnut.com/2016/free-your-project-from-dependency-hell/" title="Older Qlot workflow.">topic</a> before but the landscape has changed
+a lot since then.</em></p>
+
+<p><em>Skip to the new Qlot <a href="https://www.darkchestnut.com/feed.xml#workflow" title="The new Qlot workflow.">workflow</a>.</em></p>
+
+<p>When you work on projects that become even slightly complex it is a matter of
+time until you run into problems where the specific version of a particular
+library becomes important. This happens in most, if not all, programming
+languages.</p>
+
+<p>In the Common Lisp environment Quicklisp has become the de facto standard for
+loading libraries, including fetching and loading their dependencies. Quicklisp
+distributes libraries in "distributions" which are point-in-time snapshots of
+all the known and working libraries at the time of distribution creation.</p>
+
+<p>An advantage of this approach is that you are guaranteed that all libraries
+available in the distribution can be loaded with any of the others. Some
+disadvantages are that 1) if a library was included in an older distribution
+but no longer loads cleanly, it gets removed from the distribution, and 2)
+libraries are only added or updated when a new distribution is cut.</p>
+
+<p>Though libraries can be put in <code class="language-plaintext highlighter-rouge">~/quicklisp/local-projects/</code> in order to
+<a href="https://www.darkchestnut.com/2016/quicklisp-load-personal-projects-from-arbitrary-locations/" title="Systems don't need to be in a single place.">supplement or override</a> those in the distribution, Quicklisp
+does not provide any mechanism for pinning the state of
+<code class="language-plaintext highlighter-rouge">~/quicklisp/local-projects/</code>.</p>
+
+<p>Some Quicklisp attributes:</p>
+
+<ol>
+  <li>All libraries in a distribution can be loaded with any of the others. Those
+that no longer do are removed from the distribution.</li>
+  <li>Libraries are only added or updated at distribution cutting time.</li>
+  <li>You specify a single distribution version, not individual library
+versions. The distribution is used globally, across all projects and
+across all lisp implementations.</li>
+  <li>Libraries can be loaded from <code class="language-plaintext highlighter-rouge">~/quicklisp/local-projects/</code>. Anything
+there will override the version in the distribution.</li>
+  <li>Nothing about the <code class="language-plaintext highlighter-rouge">~/quicklisp/local-projects/</code> content can be
+specified using Quicklisp. It needs to be managed outside of Quicklisp.</li>
+  <li>Libraries are loaded from the current Quicklisp distribution. There is no
+way to specify which distribution version a particular project must use.</li>
+  <li>Quicklisp can create a bundle of all the loaded systems that can be
+committed with the project code and used from there rather than the
+distribution, i.e. vendoring.</li>
+  <li>The source code for libraries included in a distribution are stored in a
+dedicated location for Quicklisp, they are not read from the original source
+repo.</li>
+</ol>
+
+<p>Depending on your situation these attributes may be positive, negative or
+irrelevant.</p>
+
+<p>There are projects like Ultralisp that have different philosophies regarding
+the distribution content but they still depend on Quicklisp for all other
+aspects. Thus they share most of the above attributes.</p>
+
+<p>Since my <a href="https://www.darkchestnut.com/2016/free-your-project-from-dependency-hell/" title="Older Qlot workflow.">previous post</a> on this topic much has changed in the
+library version arena. There are now many projects that address different
+aspects of the above list; the topic of vendoring has gained momentum; and Qlot
+has changed a lot, to the extent that some code samples in older posts no
+longer work.</p>
+
+<p>Vendoring is the idea that all the libraries your project depend on are
+actually part of your project and as such should be committed as part of the
+project code. Both Quicklisp and Qlot support this with <code class="language-plaintext highlighter-rouge">QL:bundle</code> and
+<code class="language-plaintext highlighter-rouge">QLOT:bundle</code>, and the <a href="https://github.com/fosskers/vend" title="Vend tool for vendoring dependencies.">Vend</a> tool is entirely focused on vendoring.</p>
+
+<p>The significant changes in Qlot broke my development workflow. Since I now had
+to spend time fixing this it was a good opportunity to evaluate some of the
+other library versioning tools. The issues that made me hesitant to adapt to
+the new Qlot without considering other options are:</p>
+
+<ul>
+  <li>Roswell: Qlot pushes hard for using Roswell. That ads Roswell as another
+intermediary and dependency in an already complex process.</li>
+  <li>The Qlot documentation is heavily biased towards using it as an external tool
+rather than through the REPL. Previously I used Qlot from the REPL and wanted
+to continue doing so if possible.</li>
+  <li>Qlot is developed on SBCL which means that any issues in CCL take longer to
+be discovered and fixed. As I mainly use CCL it is something to keep in mind.</li>
+  <li>The documentation proposes that lisp be started as a subprocess of Qlot,
+e.g. <code class="language-plaintext highlighter-rouge">$ qlot exec ros emacs</code> or <code class="language-plaintext highlighter-rouge">$ qlot exec ccl</code>. This is to ensure that the
+lisp is properly configured to use the project local Quicklisp. This is a
+brittle solution because the standard lisp REPL is then no longer
+sufficient. When you forget to start lisp this way Quicklisp will load the
+wrong libraries without any indication, potentially causing subtle bugs which
+are normally absent.</li>
+  <li>Using <code class="language-plaintext highlighter-rouge">QLOT:quickload</code> rather than <code class="language-plaintext highlighter-rouge">QL:quickload</code> always bugged me for
+similar reasons. It is a non-standard way to do a standard thing. Forgetting
+to do it is easy and then you have the wrong libraries loaded.</li>
+</ul>
+
+<p>I evaluated many of the other version management tools and came to the
+conclusion that Qlot is the closest to what I wanted and I set off trying to
+find a workflow that will adhere to my requirements listed here:</p>
+
+<ul>
+  <li>Does not involve Roswell</li>
+  <li>Works with CCL</li>
+  <li>Works inside the REPL of a lisp loaded without any funny requirements</li>
+  <li>Gives me 100% certainty that the correct versions of all libraries are
+loaded, without having to interrogate <code class="language-plaintext highlighter-rouge">(asdf:system-relative-pathname)</code> for
+each.</li>
+</ul>
+
+<p>After some fiddling with Qlot I learned that:</p>
+
+<ol>
+  <li>Qlot installs a complete and independent Quicklisp inside your project
+directory. This Quicklisp has no dependence, relation or knowledge about the
+global Quicklisp.</li>
+  <li><code class="language-plaintext highlighter-rouge">$ qlot exec ccl</code> mostly arranges things such that Quicklisp is loaded from
+the project local installation. If you can arrange for that to happen
+without using Qlot then you can use start your lisp normally.</li>
+  <li>When the project local Quicklisp is loaded it doesn't know about the global
+or any other project local Quicklisps. This gives the 100% certainty of
+where libraries were loaded from.</li>
+  <li>When the project local Quicklisp is loaded you use it exactly like you would
+the global one. That is, <code class="language-plaintext highlighter-rouge">QL:quickload</code> and not <code class="language-plaintext highlighter-rouge">QLOT:quickload</code>, nor do you
+use any other Qlot wrappers.</li>
+  <li>Qlot does not need to be present in your lisp image at all.</li>
+  <li>
+    <p>Loading Qlot inside you current REPL doesn't work well because:</p>
+
+    <ol>
+      <li>The Qlot REPL API is still in development.</li>
+      <li>Doing this loads Qlot from the global Quicklisp instead of the project
+local one. Distribution version mismatches between the two Quicklisps
+could trigger issues with Qlot itself. It also voids the certainty of
+library location.</li>
+    </ol>
+  </li>
+  <li>Having Qlot as a standalone executable outside of your lisp image puts it on
+the same plane as other tools used for development such as make or git. It
+then doesn't matter which implementation it prefers because it doesn't
+affect your choices.</li>
+  <li>Qlot has gained the ability to bundle libraries in case you want to go the
+vendoring route.</li>
+  <li>Roswell is not needed for any of the above.</li>
+</ol>
+
+<h2 id="workflow">New workflow</h2>
+
+<p>Combining my requirements and my new understanding of Qlot, I modified my
+workflow for pinning library versions to be:</p>
+
+<ol>
+  <li>Qlot executable must be available in your path.</li>
+  <li>Specify the distribution and library versions in <code class="language-plaintext highlighter-rouge">qlfile</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">qlot install</code> at the CLI.</li>
+  <li>Load lisp without executing init scripts, e.g. <code class="language-plaintext highlighter-rouge">ccl -n</code>.</li>
+  <li>
+    <p>Load Quicklisp from the project local installation.</p>
+
+    <p><code class="language-plaintext highlighter-rouge">(load "PROJECT-PATH/.qlot/setup.lisp")</code></p>
+  </li>
+  <li>
+    <p>Use Quicklisp as before.</p>
+
+    <p><code class="language-plaintext highlighter-rouge">(ql:quickload :alexandria)</code></p>
+  </li>
+</ol>
+
+<p>If you would like to vendor your libraries then:</p>
+
+<ol>
+  <li>Specify the distribution and library versions in <code class="language-plaintext highlighter-rouge">qlfile</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">qlot install</code></li>
+  <li><code class="language-plaintext highlighter-rouge">qlot bundle</code></li>
+  <li><code class="language-plaintext highlighter-rouge">git commit</code></li>
+  <li><code class="language-plaintext highlighter-rouge">ccl</code></li>
+  <li><code class="language-plaintext highlighter-rouge">(load PROJECT-PATH/.bundle-libs/setup.lisp)</code></li>
+</ol>
+
+<h3 id="qlot-tasks">Qlot tasks</h3>
+
+<p>All Qlot related tasks such as initialising a project, installing libraries,
+upgrading libraries, etc must be performed in the CLI using the Qlot
+executable. These happen relatively infrequently and inside the REPL Qlot does
+not feature.</p>

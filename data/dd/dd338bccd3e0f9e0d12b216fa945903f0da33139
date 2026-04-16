@@ -1,0 +1,166 @@
+<p>Or, second system.</p>
+<!-- more-->
+
+<p>A while ago, I decided that I&rsquo;d like to test my intuition that Lisp (specifically implementations of Common Lisp) was not, in fact, bad at floating-point code and that the ease of designing languages in Lisp could make traditional Fortran-style array-bashing numerical code pretty pleasant to write.</p>
+
+<p>I used an intentionally naÃ¯ve numerical solution to a gravitating many-body system as a benchmark, so I could easily compare Lisp &amp; C versions. The brief result is that the Lisp code is a little slower than C, but not much: Lisp is not, in fact, slow. Who knew?</p>
+
+<p>The point here though, is that I wanted to dress up the array-bashing code so it looked a lot more structured. To do this I wrote a macro which hid what was in fact an array of (for instance) double floats behind a bunch of syntax which made it look like an array of structures. That macro took a couple of hours.</p>
+
+<p>This was fine and pretty simple, but it only dealt with a single type for each conceptual array of objects, there was no inheritance and it was restricted in various other ways. In particular it really was syntactic sugar on a vector: there was no distinct implementational type at all. So I thought well, I could make it more general and nicer.</p>
+
+<p>Big mistake.</p>
+
+<h2 id="the-second-system">The second system</h2>
+
+<p>Here is an example of what I wanted to be able to do (this is in fact the current syntax):</p>
+
+<pre class="brush: lisp"><code>(define-soa-class example ()
+  ((x :array t :type double-float)
+   (y :array t :type double-float)
+   (p :array t :type double-float :group pq)
+   (q :array t :type double-float :group pq)
+   (r :array t :type fixnum)
+   (s)))</code></pre>
+
+<p>This defines a class, instances of which have five array slots and one scalar slot. Of the array slots:</p>
+
+<ul>
+ <li><code>x</code> and <code>y</code> share an array and will be neighbouring elements;</li>
+ <li><code>p</code> and <code>q</code> share a different array, because the group option says they must not share with <code>x</code> and <code>y</code>;</li>
+ <li><code>r</code> will be in its own array, unless the upgraded element type of <code>fixnum</code> is the same as that of <code>double-float</code>;</li>
+ <li><code>s</code> is just a slot.</li></ul>
+
+<p>The implementation will tell you this:</p>
+
+<pre class="brush: lisp"><code>&gt; (describe (make-instance 'example :dimensions '(2 2)))
+#&lt;example 8010059EEB&gt; is an example
+[...]
+dimensions      (2 2)
+total-size      4
+rank            2
+tick            1
+its class example has a valid layout
+it has 3 arrays:
+ index 0, element type double-float, 2 slots
+ index 1, element type (signed-byte 64), 1 slot
+ index 2, element type double-float, 2 slots
+it has 5 array slots:
+ name x, index 0 offset 0
+ name y, index 0 offset 1
+ name r, index 1 offset 0
+ name p, index 2 offset 0
+ name q, index 2 offset 1</code></pre>
+
+<p>This is already too complicated: the ability to control sharing via groups is almost certainly never going to be useful: it&rsquo;s only even there because I thought of it quite early on and never removed it.</p>
+
+<p>The class definition macro then needs to arrange life so that enough information is available so that a macro can be written which turns indexed slot access into indexed array access of the underlying arrays which are secretly stored in instances, inserting declarations to make this as fast as possible: anything slower than explicit array access is not acceptable. This might (and does) look like this, for example:</p>
+
+<pre class="brush: lisp"><code>(with-array-slots (x y) (thing example)
+  (for* ((i ...) (j ...))
+    (setf (x i j) (- (y i j) (y j i)))))</code></pre>
+
+<p>As you can see from this, the resulting objects should be allowed to have rank other than 1. Inheritance should also work, including for array slots. Redefinition should be supported and obsolete macro expansions and instances at least detected.</p>
+
+<p>In other words there are <em>exactly two things</em> I should have aimed at achieving: the ability to define fields of various types and have them grouped into (generally fewer) underlying arrays, and an implementational type to hold these things. Everything else was just unnecessary baggage which made the implementation much more complicated than it needed to be.</p>
+
+<p>I had not finished making mistakes. The system needs to store some metadata about how slots map onto the underlying arrays, element types and so on, so the macro can use this to compile efficient code. There are two obvious ways to do this: use the property list of the class name, or subclass <code>standard-class</code> and store the metadata in the class. The first approach is simple, portable, has clear semantics, but it&rsquo;s &lsquo;hacky&rsquo;; the second is more complicated, not portable, has unclear semantics<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-1-definition" name="2026-04-16-structures-of-arrays-footnote-1-return">1</a></sup>, but it&rsquo;s The Right Thing<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-2-definition" name="2026-04-16-structures-of-arrays-footnote-2-return">2</a></sup>. Another wrong decision I made without even trying.</p>
+
+<p>The only thing that saved me was that the nature of software is that you can only make a finite number of bad decisions in a finite time.</p>
+
+<h2 id="more-bad-decisions">More bad decisions</h2>
+
+<p>I was not done. Early on, I thought that, well, I could make this whole thing be a shim around <code>defstruct</code>: single inheritance was more than enough, and obviously I could store metadata on the property list of the type name as described above. And there&rsquo;s no nausea with multiple accessors or any of that nonsense.</p>
+
+<p>But, somehow, I found writing a thing which would process the <code>(structure-name ...)</code> case of <code>defstruct</code> too painful, so I decided to go for the shim-around-<code>defclass</code> version instead. I even have a partly-complete version of the <code>defstruct</code>y code which I abandoned. Another mistake.</p>
+
+<p>I also decided that The Right Thing was to have the system support objects of rank 0. That constrains the underlying array representation (it needs to use rank \(n+1\) arrays for an object of rank \(n\)) in a way which I thought for a long time might limit performance.</p>
+
+<h2 id="things-i-already-knew">Things I already knew</h2>
+
+<p>At any point during the implementation of this I could have told you that it was too general and the implementation was going to be too complicated for no real gain. I don&rsquo;t know why I made so many bad choices.</p>
+
+<p>The whole process took weeks and I nearly just gave up several times.</p>
+
+<h2 id="the-light-at-the-end-of-the-tunnel">The light at the end of the tunnel</h2>
+
+<p>Or: all-up testing.</p>
+
+<p>Eventually, I had a thing I thought might work. The macro syntax was a bit ugly (that macro still exists, with a different name) but it seemed to work. But since the whole purpose of the thing was performance, that needed to be checked. I wasn&rsquo;t optimistic.</p>
+
+<p>What I did was to write a version of my naÃ¯ve gravitational many-body system using the new code, based closely on the previous one. The function that updates the state of the particles looks like this:</p>
+
+<pre class="brush: lisp"><code>(defun/quickly step-pvs (source destination from below dt G &amp;aux
+                                (n (particle-vector-length source)))
+  ;; Step a source particle vector into a destination one.
+  ;;
+  ;; Operation count:
+  ;;  3
+  ;;  + (below - from) * (n - 1) * (3 + 8 + 9)
+  ;;  + (below - from) * (12 + 6)
+  ;;  = (below - from) * (20 * (n - 1) + 18) + 3
+  (declare (type particle-vector source destination)
+           (type vector-index from)
+           (type vector-dimension below)
+           (type fpv dt G)
+           (type vector-dimension n))
+  (when (eq source destination)
+    (error "botch"))
+  (let*/fpv ((Gdt (* G dt))
+             (Gdt^2/2 (/ (* Gdt dt) (fpv 2.0))))
+    (binding-array-slots (((source particle-vector :check nil :rank 1 :suffix _s)
+                           m x y z vx vy vz)
+                          ((destination particle-vector :check nil :rank 1 :suffix _d)
+                           m x y z vx vy vz))
+      (for ((i1 (in-naturals :initially from :bound below :fixnum t)))
+        (let/fpv ((ax/G zero.fpv)
+                  (ay/G zero.fpv)
+                  (az/G zero.fpv)
+                  (x1 (x_s i1))
+                  (y1 (y_s i1))
+                  (z1 (z_s i1))
+                  (vx1 (vx_s i1))
+                  (vy1 (vy_s i1))
+                  (vz1 (vz_s i1)))
+          (for ((i2 (in-naturals n t)))
+            (when (= i1 i2) (next))
+            (let/fpv ((m2 (m_s i2))
+                      (x2 (x_s i2))
+                      (y2 (y_s i2))
+                      (z2 (z_s i2)))
+              (let/fpv ((rx (- x2 x1))
+                        (ry (- y2 y1))
+                        (rz (- z2 z1)))
+                (let/fpv ((r^3 (let* ((r^2 (+ (* rx rx) (* ry ry) (* rz rz)))
+                                      (r (sqrt r^2)))
+                                 (declare (type nonnegative-fpv r^2 r))
+                                 (* r r r))))
+                  (incf ax/G (/ (* rx m2) r^3))
+                  (incf ay/G (/ (* ry m2) r^3))
+                  (incf az/G (/ (* rz m2) r^3))))))
+          (setf (x_d i1) (+ x1 (* vx1 dt) (* ax/G Gdt^2/2))
+                (y_d i1) (+ y1 (* vy1 dt) (* ay/G Gdt^2/2))
+                (z_d i1) (+ z1 (* vz1 dt) (* az/G Gdt^2/2)))
+          (setf (vx_d i1) (+ vx1 (* ax/G Gdt))
+                (vy_d i1) (+ vy1 (* ay/G Gdt))
+                (vz_d i1) (+ vz1 (* az/G Gdt)))))))
+  destination)</code></pre>
+
+<p>And it not only worked, the performance was very close to the previous version, straight out of the gate. The syntax is not as nice as that of the initial, quick-and-dirty version, but it is much more general, so I think that&rsquo;s worth it on the whole.</p>
+
+<p>There have been problems since then: in particular the dependency on when classes get defined. It will never be as portable as I&rsquo;d like because of the unnecessary MOP dependencies<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-3-definition" name="2026-04-16-structures-of-arrays-footnote-3-return">3</a></sup>, but it is usable and quick<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-4-definition" name="2026-04-16-structures-of-arrays-footnote-4-return">4</a></sup>.</p>
+
+<p>Was it worth it? May be, but it should have been simpler.</p>
+
+<hr />
+
+<div class="footnotes">
+ <ol>
+  <li class="footnote-definition" id="2026-04-16-structures-of-arrays-footnote-1-definition">
+   <p>When exactly do classes get defined? Right.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-1-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2026-04-16-structures-of-arrays-footnote-2-definition">
+   <p>Nothing that uses the AMOP MOP is ever The Right Thing, because the whole thing was designed by people who were extremely smart, but still not as smart as they needed to be and thought they were. It&rsquo;s unclear if any MOP for CLOS can ever be satisfactory, in part because CLOS itself suffers from the same smart-but-not-smart-enough problem to a large extent not helped by bring dropped wholesale into CL at the last minute: by the time CL was standardised people had written large systems in it, but almost nobody had written anything significant using CLOS, let alone the AMOP MOP.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-2-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2026-04-16-structures-of-arrays-footnote-3-definition">
+   <p>A mistake I somehow managed to avoid was using the whole slot-definition mechanism the MOP wants you to use.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-3-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2026-04-16-structures-of-arrays-footnote-4-definition">
+   <p>I will make it available at some point.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-04-16-structures-of-arrays-footnote-4-return">&#8617;</a></p></li></ol></div>

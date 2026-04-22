@@ -1,0 +1,136 @@
+<p>
+I want to make it easier to livestream without worrying about leaking private information. Tradeoff: slower conversations with the chat, but more peace of mind.
+</p>
+
+<p>
+I think I've sorted out a setup involving two instances of <a href="https://obsproject.com/">OBS</a>, with
+the source instance sending the stream with a delay to the restreaming
+instance that will then send it on to YouTube. This allows me to cut
+the feed from the source instance to the restreaming instance in case
+something happens.
+</p>
+
+<p>
+The first OBS is the one that has my screen capture, webcam, audio, etc. Here's what I needed to do to change it.
+</p>
+
+<ol class="org-ol">
+<li>Create a new profile or rename the profile to "Source".</li>
+<li>Name the collection of streams "Source" as well.</li>
+<li>In <b>Settings - Hotkeys</b>, define a keyboard shortcut for <b>Stop streaming (discard delay)</b>. I use <code>Super + F12</code>.</li>
+<li>In <b>Settings - Stream</b>:
+<ol class="org-ol">
+<li><b>Service</b>: Custom</li>
+<li><b>Destination - Server</b>: <code>srt://127.0.0.1:9000?mode=caller</code></li>
+</ol></li>
+<li>In <b>Settings - Advanced</b>:
+<ol class="org-ol">
+<li>Check <b>Stream Delay - Enable.</b></li>
+<li>Set the duration. Let's try 10 seconds.</li>
+<li>Uncheck <b>Preserve cutoff point (increase delay) when reconnecting.</b></li>
+</ol></li>
+</ol>
+
+<p>
+Then I can launch that one with:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-sh"><code>obs &#45;&#45;profile <span class="org-string">"Source"</span> &#45;&#45;collection <span class="org-string">"Source"</span> &#45;&#45;launch-filter &#45;&#45;multi
+</code></pre>
+</div>
+
+
+
+<p>
+The second OBS will restream the output of the first OBS to YouTube.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-sh"><code>obs &#45;&#45;profile <span class="org-string">"Restream"</span> &#45;&#45;collection <span class="org-string">"Restream"</span> &#45;&#45;launch-filter &#45;&#45;multi
+</code></pre>
+</div>
+
+
+<p>
+I used the Profile menu to create a new profile called "Restream" and the Scene Collection menu to create a new collection called "Restream." I set up the scene as follows:
+</p>
+
+<ol class="org-ol">
+<li>Create a text source with the backup message.</li>
+<li>Create a media source.
+<ol class="org-ol">
+<li>Uncheck <b>Local File</b>.</li>
+<li>Uncheck <b>Restart playback when source becomes active</b>.</li>
+<li><b>Input</b>: srt://127.0.0.1:9000?mode=listener</li>
+</ol></li>
+</ol>
+
+<p>
+In the first OBS (the source), click on <b>Start streaming.</b> After some delay, the stream will appear, and I can move or resize it.
+</p>
+
+<p>
+I was a little thrown off by the fact that my audio bars didn't initially show up in the mixer in the restreamer, but both recording and streaming seem to include the audio.
+</p>
+
+<p>
+To stop the stream, I can switch to OBS, click on <b>Stop streaming</b>, and <b>(important!)</b> choose <b>Stop streaming (discard delay)</b>. The OBS window might be buried under other things on my second screen, though, and that's too many clicks and mouse movements. The keyboard shortcut <code>Super + F12</code> we just set up should be handy, but I might not remember that, so let's add some scripts. <a href="https://github.com/obsproject/obs-websocket/issues/1309">The OBS websocket protocol doesn't support discarding the delay buffer</a> yet, but I'm on Linux and X11, so I can use xdotool to simulate a keypress. Here I select the window matching the profile name I set up previously.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-sh"><code><span class="org-variable-name">WID</span>=$(xdotool search &#45;&#45;name <span class="org-string">"OBS .* - Profile: Source"</span>)
+xdotool key &#45;&#45;window $<span class="org-variable-name">WID</span> super+F12
+</code></pre>
+</div>
+
+
+<p>
+I can <code>org-capture</code> the timestamp of the panic so that I can doublecheck the recording.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code><span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-obs-panic</span> ()
+  <span class="org-doc">"Stop streaming and discard the delay buffer.</span>
+<span class="org-doc">This uses a hotkey I defined in OBS."</span>
+  (<span class="org-keyword">interactive</span>)
+  (shell-command <span class="org-string">"~/bin/panic"</span>)
+  (org-capture-string <span class="org-string">"Panicked"</span> <span class="org-string">"l"</span>)
+  (org-capture-finalize))
+</code></pre>
+</div>
+
+
+<p>
+I always have Emacs around, and if it's not my main app, I have an autokey shortcut that maps <code>super + 1</code> to focus on Emacs. Then I can <code>M-x panic</code> and Emacs completion will take care of finding the right function.
+</p>
+
+<p>
+Let's add a menu item for even more panic assistance:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">easy-menu-define</span> sacha-stream-menu global-map
+  <span class="org-doc">"Menu for streaming-related commands."</span>
+  <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"Stream"</span>
+    [<span class="org-string">"&#128721; PANIC"</span> sacha-obs-panic]
+    [<span class="org-string">"Start streaming"</span> obs-websocket-start-streaming]
+    [<span class="org-string">"Start recording"</span> obs-websocket-start-recording]
+    [<span class="org-string">"Stop streaming"</span> obs-websocket-stop-streaming]
+    [<span class="org-string">"Stop recording"</span> obs-websocket-stop-recording]))
+</code></pre>
+</div>
+
+
+<p>
+Let's see if I remember to use it!
+</p>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#streaming">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/04/obs-a-dump-button-for-dropping-the-last-10-seconds-before-it-hits-the-stream/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F04%2Fobs-a-dump-button-for-dropping-the-last-10-seconds-before-it-hits-the-stream%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

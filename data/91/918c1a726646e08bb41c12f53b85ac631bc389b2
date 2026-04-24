@@ -1,0 +1,290 @@
+
+        <link rel="stylesheet" type="text/css" href="https://rahuljuliato.com/rss-styles.css">
+        <p>I have used the <code>proced.el</code> package in Emacs on Linux for years. It is
+my go-to "ps as a buffer". A nicely formatted, colorized listing of
+every running process, with auto-update and tree view. I use it far
+more often than <code>top</code>, <code>htop</code>, or similar tools.</p>
+<p>But on macOS I noticed something important is missing: no CPU or
+memory columns.</p>
+<p>The reason lives in Emacs itself, since <code>proced.el</code> does asks the C
+function <code>system_process_attributes</code> in <code>src/sysdep.c</code> for a plist of
+fields per PID. On Linux that function pulls <code>%CPU</code> and <code>%Mem</code> out of
+<code>/proc/*/stat</code>. On the BSDs and Windows it computes them from the
+native APIs. On Darwin, though, the implementation simply never fills
+in <code>pcpu</code> or <code>pmem</code>, even though it already calls <code>proc_pidinfo</code> for
+things like <code>vsize</code> and <code>rss</code>. The data is reachable through
+<code>proc_pid_rusage</code>, <code>task_info</code>, and <code>sysctl hw.memsize</code>, it just is
+not wired up. So <code>proced</code> has nothing to show in those columns. Maybe
+a patch idea for later?</p>
+<p>I wanted to figure it out if I could somehow fix it on the lisp side
+of the equation. It turned out to be a fun Emacs Lisp exercise.</p>
+<p>I am sharing this walk-through for <strong>educational purposes</strong>. The point
+of breaking the code down step by step is to show how the pieces fit
+together. Reading and dissecting code like this is one of the best
+ways to learn Emacs Lisp. And even if the Darwin gap eventually gets
+patched upstream, this exercise still stands on its own if you want to
+understand a bit more about how Emacs works under the hood.</p>
+<hr>
+<h2>What we aim to achieve</h2>
+<p>After this setup, our <code>proced</code> buffer on macOS looks a bit more like
+it does on Linux:</p>
+<div class="remark-highlight"><pre class="language-unknown"><code class="language-unknown"> PID    %CPU    %Mem    COMMAND
+ 712     2.4     1.3    /Applications/Safari...
+ 438     0.8     0.9    /usr/bin/emacs...
+  86     0.3     0.2    /Applications/Podman Desktop...</code></pre></div>
+<p>The <code>%CPU</code> and <code>%Mem</code> values come from running <code>ps</code> on the system,
+cached and refreshed every couple of seconds, all from within Emacs.
+Let me walk you through how it works.</p>
+<hr>
+<h2>My base configuration</h2>
+<p>This is my normal <code>proced</code> setup, nothing unusual at all:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">use-package</span> proced
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:defer</span> <span class="token boolean">t</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">proced-enable-color-flag</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-tree-flag</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-auto-update-flag</span> <span class="token quoted-symbol variable symbol">'visible</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-auto-update-interval</span> <span class="token number">1</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-descent</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-format</span> <span class="token quoted-symbol variable symbol">'medium</span><span class="token punctuation">)</span> <span class="token comment">;; can be changed interactively with `F'</span>
+  <span class="token punctuation">(</span><span class="token car">proced-filter</span> <span class="token quoted-symbol variable symbol">'user</span><span class="token punctuation">)</span><span class="token punctuation">)</span>  <span class="token comment">;; can be changed interactively with `f'</span>
+</code></pre></div>
+<p>This gives me an auto-updating, colorized, tree-view <code>proced</code>. On
+Linux it shows <code>%CPU</code> and <code>%Mem</code> out of the box. On macOS the same
+config is identical, except for those missing columns.</p>
+<hr>
+<h2>The core idea</h2>
+<p>The approach is straightforward, and I like keeping a clear mental
+model of what is going on:</p>
+<p>→ Run <code>ps -axo pid=,%cpu=,%mem=</code> to grab the process info.</p>
+<p>→ Parse the output and stash it in a hash table keyed by PID.</p>
+<p>→ Hook two new attributes (<code>pcpu</code> and <code>pmem</code>) into
+<code>proced-custom-attributes</code>.</p>
+<p>→ Periodically refresh the hash table with a timer.</p>
+<p>It is a bit unorthodox, pulling data externally and caching it by
+hand, but it works. And it teaches you a lot about Emacs along the
+way, which is our main goal.</p>
+<hr>
+<h3>Running <code>ps</code> in the background</h3>
+<p>We use <code>make-process</code> to run <code>ps</code> asynchronously. The key pieces:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">eq</span> system-type <span class="token quoted-symbol variable symbol">'darwin</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">emacs-solo--proced-ps-cache</span></span> <span class="token punctuation">(</span><span class="token car">make-hash-table</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">emacs-solo--proced-ps-timer</span></span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+
+  <span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-ps-do-refresh</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+	<span class="token punctuation">(</span><span class="token car">make-process</span>
+	 <span class="token lisp-property property">:name</span> <span class="token string">"proced-ps-refresh"</span>
+	 <span class="token lisp-property property">:buffer</span> <span class="token punctuation">(</span><span class="token car">generate-new-buffer</span> <span class="token string">" *proced-ps-temp*"</span><span class="token punctuation">)</span>
+	 <span class="token lisp-property property">:command</span> <span class="token punctuation">'(</span><span class="token string">"env"</span> <span class="token string">"LC_ALL=C"</span> <span class="token string">"ps"</span> <span class="token string">"-axo"</span> <span class="token string">"pid=,%cpu=,%mem="</span><span class="token punctuation">)</span>
+	 <span class="token lisp-property property">:noquery</span> <span class="token boolean">t</span>
+	 <span class="token lisp-property property">:sentinel</span>
+	 <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">proc</span> <span class="token argument variable">_event</span></span><span class="token punctuation">)</span></span>
+	   <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">eq</span> <span class="token punctuation">(</span><span class="token car">process-status</span> proc<span class="token punctuation">)</span> <span class="token quoted-symbol variable symbol">'exit</span><span class="token punctuation">)</span>
+		 <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">new-cache</span> <span class="token punctuation">(</span><span class="token car">make-hash-table</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token car">with-current-buffer</span> <span class="token punctuation">(</span><span class="token car">process-buffer</span> proc<span class="token punctuation">)</span>
+			 <span class="token punctuation">(</span><span class="token car">goto-char</span> <span class="token punctuation">(</span><span class="token car">point-min</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			 <span class="token punctuation">(</span><span class="token keyword">while</span> <span class="token punctuation">(</span><span class="token keyword">not</span> <span class="token punctuation">(</span><span class="token car">eobp</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">looking-at</span>
+					  <span class="token punctuation">(</span><span class="token car">rx</span> <span class="token punctuation">(</span><span class="token car">*</span> blank<span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> digit<span class="token punctuation">)</span><span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">+</span> blank<span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">any</span> digit ?.<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">+</span> blank<span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">any</span> digit ?.<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				 <span class="token punctuation">(</span><span class="token car">puthash</span>
+				  <span class="token punctuation">(</span><span class="token car">string-to-number</span> <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">1</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				  <span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token punctuation">(</span><span class="token car">string-to-number</span>
+						 <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">2</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+						<span class="token punctuation">(</span><span class="token car">string-to-number</span>
+						 <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">3</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				  new-cache<span class="token punctuation">)</span><span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token car">forward-line</span> <span class="token number">1</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token car">kill-buffer</span> <span class="token punctuation">(</span><span class="token car">process-buffer</span> proc<span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-cache new-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token comment">;; ...</span>
+</code></pre></div>
+<p>A few things to note:</p>
+<p>→ <strong><code>LC_ALL=C</code></strong> can affect how <code>ps</code> formats its output. Forcing a <code>C</code>
+locale keeps it predictable.</p>
+<p>→ <strong>The <code>sentinel</code></strong> only runs once the process has exited. That is
+when we know the buffer contains the full output.</p>
+<p>→ <strong>The <code>rx</code> regex</strong> I use extended regex for cleaner matching.  There
+are three groups: PID (integer), <code>%CPU</code> (float), <code>%Mem</code>
+(float). They land in <code>match-string 1</code>, <code>2</code>, and <code>3</code>.</p>
+<p>→ <strong><code>puthash</code></strong> stores a cons of CPU and memory as the value,
+keyed by the PID.</p>
+<p>Why a hash table? Because the <code>proced</code> package calls our custom
+attributes per process. A hash lookup by PID is fast, even when you
+have hundreds of processes listed.</p>
+<hr>
+<h3>Simple lookup helpers</h3>
+<p>Trivial functions that pull from the cached hash. These are what
+<code>proced-custom-attributes</code> will call:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-pcpu</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">pid</span></span><span class="token punctuation">)</span></span>
+  <span class="token punctuation">(</span><span class="token car">car</span> <span class="token punctuation">(</span><span class="token car">gethash</span> pid emacs-solo--proced-ps-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-pmem</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">pid</span></span><span class="token punctuation">)</span></span>
+  <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">gethash</span> pid emacs-solo--proced-ps-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>That is all they do. <code>car</code> for CPU, <code>cdr</code> for memory.</p>
+<hr>
+<h3>Hooking it into <code>proced</code></h3>
+<p>This is the part that connected everything. The <code>proced</code> package
+supports <em>custom attributes</em>, which are lambdas that receive each
+row's data and return an additional property:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">add-hook</span> <span class="token quoted-symbol variable symbol">'proced-mode-hook</span>
+			<span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+			  <span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-timer
+					<span class="token punctuation">(</span><span class="token car">run-with-timer</span> <span class="token number">0</span> <span class="token number">2</span>
+									<span class="token quoted-symbol variable symbol">#'emacs-solo--proced-ps-do-refresh</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">setq</span> proced-custom-attributes
+	  <span class="token punctuation">(</span><span class="token car">list</span>
+	   <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">attrs</span></span><span class="token punctuation">)</span></span>
+		 <span class="token punctuation">(</span><span class="token car">when-let*</span>
+			 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">pid</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> <span class="token quoted-symbol variable symbol">'pid</span> attrs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			  <span class="token punctuation">(</span><span class="token car">v</span> <span class="token punctuation">(</span><span class="token car">emacs-solo--proced-pcpu</span> pid<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token quoted-symbol variable symbol">'pcpu</span> v<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	   <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">attrs</span></span><span class="token punctuation">)</span></span>
+		 <span class="token punctuation">(</span><span class="token car">when-let*</span>
+			 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">pid</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> <span class="token quoted-symbol variable symbol">'pid</span> attrs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			  <span class="token punctuation">(</span><span class="token car">v</span> <span class="token punctuation">(</span><span class="token car">emacs-solo--proced-pmem</span> pid<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token quoted-symbol variable symbol">'pmem</span> v<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Two lambdas, one for CPU and one for memory. Each one:</p>
+<ol>
+<li>Extracts the PID from <code>proced</code>'s attribute list (<code>attrs</code>).</li>
+<li>Looks up the value in our hash table.</li>
+<li>Returns a cons <code>(keyword . value)</code>. That is what tells <code>proced</code>
+to add the column.</li>
+</ol>
+<p>The timer runs every 2 seconds to keep the data fresh. I put the
+timer start inside <code>proced-mode-hook</code> because it only makes sense
+when the <code>proced</code> buffer is present.</p>
+<hr>
+<h3>Cleaning up</h3>
+<p>We do not want to leave timers dangling when the buffer is killed:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">add-hook</span> <span class="token quoted-symbol variable symbol">'kill-buffer-hook</span>
+			<span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+			  <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token keyword">and</span> <span class="token punctuation">(</span><span class="token car">derived-mode-p</span> <span class="token quoted-symbol variable symbol">'proced-mode</span><span class="token punctuation">)</span>
+						 <span class="token punctuation">(</span><span class="token car">timerp</span> emacs-solo--proced-ps-timer<span class="token punctuation">)</span><span class="token punctuation">)</span>
+				<span class="token punctuation">(</span><span class="token car">cancel-timer</span> emacs-solo--proced-ps-timer<span class="token punctuation">)</span>
+				<span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-timer <span class="token boolean">nil</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Simple. Cancel the timer when the <code>proced</code> buffer is killed. The guard
+checks that the buffer is in <code>proced-mode</code> and that the variable holds
+an actual timer to avoid errors on first load.</p>
+<hr>
+<h2>What we've covered</h2>
+<p>Summarizing:</p>
+<p>→ <strong><code>proced-custom-attributes</code></strong> is a list of lambdas called per row.
+Each lambda receives the row's attributes and returns
+<code>(keyword . value)</code>, which then becomes a new column.</p>
+<p>→ <strong><code>proced-mode-hook</code></strong> is the right place to hook things that need
+to start when the <code>proced</code> buffer appears.</p>
+<p>→ <strong><code>run-with-timer</code></strong> is the standard way to do periodic updates in
+Emacs. Unlike <code>run-at-time</code>, it returns a timer object you can
+cancel.</p>
+<p>→ <strong><code>make-process</code></strong> with a <code>sentinel</code> is the idiomatic way to
+handle async external commands. The sentinel fires when the
+process state changes. In our case we only care about the <code>'exit</code>
+state.</p>
+<hr>
+<h2>The complete code</h2>
+<p>Here is the full block you can copy and paste directly:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">use-package</span> proced
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:defer</span> <span class="token boolean">t</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">proced-enable-color-flag</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-tree-flag</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-auto-update-flag</span> <span class="token quoted-symbol variable symbol">'visible</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-auto-update-interval</span> <span class="token number">1</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-descent</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">proced-format</span> <span class="token quoted-symbol variable symbol">'medium</span><span class="token punctuation">)</span> <span class="token comment">;; can be changed interactively with `F'</span>
+  <span class="token punctuation">(</span><span class="token car">proced-filter</span> <span class="token quoted-symbol variable symbol">'user</span><span class="token punctuation">)</span>   <span class="token comment">;; can be changed interactively with `f'</span>
+  <span class="token lisp-property property">:config</span>
+  <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">eq</span> system-type <span class="token quoted-symbol variable symbol">'darwin</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">emacs-solo--proced-ps-cache</span></span> <span class="token punctuation">(</span><span class="token car">make-hash-table</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">emacs-solo--proced-ps-timer</span></span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-ps-do-refresh</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+	  <span class="token punctuation">(</span><span class="token car">make-process</span>
+	   <span class="token lisp-property property">:name</span> <span class="token string">"proced-ps-refresh"</span>
+	   <span class="token lisp-property property">:buffer</span> <span class="token punctuation">(</span><span class="token car">generate-new-buffer</span> <span class="token string">" *proced-ps-temp*"</span><span class="token punctuation">)</span>
+	   <span class="token lisp-property property">:command</span> <span class="token punctuation">'(</span><span class="token string">"env"</span> <span class="token string">"LC_ALL=C"</span> <span class="token string">"ps"</span> <span class="token string">"-axo"</span>
+				  <span class="token string">"pid=,%cpu=,%mem="</span><span class="token punctuation">)</span>
+	   <span class="token lisp-property property">:noquery</span> <span class="token boolean">t</span>
+	   <span class="token lisp-property property">:sentinel</span>
+	   <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">proc</span> <span class="token argument variable">_event</span></span><span class="token punctuation">)</span></span>
+		 <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">eq</span> <span class="token punctuation">(</span><span class="token car">process-status</span> proc<span class="token punctuation">)</span> <span class="token quoted-symbol variable symbol">'exit</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">new-cache</span> <span class="token punctuation">(</span><span class="token car">make-hash-table</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			 <span class="token punctuation">(</span><span class="token car">with-current-buffer</span> <span class="token punctuation">(</span><span class="token car">process-buffer</span> proc<span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token car">goto-char</span> <span class="token punctuation">(</span><span class="token car">point-min</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token keyword">while</span> <span class="token punctuation">(</span><span class="token keyword">not</span> <span class="token punctuation">(</span><span class="token car">eobp</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				 <span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token car">looking-at</span>
+						<span class="token punctuation">(</span><span class="token car">rx</span> <span class="token punctuation">(</span><span class="token car">*</span> blank<span class="token punctuation">)</span>
+							<span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> digit<span class="token punctuation">)</span><span class="token punctuation">)</span>
+							<span class="token punctuation">(</span><span class="token car">+</span> blank<span class="token punctuation">)</span>
+							<span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">any</span> digit ?.<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+							<span class="token punctuation">(</span><span class="token car">+</span> blank<span class="token punctuation">)</span>
+							<span class="token punctuation">(</span><span class="token car">group</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">any</span> digit ?.<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				   <span class="token punctuation">(</span><span class="token car">puthash</span>
+					<span class="token punctuation">(</span><span class="token car">string-to-number</span> <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">1</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+					<span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token punctuation">(</span><span class="token car">string-to-number</span>
+						   <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">2</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+						  <span class="token punctuation">(</span><span class="token car">string-to-number</span>
+						   <span class="token punctuation">(</span><span class="token car">match-string</span> <span class="token number">3</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+					new-cache<span class="token punctuation">)</span><span class="token punctuation">)</span>
+				 <span class="token punctuation">(</span><span class="token car">forward-line</span> <span class="token number">1</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			 <span class="token punctuation">(</span><span class="token car">kill-buffer</span> <span class="token punctuation">(</span><span class="token car">process-buffer</span> proc<span class="token punctuation">)</span><span class="token punctuation">)</span>
+			 <span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-cache new-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-pcpu</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">pid</span></span><span class="token punctuation">)</span></span>
+	  <span class="token punctuation">(</span><span class="token car">car</span> <span class="token punctuation">(</span><span class="token car">gethash</span> pid emacs-solo--proced-ps-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">emacs-solo--proced-pmem</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">pid</span></span><span class="token punctuation">)</span></span>
+	  <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">gethash</span> pid emacs-solo--proced-ps-cache<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token car">add-hook</span> <span class="token quoted-symbol variable symbol">'proced-mode-hook</span>
+			  <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+				<span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-timer
+					  <span class="token punctuation">(</span><span class="token car">run-with-timer</span> <span class="token number">0</span> <span class="token number">2</span>
+									  <span class="token quoted-symbol variable symbol">#'emacs-solo--proced-ps-do-refresh</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token car">add-hook</span> <span class="token quoted-symbol variable symbol">'kill-buffer-hook</span>
+			  <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+				<span class="token punctuation">(</span><span class="token keyword">when</span> <span class="token punctuation">(</span><span class="token keyword">and</span> <span class="token punctuation">(</span><span class="token car">derived-mode-p</span> <span class="token quoted-symbol variable symbol">'proced-mode</span><span class="token punctuation">)</span>
+						   <span class="token punctuation">(</span><span class="token car">timerp</span> emacs-solo--proced-ps-timer<span class="token punctuation">)</span><span class="token punctuation">)</span>
+				  <span class="token punctuation">(</span><span class="token car">cancel-timer</span> emacs-solo--proced-ps-timer<span class="token punctuation">)</span>
+				  <span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo--proced-ps-timer <span class="token boolean">nil</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+	<span class="token punctuation">(</span><span class="token keyword">setq</span> proced-custom-attributes
+		  <span class="token punctuation">(</span><span class="token car">list</span>
+		   <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">attrs</span></span><span class="token punctuation">)</span></span>
+			 <span class="token punctuation">(</span><span class="token car">when-let*</span>
+				 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">pid</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> <span class="token quoted-symbol variable symbol">'pid</span> attrs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				  <span class="token punctuation">(</span><span class="token car">v</span> <span class="token punctuation">(</span><span class="token car">emacs-solo--proced-pcpu</span> pid<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token quoted-symbol variable symbol">'pcpu</span> v<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">attrs</span></span><span class="token punctuation">)</span></span>
+			 <span class="token punctuation">(</span><span class="token car">when-let*</span>
+				 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">pid</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> <span class="token quoted-symbol variable symbol">'pid</span> attrs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+				  <span class="token punctuation">(</span><span class="token car">v</span> <span class="token punctuation">(</span><span class="token car">emacs-solo--proced-pmem</span> pid<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			   <span class="token punctuation">(</span><span class="token keyword">cons</span> <span class="token quoted-symbol variable symbol">'pmem</span> v<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>If you end up doing something similar, I would love to hear about it.
+What kind of hacks have you built in Emacs?</p>
+<hr>
+<h2>Other Resources</h2>
+<p>If you'd like to learn more about <code>proced.el</code>:</p>
+<p>→ <a href="https://laurencewarne.github.io/emacs/programming/2022/12/26/exploring-proced.html">https://laurencewarne.github.io/emacs/programming/2022/12/26/exploring-proced.html</a></p>
+<p>→ <a href="https://www.masteringemacs.org/article/displaying-interacting-processes-proced">https://www.masteringemacs.org/article/displaying-interacting-processes-proced</a></p>
+<p>→ <a href="https://github.com/emacs-mirror/emacs/blob/master/lisp/proced.el">https://github.com/emacs-mirror/emacs/blob/master/lisp/proced.el</a></p>
+<p>If you'd like to learn more about <code>emacs lisp</code>:</p>
+<p>→ <a href="https://www.gnu.org/software/emacs/manual/elisp.html">https://www.gnu.org/software/emacs/manual/elisp.html</a></p>
+<p>→ <a href="https://protesilaos.com/emacs/emacs-lisp-elements">https://protesilaos.com/emacs/emacs-lisp-elements</a></p>
+<hr>
+<h3>Edit</h3>
+<p><strong>2026-04-24:</strong> Removed useless call to <code>proced-toggle-auto-update</code> as
+it is not needed. As noted by <code>the_cecep</code> on reddit.</p>

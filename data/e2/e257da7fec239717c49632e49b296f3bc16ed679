@@ -1,0 +1,168 @@
+<p>BUG: Emacs is losing the default font information from init.el when
+adding a68-mode or alda-mode. It’s difficult to figure out what
+exactly is happening. It <em>seems</em> related to having a large number of
+packages installed, but perhaps its just the right combination of
+combination of packages.</p>
+
+<p>DISCLAIMER: I strongly suspect there are better ways to do some of
+this, but what I have seems to be working.</p>
+
+<p>I’m trying to write a test that starts with default font information
+specifying a font. It probably doesn’t matter <em>what</em> font, as the end
+result of the bug is this getting replaced with</p>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="nv">custom-set-faces</span>
+ <span class="c1">;; custom-set-faces was added by Custom.</span>
+ <span class="c1">;; If you edit it by hand, you could mess it up, so be careful.</span>
+ <span class="c1">;; Your init file should contain only one such instance.</span>
+ <span class="c1">;; If there is more than one, they won't work right.</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">default</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:background</span> <span class="no">nil</span><span class="p">)))))</span></code></pre></figure>
+
+<p>So to check whether the bug has happened, I can either</p>
+
+<ul>
+  <li>search for the pattern above, OR</li>
+  <li>search for the specific font I’ve specified</li>
+</ul>
+
+<p>I will search for the specific font, as I’d like to detect <em>any</em>
+changes, not just the change above.</p>
+
+<p>The bug seems to happen when installing a68-mode or alda-mode just
+after starting Emacs. So, this test will be a loop of many Emacs
+invocations.</p>
+
+<ul>
+  <li>Start Emacs</li>
+  <li>Install a68-mode</li>
+  <li>Check whether the default font information has been destroyed
+    <ul>
+      <li>If so, note the last package installed.</li>
+      <li>If not
+        <ul>
+          <li>delete (uninstall) a68-mode</li>
+          <li>install a random package</li>
+          <li>write the package name just installed to a file</li>
+          <li>exit Emacs</li>
+          <li>Run the test again</li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h1 id="initel">init.el</h1>
+
+<p>init.el contains the font information. I also initially added a
+“blank” <code class="language-plaintext highlighter-rouge">custom-set-variables</code> call, but over time I
+discovered that sometimes <code class="language-plaintext highlighter-rouge">restart-emacs</code> would see a
+process talking to ELPA and ask if I wanted to kill the process. No, I
+don’t want to be asked that. I found <code class="language-plaintext highlighter-rouge">confirm-kill-processes</code>
+was the variable I could set to <code class="language-plaintext highlighter-rouge">nil</code> to avoid getting
+asked. So into the set of of custom variables it went.</p>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="c1">;;; -*- lexical-binding: t -*-</span>
+<span class="p">(</span><span class="nv">custom-set-variables</span>
+ <span class="c1">;; custom-set-variables was added by Custom.</span>
+ <span class="c1">;; If you edit it by hand, you could mess it up, so be careful.</span>
+ <span class="c1">;; Your init file should contain only one such instance.</span>
+ <span class="c1">;; If there is more than one, they won't work right.</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">confirm-kill-processes</span> <span class="no">nil</span><span class="p">)</span>
+ <span class="p">)</span>
+<span class="p">(</span><span class="nv">custom-set-faces</span>
+ <span class="c1">;; custom-set-faces was added by Custom.</span>
+ <span class="c1">;; If you edit it by hand, you could mess it up, so be careful.</span>
+ <span class="c1">;; Your init file should contain only one such instance.</span>
+ <span class="c1">;; If there is more than one, they won't work right.</span>
+ <span class="o">'</span><span class="p">(</span><span class="nv">default</span> <span class="p">((</span><span class="no">t</span> <span class="p">(</span><span class="ss">:family</span> <span class="s">"Fira Code"</span> <span class="ss">:foundry</span> <span class="s">"CTDB"</span> <span class="ss">:slant</span> <span class="nv">normal</span> <span class="ss">:weight</span> <span class="nv">medium</span> <span class="ss">:height</span> <span class="mi">120</span> <span class="ss">:width</span> <span class="nv">normal</span><span class="p">)))))</span></code></pre></figure>
+
+<h1 id="start-testsh">start-test.sh</h1>
+
+<figure class="highlight"><pre><code class="language-shell" data-lang="shell"><span class="c">#!/bin/sh</span>
+
+<span class="nv">TESTDIR</span><span class="o">=</span><span class="nv">$HOME</span>/bug-emacs.d
+<span class="nb">cd</span> <span class="nv">$TESTDIR</span>
+emacs <span class="nt">--init-directory</span><span class="o">=</span><span class="nv">$TESTDIR</span> <span class="nt">--script</span> <span class="nv">$TESTDIR</span>/test.el</code></pre></figure>
+
+<h1 id="test">Test</h1>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="c1">;;;</span>
+<span class="c1">;;; Copy this script into an empty user-emacs-directory along with</span>
+<span class="c1">;;; the accompanying init.el.</span>
+<span class="c1">;;;</span>
+<span class="c1">;;; Run this script with</span>
+<span class="c1">;;;</span>
+<span class="c1">;;;     emacs --init-directory=&lt;directory-path&gt; --load=&lt;directory-path&gt;/test.el</span>
+<span class="c1">;;;</span></code></pre></figure>
+
+<h1 id="load-up-packages">Load up packages</h1>
+
+<p>List packages and set buffer to <strong>Packages</strong></p>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="k">progn</span>
+  <span class="p">(</span><span class="nv">list-packages</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">set-buffer</span> <span class="s">"*Packages*"</span><span class="p">)</span>
+  <span class="p">)</span></code></pre></figure>
+
+<h1 id="install-a68-mode">Install a68-mode</h1>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="nv">message</span> <span class="s">"%s"</span> <span class="s">"Installing a68-mode"</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">sit-for</span> <span class="mf">0.5</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">package-install</span> <span class="ss">'a68-mode</span><span class="p">)</span></code></pre></figure>
+
+<h1 id="check-that-font-information-is-still-in-initel">Check that font information is still in init.el</h1>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="nv">find-file</span> <span class="p">(</span><span class="nv">locate-user-emacs-file</span> <span class="s">"init.el"</span><span class="p">))</span>
+<span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nb">not</span> <span class="p">(</span><span class="nv">search-forward</span> <span class="s">"(custom-set-faces
+ ;; custom-set-faces was added by Custom.
+ ;; If you edit it by hand, you could mess it up, so be careful.
+ ;; Your init file should contain only one such instance.
+ ;; If there is more than one, they won't work right.
+ '(default ((t (:family \"Fira Code\" :foundry \"CTDB\" :slant normal :weight medium :height 120 :width normal)))))"</span>
+			 <span class="no">nil</span> <span class="no">t</span><span class="p">))</span>
+    <span class="c1">;; String not found. Read last package installed from file and print it out. Then exit Emacs.</span>
+    <span class="c1">;;</span>
+    <span class="c1">;; Read string from file and print</span>
+    <span class="p">(</span><span class="k">progn</span>
+      <span class="p">(</span><span class="nv">find-file</span> <span class="s">"last-installed.txt"</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">display-message-or-buffer</span> <span class="s">"Install of %s caused subsequent install of a68-mode to lose font information"</span> <span class="p">(</span><span class="nv">buffer-string</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">sit-for</span> <span class="mf">0.5</span><span class="p">)</span>
+      <span class="c1">;; Exit Emacs</span>
+      <span class="p">(</span><span class="nv">kill-emacs</span><span class="p">)</span> 
+     <span class="p">)</span>
+    <span class="p">)</span></code></pre></figure>
+
+<h1 id="uninstalldelete-a68-mode">Uninstall/delete a68-mode</h1>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="nv">message</span> <span class="s">"%s"</span> <span class="s">"Removing a68-mode"</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">sit-for</span> <span class="mf">0.5</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">package-delete</span> <span class="p">(</span><span class="nv">package-get-descriptor</span> <span class="ss">'a68-mode</span><span class="p">))</span></code></pre></figure>
+
+<h1 id="install-random-package">Install random package</h1>
+
+<p>Install random package and write its name to last-installed file</p>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">pkg</span> <span class="p">(</span><span class="nb">car</span> <span class="p">(</span><span class="nv">seq-random-elt</span> <span class="nv">package-archive-contents</span><span class="p">))))</span>
+  <span class="p">(</span><span class="nv">save-current-buffer</span>
+    <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">buffer</span> <span class="p">(</span><span class="nv">find-file</span> <span class="s">"last-installed.txt"</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">set-buffer</span> <span class="nv">buffer</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">kill-region</span> <span class="p">(</span><span class="nv">point-min</span><span class="p">)</span> <span class="p">(</span><span class="nv">point-max</span><span class="p">))</span>
+      <span class="p">(</span><span class="nb">print</span> <span class="nv">pkg</span> <span class="nv">buffer</span><span class="p">)</span>
+      <span class="p">(</span><span class="nv">save-buffer</span><span class="p">)</span>
+      <span class="p">)</span>
+    <span class="p">)</span>
+  <span class="c1">;; Now install pkg</span>
+  <span class="p">(</span><span class="nv">message</span> <span class="s">"Installing %s"</span> <span class="nv">pkg</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">sit-for</span> <span class="mi">1</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">ignore-errors</span> <span class="p">(</span><span class="nv">package-install</span> <span class="nv">pkg</span><span class="p">))</span>
+  <span class="p">)</span></code></pre></figure>
+
+<h1 id="restart-emacs">Restart emacs</h1>
+
+<p>I was wondering if I’d have to have a more complicated shell script to
+keep starting Emacs, but Emacs has <code class="language-plaintext highlighter-rouge">restart-emacs</code> that
+does the obvious.</p>
+
+<figure class="highlight"><pre><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="p">(</span><span class="nv">message</span> <span class="s">"%s"</span> <span class="s">"Restarting emacs"</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">sit-for</span> <span class="mf">0.5</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">restart-emacs</span><span class="p">)</span></code></pre></figure>

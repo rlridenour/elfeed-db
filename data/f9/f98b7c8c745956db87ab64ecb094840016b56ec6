@@ -1,0 +1,842 @@
+
+<p class="wp-block-paragraph">You saw the simplicity of <a href="https://tomsitcafe.com/2026/03/27/run-your-own-irc-server/">Ergo Chat</a>.<br>Now you think about how to build a modern, modular IRC server &#8211; like in the old days.<br></p>
+
+
+
+<ul class="wp-block-list">
+<li><strong>Inspircd</strong> is a modern IRC server.</li>
+
+
+
+<li><strong>Anope</strong> is a services bot.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Together they form the base of a stable and reliable communications service.<br></p>
+
+
+
+<p class="wp-block-paragraph">In 2026 IRC may not be the primary comms channel, but it&#8217;s perfect for secondary/backup.<br></p>
+
+
+
+<span id="more-8881"></span>
+
+
+
+<h3 class="wp-block-heading">The Goal</h3>
+
+
+
+<p class="wp-block-paragraph">The architecture:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+IRC Client
+    |
+  TLS
+    |
+Inspircd
+    |
+local link
+    |
+Anope (NickServ, ChanServ)
+
+</pre></div>
+
+
+<ol class="wp-block-list">
+<li>Inspircd is the IRC server &#8211; the clients connect directly using TLS (port 6697).</li>
+
+
+
+<li>Anope connects to Inspircd locally &#8211; it provides services.</li>
+
+
+
+<li>TLS is served by <code>certbot</code> through Let&#8217;s Encrypt.</li>
+
+
+
+<li>SASL authentication is enabled for modern clients.</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Prerequisites</h3>
+
+
+
+<ol class="wp-block-list">
+<li>A Debian Linux or compatible server.</li>
+
+
+
+<li><code>root</code> user, or <code>sudo</code> access.</li>
+
+
+
+<li>Open firewall ports (80 and 6697).</li>
+
+
+
+<li>Domain pointed to the server (e.g. irc.domain.tld).</li>
+
+
+
+<li>Certificates for the domain (Let&#8217;s Encrypt).</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Install The Software</h3>
+
+
+
+<p class="wp-block-paragraph">Inspircd and Anope are in the Debian repository.<br><code>apt</code> can install them:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo apt update</div><div class="cm-line">sudo apt install -y inspircd anope certbot</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">After the installation the configurations are in:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li><em>etc/inspircd</em></li>
+
+
+
+<li><em>etc/anope</em></li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">The example configurations:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li><em>usr/share/doc/inspircd/examples</em></li>
+
+
+
+<li><em>usr/share/doc/anope/examples</em></li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Issue The Certificates</h3>
+
+
+
+<p class="wp-block-paragraph"><code>certbot</code> is used to issue Let&#8217;s Encrypt certificates.<br>With the <code>--standalone</code> option <code>certbot</code> starts a temporary http server on port 80.<br></p>
+
+
+
+<p class="wp-block-paragraph">I use the <code>irc.silentarchitect.org</code> as an example. <strong>Change it to your own domain.</strong><br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo certbot certonly --standalone \</div><div class="cm-line">  -d irc.silentarchitect.org \</div><div class="cm-line">  --non-interactive \</div><div class="cm-line">  --agree-tos \</div><div class="cm-line">  -m tom@tomsitcafe.com</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">The certificates are installed in the <code>/etc/letsencrypt/</code> directory by default.<br>By default the <code>irc</code> user of Inspircd cannot read them.<br></p>
+
+
+
+<p class="wp-block-paragraph">Copy the certs to the Inspircd config directory.<br></p>
+
+
+
+<p class="wp-block-paragraph">Create the <code>certs</code> dir:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mkdir -p /etc/inspircd/certs</div><div class="cm-line">sudo chown irc:irc /etc/inspircd/certs</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Copy the certs:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo cp /etc/letsencrypt/live/irc.silentarchitect.org/fullchain.pem /etc/inspircd/certs/</div><div class="cm-line">sudo cp /etc/letsencrypt/live/irc.silentarchitect.org/privkey.pem /etc/inspircd/certs/</div><div class="cm-line">sudo chown -R irc:irc /etc/inspircd/certs</div><div class="cm-line">sudo chmod 600 /etc/inspircd/certs/privkey.pem</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph"><strong>Don&#8217;t forget to create a deploy hook that copies the certs automatically when certbot renews them.</strong><br></p>
+
+
+
+<h3 class="wp-block-heading">Configure The Inspircd</h3>
+
+
+
+<p class="wp-block-paragraph">The Inspircd configuration is in the <code>/etc/inspircd/</code> directory.<br>An example <code>inspircd.conf</code> file is pre-deployed.<br>More examples can be found in the <code>/usr/share/doc/inspircd/examples/</code> directory.<br></p>
+
+
+
+<p class="wp-block-paragraph">Backup the original config.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mv /etc/inspircd/inspircd.conf /etc/inspircd/inspircd.conf.orig</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">In the Inspircd configuration the order of some blocks matters.<br>Some modules and definitions must appear before they are referenced.<br></p>
+
+
+
+<p class="wp-block-paragraph">Set up the network name and domain.<br>This will be visible for the connecting clients.<br>The <code>name</code> field must match with the DNS record.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">&lt;server</div><div class="cm-line">        name=&quot;irc.silentarchitect.org&quot;</div><div class="cm-line">        description=&quot;SilentArchitectNetwork IRC server&quot;</div><div class="cm-line">        network=&quot;SilentArchitectNetwork&quot;&gt;</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Load the most important Inspircd modules.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">&lt;module name=&quot;ssl_gnutls&quot;&gt;</div><div class="cm-line">&lt;module name=&quot;spanningtree&quot;&gt;</div><div class="cm-line">&lt;module name=&quot;account&quot;&gt;</div><div class="cm-line">&lt;module name=&quot;services&quot;&gt;</div><div class="cm-line">&lt;module name=&quot;cloak&quot;&gt;</div><div class="cm-line">&lt;module name=&quot;cloak_sha256&quot;&gt;</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<figure class="wp-block-table"><table class="has-fixed-layout"><thead><tr><th>Module</th><th>Purpose</th></tr></thead><tbody><tr><td>ssl_gnutls</td><td>TLS encryption</td></tr><tr><td>spanningtree</td><td>Required for services and server linking</td></tr><tr><td>account</td><td>IRC account handling</td></tr><tr><td>services</td><td>Enables the services support</td></tr><tr><td>cloak</td><td>Hides client IP/hostname</td></tr><tr><td>cloak_sha256</td><td>Uses SHA256 for cloaking</td></tr></tbody></table></figure>
+
+
+
+<p class="wp-block-paragraph">The TLS configuration points to the certs you already set up.<br>Create an <code>sslprofile</code> and use it in the port binding.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">&lt;sslprofile name=&quot;Clients&quot;</div><div class="cm-line">            provider=&quot;gnutls&quot;</div><div class="cm-line">            cafile=&quot;&quot;</div><div class="cm-line">            certfile=&quot;/etc/inspircd/certs/fullchain.pem&quot;</div><div class="cm-line">            crlfile=&quot;&quot;</div><div class="cm-line">            hash=&quot;sha3-256&quot;</div><div class="cm-line">            keyfile=&quot;/etc/inspircd/certs/privkey.pem&quot;</div><div class="cm-line">            mindhbits=&quot;2048&quot;</div><div class="cm-line">            outrecsize=&quot;2048&quot;</div><div class="cm-line">            priority=&quot;NORMAL&quot;</div><div class="cm-line">            requestclientcert=&quot;yes&quot;</div><div class="cm-line">            strictpriority=&quot;no&quot;&gt;</div><div class="cm-line"></div><div class="cm-line">&lt;bind</div><div class="cm-line">      address=&quot;&quot;</div><div class="cm-line">      port=&quot;6697&quot;</div><div class="cm-line">      type=&quot;clients&quot;</div><div class="cm-line">      sslprofile=&quot;Clients&quot;</div><div class="cm-line">      defer=&quot;0&quot;</div><div class="cm-line">      free=&quot;no&quot;&gt;</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Port 6697 is the standard TLS IRC port.<br></p>
+
+
+
+<p class="wp-block-paragraph">Connection classes allow you to define limits, flood protection, and different client tiers.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">&lt;connect name=&quot;main&quot; allow=&quot;*&quot; modes=&quot;+x&quot;&gt;</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">For a full working configuration example see below.<br></p>
+
+
+
+<h3 class="wp-block-heading">Configure Anope Services</h3>
+
+
+
+<p class="wp-block-paragraph">Backup the original config.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mv /etc/anope/services.conf /etc/anope/services.conf.orig</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Example config directory: <code>/usr/share/doc/anope/examples</code><br></p>
+
+
+
+<p class="wp-block-paragraph">Edit the configuration file: <code>/etc/anope/services.conf</code><br></p>
+
+
+
+<p class="wp-block-paragraph">The minimal configuration sets up the IRC server link and the services info.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">uplink</div><div class="cm-line">{</div><div class="cm-line">        host = &quot;127.0.0.1&quot;</div><div class="cm-line">        ipv6 = no</div><div class="cm-line">        ssl = no</div><div class="cm-line">        port = 7000</div><div class="cm-line">        password = &quot;passwordforservices&quot;</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line">serverinfo</div><div class="cm-line">{</div><div class="cm-line">        name = &quot;services.silentarchitect.org&quot;</div><div class="cm-line">        description = &quot;Services of The Silent Architect&quot;</div><div class="cm-line">        pid = &quot;/run/anope/anope.pid&quot;</div><div class="cm-line">        motd = &quot;services.motd&quot;</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line">module</div><div class="cm-line">{</div><div class="cm-line">        name = &quot;inspircd3&quot;</div><div class="cm-line">        use_server_side_mlock = yes</div><div class="cm-line">        use_server_side_topiclock = yes</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line">networkinfo</div><div class="cm-line">{</div><div class="cm-line">        networkname = &quot;SilentArchitectNetwork&quot;</div><div class="cm-line">        nicklen = 31</div><div class="cm-line">        userlen = 10</div><div class="cm-line">        hostlen = 64</div><div class="cm-line">        chanlen = 32</div><div class="cm-line">        modelistsize = 100</div><div class="cm-line">        vhost_chars = &quot;abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-&quot;</div><div class="cm-line">        allow_undotted_vhosts = false</div><div class="cm-line">        disallow_start_or_end = &quot;.-&quot;</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Traditionally IRC services use flat files as a database backend.<br>A flat file database can easily handle ~10k users / 50k accounts.<br></p>
+
+
+
+<p class="wp-block-paragraph">Load the <code>enc_sha256</code> module to hash passwords.<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">module { name = &quot;enc_sha256&quot; }</div><div class="cm-line"></div><div class="cm-line">module {</div><div class="cm-line">        name = &quot;db_flatfile&quot;</div><div class="cm-line">        database = &quot;anope.db&quot;</div><div class="cm-line">        keepbackups = 3</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">For a full working configuration see below.<br></p>
+
+
+
+<h3 class="wp-block-heading">Test The Server</h3>
+
+
+
+<p class="wp-block-paragraph">After starting the services you should be able to connect with a client:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">irc.silentarchitect.org:6697 (TLS)</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Example with weechat:<br></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">/server add silent irc.silentarchitect.org/6697 -ssl</div><div class="cm-line">/connect silent</div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">Inspircd + Anope gives you a modular IRC architecture.<br></p>
+
+
+
+<p class="wp-block-paragraph">The IRC daemon handles connections and routing.<br>Services handle identity, channels, and network state.<br></p>
+
+
+
+<p class="wp-block-paragraph">This separation makes the system flexible, stable, and easy to extend.<br></p>
+
+
+
+<p class="wp-block-paragraph">For small private networks this stack can run comfortably on even a small VPS.<br></p>
+
+
+
+<h3 class="wp-block-heading">Full Inspircd Configuration</h3>
+
+
+
+<p class="wp-block-paragraph">The following configurations are simplified examples of a working single-server IRC network.<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+&lt;server
+        name="irc.silentarchitect.org"
+        description="SilentArchitectNetwork IRC server"
+        network="SilentArchitectNetwork"&gt;
+
+&lt;admin
+       name="Tom"
+       description="tom"
+       email="tom@tomsitcafe.com"&gt;
+
+&lt;module name="ssl_gnutls"&gt;
+&lt;module name="hidechans"&gt;
+&lt;module name="spanningtree"&gt;
+&lt;module name="account"&gt;
+&lt;module name="services"&gt;
+&lt;module name="conn_umodes"&gt;
+&lt;module name="sha2"&gt;
+&lt;module name="cloak"&gt;
+&lt;module name="cloak_sha256"&gt;
+
+&lt;cloak method="hmac-sha256"
+       key="lohshal0eemei3eiFeGhiv1aep8shi"
+       prefix="silent"
+       suffix="user"&gt;
+
+&lt;sslprofile name="Clients"
+            provider="gnutls"
+            cafile=""
+            certfile="/etc/inspircd/certs/fullchain.pem"
+            crlfile=""
+            hash="sha3-256"
+            keyfile="/etc/inspircd/certs/privkey.pem"
+            mindhbits="2048"
+            outrecsize="2048"
+            priority="NORMAL"
+            requestclientcert="yes"
+            strictpriority="no"&gt;
+
+&lt;bind
+      address=""
+      port="6697"
+      type="clients"
+      sslprofile="Clients"
+      defer="0"
+      free="no"&gt;
+
+&lt;files motd="inspircd.motd"&gt;
+
+&lt;connect
+    name="main"
+    allow="*"
+    maxchans="20"
+    timeout="20"
+    pingfreq="2m"
+    hardsendq="1M"
+    softsendq="64K"
+    recvq="64K"
+    threshold="10"
+    commandrate="20"
+    fakelag="yes"
+    localmax="10"
+    globalmax="10"
+    resolvehostnames="no"
+    useident="no"
+    limit="5000"
+    modes="+x"&gt;
+
+&lt;connect
+    name="opers"
+    allow="*"
+    maxchans="60"
+    timeout="20"
+    pingfreq="2m"
+    hardsendq="1M"
+    softsendq="256K"
+    recvq="128K"
+    threshold="50"
+    commandrate="100"
+    fakelag="no"
+    localmax="50"
+    globalmax="50"
+    resolvehostnames="no"
+    useident="no"
+    limit="5000"
+    modes="+x"&gt;
+
+&lt;dns timeout="5"&gt;
+
+&lt;maxlist chan="*" limit="100"&gt;
+
+&lt;options
+         prefixquit="Quit: "
+         suffixquit=""
+         prefixpart="&amp;quot;"
+         suffixpart="&amp;quot;"
+         syntaxhints="no"
+         cyclehostsfromuser="no"
+         announcets="yes"
+         allowmismatch="no"
+         defaultbind="auto"
+         maskinlist="yes"
+         maskintopic="yes"
+         pingwarning="15"
+         serverpingfreq="1m"
+         splitwhois="no"
+         defaultmodes="not"
+         xlinemessage="You're banned! Email tom@tomsitcafe.com with the ERROR line below for help."
+         xlinequit="%fulltype%: %reason%"
+         modesinlist="opers"
+         extbanformat="name"
+         exemptchanops="filter:o nickflood:o nonick:v regmoderated:o"
+         invitebypassmodes="yes"
+         nosnoticestack="no"&gt;
+
+&lt;performance
+             netbuffersize="10240"
+             somaxconn="128"
+             softlimit="12800"
+             clonesonconnect="yes"
+             timeskipwarn="2s"
+             quietbursts="yes"&gt;
+
+&lt;security
+          announceinvites="dynamic"
+          hideservices="no"
+          flatlinks="no"
+          hidekills=""
+          hideservicekills="yes"
+          hidesplits="no"
+          maxtargets="20"
+          customversion=""
+          restrictbannedusers="yes"
+          genericoper="no"
+          userstats="Pu"&gt;
+
+&lt;limits
+        maxaway="200"
+        maxchan="60"
+        maxhost="64"
+        maxuser="10"
+        maxkey="30"
+        maxkick="300"
+        maxmodes="20"
+        maxnick="30"
+        maxquit="300"
+        maxreal="130"
+        maxtopic="330"&gt;
+
+&lt;log method="file"
+     level="normal"
+     type="* -USERINPUT -USEROUTPUT"
+     target="/var/log/inspircd.log"&gt;
+
+&lt;whowas
+        groupsize="10"
+        maxgroups="10000"
+        maxkeep="7d"
+        nickupdate="yes"&gt;
+
+&lt;insane
+        hostmasks="no"
+        ipmasks="no"
+        nickmasks="no"
+        trigger="95.5"&gt;
+
+&lt;link name="services.silentarchitect.org"
+      ipaddr="127.0.0.1"
+      port="7000"
+      allowmask="127.0.0.0/8"
+      sendpass="passwordforservices"
+      recvpass="passwordforservices"&gt;
+
+&lt;uline server="services.silentarchitect.org" silent="yes"&gt;
+&lt;bind address="127.0.0.1" port="7000" type="servers"&gt;
+&lt;module name="cap"&gt;
+&lt;module name="sasl"&gt;
+&lt;sasl target="services.silentarchitect.org" requiressl="no"&gt;
+
+&lt;module name="alias"&gt;
+&lt;alias text="BOTSERV"  replace="PRIVMSG $requirement :$2-" requires="BotServ"  service="yes"&gt;
+&lt;alias text="CHANSERV" replace="PRIVMSG $requirement :$2-" requires="ChanServ" service="yes"&gt;
+&lt;alias text="GLOBAL"   replace="PRIVMSG $requirement :$2-" requires="Global"   service="yes" operonly="yes"&gt;
+&lt;alias text="HOSTSERV" replace="PRIVMSG $requirement :$2-" requires="HostServ" service="yes"&gt;
+&lt;alias text="MEMOSERV" replace="PRIVMSG $requirement :$2-" requires="MemoServ" service="yes"&gt;
+&lt;alias text="NICKSERV" replace="PRIVMSG $requirement :$2-" requires="NickServ" service="yes"&gt;
+&lt;alias text="OPERSERV" replace="PRIVMSG $requirement :$2-" requires="OperServ" service="yes" operonly="yes"&gt;
+&lt;alias text="STATSERV" replace="PRIVMSG $requirement :$2-" requires="StatServ" service="yes"&gt;
+&lt;alias text="BS" replace="PRIVMSG $requirement :$2-" requires="BotServ"  service="yes"&gt;
+&lt;alias text="CS" replace="PRIVMSG $requirement :$2-" requires="ChanServ" service="yes"&gt;
+&lt;alias text="GL" replace="PRIVMSG $requirement :$2-" requires="Global"   service="yes" operonly="yes"&gt;
+&lt;alias text="HS" replace="PRIVMSG $requirement :$2-" requires="HostServ" service="yes"&gt;
+&lt;alias text="MS" replace="PRIVMSG $requirement :$2-" requires="MemoServ" service="yes"&gt;
+&lt;alias text="NS" replace="PRIVMSG $requirement :$2-" requires="NickServ" service="yes"&gt;
+&lt;alias text="OS" replace="PRIVMSG $requirement :$2-" requires="OperServ" service="yes" operonly="yes"&gt;
+&lt;alias text="SS" replace="PRIVMSG $requirement :$2-" requires="StatServ" service="yes"&gt;
+&lt;alias text="ID"       format="*" replace="PRIVMSG $requirement :IDENTIFY $2-" requires="NickServ" service="yes"&gt;
+&lt;alias text="IDENTIFY" format="*" replace="PRIVMSG $requirement :IDENTIFY $2-" requires="NickServ" service="yes"&gt;
+&lt;alias text="LOGIN"    format="*" replace="PRIVMSG $requirement :IDENTIFY $2-" requires="NickServ" service="yes"&gt;
+&lt;alias text="LOGOUT" format="*" replace="PRIVMSG $requirement :LOGOUT" requires="NickServ" service="yes"&gt;
+&lt;badnick nick="BotServ"  reason="Reserved for a network service"&gt;
+&lt;badnick nick="ChanServ" reason="Reserved for a network service"&gt;
+&lt;badnick nick="Global"   reason="Reserved for a network service"&gt;
+&lt;badnick nick="HostServ" reason="Reserved for a network service"&gt;
+&lt;badnick nick="MemoServ" reason="Reserved for a network service"&gt;
+&lt;badnick nick="NickServ" reason="Reserved for a network service"&gt;
+&lt;badnick nick="OperServ" reason="Reserved for a network service"&gt;
+&lt;badnick nick="StatServ" reason="Reserved for a network service"&gt;
+&lt;exemptfromfilter target="BotServ"&gt;
+&lt;exemptfromfilter target="ChanServ"&gt;
+&lt;exemptfromfilter target="Global"&gt;
+&lt;exemptfromfilter target="HostServ"&gt;
+&lt;exemptfromfilter target="MemoServ"&gt;
+&lt;exemptfromfilter target="NickServ"&gt;
+&lt;exemptfromfilter target="OperServ"&gt;
+&lt;exemptfromfilter target="StatServ"&gt;
+
+</pre></div>
+
+
+<h3 class="wp-block-heading">Full Anope Configuration</h3>
+
+
+
+<p class="wp-block-paragraph">The following configurations are simplified examples of a working single-server IRC network.<br>Copy the different services&#8217; configuration files into the config directory.<br>Configure the services hostname in them.<br>Services files to configure:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>nickserv.conf</li>
+
+
+
+<li>chanserv.conf</li>
+
+
+
+<li>operserv.conf</li>
+
+
+
+<li>hostserv.conf</li>
+
+
+
+<li>memoserv.conf</li>
+
+
+
+<li>global.conf</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">The main <code>services.conf</code> file should look like this:<br></p>
+
+
+<div class="wp-block-syntaxhighlighter-code "><pre class="brush: plain; first-line: 1; gutter: false; title: ; notranslate">
+uplink
+{
+        host = "127.0.0.1"
+        ipv6 = no
+        ssl = no
+        port = 7000
+        password = "passwordforservices"
+}
+
+serverinfo
+{
+        name = "services.silentarchitect.org"
+        description = "Services of The Silent Architect"
+        pid = "/run/anope/anope.pid"
+        motd = "services.motd"
+}
+
+module
+{
+        name = "inspircd3"
+        use_server_side_mlock = yes
+        use_server_side_topiclock = yes
+}
+
+networkinfo
+{
+        networkname = "SilentArchitectNetwork"
+        nicklen = 31
+        userlen = 10
+        hostlen = 64
+        chanlen = 32
+        modelistsize = 100
+        vhost_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+        allow_undotted_vhosts = false
+        disallow_start_or_end = ".-"
+}
+
+options
+{
+        casemap = "ascii"
+        strictpasswords = yes
+        badpasslimit = 5
+        badpasstimeout = 1h
+        updatetimeout = 5m
+        expiretimeout = 30m
+        readtimeout = 5s
+        timeoutcheck = 3s
+        retrywait = 60s
+        hideprivilegedcommands = yes
+        hideregisteredcommands = yes
+        languages = "ca_ES.UTF-8 de_DE.UTF-8 el_GR.UTF-8 es_ES.UTF-8 fr_FR.UTF-8 hu_HU.UTF-8 it_IT.UTF-8 nl_NL.UTF-8 pl_PL.UTF-8 pt_PT.UTF-8 ru_RU.UTF-8 tr_TR.UTF-8"
+}
+
+module { name = "enc_sha256" }
+
+module {
+        name = "db_flatfile"
+        database = "anope.db"
+        keepbackups = 3
+}
+
+include {
+    type = "file"
+    name = "nickserv.conf"
+}
+
+include {
+    type = "file"
+    name = "chanserv.conf"
+}
+
+include {
+    type = "file"
+    name = "operserv.conf"
+}
+
+include {
+    type = "file"
+    name = "hostserv.conf"
+}
+
+include {
+    type = "file"
+    name = "memoserv.conf"
+}
+
+include {
+    type = "file"
+    name = "global.conf"
+}
+
+log
+{
+        target = "services.log"
+        bot = "Global"
+        logage = 7
+        users = "connect disconnect nick"
+        rawio = no
+        debug = no
+}
+
+module { name = "help" }
+module { name = "m_sasl" }
+
+opertype {
+    name = "ServicesRoot"
+    commands = "*"
+    privileges = "*"
+}
+
+oper {  
+    name = "tom"
+    type = "ServicesRoot"
+}
+
+</pre></div>
+
+
+<h3 class="wp-block-heading">Next Steps</h3>
+
+
+
+<p class="wp-block-paragraph">Once the basic server is running you may want to add:<br></p>
+
+
+
+<ul class="wp-block-list">
+<li>IRC operators</li>
+
+
+
+<li>channel registration policies</li>
+
+
+
+<li>spam protection modules</li>
+
+
+
+<li>a Matrix or Discord bridge</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Inspircd&#8217;s modular design makes these extensions easy to integrate.</p>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">The Silent Architect IRC network is a quiet place.</p>
+
+
+
+<p class="wp-block-paragraph">Discussion is slow.<br>Silence is normal.<br>People speak when they have something worth saying.</p>
+
+
+
+<p class="wp-block-paragraph">Idle minds are welcome.<br>Noise is not.</p>
+
+
+
+<p class="wp-block-paragraph">Server: irc.silentarchitect.org<br>Port: 6697 (TLS)<br>Channel: #ghostops</p>
+
+
+
+<p class="wp-block-paragraph">Discord invite link: <a href="https://discord.gg/nxvna45STM">https://discord.gg/nxvna45STM</a></p>

@@ -1,0 +1,406 @@
+
+<p>Navigating large source files containing thousands of lines of code with Emacs makes it difficult to perceive the underlying structure. For a software engineer spending the majority of the day reading and writing code, reliable folding is a requirement for maintaining focus and managing complexity.</p>
+
+
+
+<p>Before we dive in, <strong>please consider sharing this article</strong> on your website/blog, Mastodon, Reddit, X, or your preferred social media platforms. Sharing it will help fellow Emacs users discover better ways to manage code folding.</p>
+
+
+
+<p>In this article, we explore:</p>
+
+
+
+<ul class="wp-block-list">
+<li>A folding Frontend: Consolidating folding commands into a single, predictable keymap that operates consistently across all code folding modes.</li>
+
+
+
+<li>Folding Backends: Ready-to-use hooks to activate the most effective folding backend for the following major modes: C, C++, Java, Rust, Go, Python, JavaScript, TypeScript, Emacs Lisp, shell scripts, Lua, Haskell, YAML, Org-mode, Markdown&#8230;</li>
+
+
+
+<li>Editor Integration: Using indirect buffers to maintain independent folding states, configuring search operations to strictly ignore folded text, and setting up display-line-numbers-mode&#8230;</li>
+
+
+
+<li>Discouraged Folding Engines: A review of legacy or poorly performing packages to avoid.</li>
+</ul>
+
+
+
+<figure class="wp-block-image size-large"><img fetchpriority="high" decoding="async" width="1024" height="684" src="https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent-1024x684.png" alt="" class="wp-image-3583" srcset="https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent-1024x684.png 1024w, https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent-300x200.png 300w, https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent-768x513.png 768w, https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent-449x300.png 449w, https://www.jamescherti.com/wp-content/uploads/emacs-outline-indent.png 1117w" sizes="(max-width: 1024px) 100vw, 1024px" /></figure>
+
+
+
+<h2 class="wp-block-heading">Why code folding?</h2>
+
+
+
+<p>Code folding is about managing cognitive load, preserving spatial memory, and controlling screen real estate:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Navigating through code (e.g., with LSP) can create a vacuum of context. Folding an entire file to its top-level headings allows the manipulation of the file skeleton directly in the main buffer. Revealing only a specific entry and its parents provides an immediate understanding of the hierarchy without losing position.</li>
+
+
+
+<li>When tasked with debugging a 20,000 line legacy file, immediate refactoring is rarely an option. Folding enables the visual modularization of massive files on the fly, making hostile codebases readable.</li>
+
+
+
+<li>Every visible line of code on the screen requires a fraction of subconscious attention to ignore. During debugging sessions, folding adjacent functions or complex implementations acts as a visual garbage collector.</li>
+
+
+
+<li>Moving or deleting a massive function or block is prone to selection errors. When a block is folded, it behaves as a single logical unit that can be cut, copied, or moved safely and cleanly.</li>
+
+
+
+<li>Folding is effective for tracking progress during extensive pull requests. Collapsing previously examined functions or blocks actively filters out visual noise.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">Code Folding Frontend</h2>
+
+
+
+<p>The primary drawback of code folding modes is inconsistency. For example, <code>hs-minor-mode</code> and <code>outline-minor-mode</code> use entirely different functions and keybindings to perform the exact same logical action.</p>
+
+
+
+<p>The solution is a package called <strong><a href="https://github.com/jamescherti/kirigami.el">kirigami</a></strong>, which acts as a universal frontend for text folding. You define your keybindings once, and <strong>kirigami</strong> automatically detects the active folding and routes your commands to the appropriate engine, whether that is <code>outline-minor-mode</code>, <code>outline-indent-minor-mode</code>, <code>org-mode</code>, <code>markdown-mode</code>, <code>gfm-mode</code>, <code>treesit-fold-mode</code>, <code>hs-minor-mode</code> (hideshow), and many others&#8230;</p>
+
+
+
+<p>To install and configure kirigami, add the following code to your Emacs init file:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">use-package</span> kirigami
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">kirigami-open-fold</span>
+             kirigami-open-fold-rec
+             kirigami-close-fold
+             kirigami-toggle-fold
+             kirigami-open-folds
+             kirigami-close-folds-except-current
+             kirigami-close-folds)
+
+  <span class="hljs-symbol">:bind</span>
+  <span class="hljs-comment">;; Vanilla Emacs keybindings</span>
+  ((<span class="hljs-string">"C-c z o"</span> . kirigami-open-fold)          <span class="hljs-comment">; Open fold at point</span>
+   (<span class="hljs-string">"C-c z O"</span> . kirigami-open-fold-rec)      <span class="hljs-comment">; Open fold recursively</span>
+   (<span class="hljs-string">"C-c z r"</span> . kirigami-open-folds)         <span class="hljs-comment">; Open all folds</span>
+   (<span class="hljs-string">"C-c z c"</span> . kirigami-close-fold)         <span class="hljs-comment">; Close fold at point</span>
+   (<span class="hljs-string">"C-c z m"</span> . kirigami-close-folds)        <span class="hljs-comment">; Close all folds</span>
+   (<span class="hljs-string">"C-c z a"</span> . kirigami-toggle-fold)))      <span class="hljs-comment">; Toggle fold at point</span></code></span></pre>
+
+
+<p>If you are an <code>evil-mode</code> user, add the following keybindings to your init file:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Uncomment the following if you are an `evil-mode' user:</span>
+(<span class="hljs-name">with-eval-after-load</span> 'evil
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"zo"</span> #'kirigami-open-fold)
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"zO"</span> #'kirigami-open-fold-rec)
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"zc"</span> #'kirigami-close-fold)
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"za"</span> #'kirigami-toggle-fold)
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"zr"</span> #'kirigami-open-folds)
+  (<span class="hljs-name">define-key</span> evil-normal-state-map <span class="hljs-string">"zm"</span> #'kirigami-close-folds))</code></span></pre>
+
+
+<p>In addition to providing a unified interface, the <strong>kirigami</strong> package enhances folding behavior in <code>outline</code>, <code>markdown-mode</code>, and <code>org-mode</code> packages. It ensures that deep folds and sibling folds open and close reliably.</p>
+
+
+
+<h2 class="wp-block-heading">Code Folding Backends</h2>
+
+
+
+<p>A code folding backend is the underlying engine that handles the logic of identifying and hiding specific blocks of text. While the <strong>kirigami</strong> package provides the user interface and keybindings, it requires a backend, such as <code>outline-minor-mode</code> or <code>hs-minor-mode</code>, to perform the folding.</p>
+
+
+
+<p><strong>NOTE:</strong> When configuring folding backends, ensure that only one folding minor mode is active concurrently in a single buffer, as conflicts and unexpected behavior may occur. For this reason, adding folding hooks to broad categories like <code>prog-mode-hook</code> or <code>text-mode-hook</code> is discouraged. Instead, hooks should be applied specifically to individual language modes, such as <code>emacs-lisp-mode-hook</code>.</p>
+
+
+
+<p>Below are ready-to-use hooks to activate the optimal folding backend for each major mode:</p>
+
+
+
+<h3 class="wp-block-heading">Outline (built-in)</h3>
+
+
+
+<p><strong>outline-minor-mode</strong> relies on hierarchical headings to determine collapsible sections. It is effective for structured text and is my default choice for Elisp, Lisp, Markdown, Diff, and configuration files.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">add-hook</span> 'emacs-lisp-mode-hook #'outline-minor-mode)
+(<span class="hljs-name">add-hook</span> 'lisp-interaction-mode-hook #'hs-minor-mode) <span class="hljs-comment">; scratch</span>
+(<span class="hljs-name">add-hook</span> 'lisp-mode-hook #'outline-minor-mode)
+(<span class="hljs-name">add-hook</span> 'conf-mode-hook #'outline-minor-mode)
+(<span class="hljs-name">add-hook</span> 'markdown-mode-hook #'outline-minor-mode)
+(<span class="hljs-name">add-hook</span> 'diff-mode-hook #'outline-minor-mode)</code></span></pre>
+
+
+<h3 class="wp-block-heading">Hideshow (built-in)</h3>
+
+
+
+<p><strong>hs-minor-mode</strong> parses buffer syntax to accurately detect the start and end of blocks. It is the best tool for C-style languages, or anything using braces {} and explicit block structures like sh/Bash shell scripts.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Systems and General Purpose</span>
+(<span class="hljs-name">add-hook</span> 'c-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'c++-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'java-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'rust-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'go-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'ruby-mode-hook #'hs-minor-mode)
+
+<span class="hljs-comment">;; Web and Frontend</span>
+(<span class="hljs-name">add-hook</span> 'js-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'typescript-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'css-mode-hook #'hs-minor-mode)
+
+<span class="hljs-comment">;; Scripting, Data, and Infrastructure</span>
+(<span class="hljs-name">add-hook</span> 'sh-mode-hook #'hs-minor-mode) <span class="hljs-comment">; for bash/shell scripts</span>
+(<span class="hljs-name">add-hook</span> 'json-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'lua-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'nxml-mode-hook #'hs-minor-mode)
+(<span class="hljs-name">add-hook</span> 'html-mode-hook #'hs-minor-mode)  <span class="hljs-comment">;; mhtml and html</span></code></span></pre>
+
+
+<p><strong>hs-minor-mode</strong> folds a single level at a time, such as entire functions, without providing convenient access to nested blocks. This makes it less practical for languages that require deep folding, such as YAML, where multiple nested levels are common. Even in languages like Python, Hideshow can be impractical, because it allows folding classes but does not provide convenient folding for the functions within those classes for example.</p>
+
+
+
+<h3 class="wp-block-heading">Outline-indent</h3>
+
+
+
+<p>The <strong><a href="https://github.com/jamescherti/outline-indent.el">outline-indent</a></strong> package provides code folding based on indentation levels. It is recommended for Python, Haskell, and YAML because it supports an unlimited number of folding levels. For instance, it allows folding an entire function or specific nested blocks within that function, such as <code>if</code> statements inside <code>while</code> loops.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">use-package</span> outline-indent
+  <span class="hljs-symbol">:commands</span> outline-indent-minor-mode
+  <span class="hljs-symbol">:custom</span>
+  (<span class="hljs-name">outline-indent-ellipsis</span> <span class="hljs-string">" ▼"</span>))
+
+<span class="hljs-comment">;; Python</span>
+(<span class="hljs-name">add-hook</span> 'python-mode-hook #'outline-indent-minor-mode)
+(<span class="hljs-name">add-hook</span> 'python-ts-mode-hook #'outline-indent-minor-mode)
+
+<span class="hljs-comment">;; Yaml</span>
+(<span class="hljs-name">add-hook</span> 'yaml-mode-hook #'outline-indent-minor-mode)
+(<span class="hljs-name">add-hook</span> 'yaml-ts-mode-hook #'outline-indent-minor-mode)
+
+<span class="hljs-comment">;; Haskell</span>
+(<span class="hljs-name">add-hook</span> 'haskell-mode-hook #'outline-indent-minor-mode)</code></span></pre>
+
+
+<p>In addition to code folding, <strong>outline-indent</strong> allows moving indented blocks up and down, indenting/unindenting to adjust indentation levels, inserting a new line with the same indentation level as the current line, and moving backward/forward to the indentation level of the current line.</p>
+
+
+
+<h3 class="wp-block-heading">Treesit-fold</h3>
+
+
+
+<p>The <strong><a href="https://github.com/emacs-tree-sitter/treesit-fold">treesit-fold</a></strong> package provides Intelligent code folding by using the structural understanding of the built-in tree-sitter parser. Unlike traditional folding methods that rely on regular expressions or indentation, <strong>treesit-fold</strong> uses the actual syntax tree of the code to accurately identify foldable regions such as functions, classes, comments, and documentation strings.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">use-package</span> treesit-fold
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">treesit-fold-close</span>
+             treesit-fold-close-all
+             treesit-fold-open
+             treesit-fold-toggle
+             treesit-fold-open-all
+             treesit-fold-mode
+             global-treesit-fold-mode
+             treesit-fold-open-recursively
+             treesit-fold-line-comment-mode)
+
+  <span class="hljs-symbol">:custom</span>
+  (<span class="hljs-name">treesit-fold-line-count-show</span> <span class="hljs-literal">t</span>)
+  (<span class="hljs-name">treesit-fold-line-count-format</span> <span class="hljs-string">" ▼"</span>)
+
+  <span class="hljs-symbol">:config</span>
+  (<span class="hljs-name">set-face-attribute</span> 'treesit-fold-replacement-face <span class="hljs-literal">nil</span>
+                      <span class="hljs-symbol">:foreground</span> <span class="hljs-string">"#808080"</span>
+                      <span class="hljs-symbol">:box</span> <span class="hljs-literal">nil</span>
+                      <span class="hljs-symbol">:weight</span> 'bold))
+
+<span class="hljs-comment">;; Systems and General Purpose</span>
+(<span class="hljs-name">add-hook</span> 'c-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'c++-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'java-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'rust-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'go-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'ruby-ts-mode-hook #'treesit-fold-mode)
+
+<span class="hljs-comment">;; Web and Frontend</span>
+(<span class="hljs-name">add-hook</span> 'js-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'typescript-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'tsx-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'css-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'html-ts-mode-hook #'treesit-fold-mode)
+
+<span class="hljs-comment">;; Scripting and Infrastructure</span>
+(<span class="hljs-name">add-hook</span> 'bash-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'cmake-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'dockerfile-ts-mode-hook #'treesit-fold-mode)
+
+<span class="hljs-comment">;; Data and Configuration</span>
+(<span class="hljs-name">add-hook</span> 'json-ts-mode-hook #'treesit-fold-mode)
+(<span class="hljs-name">add-hook</span> 'toml-ts-mode-hook #'treesit-fold-mode)
+ 
+<span class="hljs-comment">;; Third-party packages</span>
+<span class="hljs-comment">;; (add-hook 'kotlin-ts-mode-hook #'treesit-fold-mode)</span>
+<span class="hljs-comment">;; (add-hook 'swift-ts-mode-hook #'treesit-fold-mode)</span>
+<span class="hljs-comment">;; (add-hook 'elixir-ts-mode-hook #'treesit-fold-mode)</span>
+<span class="hljs-comment">;; (add-hook 'zig-ts-mode-hook #'treesit-fold-mode)</span>
+</code></span></pre>
+
+
+<p>For the <code>treesit-fold</code> block to function, you must be using Emacs 29.1 or newer, and you must have the actual Tree-sitter grammars installed on your machine for those specific languages.</p>
+
+
+
+<h3 class="wp-block-heading">Markdown-mode</h3>
+
+
+
+<p>The <strong><a href="https://github.com/jrblevin/markdown-mode">markdown-mode</a></strong> package provides a major mode for syntax highlighting, editing commands, and preview support for Markdown documents. It supports core Markdown syntax as well as extensions like GitHub Flavored Markdown (GFM). <strong>Markdown-mode</strong> and <strong>gfm-mode</strong> support <code>outline-minor-mode</code> folding. </p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">use-package</span> markdown-mode
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">gfm-mode</span>
+             gfm-view-mode
+             markdown-mode
+             markdown-view-mode)
+  <span class="hljs-symbol">:mode</span> ((<span class="hljs-string">"\\.markdown\\'"</span> . markdown-mode)
+         (<span class="hljs-string">"\\.md\\'"</span> . markdown-mode)
+         (<span class="hljs-string">"README\\.md\\'"</span> . gfm-mode))
+  <span class="hljs-symbol">:bind</span>
+  (<span class="hljs-symbol">:map</span> markdown-mode-map
+        (<span class="hljs-string">"C-c C-e"</span> . markdown-do)))
+
+<span class="hljs-comment">;; Hooks</span>
+(<span class="hljs-name">add-hook</span> 'markdown-mode-hook #'outline-minor-mode)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Maintaining independent folding states in separate windows via indirect buffers (clones)</h2>
+
+
+
+<p>Opening the same buffer in multiple windows results in synchronized folding states; any folding or unfolding action performed in one window is immediately reflected in all others.</p>
+
+
+
+<p>This occurs because folding engines use buffer-local <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Overlays.html">overlays</a>, which are shared across all windows associated with that specific buffer.</p>
+
+
+
+<p>Indirect buffers provide a robust solution to this limitation. An indirect buffer shares the underlying text of its parent buffer but maintains an independent set of overlays. This distinction allows for the maintenance of different folding configurations for the same file simultaneously.</p>
+
+
+
+<p>To create an indirect buffer (clone) of the current buffer in a separate window, execute:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-plaintext">M-x clone-indirect-buffer-other-window</code></span></pre>
+
+
+<p>Creating an indirect buffer provides a separate buffer object that references the same text while maintaining its own isolated set of opened/closed folds.</p>
+
+
+
+<h2 class="wp-block-heading">Preventing Emacs search from matching text within folded blocks</h2>
+
+
+
+<p><strong>Note: </strong>This setting is for users who want search operations to ignore folded blocks instead of expanding them. This behavior is subjective and may not suit every workflow.</p>
+
+
+
+<p>By default, search operations can match text within folded blocks, which often causes Emacs to automatically expand the hidden content.</p>
+
+
+
+<p>To instruct Emacs to strictly ignore invisible text during search operations, add the following configuration to your init file:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq-default</span> search-invisible <span class="hljs-literal">nil</span>)</code></span></pre>
+
+
+<p>Alternatively, to restrict this behavior to specific modes, apply a buffer-local configuration via a mode hook:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">add-hook</span> 'prog-mode-hook (<span class="hljs-name">lambda</span> ()
+                            (<span class="hljs-name">setq-local</span> search-invisible <span class="hljs-literal">nil</span>)))</code></span></pre>
+
+
+<h3 class="wp-block-heading">Integrating display-line-numbers-mode with code folding</h3>
+
+
+
+<p>The built-in <code>display-line-numbers-mode</code> renders line numbers in the side margin of the window. By default, it uses absolute line numbering, which tracks the absolute line count in the buffer. Consequently, when a block is folded, the line numbers skip the hidden range (e.g., jumping from 15 to 120).</p>
+
+
+
+<p>For users who prefer <strong>visual</strong> line numbering, <code>display-line-numbers-mode</code> can be configured to ignore collapsed content and assign numbers sequentially based only on what is currently rendered on the screen.</p>
+
+
+
+<p>To implement visual line numbering as your global default, set the following variable in your configuration:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq-default</span> display-line-numbers-type 'visual)</code></span></pre>
+
+
+<p>(Note that you must still enable the mode itself using <code>M-x global-display-line-numbers-mode</code> for the line numbers to appear.)</p>
+
+
+
+<h2 class="wp-block-heading">Discouraged Emacs Folding Engines</h2>
+
+
+
+<p>Choosing an appropriate folding engine is important for maintaining performance and stability within Emacs. While several third-party and legacy options exist, the following packages and methods are generally discouraged in favor of more modern or integrated alternatives:</p>
+
+
+
+<ul class="wp-block-list">
+<li><strong>Origami:</strong> This package is slow and largely unmaintained. Origami uses a non-standard API and a complex implementation that frequently conflicts with other overlay-based minor modes. Its overhead can lead to performance degradation, especially when handling large buffers or deeply nested code. <strong>(Modern alternatives to origami: <a href="https://github.com/jamescherti/outline-indent.el">outline-indent</a>, <a href="https://github.com/emacs-tree-sitter/treesit-fold">treesit-fold</a>, outline-minor-mode, hs-minor-mode)</strong></li>
+
+
+
+<li><strong>Yafolding:</strong> This package is also unmaintained and suffers from performance issues. <strong>(Modern alternative to yafolding: <a href="https://github.com/jamescherti/outline-indent.el">outline-indent</a>)</strong></li>
+
+
+
+<li><strong>Semantic (CEDET):</strong> Part of the legacy CEDET suite, Semantic folding is widely regarded as heavyweight. The parsing overhead required for its operation often introduces noticeable latency, making it vastly less efficient than modern built-in alternatives like Tree-sitter.  <strong>(Modern alternatives to CEDET code folding: <a href="https://github.com/emacs-tree-sitter/treesit-fold">treesit-fold</a>, outline-minor-mode, hs-minor-mode, <strong><a href="https://github.com/jamescherti/outline-indent.el">outline-indent</a></strong>)</strong></li>
+
+
+
+<li><strong>Selective Display (<code>set-selective-display</code>):</strong> This is Emacs&#8217; oldest built-in folding method (often bound to <code>C-x $</code>). It causes unpredictable cursor jumping, and lacks any contextual awareness.</li>
+
+
+
+<li><strong>Folding-mode:</strong> This ancient package relies on explicit structural markers placed manually inside code comments (e.g., <code>{{{</code> and <code>}}}</code>). While robust for the user, markers pollute the source code with editor-specific metadata. This is heavily frowned upon in modern collaborative environments where team members use varying IDEs.</li>
+
+
+
+<li><strong>Vimish-fold:</strong> Although useful for manual, ad-hoc text folding, <em>vimish-fold</em> is not recommended as a primary automated folding engine. Unlike Vim&#8217;s <code>set foldmethod=marker</code>, the <em>vimish-fold</em> implementation does not support recursive markers, such as <code>{{{</code> inside of <code>{{{</code>. Additionally, like <em>folding-mode</em>, <em>vimish-fold</em> also uses markers that pollute the source code with editor-specific markers, a practice discouraged in collaborative environments where team members use a variety of editors and IDEs.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">Conclusion</h2>
+
+
+
+<p>Establishing a unified folding interface in Emacs converts a buffer into a structured environment. Whether you are refactoring complex Python classes or navigating extensive Org documents, relying on a standardized command set simplifies the experience. Integrating the hooks outlined in this article ensures you enable the optimal backend for each major mode, allowing you to focus on logic rather than editor mechanics.</p>

@@ -1,0 +1,56 @@
+<p>The Lisp Machine Listener had an electric close parenthesis.  When
+  the user typed a close parenthesis, and this was the close
+  parenthesis that finished the complete form at top level, the form
+  would be sent to the REPL right away with no need to press enter.
+  Here's how to get this behavior with SLY:</p>
+<pre>(defun my-sly-mrepl-electric-close-paren ()
+  "Insert ')' and auto-send ONLY if we are closing a top-level Lisp form."
+  (interactive)
+  (let ((state (syntax-ppss)))
+    (insert ")")
+    ;; Safety checks:
+    ;; 1. We were at depth 1 (so we are now at depth 0)
+    ;; 2. We aren't in a string or comment
+    ;; 3. The input actually starts with a paren (it's a form, not a sentence)
+    (when (and (= (car state) 1)
+               (not (nth 3 state))
+               (not (nth 4 state))
+               (string-match-p "^\\s-*(" 
+                               (buffer-substring-no-properties (sly-mrepl--mark) (point))))
+      (sly-mrepl-return))))</pre>
+<p>Another cool hack is to get the REPL to do double duty as a command
+  line to the LLM chatbot.  When you type RET in the REPL, it will
+  check if the input is a complete lisp form.  If so, it will send the
+  form to the REPL as normal.  If not, it will send the input to the
+  chatbot. Here's how to do this:</p>
+<pre>(defun my-sly-mrepl-electric-return ()
+  "Send to Lisp if it's a form/symbol, or wrap in (chat ...) if it's a sentence."
+  (interactive)
+  (let* ((beg (marker-position (sly-mrepl--mark)))
+         (end (point-max))
+         (input (buffer-substring-no-properties beg end))
+         (trimmed (string-trim input)))
+    (cond
+     ;; If it's empty, just do a normal return
+     ((string-blank-p trimmed)
+      (sly-mrepl-return))
+     
+     ;; If it starts with a paren, quote, or hash, it's definitely a Lisp form
+     ((string-match-p "^\\s-*[(#'\"]" trimmed)
+      (sly-mrepl-return))
+     
+     ;; If it's a single word (no spaces), treat it as a symbol/form (e.g., *package*)
+     ((not (string-match-p "\\s-" trimmed))
+      (sly-mrepl-return))
+     
+     ;; Otherwise, it's a sentence. Wrap it and fire.
+     (t
+      (delete-region beg end)
+      (insert (format "(chat %S)" trimmed))
+      (sly-mrepl-return)))))</pre>
+
+<p>Install as follows:</p>
+<pre>;; Apply to SLY MREPL with a safety check for the mode map
+(with-eval-after-load 'sly-mrepl
+  (define-key sly-mrepl-mode-map (kbd "RET") 'my-sly-mrepl-electric-return)
+  (define-key sly-mrepl-mode-map (kbd ")") 'my-sly-mrepl-electric-close-paren))</pre>

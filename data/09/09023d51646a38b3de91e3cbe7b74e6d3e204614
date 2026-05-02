@@ -1,0 +1,54 @@
+<p>Access to slots in CLOS instances is often very slow. It&rsquo;s probably not possible for it ever to be really fast, but the AMOP MOP does provide a way of making it, at least, less slow.</p>
+<!-- more-->
+
+<h2 id="how-slow-is-it">How slow is it?</h2>
+
+<p>Here are some benchmarks for accessing fields in objects of various kinds, using SBCL. All of these tests do something equivalent to</p>
+
+<pre class="brush: lisp"><code>(defclass a ()
+  ((i :initform 0 :type fixnum)))
+
+(defclass a/no-fixnum ()
+  ((i :initform 0)))
+
+(defmethod svn ((a a) n)
+  (declare (type fixnum n)
+           (optimize speed (safety 0)))
+  (dotimes (i n)
+    (incf (the fixnum (slot-value a 'i)))))
+
+(defmethod svn ((a a/no-fixnum) n)
+  (declare (type fixnum n)
+           (optimize speed (safety 0)))
+  (dotimes (i n)
+    (incf (the fixnum (slot-value a 'i)))))</code></pre>
+
+<p>They then call <code>svn</code> (or equivalent) with a large value of \(n\), do that a number of times \(m\) and then divide by \(2 \times n \times m\) to get an average time per access (<code>incf</code> accesses the slot twice).</p>
+
+<p>For SBCL 2.6.3.178-a190d9710 on ARM64 Apple M1, seconds per access:</p>
+
+<ul>
+ <li>raw fixnum increment \(1.58\times 10^{-10}\), ratio \(1.0\);</li>
+ <li>slot access with <code>slot-value</code> (slot type <code>fixnum</code>) \(1.20\times 10^{-8}\), ratio \(76\);</li>
+ <li>slot access with <code>slot-value</code> (no slot type) \(1.22\times 10^{-8}\), ratio \(77\);</li>
+ <li>slot access with <code>slot-value</code> (single <code>slot-value-using-class</code> method) \(1.69\times 10^{-8}\), ratio \(107\);</li>
+ <li>slot access using <code>standard-instance-access</code> \(1.00\times 10^{-9}\), ratio \(6.4\);</li>
+ <li>slot access, struct (slot type <code>fixnum</code>) \(1.57\times 10^{-10}\), ratio \(1.0\);</li>
+ <li>slot access, struct (no type) \(1.58\times 10^{-10}\), ratio \(1.0\);</li>
+ <li>slot access, cons (<code>car</code>) \(1.59\times 10^{-10}\), ratio \(1.0\).</li></ul>
+
+<p>These numbers vary slightly, but this gives a good picture of what is going on. In particular you can see that <code>slot-value</code> within a method specialised on the class is more than 70 times slower than access for a structure slot, but if you can use <code>standard-instance-access</code> it is only about 6 times slower: <code>standard-instance-access</code> speeds things up by a factor of about 10, which changes CLOS slot access performance from laughably slow to merely pretty slow.</p>
+
+<h2 id="a-macro">A macro</h2>
+
+<p>I&rsquo;ve written a macro, called <code>with-sia-slots</code> which is like <code>with-slots</code> but uses <code>standard-instance-access</code>. It therefore has all the constraints imposed by that, but it is significantly faster than <code>with-slots</code> or <code>slot-value</code>. It has some overhead, as it has to dynamically compute the slot locations: this is better done outside any inner loop. This means that, for instance, you probably want to write code that looks like</p>
+
+<pre class="brush: lisp"><code>(with-sia-slots (x) o
+  (dotimes (i many)
+    (setf x (... x ...))))</code></pre>
+
+<p>which will mean you only pay the overhead once.</p>
+
+<p>The above tests don&rsquo;t use <code>with-sia-slots</code>, as I wrote them partly to see if something like this was worth writing. However on a current (at the time of writing) SBCL <code>with-sia-slots</code> is asymptotically about 10 times faster than <code>with-slots</code> as demonstrated by these tests.</p>
+
+<p>Up to package names it should be portable to any CL with an AMOP-compatible MOP. It can be found in my implementation-specific hacks, linked from <a href="https://tfeb.org/fragments/documentation/" title="Documentation">here</a>.</p>

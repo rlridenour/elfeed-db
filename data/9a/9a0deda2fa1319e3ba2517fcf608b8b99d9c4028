@@ -1,0 +1,226 @@
+<p>
+For years, <code>rgrep</code> has been the go-to solution for searching codebases in Emacs. It's built-in, reliable, and works everywhere. But it's slow on large projects and uses the aging <code>find</code> and <code>grep</code> commands.
+</p>
+
+<p>
+Packages like <code>deadgrep</code> and <code>rg.el</code> provide ripgrep integration, and for years I used <code>deadgrep</code> and really liked it. But what if you could get ripgrep's speed with just a single function you paste into your config?
+</p>
+
+
+<div id="org8e3c2d0" class="figure">
+<p><img class="img-fluid rounded" src="/static/emacs/20260109094340-emacs--A-Single-Function-ripgrep-Alternative-to-rgrep.jpg" alt="20260109094340-emacs--A-Single-Function-ripgrep-Alternative-to-rgrep.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+This post introduces a ~100 line <code>defun</code> that replaces rgrep, no packages, no dependencies, just pure Elisp. It's fast, asynchronous, works offline, and mimics rgrep's familiar interface so it can leverage <code>grep-mode</code>
+</p>
+
+<p>
+So, why not just use rgrep?
+</p>
+
+<p>
+I think that rgrep has three main limitations:
+</p>
+
+<p>
+Firstly, speed. On a project with 10,000+ files, rgrep can take 15-30 seconds. Ripgrep completes the same search in under a second.
+</p>
+
+<p>
+Secondly, file ignoring, rgrep requires manually configuring <code>grep-find-ignored-directories</code> or <code>grep-find-ignored-files</code>, I had the following typical configuration for rgrep, but it wasn't as flexible as I would like it to be:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(eval-after-load 'grep
+  '(progn
+     (<span style="color: #ea3d54; font-weight: bold;">dolist</span> (dir '(<span style="color: #4fb3d8;">"nas"</span> <span style="color: #4fb3d8;">".cache"</span> <span style="color: #4fb3d8;">"cache"</span> <span style="color: #4fb3d8;">"elpa"</span> <span style="color: #4fb3d8;">"chromium"</span> <span style="color: #4fb3d8;">".local/share"</span> <span style="color: #4fb3d8;">"syncthing"</span> <span style="color: #4fb3d8;">".mozilla"</span> <span style="color: #4fb3d8;">".local/lib"</span> <span style="color: #4fb3d8;">"Games"</span>))
+       (<span style="color: #ea3d54; font-weight: bold;">push</span> dir grep-find-ignored-directories))
+     (<span style="color: #ea3d54; font-weight: bold;">dolist</span> (file '(<span style="color: #4fb3d8;">".cache"</span> <span style="color: #4fb3d8;">"*cache*"</span> <span style="color: #4fb3d8;">"*.iso"</span> <span style="color: #4fb3d8;">"*.xmp"</span> <span style="color: #4fb3d8;">"*.jpg"</span> <span style="color: #4fb3d8;">"*.mp4"</span>))
+       (<span style="color: #ea3d54; font-weight: bold;">push</span> file grep-find-ignored-files))
+     ))
+</pre>
+</div><br>
+<p>
+Ripgrep automatically respects an <code>.ignore</code> file. Just create an <code>.ignore</code> file in your project root and list patterns to exclude, this is just a simple text file, universally applied across all searches and any changes can be easily applied.
+</p>
+
+<p>
+Thirdly, modern features. Ripgrep includes smart-case search, better regex support, and automatic binary file detection. Of course, there is a context that can be displayed around the found line, but in order to get ripgrep to work with grep-mode, this is not really doable, and it's not something I need anyway.
+</p>
+
+<hr />
+
+<p>
+Here is the complete ripgrep implementation that you can paste directly into your <code>init.el</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #ea3d54; font-weight: bold;">defun</span> <span style="color: #fedd38; font-weight: bold;">my/grep</span> (search-term <span style="color: #ee7b29;">&amp;optional</span> directory glob)
+  <span style="color: #7bc5e1;">"Run ripgrep (rg) with SEARCH-TERM and optionally DIRECTORY and GLOB.
+If ripgrep is unavailable, fall back to Emacs's rgrep command. Highlights SEARCH-TERM in results.
+By default, only the SEARCH-TERM needs to be provided. If called with a
+universal argument, DIRECTORY and GLOB are prompted for as well."</span>
+  (<span style="color: #ea3d54; font-weight: bold;">interactive</span>
+   (<span style="color: #ea3d54; font-weight: bold;">let*</span> ((univ-arg current-prefix-arg)
+          (default-search-term
+           (<span style="color: #ea3d54; font-weight: bold;">cond</span>
+            ((use-region-p)
+             (buffer-substring-no-properties (region-beginning) (region-end)))
+            ((thing-at-point 'symbol t))
+            ((thing-at-point 'word t))
+            (t <span style="color: #4fb3d8;">""</span>))))
+     (list
+      (read-string (<span style="color: #ea3d54; font-weight: bold;">if</span> (string-empty-p default-search-term)
+                       <span style="color: #4fb3d8;">"Search for: "</span>
+                     (format <span style="color: #4fb3d8;">"Search for (default `%s`): "</span> default-search-term))
+                   nil nil default-search-term)
+      (<span style="color: #ea3d54; font-weight: bold;">when</span> univ-arg (read-directory-name <span style="color: #4fb3d8;">"Directory: "</span>))
+      (<span style="color: #ea3d54; font-weight: bold;">when</span> univ-arg (read-string <span style="color: #4fb3d8;">"File pattern (glob, default: ): "</span> nil nil <span style="color: #4fb3d8;">""</span>)))))
+  (<span style="color: #ea3d54; font-weight: bold;">let*</span> ((directory (expand-file-name (<span style="color: #ea3d54; font-weight: bold;">or</span> directory default-directory)))
+         (glob (<span style="color: #ea3d54; font-weight: bold;">or</span> glob <span style="color: #4fb3d8;">""</span>))
+         (buffer-name <span style="color: #4fb3d8;">"*grep*"</span>))
+    (<span style="color: #ea3d54; font-weight: bold;">if</span> (executable-find <span style="color: #4fb3d8;">"rg"</span>)
+        (<span style="color: #ea3d54; font-weight: bold;">let</span> ((buffer (get-buffer-create buffer-name)))
+          (<span style="color: #ea3d54; font-weight: bold;">with-current-buffer</span> buffer
+            (<span style="color: #ea3d54; font-weight: bold;">setq</span> default-directory directory)
+            (<span style="color: #ea3d54; font-weight: bold;">let</span> ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (format <span style="color: #4fb3d8;">"-*- mode: grep; default-directory: \"%s\" -*-\n\n"</span> directory))
+              (<span style="color: #ea3d54; font-weight: bold;">if</span> (not (string= <span style="color: #4fb3d8;">""</span> glob))
+                  (insert (format <span style="color: #4fb3d8;">"[o] Glob: %s\n\n"</span> glob)))
+              (insert <span style="color: #4fb3d8;">"Searching...\n\n"</span>))
+            (grep-mode)
+            (<span style="color: #ea3d54; font-weight: bold;">setq-local</span> my/grep-search-term search-term)
+            (<span style="color: #ea3d54; font-weight: bold;">setq-local</span> my/grep-directory directory)
+            (<span style="color: #ea3d54; font-weight: bold;">setq-local</span> my/grep-glob glob))<br>
+          (pop-to-buffer buffer)
+          (goto-char (point-min))<br>
+          (make-process
+           <span style="color: #fedd38;">:name</span> <span style="color: #4fb3d8;">"ripgrep"</span>
+           <span style="color: #fedd38;">:buffer</span> buffer
+           <span style="color: #fedd38;">:command</span> `(<span style="color: #4fb3d8;">"rg"</span> <span style="color: #4fb3d8;">"--color=never"</span> <span style="color: #4fb3d8;">"--max-columns=500"</span> 
+                      <span style="color: #4fb3d8;">"--column"</span> <span style="color: #4fb3d8;">"--line-number"</span> <span style="color: #4fb3d8;">"--no-heading"</span> 
+                      <span style="color: #4fb3d8;">"--smart-case"</span> <span style="color: #4fb3d8;">"-e"</span> ,search-term
+                      <span style="color: #4fb3d8;">"--glob"</span> ,glob ,directory)
+           <span style="color: #fedd38;">:filter</span> (<span style="color: #ea3d54; font-weight: bold;">lambda</span> (proc string)
+                     (<span style="color: #ea3d54; font-weight: bold;">when</span> (buffer-live-p (process-buffer proc))
+                       (<span style="color: #ea3d54; font-weight: bold;">with-current-buffer</span> (process-buffer proc)
+                         (<span style="color: #ea3d54; font-weight: bold;">let</span> ((inhibit-read-only t)
+                               (moving (= (point) (process-mark proc))))
+                           (<span style="color: #ea3d54; font-weight: bold;">setq</span> string (replace-regexp-in-string <span style="color: #4fb3d8;">"[\r\0\x01-\x08\x0B-\x0C\x0E-\x1F]"</span> <span style="color: #4fb3d8;">""</span> string))
+                           <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Replace full directory path with ./ in the incoming output
+</span>                           (<span style="color: #ea3d54; font-weight: bold;">setq</span> string (replace-regexp-in-string 
+                                         (concat <span style="color: #4fb3d8;">"^"</span> (regexp-quote directory))
+                                         <span style="color: #4fb3d8;">"./"</span>
+                                         string))
+                           (<span style="color: #ea3d54; font-weight: bold;">save-excursion</span>
+                             (goto-char (process-mark proc))
+                             (insert string)
+                             (set-marker (process-mark proc) (point)))
+                           (<span style="color: #ea3d54; font-weight: bold;">if</span> moving (goto-char (process-mark proc)))))))
+           <span style="color: #fedd38;">:sentinel</span>
+           (<span style="color: #ea3d54; font-weight: bold;">lambda</span> (proc _event)
+             (<span style="color: #ea3d54; font-weight: bold;">when</span> (memq (process-status proc) '(exit signal))
+               (<span style="color: #ea3d54; font-weight: bold;">with-current-buffer</span> (process-buffer proc)
+                 (<span style="color: #ea3d54; font-weight: bold;">let</span> ((inhibit-read-only t))
+                   <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Remove "Searching..." line
+</span>                   (goto-char (point-min))
+                   (<span style="color: #ea3d54; font-weight: bold;">while</span> (re-search-forward <span style="color: #4fb3d8;">"Searching\\.\\.\\.\n\n"</span> nil t)
+                     (replace-match <span style="color: #4fb3d8;">""</span> nil t))<br>
+                   <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Clean up the output - replace full paths with ./
+</span>                   (goto-char (point-min))
+                   (forward-line 3)
+                   (<span style="color: #ea3d54; font-weight: bold;">let</span> ((start-pos (point)))
+                     (<span style="color: #ea3d54; font-weight: bold;">while</span> (re-search-forward (concat <span style="color: #4fb3d8;">"^"</span> (regexp-quote directory)) nil t)
+                       (replace-match <span style="color: #4fb3d8;">"./"</span> t t))<br>
+                     <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Check if any results were found
+</span>                     (goto-char start-pos)
+                     (<span style="color: #ea3d54; font-weight: bold;">when</span> (= (point) (point-max))
+                       (insert <span style="color: #4fb3d8;">"No results found.\n"</span>)))<br>
+                   (goto-char (point-max))
+                   (insert <span style="color: #4fb3d8;">"\nRipgrep finished\n"</span>)<br>
+                   <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Highlight search terms using grep's match face
+</span>                   (goto-char (point-min))
+                   (forward-line 3)
+                   (<span style="color: #ea3d54; font-weight: bold;">save-excursion</span>
+                     (<span style="color: #ea3d54; font-weight: bold;">while</span> (re-search-forward (regexp-quote search-term) nil t)
+                       (put-text-property (match-beginning 0) (match-end 0)
+                                          'face 'match)
+                       (put-text-property (match-beginning 0) (match-end 0)
+                                          'font-lock-face 'match))))<br>
+                 <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Set up keybindings
+</span>                 (local-set-key (kbd <span style="color: #4fb3d8;">"D"</span>) 
+                                (<span style="color: #ea3d54; font-weight: bold;">lambda</span> () 
+                                  (<span style="color: #ea3d54; font-weight: bold;">interactive</span>)
+                                  (my/grep my/grep-search-term 
+                                           (read-directory-name <span style="color: #4fb3d8;">"New search directory: "</span>)
+                                           my/grep-glob)))
+                 (local-set-key (kbd <span style="color: #4fb3d8;">"S"</span>) 
+                                (<span style="color: #ea3d54; font-weight: bold;">lambda</span> () 
+                                  (<span style="color: #ea3d54; font-weight: bold;">interactive</span>)
+                                  (my/grep (read-string <span style="color: #4fb3d8;">"New search term: "</span>
+                                                        nil nil my/grep-search-term)
+                                           my/grep-directory
+                                           my/grep-glob)))
+                 (local-set-key (kbd <span style="color: #4fb3d8;">"o"</span>) 
+                                (<span style="color: #ea3d54; font-weight: bold;">lambda</span> () 
+                                  (<span style="color: #ea3d54; font-weight: bold;">interactive</span>)
+                                  (my/grep my/grep-search-term
+                                           my/grep-directory
+                                           (read-string <span style="color: #4fb3d8;">"New glob: "</span>))))
+                 (local-set-key (kbd <span style="color: #4fb3d8;">"g"</span>) 
+                                (<span style="color: #ea3d54; font-weight: bold;">lambda</span> () 
+                                  (<span style="color: #ea3d54; font-weight: bold;">interactive</span>)
+                                  (my/grep my/grep-search-term my/grep-directory my/grep-glob)))<br>
+                 (goto-char (point-min))
+                 (message <span style="color: #4fb3d8;">"ripgrep finished."</span>))))
+           )
+          (message <span style="color: #4fb3d8;">"ripgrep started..."</span>))
+      <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Fallback to rgrep
+</span>      (<span style="color: #ea3d54; font-weight: bold;">progn</span>
+        (<span style="color: #ea3d54; font-weight: bold;">setq</span> default-directory directory)
+        (message (format <span style="color: #4fb3d8;">"%s : %s : %s"</span> search-term glob directory))
+        (rgrep search-term (<span style="color: #ea3d54; font-weight: bold;">if</span> (string= <span style="color: #4fb3d8;">""</span> glob) <span style="color: #4fb3d8;">"*"</span> glob) directory)))))
+</pre>
+</div><br>
+<p>
+That's it. ~100 lines. No dependencies. No packages to manage! (well except ripgrep of course)
+</p>
+
+<p>
+Now that I have complete control over this function, I have added further improvements over rgrep, inspired by <code>deadgrep</code>
+</p>
+
+<ul class="org-ul">
+<li><b><code>S</code></b> - New search term</li>
+<li><b><code>D</code></b> - New directory</li>
+<li><b><code>o</code></b> - New glob pattern</li>
+<li><b><code>g</code></b> - Re-run current search</li>
+</ul>
+
+<p>
+and a universal argument can be passed through to set these up on the initial grep
+</p>
+
+<p>
+I have tried to make the output as similar as possible to rgrep, to be compatible with <code>grep-mode</code> and for familiarity, so it will be something like:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-nil">-*- mode: grep; default-directory: "~/project/" -*-<br>
+[o] Glob: *.el<br>
+./init.el:42:10:(defun my-function ()
+./config.el:156:5:  (my-function)
+./helpers.el:89:12:;; Helper for my-function<br>
+Ripgrep finished
+</pre>
+</div><br>
+<p>
+and if a glob is applied it will display the glob pattern.
+</p>
+
+<p>
+Its perfect for offline environments, and yes, I'm banging on about this again!, no network, no package manager, no dependencies (except ripgrep of course!)
+</p>

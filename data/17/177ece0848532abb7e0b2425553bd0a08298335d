@@ -1,0 +1,129 @@
+<figure><img src="https://baty.net/img/2026/20260503-example-pdf.png" alt="Screenshot of PDF"><figcaption>Sample PDF output</figcaption></figure><p>Rather than using a normal-person's &quot;Read Later&quot; service, I print long-form web articles for reading later. I print them, pile them up, and read them all when I have some time away from the computer. It's the only way I can truly pay attention to them.</p>
+<p>The process took some work to dial in, but I've gotten it close to how I like it. It goes like this:</p>
+<ol>
+<li>Save the page as Markdown using the <a href="https://obsidian.md/clipper">Obsidian Web Clipper</a></li>
+<li>Convert the Markdown to PDF using <a href="https://pandoc.org">Pandoc</a></li>
+<li>Print!</li>
+</ol>
+<!-- more -->
+<p>First, the Obsidian Web Clipper. I have a custom &quot;template&quot; configured for this. The template doesn't use Properties. I put the entire block of front matter into the Content field, using variables to insert the specifics, so no need to worry about the way the clipper renders properties...</p>
+<pre><code class="language-yaml">---
+title: &quot;{{title}}&quot;
+author: &quot;{{author|safe_name}}&quot;
+source: {{url}}
+created: {{date}}
+published: {{published|date:&quot;YYYY-MM-DD&quot;}}
+---
+
+&gt; ## Excerpt
+&gt; {{description}}
+
+{{content}}
+</code></pre>
+<p>A copy of the template for importing directly into the web clipper is <a href="https://static.baty.net/code/obsidia-web-clipper-for-pandoc.json">here</a></p>
+<p>The magic comes from Pandoc. I convert the Markdown to PDF via LaTeX. The <code>default.latex</code> template that ships with Pandoc works well. It uses all sorts of variables that can be passed in via YAML front matter or via a defaults file. I only just learned about the default file option, so that cleaned up the front matter dramatically. Here's my ~/.pandoc/defaults/article.yaml defaults file:</p>
+<pre><code class="language-yaml">pdf-engine: xelatex
+template: ~/.pandoc/templates/default.latex
+
+variables:
+  documentclass: scrartcl
+  mainfont: XCharter
+  sansfont: Playfair Display
+  linestretch: 1.15
+  header-includes:
+    - \setkomafont{title}{\sffamily\bfseries}
+    - \setkomafont{section}{\sffamily\bfseries}
+    - \setkomafont{subsection}{\sffamily\bfseries}
+  classoption:
+    - DIV=14
+    - twocolumn 
+</code></pre>
+<p>This sets fonts, sizes, document class, etc. The <code>DIV=14</code> is new to me. With KOMA classes, it sets the text width, taking font size into account. This is easier than including specific geometry. Smaller numbers = narrower text. Drop the <code>twocolumn</code> line to print full-width.</p>
+<p>I could create separate default files for different layouts and styles. Use the -d option, e.g. <code>pandoc -d article</code>. I might make one for use on the Remarkable tablet, which likes a larger font and wider body.</p>
+<p>A shell script, <code>md2pdf.sh</code> does the conversion for me. The script used to be about 10 lines of sloppy bash with a bunch of stuff hard-coded. I had Claude help me make it more robust, and here's the latest version:</p>
+<pre><code class="language-bash">#!/bin/sh
+set -eu
+
+DEFAULT_DEFAULTS_FILE=&quot;$HOME/.pandoc/defaults/article.yaml&quot;
+
+usage() {
+    cat &gt;&amp;2 &lt;&lt;EOF
+Usage: $(basename &quot;$0&quot;) [OPTIONS] FILE
+
+Convert a Markdown file to PDF with pandoc and open it.
+
+Options:
+  -o DIR    Output directory (default: same directory as FILE)
+  -d FILE   Pandoc defaults file (default: $DEFAULT_DEFAULTS_FILE)
+  -n        Don't open the PDF after creating it
+  -h        Show this help
+EOF
+    exit 1
+}
+
+output_dir=&quot;&quot;
+defaults_file=&quot;$DEFAULT_DEFAULTS_FILE&quot;
+open_after=1
+
+while getopts &quot;o:d:nh&quot; opt; do
+    case &quot;$opt&quot; in
+        o) output_dir=&quot;$OPTARG&quot; ;;
+        d) defaults_file=&quot;$OPTARG&quot; ;;
+        n) open_after=0 ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+[ $# -ge 1 ] || usage
+
+input=&quot;$1&quot;
+
+if [ ! -f &quot;$input&quot; ]; then
+    echo &quot;Error: input file '$input' not found&quot; &gt;&amp;2
+    exit 1
+fi
+
+if [ ! -f &quot;$defaults_file&quot; ]; then
+    echo &quot;Error: defaults file '$defaults_file' not found&quot; &gt;&amp;2
+    exit 1
+fi
+
+# Default output dir to source dir
+[ -n &quot;$output_dir&quot; ] || output_dir=$(dirname &quot;$input&quot;)
+mkdir -p &quot;$output_dir&quot;
+
+stem=$(basename &quot;$input&quot;)
+stem=&quot;${stem%.*}&quot;
+output=&quot;$output_dir/$stem.pdf&quot;
+
+# Capture pandoc stderr so we can report it clearly on failure
+log=$(mktemp)
+trap 'rm -f &quot;$log&quot;' EXIT
+
+if ! pandoc --defaults &quot;$defaults_file&quot; &quot;$input&quot; -o &quot;$output&quot; 2&gt;&quot;$log&quot;; then
+    echo &quot;pandoc failed converting '$input'&quot; &gt;&amp;2
+    echo &quot;----- pandoc output -----&quot; &gt;&amp;2
+    cat &quot;$log&quot; &gt;&amp;2
+    echo &quot;-------------------------&quot; &gt;&amp;2
+    echo &quot;Command: pandoc --defaults '$defaults_file' '$input' -o '$output'&quot; &gt;&amp;2
+    exit 1
+fi
+
+# Surface warnings even on a successful run
+[ -s &quot;$log&quot; ] &amp;&amp; cat &quot;$log&quot; &gt;&amp;2
+
+echo &quot;Created: $output&quot;
+
+if [ &quot;$open_after&quot; -eq 1 ]; then
+    xdg-open &quot;$output&quot; &gt;/dev/null 2&gt;&amp;1 &amp;
+fi
+
+</code></pre>
+<p>So the simple version (assuming md2pdf.sh is in your path) is:</p>
+<p><code>md2pdf.sh my-article.md</code></p>
+<p>It's not quite cross-platform (e.g xdg-open on Linux vs open on macOS) but that shouldn't be to difficult to do.</p>
+<p>This seems like a lot, but once it's in place it's a couple of clicks and a quick shell command.</p>
+<p>Let me know if there's anything unclear or incorrect here. Or if you have suggestions for improvements.</p>
+<p><a href="mailto:jack@baty.net?subject=[Baty.net] Re: From%20web%20page%20to%20printable%20PDF%20for%20reading%20later">✍️ Reply by email</a></p>

@@ -1,0 +1,680 @@
+<section id="outline-container-orgec7eed1" class="outline-2">
+<h2 id="orgec7eed1">Introduction</h2>
+<div class="outline-text-2" id="text-orgec7eed1">
+<p>
+I have been developing C# with .NET 9.0 for the last year on Windows and I thought it was probably time to write down my current setup, and maybe someone might even find this useful!
+</p>
+
+<p>
+So, this guide documents my setup for running Emacs 30.1 on Windows with full C# development support, including LSP, debugging (through DAPE), and all the ancillary tools you'd expect from a modern development environment. The setup is designed to be portable and self-contained, which is particularly useful in air-gapped or restricted environments.
+</p>
+
+<p>
+A version of this can be found at <a href="https://github.com/captainflasmr/Emacs-on-windows">https://github.com/captainflasmr/Emacs-on-windows</a> which will be a living continually updated version!
+</p>
+
+
+<div id="orgcb47680" class="figure">
+<p><img class="img-fluid rounded" src="/static/emacs/20251216082551-emacs--Setting-Up-Emacs-for-Csharp-Development-on-Windows.jpg" alt="20251216082551-emacs--Setting-Up-Emacs-for-Csharp-Development-on-Windows.jpg" width="100%" />
+</p>
+</div>
+</div>
+</section>
+<section id="outline-container-orgd82550d" class="outline-2">
+<h2 id="orgd82550d">Prerequisites</h2>
+<div class="outline-text-2" id="text-orgd82550d">
+<p>
+Before we begin, you'll need:
+</p>
+
+<ul class="org-ul">
+<li><b>Windows 10 or 11</b> (64-bit)</li>
+<li><b>.NET 9.0 SDK</b> - Required for csharp-ls and building .NET projects</li>
+<li><b>Visual Studio 2022</b> (optional) - Useful for MSBuild and if you need the full IDE occasionally</li>
+<li><b>Administrator access</b> - For initial setup only</li>
+</ul>
+
+<p>
+You can verify your .NET installation by opening a command prompt and running:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-shell">dotnet --version
+</pre>
+</div><br>
+<p>
+If you see version 9.0.x or later, you're ready to proceed.
+</p>
+</div>
+</section>
+<section id="outline-container-orgb6f11f4" class="outline-2">
+<h2 id="orgb6f11f4">The Big Picture</h2>
+<div class="outline-text-2" id="text-orgb6f11f4">
+<p>
+Here's what we're building:
+</p>
+
+<pre class="example" id="orgd02b3f3">
+D:\source\emacs-30.1\
+├── bin\
+│   ├── emacs.exe, runemacs.exe, etc.
+│   ├── PortableGit\          # Git for version control
+│   ├── Apache-Subversion\    # SVN (if needed)
+│   ├── csharp-ls\            # C# Language Server
+│   ├── netcoredbg\           # .NET debugger
+│   ├── omnisharp-win-x64\    # Alternative C# LSP
+│   ├── hunspell\             # Spell checking
+│   ├── find\                 # ripgrep for fast searching
+│   ├── ffmpeg-7.1.1-.../     # Video processing
+│   └── ImageMagick-.../      # Image processing
+└── share\
+    └── emacs\...
+</pre>
+
+<p>
+The key insight here is keeping everything within the Emacs installation directory. This makes the whole setup portable-you can copy it to another machine or keep it on a USB drive.
+</p>
+</div>
+</section>
+<section id="outline-container-org7cfbaed" class="outline-2">
+<h2 id="org7cfbaed">Step 1: Installing Emacs</h2>
+<div class="outline-text-2" id="text-org7cfbaed">
+<p>
+Download Emacs 30.1 from the <a href="https://www.gnu.org/software/emacs/download.html">GNU Emacs download page</a>. For Windows, grab the installer or the zip archive.
+</p>
+
+<p>
+I install to an external drive <code>D:\source\emacs-30.1</code> rather than Program Files-it avoids permission issues and keeps everything in one place.
+</p>
+
+<p>
+Test your installation by running <code>bin\runemacs.exe</code>. You should see a fresh Emacs frame.
+</p>
+</div>
+</section>
+<section id="outline-container-orgf3fad19" class="outline-2">
+<h2 id="orgf3fad19">Step 2: Setting Up csharp-ls (The C# Language Server)</h2>
+<div class="outline-text-2" id="text-orgf3fad19">
+<p>
+This is the heart of the C# development experience. <code>csharp-ls</code> provides code completion, go-to-definition, find references, diagnostics, and more through the Language Server Protocol (LSP).
+</p>
+</div>
+<div id="outline-container-orge72d52d" class="outline-3">
+<h3 id="orge72d52d">Option A: Installing via dotnet tool (Recommended for Internet Access)</h3>
+<div class="outline-text-3" id="text-orge72d52d">
+<p>
+If you have internet access, the easiest way to install csharp-ls is as a .NET global tool:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-shell"><span style="color: #5B6268;"># </span><span style="color: #5B6268;">Install the latest version globally
+</span>dotnet tool install --global csharp-ls<br>
+<span style="color: #5B6268;"># </span><span style="color: #5B6268;">Or install a specific version
+</span>dotnet tool install --global csharp-ls --version 0.20.0<br>
+<span style="color: #5B6268;"># </span><span style="color: #5B6268;">Verify installation
+</span>csharp-ls --version
+</pre>
+</div><br>
+<p>
+By default, global tools are installed to:
+</p>
+<ul class="org-ul">
+<li>Windows: <code>%USERPROFILE%\.dotnet\tools</code></li>
+</ul>
+
+<p>
+The executable will be <code>csharp-ls.exe</code> and can be called directly once the tools directory is in your PATH.
+</p>
+</div>
+</div>
+<div id="outline-container-orgd7adefd" class="outline-3">
+<h3 id="orgd7adefd">Option B: Offline Installation via NuGet Package</h3>
+<div class="outline-text-3" id="text-orgd7adefd">
+<p>
+For air-gapped environments, you can download the NuGet package and extract it manually:
+</p>
+
+<ol class="org-ol">
+<li><p>
+On a machine with internet, download the package:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell">   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">Download the nupkg file
+</span>   nuget install csharp-ls -Version 0.20.0 -OutputDirectory ./packages<br>
+   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">Or download directly from NuGet Gallery:
+</span>   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">https://www.nuget.org/packages/csharp-ls/
+</span>   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">Click "Download package" on the right side</span>
+</pre>
+</div></li>
+
+<li><p>
+The <code>.nupkg</code> file is just a ZIP archive. Extract it:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell">   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">Rename to .zip and extract, or use 7-Zip
+</span>   <span style="color: #5B6268;"># </span><span style="color: #5B6268;">The DLLs are in tools/net9.0/any/</span>
+</pre>
+</div></li>
+
+<li><p>
+Copy the <code>tools/net9.0/any/</code> directory to your Emacs bin:
+</p>
+<div class="org-src-container">
+<pre class="src src-shell">   xcopy /E packages\csharp-ls.0.20.0\tools\net9.0\any D:\source\emacs-30.1\bin\csharp-ls<span style="color: #4fb3d8;">\</span>
+</pre>
+</div></li>
+
+<li>The language server is now at:
+<code>D:\source\emacs-30.1\bin\csharp-ls\CSharpLanguageServer.dll</code></li>
+</ol>
+</div>
+</div>
+<div id="outline-container-org639db3a" class="outline-3">
+<h3 id="org639db3a">Configuring Eglot for csharp-ls</h3>
+<div class="outline-text-3" id="text-org639db3a">
+<p>
+In your <code>init.el</code>, configure Eglot to use csharp-ls:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #ea3d54; font-weight: bold;">require</span> '<span style="color: #ee7b29;">eglot</span>)<br>
+<span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Option A: If installed as a global tool
+</span>(<span style="color: #ea3d54; font-weight: bold;">setq</span> eglot-server-programs
+      '((csharp-mode . (<span style="color: #4fb3d8;">"csharp-ls"</span>))))<br>
+<span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Option B: If running from extracted DLL
+</span>(<span style="color: #ea3d54; font-weight: bold;">setq</span> eglot-server-programs
+      '((csharp-mode . (<span style="color: #4fb3d8;">"dotnet"</span> 
+                        <span style="color: #4fb3d8;">"D:/source/emacs-30.1/bin/csharp-ls/CSharpLanguageServer.dll"</span>))))
+</pre>
+</div><br>
+<p>
+I also have the following commented out if there are some eglot functions that causes slowdowns or I just think I don't need:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #ea3d54; font-weight: bold;">setq</span> eglot-ignored-server-capabilities
+      '(
+        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:hoverProvider                    ; Documentation on hover
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:completionProvider               ; Code completion
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:signatureHelpProvider            ; Function signature help
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:definitionProvider               ; Go to definition
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:typeDefinitionProvider           ; Go to type definition
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:implementationProvider           ; Go to implementation
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:declarationProvider              ; Go to declaration
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:referencesProvider               ; Find references
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentHighlightProvider        ; Highlight symbols automatically
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentSymbolProvider           ; List symbols in buffer
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:workspaceSymbolProvider          ; List symbols in workspace
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:codeActionProvider               ; Execute code actions
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:codeLensProvider                 ; Code lens
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentFormattingProvider       ; Format buffer
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentRangeFormattingProvider  ; Format portion of buffer
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentOnTypeFormattingProvider ; On-type formatting
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:renameProvider                   ; Rename symbol
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:documentLinkProvider             ; Highlight links in document
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:colorProvider                    ; Decorate color references
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:foldingRangeProvider             ; Fold regions of buffer
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:executeCommandProvider           ; Execute custom commands
+</span>        <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">:inlayHintProvider                ; Inlay hints
+</span>        ))
+</pre>
+</div><br>
+</div>
+</div>
+</section>
+<section id="outline-container-org955534c" class="outline-2">
+<h2 id="org955534c">Step 3: Setting Up the Debugger (netcoredbg)</h2>
+<div class="outline-text-2" id="text-org955534c">
+<p>
+For debugging .NET applications, we'll use <code>netcoredbg</code>, which implements the Debug Adapter Protocol (DAP).
+</p>
+</div>
+<div id="outline-container-org26a7b41" class="outline-3">
+<h3 id="org26a7b41">Installing netcoredbg</h3>
+<div class="outline-text-3" id="text-org26a7b41">
+<ol class="org-ol">
+<li>Download from <a href="https://github.com/Samsung/netcoredbg/releases">Samsung's GitHub releases</a></li>
+<li>Extract to <code>D:\source\emacs-30.1\bin\netcoredbg\</code></li>
+<li>Verify: <code>netcoredbg.exe --version</code></li>
+</ol>
+</div>
+</div>
+<div id="outline-container-orgd2a9278" class="outline-3">
+<h3 id="orgd2a9278">Configuring dape for Debugging</h3>
+<div class="outline-text-3" id="text-orgd2a9278">
+<p>
+<code>dape</code> is an excellent DAP client for Emacs. Here's my configuration:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #ea3d54; font-weight: bold;">use-package</span> dape
+  <span style="color: #fedd38;">:load-path</span> <span style="color: #4fb3d8;">"z:/SharedVM/source/dape-master"</span>
+  <span style="color: #fedd38;">:init</span>
+  <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Set key prefix BEFORE loading dape
+</span>  (<span style="color: #ea3d54; font-weight: bold;">setq</span> dape-key-prefix (kbd <span style="color: #4fb3d8;">"C-c d"</span>))
+  <span style="color: #fedd38;">:config</span>
+  <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Define common configuration
+</span>  (<span style="color: #ea3d54; font-weight: bold;">defvar</span> <span style="color: #cbccd1;">project-netcoredbg-path</span> <span style="color: #4fb3d8;">"d:/source/emacs-30.1/bin/netcoredbg/netcoredbg.exe"</span>
+    <span style="color: #7bc5e1;">"Path to netcoredbg executable."</span>)
+  (<span style="color: #ea3d54; font-weight: bold;">defvar</span> <span style="color: #cbccd1;">project-netcoredbg-log</span> <span style="color: #4fb3d8;">"d:/source/emacs-30.1/bin/netcoredbg/netcoredbg.log"</span>
+    <span style="color: #7bc5e1;">"Path to netcoredbg log file."</span>)
+  (<span style="color: #ea3d54; font-weight: bold;">defvar</span> <span style="color: #cbccd1;">project-project-root</span> <span style="color: #4fb3d8;">"d:/source/PROJECT"</span>
+    <span style="color: #7bc5e1;">"Root directory of PROJECT project."</span>)
+  (<span style="color: #ea3d54; font-weight: bold;">defvar</span> <span style="color: #cbccd1;">project-build-config</span> <span style="color: #4fb3d8;">"Debug"</span>
+    <span style="color: #7bc5e1;">"Build configuration (Debug or Release)."</span>)
+  (<span style="color: #ea3d54; font-weight: bold;">defvar</span> <span style="color: #cbccd1;">project-target-arch</span> <span style="color: #4fb3d8;">"x64"</span>
+    <span style="color: #7bc5e1;">"Target architecture (x64, x86, or AnyCPU)."</span>)<br>
+  <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Helper function to create component configs
+</span>  (<span style="color: #ea3d54; font-weight: bold;">defun</span> <span style="color: #fedd38; font-weight: bold;">project-dape-config</span> (component-name dll-name <span style="color: #ee7b29;">&amp;optional</span> stop-at-entry)
+    <span style="color: #7bc5e1;">"Create a dape configuration for a component.
+COMPONENT-NAME is the component directory name
+DLL-NAME is the DLL filename without extension.
+STOP-AT-ENTRY if non-nil, stops at program entry point."</span>
+    (<span style="color: #ea3d54; font-weight: bold;">let*</span> ((component-dir (format <span style="color: #4fb3d8;">"%s/%s"</span> project-project-root component-name))
+           (bin-path (format <span style="color: #4fb3d8;">"%s/bin/%s/%s/net9.0"</span>
+                             component-dir
+                             project-target-arch
+                             project-build-config))
+           (dll-path (format <span style="color: #4fb3d8;">"%s/%s.dll"</span> bin-path dll-name))
+           (config-name (intern (format <span style="color: #4fb3d8;">"netcoredbg-launch-%s"</span> 
+                                        (downcase component-name)))))
+      `(,config-name
+        modes (csharp-mode csharp-ts-mode)
+        command ,project-netcoredbg-path
+        command-args (,(format <span style="color: #4fb3d8;">"--interpreter=vscode"</span>)
+                      ,(format <span style="color: #4fb3d8;">"--engineLogging=%s"</span> project-netcoredbg-log))
+        normalize-path-separator 'windows
+        <span style="color: #fedd38;">:type</span> <span style="color: #4fb3d8;">"coreclr"</span>
+        <span style="color: #fedd38;">:request</span> <span style="color: #4fb3d8;">"launch"</span>
+        <span style="color: #fedd38;">:program</span> ,dll-path
+        <span style="color: #fedd38;">:cwd</span> ,component-dir
+        <span style="color: #fedd38;">:console</span> <span style="color: #4fb3d8;">"externalTerminal"</span>
+        <span style="color: #fedd38;">:internalConsoleOptions</span> <span style="color: #4fb3d8;">"neverOpen"</span>
+        <span style="color: #fedd38;">:suppressJITOptimizations</span> t
+        <span style="color: #fedd38;">:requireExactSource</span> nil
+        <span style="color: #fedd38;">:justMyCode</span> t
+        <span style="color: #fedd38;">:stopAtEntry</span> ,(<span style="color: #ea3d54; font-weight: bold;">if</span> stop-at-entry t <span style="color: #fedd38;">:json-false</span>))))<br>
+  <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Register all component configurations
+</span>  (<span style="color: #ea3d54; font-weight: bold;">dolist</span> (config (list
+                   (project-dape-config <span style="color: #4fb3d8;">"DM"</span> <span style="color: #4fb3d8;">"DM.MSS"</span> t)
+                   (project-dape-config <span style="color: #4fb3d8;">"Demo"</span> <span style="color: #4fb3d8;">"Demo.MSS"</span> t)
+                   (project-dape-config <span style="color: #4fb3d8;">"Test_001"</span> <span style="color: #4fb3d8;">"Test"</span> t)))
+    (add-to-list 'dape-configs config))<br>
+  <span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Set buffer arrangement and other options
+</span>  (<span style="color: #ea3d54; font-weight: bold;">setq</span> dape-buffer-window-arrangement 'gud)
+  (<span style="color: #ea3d54; font-weight: bold;">setq</span> dape-debug t)
+  (<span style="color: #ea3d54; font-weight: bold;">setq</span> dape-repl-echo-shell-output t))
+</pre>
+</div><br>
+<p>
+Now you can start debugging with <code>M-x dape</code> and selecting your configuration.
+</p>
+</div>
+</div>
+</section>
+<section id="outline-container-orgfd96775" class="outline-2">
+<h2 id="orgfd96775">Step 4: Installing Supporting Tools</h2>
+<div class="outline-text-2" id="text-orgfd96775">
+</div>
+<div id="outline-container-orge7d67eb" class="outline-3">
+<h3 id="orge7d67eb">Portable Git</h3>
+<div class="outline-text-3" id="text-orge7d67eb">
+<ol class="org-ol">
+<li>Download <code>PortableGit-2.50.0-64-bit.7z.exe</code> from <a href="https://git-scm.com/download/win">git-scm.com</a></li>
+<li>Run and extract to <code>D:\source\emacs-30.1\bin\PortableGit\</code></li>
+</ol>
+
+<p>
+This gives you <code>git.exe</code>, <code>bash.exe</code>, and a whole Unix-like environment.
+</p>
+</div>
+</div>
+<div id="outline-container-org245ac14" class="outline-3">
+<h3 id="org245ac14">ripgrep (Fast Searching)</h3>
+<div class="outline-text-3" id="text-org245ac14">
+<ol class="org-ol">
+<li>Download from <a href="https://github.com/BurntSushi/ripgrep/releases">ripgrep releases</a></li>
+<li>Extract <code>rg.exe</code> to <code>D:\source\emacs-30.1\bin\find\</code></li>
+</ol>
+
+<p>
+ripgrep is dramatically faster than grep for searching codebases.
+</p>
+</div>
+</div>
+<div id="outline-container-orge45f730" class="outline-3">
+<h3 id="orge45f730">Hunspell (Spell Checking)</h3>
+<div class="outline-text-3" id="text-orge45f730">
+<ol class="org-ol">
+<li>Download <code>hunspell-1.3.2-3-w32-bin.zip</code></li>
+<li>Extract to <code>D:\source\emacs-30.1\bin\hunspell\</code></li>
+<li>Download dictionary files (<code>en_GB.dic</code> and <code>en_GB.aff</code>) and place in <code>hunspell\share\hunspell\</code></li>
+</ol>
+</div>
+</div>
+<div id="outline-container-org54bac8b" class="outline-3">
+<h3 id="org54bac8b">ImageMagick (Image Processing)</h3>
+<div class="outline-text-3" id="text-org54bac8b">
+<ol class="org-ol">
+<li>Download the portable Q16 x64 version from <a href="https://imagemagick.org/script/download.php">imagemagick.org</a></li>
+<li>Extract to <code>D:\source\emacs-30.1\bin\ImageMagick-7.1.2-9-portable-Q16-x64\</code></li>
+</ol>
+
+<p>
+This enables <code>image-dired</code> thumbnail generation.
+</p>
+</div>
+</div>
+<div id="outline-container-org6e681b9" class="outline-3">
+<h3 id="org6e681b9">FFmpeg (Video Processing)</h3>
+<div class="outline-text-3" id="text-org6e681b9">
+<ol class="org-ol">
+<li>Download from <a href="https://ffmpeg.org/download.html">ffmpeg.org</a> (essentials build is fine)</li>
+<li>Extract to <code>D:\source\emacs-30.1\bin\ffmpeg-7.1.1-essentials_build\</code></li>
+</ol>
+
+<p>
+Useful for video thumbnails in dired and media processing.
+</p>
+</div>
+</div>
+</section>
+<section id="outline-container-org1033462" class="outline-2">
+<h2 id="org1033462">Step 5: Configuring the PATH</h2>
+<div class="outline-text-2" id="text-org1033462">
+<p>
+This is crucial-Emacs needs to find all these tools. Here's the PATH configuration from my <code>init.el</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #ea3d54; font-weight: bold;">when</span> (eq system-type 'windows-nt)
+  (<span style="color: #ea3d54; font-weight: bold;">let*</span> ((emacs-bin <span style="color: #4fb3d8;">"d:/source/emacs-30.1/bin"</span>)
+         (xPaths
+          `(,emacs-bin
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/PortableGit/bin"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/PortableGit/usr/bin"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/hunspell/bin"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/find"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/netcoredbg"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/csharp-ls/tools/net9.0/any"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/ffmpeg-7.1.1-essentials_build/bin"</span>)
+            ,(concat emacs-bin <span style="color: #4fb3d8;">"/ImageMagick-7.1.2-9-portable-Q16-x64"</span>)))
+         (winPaths (getenv <span style="color: #4fb3d8;">"PATH"</span>)))
+    (setenv <span style="color: #4fb3d8;">"PATH"</span> (concat (mapconcat 'identity xPaths <span style="color: #4fb3d8;">";"</span>) <span style="color: #4fb3d8;">";"</span> winPaths))
+    (<span style="color: #ea3d54; font-weight: bold;">setq</span> exec-path (append xPaths (parse-colon-path winPaths)))))
+</pre>
+</div><br>
+</div>
+</section>
+<section id="outline-container-org911db39" class="outline-2">
+<h2 id="org911db39">Step 6: Installing Emacs Packages</h2>
+<div class="outline-text-2" id="text-org911db39">
+<p>
+Extract these to a shared location or download from MELPA
+</p>
+
+<table class="table table-striped" border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">Package</th>
+<th scope="col" class="org-left">Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">corfu</td>
+<td class="org-left">Modern completion UI</td>
+</tr>
+
+<tr>
+<td class="org-left">dape</td>
+<td class="org-left">Debug Adapter Protocol client</td>
+</tr>
+
+<tr>
+<td class="org-left">highlight-indent-guides</td>
+<td class="org-left">Visual indentation guides</td>
+</tr>
+
+<tr>
+<td class="org-left">ztree</td>
+<td class="org-left">Directory tree comparison</td>
+</tr>
+
+<tr>
+<td class="org-left">web-mode</td>
+<td class="org-left">Web template editing</td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Example package configuration:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp">(<span style="color: #ea3d54; font-weight: bold;">use-package</span> corfu
+  <span style="color: #fedd38;">:load-path</span> <span style="color: #4fb3d8;">"z:/SharedVM/source/corfu-main"</span>
+  <span style="color: #fedd38;">:custom</span>
+  (corfu-auto nil)         <span style="color: #5B6268;">; </span><span style="color: #5B6268;">Manual completion trigger
+</span>  (corfu-cycle t)          <span style="color: #5B6268;">; </span><span style="color: #5B6268;">Cycle through candidates
+</span>  (corfu-preselect 'first))<br>
+(<span style="color: #ea3d54; font-weight: bold;">use-package</span> ztree
+  <span style="color: #fedd38;">:load-path</span> <span style="color: #4fb3d8;">"z:/SharedVM/source/ztree"</span>
+  <span style="color: #fedd38;">:config</span>
+  (<span style="color: #ea3d54; font-weight: bold;">setq</span> ztree-diff-filter-list
+        '(<span style="color: #4fb3d8;">"build"</span> <span style="color: #4fb3d8;">"\\.dll"</span> <span style="color: #4fb3d8;">"\\.git"</span> <span style="color: #4fb3d8;">"bin"</span> <span style="color: #4fb3d8;">"obj"</span>))
+  (global-set-key (kbd <span style="color: #4fb3d8;">"C-c z d"</span>) 'ztree-diff))<br>
+(<span style="color: #ea3d54; font-weight: bold;">use-package</span> web-mode
+  <span style="color: #fedd38;">:load-path</span> <span style="color: #4fb3d8;">"z:/SharedVM/source/web-mode-master"</span>
+  <span style="color: #fedd38;">:mode</span> <span style="color: #4fb3d8;">"\\.cshtml?\\'"</span>
+  <span style="color: #fedd38;">:hook</span> (html-mode . web-mode)
+  <span style="color: #fedd38;">:bind</span> (<span style="color: #fedd38;">:map</span> web-mode-map (<span style="color: #4fb3d8;">"M-;"</span> . nil)))
+</pre>
+</div><br>
+<p>
+Note that I turn off autocomplete for corfu and complete using <code>complete-symbol</code> manually, otherwise the LSP is constantly accessed with slowdown.
+</p>
+
+<p>
+I often use <code>Meld</code> but am currently am looking to adapt <code>ztree</code> to perform better for directory comparisons.
+</p>
+
+<p>
+Web-mode is the best package I have found for html type file navigation and folding, very useful when developing Razor pages for example.
+</p>
+</div>
+</section>
+<section id="outline-container-orgdd9e2d2" class="outline-2">
+<h2 id="orgdd9e2d2">Step 7: auto open file modes</h2>
+<div class="outline-text-2" id="text-orgdd9e2d2">
+<p>
+Of course running and building in windows means in Emacs probably having to open .csproj files from time to time, well <code>nxml-mode</code> comes in useful for this:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(add-to-list 'auto-mode-alist '(<span style="color: #4fb3d8;">"\\.csproj\\'"</span> . nxml-mode))
+</pre>
+</div><br>
+</div>
+</section>
+<section id="outline-container-org8edb9d9" class="outline-2">
+<h2 id="org8edb9d9">Step 8: build script</h2>
+<div class="outline-text-2" id="text-org8edb9d9">
+<p>
+Here is my general build script, leveraging msbuild and running generally from <code>eshell</code>
+</p>
+
+<p>
+New projects are added to :
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bat"><span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECTS</span>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_NAMES</span>
+</pre>
+</div><br>
+<div class="org-src-container">
+<pre class="src src-bat">@<span style="color: #fedd38;">echo</span> off
+<span style="color: #fedd38;">setlocal</span><br>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">=================================================================
+</span><span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Build Management Script
+</span><span style="color: #5B6268;">REM </span><span style="color: #5B6268;">=================================================================
+</span><span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Usage: build-selected.bat [action] [verbosity] [configuration] [platform]
+</span><span style="color: #5B6268;">REM   </span><span style="color: #5B6268;">action: build, clean, restore, rebuild (default: build)
+</span><span style="color: #5B6268;">REM   </span><span style="color: #5B6268;">verbosity: quiet, minimal, normal, detailed, diagnostic (default: minimal)
+</span><span style="color: #5B6268;">REM   </span><span style="color: #5B6268;">configuration: Debug, Release (default: Debug)
+</span><span style="color: #5B6268;">REM   </span><span style="color: #5B6268;">platform: x64, x86, "Any CPU" (default: x64)
+</span><span style="color: #5B6268;">REM </span><span style="color: #5B6268;">=================================================================
+</span>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Set defaults
+</span><span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">ACTION</span>=%<span style="color: #cbccd1;">1</span>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">VERBOSITY</span>=%<span style="color: #cbccd1;">2</span>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">CONFIGURATION</span>=%<span style="color: #cbccd1;">3</span>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PLATFORM</span>=%<span style="color: #cbccd1;">4</span><br>
+<span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">""</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">ACTION</span>=build
+<span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"%VERBOSITY%"</span>==<span style="color: #4fb3d8;">""</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">VERBOSITY</span>=minimal
+<span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"%CONFIGURATION%"</span>==<span style="color: #4fb3d8;">""</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">CONFIGURATION</span>=Debug
+<span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"%PLATFORM%"</span>==<span style="color: #4fb3d8;">""</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PLATFORM</span>=x64<br>
+<span style="color: #fedd38;">echo</span> Build Script - Action=%<span style="color: #cbccd1;">ACTION</span>%, Verbosity=%<span style="color: #cbccd1;">VERBOSITY</span>%, Config=%<span style="color: #cbccd1;">CONFIGURATION</span>%, Platform=%<span style="color: #cbccd1;">PLATFORM</span>%
+<span style="color: #fedd38;">echo</span>.<br>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Common build parameters
+</span><span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">BUILD_PARAMS</span>=/<span style="color: #ee7b29;">p</span>:Configuration=%<span style="color: #cbccd1;">CONFIGURATION</span>% /<span style="color: #ee7b29;">p</span>:Platform=<span style="color: #4fb3d8;">"%PLATFORM%"</span> /<span style="color: #ee7b29;">verbosity</span>:%<span style="color: #cbccd1;">VERBOSITY</span>%<br>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Set MSBuild target based on action
+</span><span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"build"</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">TARGET</span>=Build
+<span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"clean"</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">TARGET</span>=Clean
+<span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"restore"</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">TARGET</span>=Restore
+<span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"rebuild"</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">TARGET</span>=Rebuild<br>
+<span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"%TARGET%"</span>==<span style="color: #4fb3d8;">""</span> (
+    <span style="color: #fedd38;">echo</span> Error: Invalid action '%<span style="color: #cbccd1;">ACTION</span>%'. Use: build, clean, restore, or rebuild
+    <span style="color: #ea3d54; font-weight: bold;">exit</span> /<span style="color: #ee7b29;">b</span> 1
+)<br>
+<span style="color: #fedd38;">echo</span> Executing %<span style="color: #cbccd1;">ACTION</span>% action...
+<span style="color: #fedd38;">echo</span>.<br>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECTS</span>[1]=Demo/Demo.csproj
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_NAMES</span>[1]=Demo<br>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECTS</span>[2]=Test/Test.csproj
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_NAMES</span>[2]=Test<br>
+<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_COUNT</span>=2<br>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Special handling for rebuild (clean then build)
+</span><span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"rebuild"</span> (
+    <span style="color: #fedd38;">echo</span> === CLEANING PHASE ===
+    <span style="color: #ea3d54; font-weight: bold;">for</span> /<span style="color: #ee7b29;">L</span> %%<span style="color: #cbccd1;">i</span> <span style="color: #ea3d54; font-weight: bold;">in</span> (1,1,%<span style="color: #cbccd1;">PROJECT_COUNT</span>%) <span style="color: #ea3d54; font-weight: bold;">do</span> (
+        <span style="color: #ea3d54; font-weight: bold;">call</span> <span style="color: #ee7b29;">:process_project</span> %%<span style="color: #cbccd1;">i</span> Clean
+        <span style="color: #ea3d54; font-weight: bold;">if</span> errorlevel 1 <span style="color: #ea3d54; font-weight: bold;">goto</span> <span style="color: #ee7b29;">:error</span>
+    )
+    <span style="color: #fedd38;">echo</span>.
+    <span style="color: #fedd38;">echo</span> === BUILDING PHASE ===
+    <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">TARGET</span>=Build
+)<br>
+<span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Process all active projects
+</span><span style="color: #ea3d54; font-weight: bold;">for</span> /<span style="color: #ee7b29;">L</span> %%<span style="color: #cbccd1;">i</span> <span style="color: #ea3d54; font-weight: bold;">in</span> (1,1,%<span style="color: #cbccd1;">PROJECT_COUNT</span>%) <span style="color: #ea3d54; font-weight: bold;">do</span> (
+    <span style="color: #ea3d54; font-weight: bold;">call</span> <span style="color: #ee7b29;">:process_project</span> %%<span style="color: #cbccd1;">i</span> %<span style="color: #cbccd1;">TARGET</span>%
+    <span style="color: #ea3d54; font-weight: bold;">if</span> errorlevel 1 <span style="color: #ea3d54; font-weight: bold;">goto</span> <span style="color: #ee7b29;">:error</span>
+)<br>
+<span style="color: #fedd38;">echo</span>.
+<span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"clean"</span> (
+    <span style="color: #fedd38;">echo</span> All selected components cleaned successfully!
+) <span style="color: #ea3d54; font-weight: bold;">else</span> <span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"restore"</span> (
+    <span style="color: #fedd38;">echo</span> All selected components restored successfully!
+) <span style="color: #ea3d54; font-weight: bold;">else</span> <span style="color: #ea3d54; font-weight: bold;">if</span> /<span style="color: #ee7b29;">I</span> <span style="color: #4fb3d8;">"%ACTION%"</span>==<span style="color: #4fb3d8;">"rebuild"</span> (
+    <span style="color: #fedd38;">echo</span> All selected components rebuilt successfully!
+) <span style="color: #ea3d54; font-weight: bold;">else</span> (
+    <span style="color: #fedd38;">echo</span> All selected components built successfully!
+)
+<span style="color: #ea3d54; font-weight: bold;">goto</span> <span style="color: #ee7b29;">:end</span><br>
+<span style="font-weight: bold;">:process_project</span>
+    <span style="color: #fedd38;">setlocal</span> EnableDelayedExpansion
+    <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">idx</span>=%<span style="color: #cbccd1;">1</span>
+    <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">target</span>=%<span style="color: #cbccd1;">2</span><br>
+    <span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Get project path and name using the index
+</span>    <span style="color: #ea3d54; font-weight: bold;">for</span> /<span style="color: #ee7b29;">f</span> <span style="color: #4fb3d8;">"tokens=2 delims=="</span> %%<span style="color: #cbccd1;">a</span> <span style="color: #ea3d54; font-weight: bold;">in</span> ('<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECTS</span>[%<span style="color: #cbccd1;">idx</span>%] 2^&gt;nul') <span style="color: #ea3d54; font-weight: bold;">do</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_PATH</span>=%%<span style="color: #cbccd1;">a</span>
+    <span style="color: #ea3d54; font-weight: bold;">for</span> /<span style="color: #ee7b29;">f</span> <span style="color: #4fb3d8;">"tokens=2 delims=="</span> %%<span style="color: #cbccd1;">a</span> <span style="color: #ea3d54; font-weight: bold;">in</span> ('<span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_NAMES</span>[%<span style="color: #cbccd1;">idx</span>%] 2^&gt;nul') <span style="color: #ea3d54; font-weight: bold;">do</span> <span style="color: #fedd38;">set</span> <span style="color: #cbccd1;">PROJECT_NAME</span>=%%<span style="color: #cbccd1;">a</span><br>
+    <span style="color: #ea3d54; font-weight: bold;">if</span> <span style="color: #4fb3d8;">"!PROJECT_PATH!"</span>==<span style="color: #4fb3d8;">""</span> <span style="color: #ea3d54; font-weight: bold;">goto</span> <span style="color: #ee7b29;">:eof</span><br>
+    <span style="color: #fedd38;">echo</span> ----------------------------------------
+    <span style="color: #fedd38;">echo</span> [%<span style="color: #cbccd1;">idx</span>%/%<span style="color: #cbccd1;">PROJECT_COUNT</span>%] %<span style="color: #cbccd1;">target</span>%ing !<span style="color: #cbccd1;">PROJECT_NAME</span>!...<br>
+    <span style="color: #5B6268;">REM </span><span style="color: #5B6268;">Build the project normally
+</span>    msbuild <span style="color: #4fb3d8;">"!PROJECT_PATH!"</span> /<span style="color: #ee7b29;">t</span>:%<span style="color: #cbccd1;">target</span>% %<span style="color: #cbccd1;">BUILD_PARAMS</span>%
+    <span style="color: #ea3d54; font-weight: bold;">if</span> errorlevel 1 <span style="color: #ea3d54; font-weight: bold;">exit</span> /<span style="color: #ee7b29;">b</span> 1<br>
+<span style="color: #ea3d54; font-weight: bold;">goto</span> <span style="color: #ee7b29;">:eof</span><br>
+<span style="font-weight: bold;">:error</span>
+<span style="color: #fedd38;">echo</span>.
+<span style="color: #fedd38;">echo</span> %<span style="color: #cbccd1;">ACTION</span>% failed! Check the output above <span style="color: #ea3d54; font-weight: bold;">for</span> errors.
+<span style="color: #ea3d54; font-weight: bold;">exit</span> /<span style="color: #ee7b29;">b</span> 1<br>
+<span style="font-weight: bold;">:end</span>
+<span style="color: #fedd38;">echo</span> %<span style="color: #cbccd1;">ACTION</span>% completed <span style="color: #fedd38;">at</span> %<span style="color: #cbccd1;">time</span>%
+</pre>
+</div><br>
+<p>
+to launch applications of course, if it is a pure DOTNET project you would use <code>dotnet run</code>
+</p>
+</div>
+</section>
+<section id="outline-container-orgc8c1c5d" class="outline-2">
+<h2 id="orgc8c1c5d">Troubleshooting</h2>
+<div class="outline-text-2" id="text-orgc8c1c5d">
+</div>
+<div id="outline-container-orgae71c79" class="outline-3">
+<h3 id="orgae71c79">"Cannot find csharp-ls" or Eglot won't start</h3>
+<div class="outline-text-3" id="text-orgae71c79">
+<ol class="org-ol">
+<li>Check the PATH: <code>M-x getenv RET PATH</code></li>
+<li>Verify the DLL exists at the configured location</li>
+<li>Try running manually: <code>dotnet path\to\CSharpLanguageServer.dll --version</code></li>
+<li>Check <code>*eglot-events*</code> buffer for detailed error messages</li>
+</ol>
+</div>
+</div>
+<div id="outline-container-orga512d27" class="outline-3">
+<h3 id="orga512d27">LSP is slow or uses too much memory</h3>
+<div class="outline-text-3" id="text-orga512d27">
+<p>
+Try adding to your configuration:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><span style="color: #5B6268;">;; </span><span style="color: #5B6268;">Increase garbage collection threshold during LSP operations
+</span>(<span style="color: #ea3d54; font-weight: bold;">setq</span> gc-cons-threshold 100000000)  <span style="color: #5B6268;">; </span><span style="color: #5B6268;">100MB
+</span>(<span style="color: #ea3d54; font-weight: bold;">setq</span> read-process-output-max (* 1024 1024))  <span style="color: #5B6268;">; </span><span style="color: #5B6268;">1MB</span>
+</pre>
+</div><br>
+</div>
+</div>
+<div id="outline-container-orgc4a1901" class="outline-3">
+<h3 id="orgc4a1901">Debugger won't attach</h3>
+<div class="outline-text-3" id="text-orgc4a1901">
+<ol class="org-ol">
+<li>Ensure the project is built in Debug configuration</li>
+<li>Check the DLL path matches your build output</li>
+<li>Look at <code>*dape-repl*</code> for error messages</li>
+<li>Verify netcoredbg runs: <code>netcoredbg.exe --version</code></li>
+</ol>
+</div>
+</div>
+</section>
+<section id="outline-container-orgafc5e3f" class="outline-2">
+<h2 id="orgafc5e3f">Conclusion</h2>
+<div class="outline-text-2" id="text-orgafc5e3f">
+<p>
+This setup has served me well for my windows .NET 9.0 projects and various other C# work. The key benefits:
+</p>
+
+<ul class="org-ul">
+<li><b>Portability</b>: Everything lives in one directory</li>
+<li><b>Speed</b>: csharp-ls is notably faster than OmniSharp</li>
+<li><b>Flexibility</b>: Easy to customise and extend</li>
+<li><b>Offline-capable</b>: Works in air-gapped environments</li>
+</ul>
+
+<p>
+The initial setup takes some effort, but once it's done, you have a powerful, consistent development environment that travels with you.
+</p>
+</div>
+</section>

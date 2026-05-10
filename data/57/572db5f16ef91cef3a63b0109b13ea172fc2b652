@@ -1,0 +1,70 @@
+<img src="https://cella.b-cdn.net/joshblais/openbsd.jpg" alt="Descriptive alt text" />
+<h2>Introduction<a href="#introduction">#</a></h2>
+<p>We are going to be setting up a <strong>Bastion Host</strong> (or colloquially a ‘Jumpbox’) for our cloud infrastructure.</p>
+<p>This should be the entry point for all future server, database, and load balancing systems.</p>
+<p>The purpose of Bastion Hosts is simple and for one reason: to only allow the ability to SSH into your cloud infrastructure from ONE secure location. No other computers in the world will be allowed to access the rest of your machines, only this one.</p>
+<p>Classically, you would SSH into each part of your infrastructure (DB, web server, load balancers etc.) and work on them. Most guides are set up so that you directly connect to your production server from your desktop. However, this adds a secure step in the process, stopping the greater internet from even really seeing these important parts of your setup.</p>
+<p>How are we going to do this?</p>
+<p>Via the most secure OS in the world - <a href="https://www.openbsd.org/">OpenBSD</a></p>
+<p>Let’s begin!</p>
+<h2>OpenBSD Setup:<a href="#openbsd-setup">#</a></h2>
+<p>Go into <a href="https://www.vultr.com/?ref=9273747">Vultr</a> - use my promo code to save some money (and give me a little kickback, <strong>thank you!</strong>) and create an OpenBSD instance. From here, you will ssh into it from your main computer and begin the process of a basic setup</p>
+<p><a></a></p>
+<h2>1. Setup SSH keys<a href="#1-setup-ssh-keys">#</a></h2>
+<p>Setup your ssh keys on your local computer by:</p>
+<figure><figcaption></figcaption><pre><code>ssh-keygen -t rsa 4096 -f ~/ssh/whateverKeyNameYouWant.key -C "Jumpbox key"</code></pre></figure>
+<p>This will give you two files in your .ssh directory:
+whateverKeyNameYouWant.key
+AND
+whateverKeyNameYouWant.key.pub</p>
+<p>You will add that .pub key to your OpenBSD installation</p>
+<p><a></a></p>
+<h2>2. Change root password<a href="#2-change-root-password">#</a></h2>
+<p>Get into your bastion host via:</p>
+<figure><figcaption></figcaption><pre><code>ssh root@yourserverIP</code></pre></figure>
+<p>using the password on your Vultr server details page</p>
+<p>You’re in!</p>
+<p>Now, first thing first is we will change that root password:</p>
+<figure><figcaption></figcaption><pre><code>passwd</code></pre></figure>
+<p>And enter whatever root password you want.</p>
+<p><a></a></p>
+<h2>3. Add packages<a href="#3-add-packages">#</a></h2>
+<p>We can add packages to our new OpenBSD installation via the following:</p>
+<figure><figcaption></figcaption><pre><code>pkg_add packageNamepkg_add neovim</code></pre></figure>
+<p>I generally add neovim to all my servers, and this is no exception.</p>
+<p><a></a></p>
+<h2>4. Create a new user<a href="#4-create-a-new-user">#</a></h2>
+<p>Enter as the root user:</p>
+<figure><figcaption></figcaption><pre><code>useradd</code></pre></figure>
+<p>and you will get an interactive script allowing you to name and create a new user</p>
+<p><a></a></p>
+<h3>4.1 Add that user to wheel group<a href="#41-add-that-user-to-wheel-group">#</a></h3>
+<p>Edit /etc/group file as the root user:</p>
+<p>and add the following:</p>
+<figure><figcaption></figcaption><pre><code>wheel:*:0:root,john_doe</code></pre></figure>
+<p>or in the terminal:</p>
+<figure><figcaption></figcaption><pre><code>sudo useradd -G wheel john_doe</code></pre></figure>
+<p><a></a></p>
+<h3>4.2 Enable doas:<a href="#42-enable-doas">#</a></h3>
+<p>nvim /etc/doas.conf as the root user And put the following in the file:</p>
+<figure><figcaption></figcaption><pre><code>permit :wheel</code></pre></figure>
+<p><a></a></p>
+<h3>4.3 Make sure your private key is in that USER’s .ssh/authorizedkeys<a href="#43-make-sure-your-private-key-is-in-that-users-sshauthorizedkeys">#</a></h3>
+<p>As the user you created:</p>
+<figure><figcaption></figcaption><pre><code>cat .ssh/authorized_keys</code></pre></figure>
+<p>or as root:</p>
+<figure><figcaption></figcaption><pre><code>cat /home/user/.ssh/authorized_keys</code></pre></figure>
+<p>The file should look like the following:</p>
+<figure><figcaption></figcaption><pre><code>ssh-rsaAAAAB3NzaC1yc2EAAAADAQABAAACAQC2SPcjFIXET7ij8LqkmuxF87HbMmnHRBlajbLPBjjIeHp7A/i8B8KY2F8ze5iZUMkpdrObuZ+zeKymuKixeb//K1zBHGercYJYhl9UJ9r03haFuYGj033BTut9m6qFO/ytyW5njTQDIfVWyXjm5988RMAdTZR+QZugFYx/8v4VE83DX53wNdiQlpsp+hWwPj6FgA8QT9xdsEYABywqO08+MfLVP3xOaCxtpN3PnCin6N1ZECt+S35h61TOiujRYRvIIJOh896AtjWTJrKd+W4WcQFj0SbWcMD3+V7Wn0pMNLJBHZT9mJLLl1r7WU5Kbnlk3l7VRqkY5F8UBtTQ2dNxAY8nICtXXkcGYFpcvcSYoOpphGiAYvBapLiLmlW7cLyKgxS5wyDnN3NT1baYOlDcNJkvkf3X4CQTVbDx2Pxk1B9+I7PFhZHIoqyRi+qF58ZhmRSvjaAgrvhMJmgo60Iw5inqcSGY3rqQpFip6dXxiCgqX72ON++7Gyi7TWPp0LkVeGMiRz3i+iuu3bb5OvBlS5zK2dvBgLv4OtmeGrZm74GsOIWr+Tjojw7ksMGzpdcussYdOwjIzRKHctLeBU18nH9zroqcC0hQnHeTBoDyjyPY0Zn/iXFKYpnm1v8K6Kme9LcKE7H9bbPHBlNFnq3G+RNVxLY1dldKXkS2IA86FQ== throwaway</code></pre></figure>
+<p><a></a></p>
+<h2>5. Security and remove ability to ssh into root user:<a href="#5-security-and-remove-ability-to-ssh-into-root-user">#</a></h2>
+<p>inside /etc/ssh/sshdconfig from root:</p>
+<p>Change the following lines and UNCOMMENT them:</p>
+<figure><figcaption></figcaption><pre><code>PermitRootLogin -&gt; noAuthorizedKeysFile -&gt; .ssh/authorized_keysPasswordAuthentication -&gt; no</code></pre></figure>
+<p>Then run:</p>
+<figure><figcaption></figcaption><pre><code>/etc/rc.d/sshd restart</code></pre></figure>
+<p>Now to get into remote server you must run:</p>
+<figure><figcaption></figcaption><pre><code>ssh -i .ssh/private_key.key user@33.33.333.33</code></pre></figure>
+<p>Congratulations! You now have a tremendously secure Jump-in point for your cloud infrastructure that only you can access via your ssh private key.</p>
+<p>Next, we will configure a load balancing machine.</p>
+<p>I hope you liked this first technical post I’ve made, and I plan on doing many more in the future for the sake of documenting the journey of developing applications that are portable and scalable.</p>

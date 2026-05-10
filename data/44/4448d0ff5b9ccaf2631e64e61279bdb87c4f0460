@@ -1,0 +1,41 @@
+<img src="https://cella.b-cdn.net/joshblais/feeds.png" alt="rss feeds" />
+<p>When people talk about the “<a href="https://www.youtube.com/watch?v=A41zzxyVANo">internet dying</a>” - what they are really talking about is slop overtaking the algorithm - of social media becoming unuseable because it’s all bots.  But that is not the internet, not by a long shot.</p>
+<p>If you live and die by the algorithm, then your experience will be one of curation. It will never be that which you have decided for yourself. It will be a path that is taken for you, and that is no path at all.</p>
+<p>We solved the problem of the “algorithm” a few years back (well, 27 years back, <a href="https://joshblais.com/using-the-internet-like-its-1999">in 1999</a> - holy shit that was 27 years ago) - with <a href="https://en.wikipedia.org/wiki/RSS">RSS feeds</a>. I have <a href="https://joshblais.com/blog/use-rss/">discussed RSS</a> in the past, but I think I have stumbled upon the “endgame” way to use it: have a server that is the “point of truth” that serves all your feeds.  This also tracks read/unread state across your client devices, and syncs it up/down to your phone or machines. Then, you can easily track what you have read and make notes to self/org notes that then become blog posts, emails etc.</p>
+<p>With this setup, you have a fully sovereign system in which “scrolling” the internet is a non-starter. Heck, you can get everything you’ve ever wanted to read (or watch and listen to!) shipped right to your door and only open a browser when you really must.  I have <a href="https://joshblais.com/blog/emacs-as-my-browser/">started to use EWW in emacs</a> more as the JS hellscape of the modern web continues, and this setup is very, very peaceful, yet powerful.</p>
+<p>This works for news sites, blogs, youtube channels, really anything you can create a feed with.</p>
+<p>Let’s discuss setting this up.</p>
+<p><a></a></p>
+<h2>The Components<a href="#the-components">#</a></h2>
+<p><a></a></p>
+<h3>Miniflux<a href="#miniflux">#</a></h3>
+<p><a href="https://miniflux.app/">Miniflux</a> is a self hosted RSS feed aggregator - your new “point of truth” if you will - for all feeds and things you want to watch/read/consoom on the internet. Setting it up is very easy in NixOS:</p>
+<figure><figcaption></figcaption><pre><code>{  config,  lib,  pkgs,  ...}:with lib;let  cfg = config.services.homelab;in{  config = mkIf cfg.enable {    services.miniflux = {      enable = true;      config = {        LISTEN_ADDR = "0.0.0.0:8082";      };      adminCredentialsFile = "/run/agenix/miniflux-admin";    };  };}</code></pre></figure>
+<p>Setup a password/username for your admin and then open up your service in a browser to add the feeds to.  You will then navigate over to Settings &gt; Integrations &gt; Fever API and set this up so that you can use Elfeed in emacs to read your feed.</p>
+<p>One major benefit of miniflux is that you can very easily import/export your OPML feeds to and from it, so if you’re migrating from another service, it’s very quick to get up and running.</p>
+<p><a></a></p>
+<h3>Elfeed-Protocol<a href="#elfeed-protocol">#</a></h3>
+<p><a></a></p>
+<h4><a href="https://github.com/fasheng/elfeed-protocol">Elfeed Protocol</a> is how we will ingest all of our feeds into emacs. I previously had used <a href="https://github.com/remyhonig/elfeed-org">Elfeed-org</a> - which is still a good way to organize your feeds, but limited strictly to emacs.  You will hook into your miniflux fever API like so:<a href="#elfeed-protocol-is-how-we-will-ingest-all-of-our-feeds-into-emacs-i-previously-had-used-elfeed-org---which-is-still-a-good-way-to-organize-your-feeds-but-limited-strictly-to-emacs--you-will-hook-into-your-miniflux-fever-api-like-so">#</a></h4>
+<figure><figcaption></figcaption><pre><code>(use-package elfeed-protocol  :ensure t  :after elfeed  :config  (setq elfeed-feeds nil)  (setq elfeed-use-curl t)  (elfeed-set-timeout 36000)
+
+  (let* ((auth (auth-source-search :host "miniflux.labrynth.org"                                   :require '(:secret)))         (entry (car auth))         (pass (if (functionp (plist-get entry :secret))                   (funcall (plist-get entry :secret))                 (plist-get entry :secret))))    (if pass        (setq elfeed-protocol-feeds              `(("fever+https://joshua@miniflux.labrynth.org"                 :api-url "https://miniflux.labrynth.org/fever/"                 :password ,pass)))      (message "Error: Could not find credentials in auth-source")))
+  (elfeed-protocol-enable)
+
+  (run-at-time "1 minute" (* 60 60) #'elfeed-update))</code></pre></figure>
+<p>Change your url or IP address to your running miniflux instance, and setup your credentials in pass.</p>
+<p><a></a></p>
+<h4>MPV<a href="#mpv">#</a></h4>
+<p>You can hook up <a href="https://github.com/karthink/elfeed-tube">elfeed-tube</a> to your feeds to allow playing of video and audio through <a href="https://mpv.io/">MPV</a>. This is a nice touch, especially for those that want the <a href="https://suckless.org/">suckless</a> feel.</p>
+<p><a></a></p>
+<h3>Capy Reader<a href="#capy-reader">#</a></h3>
+<p><a href="https://capyreader.com/">Capy</a> is the app that I use on my Android phone, downloaded from <a href="https://f-droid.org/en/packages/com.capyreader.app/">F-Droid</a>, it works out of the box with miniflux by pointing directly to your server.  Not much to say here, it’s minimalist by design, allows you to read feeds internally or right in your phone’s browser, and just works.</p>
+<p><a></a></p>
+<h3>Tailscale<a href="#tailscale">#</a></h3>
+<p>Setup a tailscale instance for your server, machines, and phone, and you can simply point to your miniflux server and access it wherever you may be. Nice.</p>
+<p><a></a></p>
+<h2>Conclusion<a href="#conclusion">#</a></h2>
+<p>You are now an independent <a href="https://en.wikipedia.org/wiki/Netizen">netizen</a> which depends on no platforms or third parties to show you content. Everything is on you to decide what you want to consume, and everything is in chronological order, no filtering, no shadow banning.</p>
+<p>Welcome to how the internet was supposed to be.</p>
+<p>As always, God bless, and until next time.</p>
+<p>If you enjoyed this post, consider <a href="https://joshblais.com/support/">Supporting my work</a>, <a href="https://mountainthebook.com">Checking out my book</a>, <a href="https://joshblais.com/work-with-me">Working with me</a>, or sending me an <a href="mailto:josh@joshblais.com">Email</a> to tell me what you think.</p>

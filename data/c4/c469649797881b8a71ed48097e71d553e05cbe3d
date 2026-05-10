@@ -1,0 +1,83 @@
+<img src="https://cella.b-cdn.net/joshblais/gnome-keylayout.png" alt="Descriptive alt text" />
+<p>I have pretty well integrated emacs into everything I do on a computer. Using GNOME as my underlying <a href="https://news.ycombinator.com/item?id=35625877">“bootloader” for doom emacs</a>, I have setup various hotkeys to make my experience seamless and easily accessible from anywhere on the desktop. Let’s walkthrough these keybinds that make my computer comfy.</p>
+<p><a></a></p>
+<h2>Launching emacs<a href="#launching-emacs">#</a></h2>
+<p>When I need to open emacs I press <code>Alt + E</code> with the following command bound:</p>
+<figure><figcaption></figcaption><pre><code>bash -c "GDK_BACKEND=x11 emacs"</code></pre></figure>
+<p>This launches emacs in X11 mode (fastest interactivity I have found). I have tried in wayland to have emacs work aGs quickly as possible, but x11 is still where is is at.</p>
+<p><a></a></p>
+<h2>Capture to org files<a href="#capture-to-org-files">#</a></h2>
+<p>To capture in my org setup globally, I bound <code>Ctrl+Shift+c</code> to</p>
+<figure><figcaption></figcaption><pre><code>emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (org-capture))'</code></pre></figure>
+<p>this allows org-capture to my running instance of emacs from anywhere on the computer.</p>
+<p><a></a></p>
+<h2>Vterm open<a href="#vterm-open">#</a></h2>
+<p>I still use kitty as my one off terminal, but if I want to quickly bring up a terminal in emacs, instead of using Doom’s <code>SPC o T</code>, I use this command bound to quickly open a vterm instance wherever I am in the filesystem. Add this to your config.el:</p>
+<figure><figcaption></figcaption><pre><code>    ;; Vterm adjustemts    (setq vterm-environment '("TERM=xterm-256color"))    (set-language-environment "UTF-8")    (set-default-coding-systems 'utf-8)    (custom-set-faces!      '(vterm :family "Geistmono Nerd Font"))
+    ;; open vterm in dired location    (after! vterm      (setq vterm-buffer-name-string "vterm %s")
+      ;; Modify the default vterm opening behavior      (defadvice! +vterm-use-current-directory-a (fn &amp;rest args)        "Make vterm open in the directory of the current buffer."        :around #'vterm        (let ((default-directory (or (and (buffer-file-name)                                          (file-name-directory (buffer-file-name)))                                     (and (eq major-mode 'dired-mode)                                          (dired-current-directory))                                     default-directory)))          (apply fn args)))
+      ;; Also modify Doom's specific vterm functions      (defadvice! +vterm-use-current-directory-b (fn &amp;rest args)        "Make Doom's vterm commands open in the directory of the current buffer."        :around #'+vterm/here        (let ((default-directory (or (and (buffer-file-name)                                          (file-name-directory (buffer-file-name)))                                     (and (eq major-mode 'dired-mode)                                          (dired-current-directory))                                     default-directory)))          (apply fn args))))
+    (defun open-vterm-in-current-context ()      "Open vterm in the context of the current buffer/window."      (interactive)      (when-let ((buf (current-buffer)))        (with-current-buffer buf          (call-interactively #'+vterm/here))))
+We can call a vterm instance with this using `Alt + Ret`:
+    emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (let ((current-buf (window-buffer (selected-window)))) (with-current-buffer current-buf (call-interactively #'"'"'+vterm/here))))'</code></pre></figure>
+<p><a></a></p>
+<h2>Passwords<a href="#passwords">#</a></h2>
+<p>I can access my .<a href="https://www.passwordstore.org/">password-store</a> from anywhere on my system with <code>shift + ctrl + p</code>:</p>
+<figure><figcaption></figcaption><pre><code>emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (pass))'</code></pre></figure>
+<p><a></a></p>
+<h2>Elfeed<a href="#elfeed">#</a></h2>
+<p>Call elfeed with this <code>Alt + z</code>:</p>
+<figure><figcaption></figcaption><pre><code>emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (elfeed))'</code></pre></figure>
+<p><a></a></p>
+<h2>EMMS<a href="#emms">#</a></h2>
+<p>Call emms with this for all your music management <code>Alt + Ctrl + m</code>:</p>
+<figure><figcaption></figcaption><pre><code>emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (emms-smart-browse))'</code></pre></figure>
+<p><a></a></p>
+<h2>Calendar<a href="#calendar">#</a></h2>
+<p>I open my calendar with <code>Alt + Ctrl + c</code></p>
+<figure><figcaption></figcaption><pre><code>emacsclient -n -e '(progn (select-frame-set-input-focus (selected-frame)) (+calendar/open-calendar))'</code></pre></figure>
+<p><a></a></p>
+<h2>Using emacs to write and copy to text boxes<a href="#using-emacs-to-write-and-copy-to-text-boxes">#</a></h2>
+<p>This one is fun, I hate writing outside of emacs, so when I am in a long text box in the browser, perhaps on a forum or needing to enter a long string, I created a function to allow this, then copying the text with <code>C-c C-c</code> I can paste it wherever.</p>
+<p>Add this custom function to your lisp directory:</p>
+<figure><figcaption></figcaption><pre><code>    ;;; ../../dotfiles/doom/.config/doom/lisp/popup-scratch.el -*- lexical-binding: t; -*-
+    (defun popup-scratch-for-web ()      "Create a popup frame with a scratch buffer for web text editing.    Designed specifically for GNOME Wayland with Doom Emacs spell checking."      (interactive)      (let ((buffer (get-buffer-create "*web-compose*")))        (with-current-buffer buffer          (erase-buffer)          ;; Use text mode          (text-mode)
+          ;; For Doom Emacs, enable appropriate spell checking mode          ;; This should enable the z= binding for spell suggestions          (when (fboundp 'spell-checking-enable)            (spell-checking-enable))
+          ;; Add header with instructions          (insert "# Compose your text below, then press C-c C-c when done.\n")          (insert "# Use z= on misspelled words to see correction suggestions.\n")          (insert "# Text will be copied to clipboard for pasting.\n\n")
+          ;; Define our finish function          (fset 'web-compose-finish                (lambda ()                  (interactive)                  ;; Extract content (skipping header comments)                  (let ((content (buffer-substring-no-properties                                  (save-excursion                                    (goto-char (point-min))                                    (forward-line 4)                                    (point))                                  (point-max))))
+                    ;; Copy to Emacs clipboard                    (kill-new content)
+                    ;; For Wayland - use wl-copy which is the most compatible                    (when (executable-find "wl-copy")                      (call-process "wl-copy" nil nil nil content))
+                    ;; Message user about next steps                    (message "Text copied to clipboard! Ready to paste with Ctrl+V")
+                    ;; Store frame to close                    (let ((frame-to-close (selected-frame)))                      ;; Close frame after a short delay                      (run-with-timer 0.5 nil                                      (lambda ()                                        (delete-frame frame-to-close)))))))
+          ;; Bind our function to the local map          (local-set-key (kbd "C-c C-c") 'web-compose-finish)
+          ;; Set up mode line to indicate Doom/Evil spell check is available          (setq mode-line-format                (list "-- WEB COMPOSE (WAYLAND) -- Use z= for spelling -- C-c C-c when done ")))
+        ;; Create the frame        (let ((frame (make-frame `((name . "Web Compose")                                   (width . 80)                                   (height . 30)                                   (minibuffer . nil)                                   (vertical-scroll-bars . nil)                                   (menu-bar-lines . 0)                                   (tool-bar-lines . 0)))))          ;; Set up the frame          (select-frame frame)          (switch-to-buffer "*web-compose*")
+          ;; Position cursor after comments          (goto-char (point-min))          (forward-line 4)
+          ;; Center the frame using a timer          (run-with-timer 0.2 nil                          (lambda ()                            (let* ((display-width (display-pixel-width))                                   (display-height (display-pixel-height))                                   (frame-width (frame-pixel-width))                                   (frame-height (frame-pixel-height))                                   (left-pos (max 0 (/ (- display-width frame-width) 2)))                                   (top-pos (max 0 (/ (- display-height frame-height) 2))))                              (set-frame-position frame left-pos top-pos)))))))                              ```
+Call it in your config.el:
+    (load! "lisp/popup-scratch")
+And bind it in GNOME:
+    emacsclient -e '(popup-scratch-for-web)' -n
+Write whatever you want, then press `C-c C-c` and copy it wherever you want.
+
+&lt;a id="orgaeabfc9"&gt;&lt;/a&gt;
+## Dirvish as file manager
+I had previously hit `Alt + f` to bring up nautilus, but I like using dirvish as a quick way to jump around my filesystem:
+in config.el:
+```elisp    (defun popup-dirvish-browser ()      "Create a new frame with Dirvish browser starting in home directory."      (interactive)      ;; First, calculate the screen dimensions      (let* ((display-width (display-pixel-width))             (display-height (display-pixel-height))             ;; Calculate desired frame size (in pixels)             (desired-width-px (* (frame-char-width) 100))             (desired-height-px (* (frame-char-height) 35))             ;; Calculate center position             (left-pos (max 0 (/ (- display-width desired-width-px) 2)))             (top-pos (max 0 (/ (- display-height desired-height-px) 2)))             ;; Prepare frame parameters with explicit positioning             (frame-props `((name . "Dirvish Browser")                            (width . 100)                            (height . 35)                            (minibuffer . t)                            (vertical-scroll-bars . nil)                            (menu-bar-lines . 0)                            (tool-bar-lines . 0)                            (left . ,left-pos)                            (top . ,top-pos))))
+        ;; Create the pre-positioned frame        (let ((frame (make-frame frame-props)))          (select-frame frame)
+          ;; Open Dirvish in home directory          (dirvish "~/")
+          ;; Add special keybindings for this frame          (with-selected-frame frame            (let ((map (copy-keymap dirvish-mode-map)))              (define-key map (kbd "q") 'delete-frame)              (define-key map (kbd "C-g") 'delete-frame)              (use-local-map map)))
+          ;; Add helpful message          (message "Dirvish browser ready. Navigate with normal commands. Press 'N' for Nautilus, 'q' to close."))))</code></pre></figure>
+<p>Then call:</p>
+<figure><figcaption></figcaption><pre><code>emacsclient -e '(popup-dirvish-browser)' -n</code></pre></figure>
+<p>I then navigate quickly around my filesystem, find what I want, and call a little script to open nautilus if I need GUI support (ie. drag/dropping a file somewhere):</p>
+<figure><figcaption></figcaption><pre><code>    (defun open-nautilus-here ()      "Open nautilus in the current directory shown in dired/dirvish."      (interactive)      (let ((dir (cond                  ;; If we're in dired mode                  ((derived-mode-p 'dired-mode)                   default-directory)                  ;; If we're in dirvish mode (dirvish is derived from dired)                  ((and (featurep 'dirvish)                        (derived-mode-p 'dired-mode)                        (bound-and-true-p dirvish-directory))                   (or (bound-and-true-p dirvish-directory) default-directory))                  ;; Fallback for any other mode                  (t default-directory))))        (message "Opening nautilus in: %s" dir)  ; Helpful for debugging        (start-process "nautilus" nil "nautilus" dir)))
+    ;; Bind it to Ctrl+Alt+f in both dired and dirvish modes    (with-eval-after-load 'dired      (define-key dired-mode-map (kbd "C-M-f") 'open-nautilus-here))
+    ;; For dirvish, we need to add our binding to its special keymap if it exists    (with-eval-after-load 'dirvish      (if (boundp 'dirvish-mode-map)          (define-key dirvish-mode-map (kbd "C-M-f") 'open-nautilus-here)        ;; Alternative approach if dirvish uses a different keymap system        (add-hook 'dirvish-mode-hook                  (lambda ()                    (local-set-key (kbd "C-M-f") 'open-nautilus-here)))))</code></pre></figure>
+<p>I call <code>Alt + ctrl + f</code> to open nautilus at the point in my dirvish window.</p>
+<p><a></a></p>
+<h2>Deeper integration means less context switching<a href="#deeper-integration-means-less-context-switching">#</a></h2>
+<p>The big goal with emacs is to <a href="https://joshblais.com/blog/emacs-for-everything/">forgo context switching</a> as much as possible. With these integrations, I have created ways to not change my mental space when in my computer, allowing speed and focus to continue throughout my working sessions. It has become that when I open my laptop lid, I am entering a different world of focus and creativity, where the outside world just falls away as I quickly edit my digital world, brain and fingers flying as quickly as possible.</p>
+<p>As always, God bless, and until next time.</p>
+<p>If you enjoyed this post, consider supporting my work by <a href="https://buymeacoffee.com/joshuablais">Buying me a Coffee</a>, <a href="https://mountainthebook.com">Checking out my book</a>, or sending me an <a href="mailto:josh@joshblais.com">email</a> to tell me what you think.</p>

@@ -1,0 +1,137 @@
+<p><img src="https://revere.b-cdn.net/joshblais.com/signal-2025-12-09-092803_002.jpeg" alt="laptop workstation" /></p>
+<p>When choosing a machine, you face the Trilemma Of Choice:</p>
+<p><a></a></p>
+<h2>The Computing Constraint Trilemma<a href="#the-computing-constraint-trilemma">#</a></h2>
+<ol>
+<li><strong>Portability</strong> - weight, battery life, form factor</li>
+<li><strong>Performance</strong> - CPU headroom, GPU capability, thermal sustained load</li>
+<li><strong>Economy</strong> - initial cost, maintenance burden, replacement cycle</li>
+</ol>
+<p><strong>You can pick two.</strong></p>
+<p>Most people choose portability + performance: a $4500 MacBook Pro that goes anywhere and handles heavy workloads - until the battery degrades, thermals throttle sustained loads, or soldered components fail. Then you get the privilege of replacing the entire machine.</p>
+<p>I chose differently: <strong>I separated the constraints across two devices.</strong></p>
+<ul>
+<li>Laptop: portability + economy (ThinkPad T14s gen 3, ~$800, replaceable)</li>
+<li>Workstation: performance + economy (custom build, ~$2500, upgradeable)</li>
+</ul>
+<p>The laptop thus becomes a thin client to the workstation. The workstation becomes location-independent compute accessed via Tailscale and Mosh.</p>
+<p><a></a></p>
+<h2>Distributed Compute Architecture<a href="#distributed-compute-architecture">#</a></h2>
+<p>If you compile programs, render video, run VMs, or deploy infrastructure, you do need <strong>real compute</strong>. The question becomes: where does that compute exist?</p>
+<p>The conventional answer is to carry it with you.</p>
+<p>But the better answer is to <strong>separate the interface from the compute.</strong></p>
+<p><a></a></p>
+<h3>How I have done this:<a href="#how-i-have-done-this">#</a></h3>
+<p><a></a></p>
+<h4>Workstation: Ryzen 9 5900x, RTX 3080, 32GB RAM, gigabit ethernet, always-on<a href="#workstation-ryzen-9-5900x-rtx-3080-32gb-ram-gigabit-ethernet-always-on">#</a></h4>
+<p>Built in 2021, this machine runs in a 4U server chassis: it is silent, cool, and still capable four years later. The chassis permits ATX expansion, multiple GPUs, and drive arrays.</p>
+<p>The components will eventually age out, and when they do,  they will get replaced individually. The chassis and cooling infrastructure remain.</p>
+<p><a></a></p>
+<h4>Laptop: ThinkPad T14s Gen 3, adequate for Emacs and a browser, ~10+ hour battery life<a href="#laptop-thinkpad-t14s-gen-3-adequate-for-emacs-and-a-browser-10-hour-battery-life">#</a></h4>
+<p>Bought on sale in 2022,  the keyboard remains world-class. Recently installed a new battery - this machine will likely run another 3+ years. When it doesn’t, any used ThinkPad from eBay will do; The hardware is effectively disposable.</p>
+<p><a></a></p>
+<h4>Connection: Tailscale + Mosh + tmux<a href="#connection-tailscale--mosh--tmux">#</a></h4>
+<p><strong>Tailscale</strong>: Zero-trust mesh VPN using WireGuard.</p>
+<p>This permits secure connection without exposing SSH to the internet or maintaining traditional VPN infrastructure (OpenVPN configuration, port forwarding, dynamic DNS - all of this is eliminated). Your devices see each other as if they’re on the same LAN, regardless of NAT or firewall topology.</p>
+<p>There is no attack surface, no port forwarding configuration, and no IP address memorization.</p>
+<p><strong>Mosh</strong>: Mobile shell using UDP with predictive local echo.</p>
+<p>Mosh survives network transitions (wifi - cellular and back again), laptop sleep/wake, and IP address changes. It compensates for latency by predicting your keystrokes locally. On degraded networks (hotel/cafe wifi or tethering), the difference is substantial - mosh feels responsive where SSH would be laggy and in some cases, unusable.</p>
+<p><strong>tmux</strong>: Persistent sessions on workstation.</p>
+<p>Your compilation, your video render, your long-running process - all continue when you disconnect. Close the laptop, board a plane, reopen elsewhere. `tmux attach` and you’re back in the same session. The compute is <strong>stateless</strong> from the client’s perspective. I have a simple alias that allows either spawning a tmux session or connecting to the already existing one:</p>
+<figure><figcaption></figcaption><pre><code>alias logos="mosh joshua@logos -- tmux new-session -A -s main"</code></pre></figure>
+<p>The laptop becomes a thin layer into much greater compute: a keyboard, screen, and network interface into that workstation.</p>
+<p><a></a></p>
+<h2>NixOS ties this all together<a href="#nixos-ties-this-all-together">#</a></h2>
+<p>Both machines run NixOS with configurations declared in version-controlled Nix files. Each host runs nearly identical configurations including:</p>
+<ul>
+<li>Same packages available system-wide (Go toolchain, ffmpeg, git, ripgrep)</li>
+<li>Same development environment (Doom Emacs with identical config, LSP servers, formatters)</li>
+<li>Same shell configuration, aliases, SSH keys, git setup</li>
+<li>Only hardware-specific differences (GPU drivers on the workstation, power management and optimizations on the laptop)</li>
+</ul>
+<p>The experience is truly identical. Open Emacs on either machine - same keybindings, same packages, same org-mode workflow, same project structure. The workstation has better ergonomics. The laptop is portable. But the <strong>environment</strong> is effectively the same.</p>
+<p><a></a></p>
+<h3>Machines as Cattle, Not Pets<a href="#machines-as-cattle-not-pets">#</a></h3>
+<p>Setup on new hardware takes ~30 minutes:</p>
+<ol>
+<li>Install NixOS from USB</li>
+<li>Clone <a href="https://github.com/joshuablais/nixos-config">nixos-config</a> repository</li>
+<li>Run `nixos-rebuild switch`</li>
+</ol>
+<p>Everything restores - not from backup archives, but from <strong>declared state</strong>. Doom Emacs configuration, development tools, system services, user environment. The machine becomes what it should be by reading its configuration, not by restoring snapshots of what it was.</p>
+<p>The machines become <a href="https://cloudscaling.com/blog/cloud-computing/the-history-of-pets-vs-cattle/">cattle</a>: replaceable on demand. My Laptop gets stolen? Rebuild in an afternoon with any ThinkPad off Facebook marketplace. My Workstation dies? Deploy the same configuration on replacement hardware - or temporarily on a Hetzner cloud instance while parts ship.</p>
+<p>This is infrastructure-as-code at the personal computing level. Most people treat computers like pets - unique, precious, full of undocumented manual configuration accumulated over the years. NixOS lets you treat them like cattle - reproducible, disposable, version-controlled. The machine’s identity is its configuration file, not its physical hardware or installed software state.</p>
+<p><a></a></p>
+<h2>Economics<a href="#economics">#</a></h2>
+<p>The naive comparison looks something like: ThinkPad (800)+Workstation(800) + Workstation (800)+Workstation(2500) - 3300vs.MacBookProM4Max−3300 vs. MacBook Pro M4 Max - 3300vs.MacBookProM4Max−4500</p>
+<p>But total cost of ownership over 5 years tells the real story:</p>
+<p><a></a></p>
+<h3>Workstation path:<a href="#workstation-path">#</a></h3>
+<ul>
+<li>Initial hardware: $3300</li>
+<li>Power consumption (300W avg, 8hrs/day, 0.12/kWh,5years): 0.12/kWh, 5 years): ~0.12/kWh,5years): 525</li>
+<li>Maintenance (replacement fans, storage upgrade): ~$200</li>
+<li>Optional GPU upgrade (year 4): ~$500-1000</li>
+<li><strong>Total: $3825-4850</strong></li>
+</ul>
+<p><a></a></p>
+<h3>Laptop-only path:<a href="#laptop-only-path">#</a></h3>
+<ul>
+<li>Initial purchase: $4500</li>
+<li>Battery replacement (year 3): $200</li>
+<li>Forced replacement due to battery cycle limits, thermal degradation, or soldered component failure (year 5): $4500</li>
+<li><strong>Total: $9200</strong></li>
+</ul>
+<p>The distributed approach costs less than half as much over 5 years.</p>
+<p>This also ignores opportunity costs:</p>
+<p><strong>Thermal throttling</strong> - laptops have this constraint due to chassis size, it’s just physics. You can run sustained workloads on a workstation that would throttle laptops drastically.</p>
+<p><strong>Upgrade flexibility:</strong> When the workstation’s GPU ages out, drop in a replacement for $500-1000. The chassis, cooling, power supply, and motherboard remain. A laptop GPU is soldered to the motherboard - when it’s obsolete, you replace the entire machine. Sadly Apple makes user replacing a battery a 3 hour ordeal when it should just be a drop-in and many aren’t comfortable with doing a battery swap, so that means a new machine for many people.</p>
+<p><strong>Repairability:</strong> Your workstation fan died? $15 replacement, 10 minute install.</p>
+<p>Your laptop fan died? Requires full motherboard disassembly, often isn’t sold as a separate part, and risks warranty violation.</p>
+<p>When the T14s eventually ages out, replacement cost is ~$300-800 for a used ThinkPad on eBay. The workstation continues running. The environment continues working identically.</p>
+<p>The laptop is fungible. The workstation is upgradeable. Neither is precious.</p>
+<p><a></a></p>
+<h2>Failure Modes and Graceful Degradation<a href="#failure-modes-and-graceful-degradation">#</a></h2>
+<p>Inevitably the immidiate objection: “What if I need to work offline?” or “I render video on airplanes”</p>
+<p>To which I would simply reply: <strong>Our system degrades gracefully, not catastrophically.</strong></p>
+<p><a></a></p>
+<h3>Connectivity loss scenarios:<a href="#connectivity-loss-scenarios">#</a></h3>
+<p><strong>Home internet down:</strong>
+You can still work locally. Emacs, browser, local git repositories function identically. Continue your development, commit to local branches, then push when connectivity is restored. Heavy compilation and video rendering: wait; or run it locally at reduced efficacy.</p>
+<p><strong>On a plane rendering video:</strong>
+The T14s has 32GB RAM and a capable CPU. A 10-minute 4K video render that takes 3 minutes on the workstation takes 12 minutes on the laptop. It is just an annoyance, but you can still get your work done.</p>
+<p>For true offline heavy work (multi-hour renders, massive compilation), you have options:</p>
+<ol>
+<li>Start the job before leaving (tmux keeps it running)</li>
+<li>Accept the performance penalty and run locally</li>
+<li>Tether to phone hotspot for remote execution (Mosh handles poor connections well)</li>
+</ol>
+<p><strong>You’re not trapped by this solution.</strong> The laptop is adequate for the work - the workstation is just optimal.</p>
+<p><a></a></p>
+<h3>Hardware failure scenarios:<a href="#hardware-failure-scenarios">#</a></h3>
+<p><strong>Workstation dies:</strong>
+You can deploy our NixOS configuration on replacement hardware. Or spin up an identical environment on Hetzner/Digital Ocean temporarily ($50/month for equivalent specs). The configuration is portable - the hardware isn’t.</p>
+<p><strong>Laptop stolen or damaged:</strong>
+Replace with any hardware running NixOS. Used ThinkPad from eBay or FB marketplace. Install NixOS from USB, clone config repo, `nixos-rebuild switch`. Hours to restore, not days.</p>
+<p><a></a></p>
+<h3>The real comparison:<a href="#the-real-comparison">#</a></h3>
+<p>If your MacBook Pro dies, you’re completely blocked until you buy another machine and restore.</p>
+<p>Workstation dies: Work locally at reduced performance or spin up cloud instance in 30 minutes.</p>
+<p>Laptop dies: Replace with cheap used hardware, restore from config in 30 mins flat.</p>
+<p>The truth is that our distributed model has <strong>redundancy</strong>. The monolithic laptop model has a single point of failure, hence why I stopped caring about it.</p>
+<p><a></a></p>
+<h2>Technological Sovereignty Through Distributed Compute<a href="#technological-sovereignty-through-distributed-compute">#</a></h2>
+<p>This post isn’t really about laptops not mattering. It’s about <strong>computing independence</strong>:</p>
+<ul>
+<li>Your tools are location-independent (work from anywhere with connectivity)</li>
+<li>Your hardware is replaceable (no vendor lock-in, no precious devices)</li>
+<li>Your configuration is version-controlled (reproducible state, no backup ritual)</li>
+<li>Your compute scales independently of your interface (upgrade workstation, keep laptop)</li>
+</ul>
+<p>This is the same architecture behind “The Cloud (TM)” - separation of stateless frontends from scalable backends, declarative configuration management, location-independent compute.</p>
+<p><strong>But you’ve kept it under our control.</strong></p>
+<p>No AWS bills or <a href="https://aws.plainenglish.io/the-cloud-bill-apocalypse-how-we-wasted-250k-in-one-month-4847ecd9d220">surprises</a>. No vendor deciding which ports you can use (I had to contact Hetzner to allow email ports!). No terms of service changes. No cloud provider reading your data for AI training.</p>
+<p>You’re running your own personal cloud with zero lock-in. The laptop is just an SSH client. It doesn’t matter because you’ve <strong>made</strong> it not matter - you’ve moved everything that matters into declared, reproducible, distributed infrastructure.</p>
+<p>We have built something here that provides redundancy while giving us sovereignty, and at the end of the day, that’s what it’s all about.</p>
+<p>As always, God bless, and until next time.</p>
+<p>If you enjoyed this post, consider <a href="https://joshblais.com/support/">Supporting my work</a>, <a href="https://mountainthebook.com">Checking out my book</a>, <a href="https://joshblais.com/work-with-me">Working with me</a>, or sending me an <a href="mailto:josh@joshblais.com">Email</a> to tell me what you think.</p>

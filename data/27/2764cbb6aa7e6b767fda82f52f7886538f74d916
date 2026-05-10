@@ -1,0 +1,62 @@
+<img src="https://cella.b-cdn.net/joshblais/giteaio.svg" alt="Descriptive alt text" />
+<h2>A guide to install gitea on Debian 11<a href="#a-guide-to-install-gitea-on-debian-11">#</a></h2>
+<p>Here is a quick guide to Install <a href="https://about.gitea.com/">Gitea</a> with Postgresql on Debian 11</p>
+<p>Start with a quick system update:</p>
+<figure><figcaption></figcaption><pre><code>sudo apt-get update -ysudo apt-get upgrade -y</code></pre></figure>
+<p><a></a></p>
+<h3>Setup postgresql<a href="#setup-postgresql">#</a></h3>
+<figure><figcaption></figcaption><pre><code>sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" &gt; /etc/apt/sources.list.d/pgdg.list'
+# Import repo signing key with:wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+sudo apt-get updatesudo apt-get -y install postgresql</code></pre></figure>
+<p><a></a></p>
+<h3>System setup<a href="#system-setup">#</a></h3>
+<figure><figcaption></figcaption><pre><code>sudo systemctl start postgresqlsudo systemctl enable postgresqlsudo systemctl status postgresql</code></pre></figure>
+<p><a></a></p>
+<p>Next, You need to switch to ’SCRAM-SHA-256’ scheme from md5 encryption scheme for better security. If you want to connect to PostgreSQL remotely, then you need to allow your IP address in the PostgreSQL configuration file. Open Configuration file to make changes using the following command:</p>
+<figure><figcaption></figcaption><pre><code>sudo vim /etc/postgresql/15/main/postgresql.conf
+# Inside file uncomment:
+listen_addresses = 'localhost, 45.32.225.46'password_encryption = scram-sha-256</code></pre></figure>
+<p>Then, restart systemd service:</p>
+<figure><figcaption></figcaption><pre><code>sudo systemctl restart postgresql</code></pre></figure>
+<p><a></a></p>
+<h3>Login in to postgresql<a href="#login-in-to-postgresql">#</a></h3>
+<figure><figcaption></figcaption><pre><code>sudo -u postgres psql</code></pre></figure>
+<p>Inside psql:</p>
+<figure><figcaption></figcaption><pre><code>postgres=# CREATE ROLE gitea WITH LOGIN PASSWORD 'secure@123';
+postgres=# CREATE DATABASE giteadb;
+postgres=# GRANT ALL PRIVILEGES ON DATABASE giteadb TO gitea;
+postgres=# exit</code></pre></figure>
+<p>if you receive the error:</p>
+<figure><figcaption></figcaption><pre><code>The database settings are invalid: migrate: sync: pq: permission denied for schema public</code></pre></figure>
+<p>you might have to do the following in psql after the install is complete, I did:</p>
+<figure><figcaption></figcaption><pre><code>ALTER DATABASE gitea OWNER TO gitea</code></pre></figure>
+<p><a></a></p>
+<h2>Within /etc/postgresql/15/main/pghba.conf file:<a href="#within-etcpostgresql15mainpghbaconf-file">#</a></h2>
+<figure><figcaption></figcaption><pre><code>host    giteadb        gitea            134.122.38.0/32           scram-sha-256</code></pre></figure>
+<p><a></a></p>
+<h2>Install and configure git:<a href="#install-and-configure-git">#</a></h2>
+<figure><figcaption></figcaption><pre><code>sudo apt install gitgit --version
+git config --global user.name "Your Name"git config --global user.email "youremail@domain.com”git config --list</code></pre></figure>
+<p><a></a></p>
+<h2>Create git user for gitea<a href="#create-git-user-for-gitea">#</a></h2>
+<figure><figcaption></figcaption><pre><code>sudo adduser \   --system \   --shell /bin/bash \   --gecos 'Git Version Control' \   --group \   --disabled-password \   --home /home/git \   git</code></pre></figure>
+<p><a></a></p>
+<h3>Install gitea:<a href="#install-gitea">#</a></h3>
+<figure><figcaption></figcaption><pre><code>wget https://dl.gitea.com/gitea/1.20.3/gitea-1.20.3-linux-amd64 -O /usr/local/bin/giteasudo chmod +x /usr/local/bin/gitea</code></pre></figure>
+<p>Make directory structure for gitea:</p>
+<figure><figcaption></figcaption><pre><code>sudo mkdir -p /etc/gitea
+sudo mkdir -p /var/lib/gitea/{custom,data,indexers,public,log}
+sudo chown -R git:git /var/lib/gitea/
+sudo chown root:git /etc/gitea
+sudo chmod -R 750 /var/lib/gitea/
+sudo chmod 770 /etc/gitea</code></pre></figure>
+<p>Create systemd service file:</p>
+<figure><figcaption></figcaption><pre><code>sudo vim /etc/systemd/system/gitea.service</code></pre></figure>
+<p>Inside:</p>
+<figure><figcaption></figcaption><pre><code>[Unit]Description=GiteaAfter=syslog.targetAfter=network.targetAfter=postgresql.service
+[Service]RestartSec=2sType=simpleUser=gitGroup=gitWorkingDirectory=/var/lib/gitea/ExecStart=/usr/local/bin/gitea web -c /etc/gitea/app.iniRestart=alwaysEnvironment=USER=git HOME=/home/git GITEA_WORK_DIR=/var/lib/gitea
+[Install]WantedBy=multi-user.target
+sudo systemctl daemon-reloadsudo systemctl start giteasudo systemctl enable giteasudo systemctl status gitea
+# Verify running on port 3000:netstat -tulpan | grep 3000</code></pre></figure>
+<p>Navitate to port 3000 on your server and you will see it running!</p>
+<p>Congrats, you have now dropped github as your git server.</p>

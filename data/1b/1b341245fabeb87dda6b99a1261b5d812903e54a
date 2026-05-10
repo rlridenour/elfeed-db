@@ -1,0 +1,45 @@
+<img src="https://cella.b-cdn.net/joshblais/s3.png" alt="s3 storage" />
+<p>I started the new year by getting kicked off Cloudinary’s free tier for image storage.</p>
+<p>Deciding that I do not want to have to migrate ever again, I have architected a simple way to get off of SaaS/Cloud services and still maintain control of my media. I was not willing to pay $99 a month for a hosted image service (I never used their transformations etc.) - and while Cloudinary offers a generous free tier for storage, I got hit on the bandwith limitations (a good problem to have, I suppose!)</p>
+<p>This will serve as a guide how I have setup the infrastructure, and how I migrated away from Cloudinary’s nice, albeit, walled garden.</p>
+<p><a></a></p>
+<h2>The Migration off Cloudinary<a href="#the-migration-off-cloudinary">#</a></h2>
+<p><a></a></p>
+<h3>The Media<a href="#the-media">#</a></h3>
+<p>I simply downloaded all media from Cloudinary and saved it locally on my machine, in directories for each site/project.</p>
+<p>Files were not named well, so I took the hour or so of going through in emacs (<a href="https://github.com/alexluigit/dirvish">dirvish</a>/<a href="https://en.wikipedia.org/wiki/Dired">dired</a>) and renaming files so as to have logical paths for my object storage. I then placed the media in directories for my projects, and was ready for the migration.</p>
+<p>The file tree looks something like this:</p>
+<figure><figcaption></figcaption><pre><code>.Media├── project1├── project2├── joshblais│   └── post├── Mountainthebook├── company│   ├── project│   ├── logos│   ├── project│   │   └── projectlisting│   └── blog└── project3</code></pre></figure>
+<p>It was now cleaned and ready to be shipped to object storage.</p>
+<p><a></a></p>
+<h2>S3 Compatible Object Storage<a href="#s3-compatible-object-storage">#</a></h2>
+<p>Hetzner offers a pretty decent <a href="https://www.hetzner.com/storage/object-storage/">s3 compatible object storage</a>, so I spun up an instance for this:</p>
+<p><a></a></p>
+<h3>Create Credentials<a href="#create-credentials">#</a></h3>
+<p>Upon creation of the bucket, you will be prompted to save your credentials - Copy these to your password store for reference later.</p>
+<p><code>rclone.conf</code>:</p>
+<figure><figcaption></figcaption><pre><code>[hetzner]type = s3provider = Otherenv_auth = falseaccess_key_id = YOUR_KEYsecret_access_key = YOUR_SECRETendpoint = fsn1.your-objectstorage.comacl = public-read</code></pre></figure>
+<p><a></a></p>
+<h3>Copying media over to the Bucket<a href="#copying-media-over-to-the-bucket">#</a></h3>
+<p>I then <a href="https://rclone.org/">rcloned</a> the whole Media directory to an S3 compatible storage bucket, and when referencing urls, they are done like so:</p>
+<p><code>~https://cdnlocation.net/joshblais/vimiumc2.png~</code></p>
+<p>I created a script for this using a <a href="https://nixos.wiki/wiki/Nix-shell_shebang">nix-shebang</a>, defining rclone as a dependency, and now it’s portable to any system running nix, nice.</p>
+<figure><figcaption></figcaption><pre><code>#!/usr/bin/env nix-shell#!nix-shell -i bash -p rclone
+set -euo pipefail
+MEDIA_DIR="${1:-$HOME/Media}"BUCKET="your-bucket-name"REMOTE="hetzner"
+rclone sync "$MEDIA_DIR" "$REMOTE:$BUCKET" \  --progress \  --checksum \  --transfers 8</code></pre></figure>
+<p><a></a></p>
+<h3>Renaming tags in projects<a href="#renaming-tags-in-projects">#</a></h3>
+<p>The (not) fun part is migrating your tags in all your projects. In emacs, I wrote a quick lisp function to go through the projects to hunt down cloudinary references:</p>
+<figure><figcaption></figcaption><pre><code>(defun jb/hunt-cloudinary ()  "Interactively hunt and migrate cloudinary references."  (interactive)  (consult-ripgrep nil "cloudinary"))
+(map! :leader      (:prefix ("j" . "jump")       :desc "Hunt cloudinary refs" "t" #'jb/hunt-cloudinary))</code></pre></figure>
+<p>Replacing with the correct image and path.  This took a few hours to do so, but in the future, should never happen again as I have all images named correctly (and continue to do so upon adding new ones) - if I need to migrate storage hosts, I will just change the cdn name in a project wide find-replace.</p>
+<p><a></a></p>
+<h2>Bunny CDN for caching images globally<a href="#bunny-cdn-for-caching-images-globally">#</a></h2>
+<p>One thing I lost with Cloudinary is the ability to have a global CDN caching my images. This was easily impletmented with <a href="https://bunny.net/">BunnyCDN</a> - I created a pull zone, pointed it to my hetzner storage bucket, and it just works.</p>
+<p><a></a></p>
+<h2>Cost<a href="#cost">#</a></h2>
+<p>So, while Cloudinary wanted to charge me $99 a month, this setup costs ~€5/month. I don’t get the image transformations baked in, but I am likely going to add either some pre-processing in the upload pipeline or at runtime via <a href="https://github.com/imgproxy/imgproxy">imgproxy</a>.</p>
+<p>Overall, I am very happy with the setup, it is completely web-GUI free, fast, and quite robust if there is ever a migration needed in the future. The 1TB plan with Hetzner is very reasonable and gives ton of overhead for years to come.</p>
+<p>As always, God bless, and until next time.</p>
+<p>If you enjoyed this post, consider <a href="https://joshblais.com/support/">Supporting my work</a>, <a href="https://mountainthebook.com">Checking out my book</a>, <a href="https://joshblais.com/work-with-me">Working with me</a>, or sending me an <a href="mailto:josh@joshblais.com">Email</a> to tell me what you think.</p>

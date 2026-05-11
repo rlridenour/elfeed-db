@@ -1,0 +1,367 @@
+<p>
+I have been busy improving my annotation package! <a href="https://github.com/captainflasmr/simply-annotate">Simply Annotate</a>, the latest release is 0.9.8 and I have put in a bunch of new features, so it felt like a good time to step back and show what the package actually does at this point, because honestly, quite a lot has changed since I last wrote about it.
+</p>
+
+
+<div id="orgc431f0c" class="figure">
+<p><img class="img-fluid rounded" src="/static/emacs/simply-annotate-banner.jpg" alt="simply-annotate-banner.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+There are annotation packages out there already, <code>annotate.el</code> being the most established.  And they are good!  But I kept running into the same friction: I wanted threaded conversations directly on my code, I wanted multiple display styles I could combine, and I wanted the whole thing to be a single file with no dependencies that I could drop onto an air-gapped machine and just use (yup, that again!)
+</p>
+
+<p>
+So I built my own!, this is Emacs, after all.
+</p>
+
+
+<div id="org7ea51ae" class="figure">
+<p><img class="img-fluid rounded" src="/static/emacs/simply-annotate-screen-recording.gif" alt="simply-annotate-screen-recording.gif" width="100%" />
+</p>
+</div>
+
+<p>
+At its core, simply-annotate lets you attach persistent notes to any text file (or Info manual, or dired buffer) without modifying the original content.  Annotations are stored in a simple s-expression database at <code>~/.emacs.d/simply-annotations.el</code>.  The entire package is a single elisp file, requires Emacs 28.1+, and has zero external dependencies.
+</p>
+
+<p>
+Basic setup is two lines:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">use-package</span> simply-annotate
+  <span style="color: #c586c0; font-weight: bold;">:bind-keymap</span> (<span style="color: #ce9178; font-style: italic;">"C-c a"</span> . simply-annotate-command-map)
+  <span style="color: #c586c0; font-weight: bold;">:hook</span> (find-file-hook . simply-annotate-mode))
+</pre>
+</div>
+
+<p>
+Or if you prefer <code>require</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">require</span> '<span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">simply-annotate</span>)
+(global-set-key (kbd <span style="color: #ce9178; font-style: italic;">"C-c a"</span>) simply-annotate-command-map)
+(add-hook 'find-file-hook #'simply-annotate-mode)
+</pre>
+</div>
+
+<p>
+Open a file, select some text, press <code>C-c a j</code>, and you have your first annotation.  <code>M-n</code> and <code>M-p</code> step through them.
+</p>
+
+<p>
+I am always fiddling around with styles, themes, backgrounds e.t.c, so I thought I would build this tinkering enthusiasm into this package.  Simply-annotate has five display styles, and you can layer them together:
+</p>
+
+<ul class="org-ul">
+<li><b>Highlight</b> &#x2013; classic background colour on the annotated region</li>
+<li><b>Tint</b> &#x2013; a subtle background derived from your current theme, lightened by a configurable amount.  Adapts automatically when you switch themes</li>
+<li><b>Fringe</b> &#x2013; a small triangle indicator in the fringe, minimal and unobtrusive</li>
+<li><b>Fringe-bracket</b> &#x2013; a vertical bracket spanning the full annotated region in the fringe, with a proper top cap, continuous vertical bar, and bottom cap</li>
+<li><b>Subtle</b> &#x2013; overline and underline bracketing the region, barely visible but there when you need it</li>
+</ul>
+
+<p>
+You can combine them, so <code>(tint fringe-bracket)</code> gives you a gentle background wash with a clear fringe bracket showing exactly where the annotation spans.  Cycle through styles with <code>C-c a '</code>.
+</p>
+
+<p>
+Toggle inline display with <code>C-c a /</code> and annotation content appears as box-drawn blocks directly in your buffer:
+</p>
+
+<pre class="example" id="org8d934e3">
+    some annotated code here
+    ▴
+┌─ ✎ [OPEN/NORMAL] ──────────────
+│ This function needs refactoring.
+│ The nested conditionals are hard
+│ to follow.
+└─────────────────────────────────
+</pre>
+
+<p>
+New in 0.9.8 is the inline pointer, that little <code>▴</code> connecting the box to the annotated text.  It is indented to the exact column where the annotation starts, so you always know what the comment refers to.
+</p>
+
+<p>
+The fun bit is that the pointer is just a string, and it supports multiline.  So you can customise it to whatever shape you like:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Simple arrow (default)
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9652;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9662;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Heavy L-bracket (my current favourite)
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9475;\n&#9495;&#9473;&#9654;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9487;&#9473;&#9654;\n&#9475;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Speech bubble tail
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">" &#9584;&#9488;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">" &#9584;&#9488;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Decorative diamond
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9670;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9670;"</span>)
+</pre>
+</div>
+
+<p>
+There is a full list of copy-paste options in the Commentary section of the elisp file.  Set to <code>nil</code> to disable the pointer entirely.
+</p>
+
+<p>
+So I think this is where simply-annotate really differs from other annotation packages.  Every annotation is a thread.  You can reply to it with <code>C-c a r</code>, and replies can be nested under any comment in the thread, not just the root.  It prompts with a hierarchical completing-read menu showing the comment tree.
+</p>
+
+<p>
+Each thread has:
+</p>
+
+<ul class="org-ul">
+<li><b>Status</b> &#x2013; open, in-progress, resolved, closed (<code>C-c a s</code>)</li>
+<li><b>Priority</b> &#x2013; low, normal, high, critical (<code>C-c a p</code>)</li>
+<li><b>Tags</b> &#x2013; freeform hashtags for organisation (<code>C-c a t</code>)</li>
+<li><b>Author tracking</b> &#x2013; configurable per-team, per-file, or single-user</li>
+</ul>
+
+<p>
+The comment tree renders with box-drawing characters so the hierarchy is always clear:
+</p>
+
+<pre class="example" id="org84a6615">
+┌— ® [OPEN/NORMAL] —
+| james dyer (03/29 08:27)
+|   This is the original comment
+| L james dyer (03/29 08:27)
+| |   here is a reply to this comment
+| | L james dyer (@3/29 08:27)
+| |     and a reply within a reply!!
+| L james dyer (03/29 08:28)
+|    Here is another reply to the original comment
+└────────────────────
+</pre>
+
+<p>
+For team collaboration:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-author-list '(<span style="color: #ce9178; font-style: italic;">"Alice"</span> <span style="color: #ce9178; font-style: italic;">"Bob"</span> <span style="color: #ce9178; font-style: italic;">"Charlie"</span>))
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-prompt-for-author 'threads-only)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-remember-author-per-file t)
+</pre>
+</div>
+
+<p>
+Annotations exist at three levels: <code>file</code> (whole-file overview), <code>defun</code> (function or block description), and <code>line</code> (individual elements).  There is also an <code>all</code> pseudo-level that shows everything at once, which is the default.
+</p>
+
+<p>
+Cycle levels with <code>C-c a ]</code> and <code>C-c a [</code>.  The header-line shows counts per level (<code>FILE:2 | DEFUN:5 | LINE:3</code>) with the active level in bold, so you always know where you are, my idea here is to lean towards a coding annotation tool to help teach code or help to remember what has been implemented, so the levels start at a broad file overview and enables you to switch instantly to a more granular level.
+</p>
+
+<p>
+The org-mode listing (<code>C-c a l</code>) gives you a foldable, navigable overview of all annotations in the current file, grouped by level.  Press <code>n</code> and <code>p</code> to step through headings, <code>RET</code> to jump to source.
+</p>
+
+<p>
+New in 0.9.6, the tabular listing (<code>C-c a T</code>) opens a fast, sortable table using <code>tabulated-list-mode</code> (a feature in Emacs I am starting to leverage more).  Columns for Level, Line, Status, Priority, Comments, Tags, Author, and the first line of the comment.  Click column headers to sort.  This is brilliant for getting a quick birds-eye view of all the open items in a file.
+</p>
+
+<p>
+For the global view, <code>simply-annotate-show-all</code> gathers annotations from every file in the database into a single org-mode buffer.
+</p>
+
+<p>
+Enable <code>simply-annotate-dired-mode</code> and dired buffers show fringe indicators next to files that have annotations.  You can see at a glance which files have notes attached:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(add-hook 'dired-mode-hook #'simply-annotate-dired-mode)
+</pre>
+</div>
+
+<p>
+Info manuals are also fully supported.  Annotations are tracked per-node, and the listing and jump-to-file commands navigate to Info nodes seamlessly.
+</p>
+
+<p>
+Press <code>C-c a e</code> and you can edit the raw s-expression data structure of any annotation.  Every field is there: thread ID, status, priority, tags, comments with their IDs, parent-IDs, timestamps, and text.  <code>C-c C-c</code> to save.  This is the escape hatch for when the UI does not quite cover what you need.
+</p>
+
+<p>
+Rather than writing paragraphs about how simply-annotate compares to other packages, I have put together a feature matrix in the README.  The short version: if you want threaded conversations, multiple combinable display styles, annotation levels, a smart context-aware command, and zero dependencies in a single file, this is the package for you.  If you need PDF annotation, go with org-noter or org-remark, they are excellent at that.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">use-package</span> simply-annotate
+  <span style="color: #c586c0; font-weight: bold;">:bind-keymap</span> (<span style="color: #ce9178; font-style: italic;">"C-c a"</span> . simply-annotate-command-map)
+  <span style="color: #c586c0; font-weight: bold;">:hook</span> (find-file-hook . simply-annotate-mode))
+
+(<span style="color: #569cd6; font-weight: bold;">with-eval-after-load</span> 'simply-annotate
+  (add-hook 'dired-mode-hook #'simply-annotate-dired-mode))
+</pre>
+</div>
+
+<p>
+The package is available on GitHub on melpa at <a href="https://melpa.org/#/simply-annotate">simply-annotate</a> or  <a href="https://github.com/captainflasmr/simply-annotate">https://github.com/captainflasmr/simply-annotate</a>.  There is also an Info manual if you run <code>M-x info</code> and search for <code>simply-annotate</code>.
+</p>
+<section id="outline-container-org8225491" class="outline-2">
+<h2 id="org8225491">Inline Display and the New Pointer</h2>
+<div class="outline-text-2" id="text-org8225491">
+<p>
+Toggle inline display with <code>C-c a /</code> and annotation content appears as box-drawn blocks directly in your buffer:
+</p>
+
+<pre class="example" id="org7b4facb">
+    some annotated code here
+    ▴
+┌─ ✎ [OPEN/NORMAL] ──────────────
+│ This function needs refactoring.
+│ The nested conditionals are hard
+│ to follow.
+└─────────────────────────────────
+</pre>
+
+<p>
+New in 0.9.8 is the inline pointer, that little <code>▴</code> connecting the box to the annotated text.  It is indented to the exact column where the annotation starts, so you always know what the comment refers to.
+</p>
+
+<p>
+The fun bit is that the pointer is just a string, and it supports multiline.  So you can customise it to whatever shape you like:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Simple arrow (default)
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9652;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9662;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Heavy L-bracket (my current favourite)
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9475;\n&#9495;&#9473;&#9654;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9487;&#9473;&#9654;\n&#9475;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Speech bubble tail
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">" &#9584;&#9488;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">" &#9584;&#9488;"</span>)
+
+<span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">Decorative diamond
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-after <span style="color: #ce9178; font-style: italic;">"&#9670;"</span>)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-inline-pointer-above <span style="color: #ce9178; font-style: italic;">"&#9670;"</span>)
+</pre>
+</div>
+
+<p>
+There is a full list of copy-paste options in the Commentary section of the elisp file.  Set to <code>nil</code> to disable the pointer entirely.
+</p>
+</div>
+</section>
+<section id="outline-container-org2837446" class="outline-2">
+<h2 id="org2837446">Threaded Conversations</h2>
+<div class="outline-text-2" id="text-org2837446">
+<p>
+This is where simply-annotate really differs from other annotation packages.  Every annotation is a thread.  You can reply to it with <code>C-c a r</code>, and replies can be nested under any comment in the thread, not just the root.  It prompts with a hierarchical completing-read menu showing the comment tree.
+</p>
+
+<p>
+Each thread has:
+</p>
+
+<ul class="org-ul">
+<li><b>Status</b> &#x2013; open, in-progress, resolved, closed (<code>C-c a s</code>)</li>
+<li><b>Priority</b> &#x2013; low, normal, high, critical (<code>C-c a p</code>)</li>
+<li><b>Tags</b> &#x2013; freeform hashtags for organisation (<code>C-c a t</code>)</li>
+<li><b>Author tracking</b> &#x2013; configurable per-team, per-file, or single-user</li>
+</ul>
+
+<p>
+The comment tree renders with box-drawing characters so the hierarchy is always clear:
+</p>
+
+<pre class="example" id="org9876313">
+┌— ® [OPEN/NORMAL] —
+| james dyer (03/29 08:27)
+|   This is the original comment
+| L james dyer (03/29 08:27)
+| |   here is a reply to this comment
+| | L james dyer (@3/29 08:27)
+| |     and a reply within a reply!!
+| L james dyer (03/29 08:28)
+|    Here is another reply to the original comment
+└────────────────────
+</pre>
+
+<p>
+For team collaboration:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-author-list '(<span style="color: #ce9178; font-style: italic;">"Alice"</span> <span style="color: #ce9178; font-style: italic;">"Bob"</span> <span style="color: #ce9178; font-style: italic;">"Charlie"</span>))
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-prompt-for-author 'threads-only)
+(<span style="color: #569cd6; font-weight: bold;">setq</span> simply-annotate-remember-author-per-file t)
+</pre>
+</div>
+
+<p>
+Annotations exist at three levels: <code>file</code> (whole-file overview), <code>defun</code> (function or block description), and <code>line</code> (individual elements).  There is also an <code>all</code> pseudo-level that shows everything at once, which is the default.
+</p>
+
+<p>
+Cycle levels with <code>C-c a ]</code> and <code>C-c a [</code>.  The header-line shows counts per level (<code>FILE:2 | DEFUN:5 | LINE:3</code>) with the active level in bold, so you always know where you are, my idea here is to lean towards a coding annotation tool to help teach code or help to remember what has been implemented, so the levels start at a broad file overview and enable you to switch instantly to a more granular level.
+</p>
+
+<p>
+The org-mode listing (<code>C-c a l</code>) gives you a foldable, navigable overview of all annotations in the current file, grouped by level.  Press <code>n</code> and <code>p</code> to step through headings, <code>RET</code> to jump to source.
+</p>
+
+<p>
+New in 0.9.6, the tabular listing (<code>C-c a T</code>) opens a fast, sortable table using <code>tabulated-list-mode</code> (a feature in Emacs I am starting to leverage more).  Columns for Level, Line, Status, Priority, Comments, Tags, Author, and the first line of the comment.  Click column headers to sort.  This is brilliant for getting a quick birds-eye view of all the open items in a file.
+</p>
+
+<p>
+For the global view, <code>simply-annotate-show-all</code> gathers annotations from every file in the database into a single org-mode buffer.
+</p>
+
+<p>
+Enable <code>simply-annotate-dired-mode</code> and dired buffers show fringe indicators next to files that have annotations.  You can see at a glance which files have notes attached:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(add-hook 'dired-mode-hook #'simply-annotate-dired-mode)
+</pre>
+</div>
+
+<p>
+Info manuals are also fully supported.  Annotations are tracked per-node, and the listing and jump-to-file commands navigate to Info nodes seamlessly.
+</p>
+
+<p>
+Press <code>C-c a e</code> and you can edit the raw s-expression data structure of any annotation.  Every field is there: thread ID, status, priority, tags, comments with their IDs, parent-IDs, timestamps, and text.  <code>C-c C-c</code> to save.  This is the escape hatch for when the UI does not quite cover what you need.
+</p>
+
+<p>
+Rather than writing paragraphs about how simply-annotate compares to other packages, I have put together a feature matrix in the README.  The short version: if you want threaded conversations, multiple combinable display styles, annotation levels, a smart context-aware command, and zero dependencies in a single file, this is the package for you.  If you need PDF annotation, go with org-noter or org-remark, they are excellent at that.
+</p>
+</div>
+</section>
+<section id="outline-container-org3700976" class="outline-2">
+<h2 id="org3700976">Getting Started</h2>
+<div class="outline-text-2" id="text-org3700976">
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">use-package</span> simply-annotate
+  <span style="color: #c586c0; font-weight: bold;">:bind-keymap</span> (<span style="color: #ce9178; font-style: italic;">"C-c a"</span> . simply-annotate-command-map)
+  <span style="color: #c586c0; font-weight: bold;">:hook</span> (find-file-hook . simply-annotate-mode))
+
+(<span style="color: #569cd6; font-weight: bold;">with-eval-after-load</span> 'simply-annotate
+  (add-hook 'dired-mode-hook #'simply-annotate-dired-mode))
+</pre>
+</div>
+
+<p>
+The package is available on GitHub on melpa at <a href="https://melpa.org/#/simply-annotate">simply-annotate</a> or  <a href="https://github.com/captainflasmr/simply-annotate">https://github.com/captainflasmr/simply-annotate</a>.  There is also an Info manual if you run <code>M-x info</code> and search for <code>simply-annotate</code>.
+</p>
+</div>
+</section>

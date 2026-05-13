@@ -1,0 +1,115 @@
+<p>
+Ever found yourself wanting to add a new AI provider to ollama-buddy? (probably not I would guess 🙂), only to realise you'd need to write an entire Elisp module? Or perhaps you're running a local inference server that speaks the OpenAI API, but can't be bothered with the ceremony of creating a dedicated provider file?
+</p>
+
+
+<div id="org353ad3b" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/ollama-buddy-logo_001.jpg" alt="ollama-buddy-logo_001.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+Fair question. That's exactly why I built <code>ollama-buddy-provider-create</code> — a single function that lets you register any LLM provider in seconds, whether it's a cloud API or your own local server.
+</p>
+
+<p>
+The traditional approach required a separate <code>.el</code> file for each provider — OpenAI, Claude, Gemini, you name it. Each with its own <code>defcustom</code> variables, configuration boilerplate, and maintenance overhead. It worked, but it felt a bit&#x2026; heavy-handed for simple use cases.
+</p>
+
+<p>
+What if you just wanted to quickly add support for that new local LM Studio instance running on port 1234? Or point ollama-buddy at your company's internal AI gateway? Previously, you'd be looking at copying an existing provider file and modifying dozens of lines. Now? One function call.
+</p>
+
+<p>
+The magic (yes, of the elisp kind!) happens in <code>ollama-buddy-provider.el</code>, which provides a generic provider registration system. Instead of requiring separate Elisp files, you can register any provider with a single call:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(ollama-buddy-provider-create
+ <span style="color: #c586c0; font-weight: bold;">:name</span> <span style="color: #ce9178; font-style: italic;">"My Local Server"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-type</span> 'openai
+ <span style="color: #c586c0; font-weight: bold;">:endpoint</span> <span style="color: #ce9178; font-style: italic;">"http://localhost:1234/v1/chat"</span>
+ <span style="color: #c586c0; font-weight: bold;">:models-endpoint</span> <span style="color: #ce9178; font-style: italic;">"http://localhost:1234/v1/models"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-key</span> <span style="color: #ce9178; font-style: italic;">"your-key-here"</span>
+ <span style="color: #c586c0; font-weight: bold;">:prefix</span> <span style="color: #ce9178; font-style: italic;">"l:"</span>)
+</pre>
+</div>
+
+<p>
+<b>Three API types are supported out of the box:</b>
+</p>
+
+<ul class="org-ul">
+<li><code>openai</code> (default) — Any OpenAI-compatible chat/completions API</li>
+<li><code>claude</code> — Anthropic Claude Messages API</li>
+<li><code>gemini</code> — Google Gemini generateContent API</li>
+</ul>
+
+<p>
+The system handles all the underlying HTTP requests, error mapping, and session management automatically. Your provider just needs to specify which API flavour it speaks.
+</p>
+
+<p>
+<b>Adding a local LM Studio instance:</b>
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(ollama-buddy-provider-create
+ <span style="color: #c586c0; font-weight: bold;">:name</span> <span style="color: #ce9178; font-style: italic;">"LM Studio"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-type</span> 'openai
+ <span style="color: #c586c0; font-weight: bold;">:endpoint</span> <span style="color: #ce9178; font-style: italic;">"http://localhost:1234/v1/chat/completions"</span>
+ <span style="color: #c586c0; font-weight: bold;">:models-endpoint</span> <span style="color: #ce9178; font-style: italic;">"http://localhost:1234/v1/models"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-key</span> <span style="color: #ce9178; font-style: italic;">"not-needed"</span>  <span style="color: #6a9955; font-weight: bold; font-style: italic;">; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">LM Studio often doesn't require auth
+</span> <span style="color: #c586c0; font-weight: bold;">:model-prefix</span> <span style="color: #ce9178; font-style: italic;">"l:"</span>)
+</pre>
+</div>
+
+<p>
+<b>Connecting to OpenRouter (400+ models through one API):</b>
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(ollama-buddy-provider-create
+ <span style="color: #c586c0; font-weight: bold;">:name</span> <span style="color: #ce9178; font-style: italic;">"OpenRouter"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-type</span> 'openai
+ <span style="color: #c586c0; font-weight: bold;">:endpoint</span> <span style="color: #ce9178; font-style: italic;">"https://openrouter.ai/api/v1/chat/completions"</span>
+ <span style="color: #c586c0; font-weight: bold;">:models-endpoint</span> <span style="color: #ce9178; font-style: italic;">"https://openrouter.ai/api/v1/models"</span>
+ <span style="color: #c586c0; font-weight: bold;">:api-key</span> <span style="color: #ce9178; font-style: italic;">"your-openrouter-key"</span>
+ <span style="color: #c586c0; font-weight: bold;">:model-prefix</span> <span style="color: #ce9178; font-style: italic;">"r:"</span>)
+</pre>
+</div>
+
+<p>
+After registration, your new provider appears in the status line and becomes available through the standard model selection interface. The <code>model-prefix</code> (like <code>l:</code> for local or <code>r:</code> for OpenRouter) lets you quickly identify which provider a model belongs to.
+</p>
+
+<p>
+The provider system leverages ollama-buddy's shared infrastructure in <code>ollama-buddy-remote.el</code>, which extracts common functionality like request handling, error mapping, and response processing. This means your custom provider gets the same robust error handling as the built-in ones:
+</p>
+
+<ul class="org-ul">
+<li>Proper HTTP status code mapping (rate limits, timeouts, authentication errors)</li>
+<li>Async request support for non-blocking UI</li>
+<li>Automatic model listing and caching</li>
+<li>Integration with the existing session and conversation system</li>
+</ul>
+
+<p>
+When you call <code>ollama-buddy-provider-create</code>, it registers your provider with the core system, making it available to all the usual entry points: the transient menu, model selection, and conversation buffers.
+</p>
+
+<p>
+This approach is perfect for:
+</p>
+<ul class="org-ul">
+<li>Local inference servers (LM Studio, llama.cpp, vLLM, Ollama's own OpenAI-compat layer)</li>
+<li>Company/internal AI gateways</li>
+<li>Quick experiments with new APIs</li>
+</ul>
+
+<p>
+The beauty ojf this system is that it makes ollama-buddy genuinely extensible without requiring deep knowledge of its internals. Want to add support for that new AI service that launched yesterday? You can probably do it in five lines of configuration rather than fifty.
+</p>
+
+<p>
+Next up I think this will be the big one, adding tooling for those external providers!!!
+</p>

@@ -1,0 +1,336 @@
+<p>The concept of orchestrating agents is gradually spreading among developers. Claude has planned, or you may already be able to use (depending on when you're reading this), the ability to launch several autonomous agents working in parallel and in a coordinated manner. This is great, who doesn't like working faster? However, you can build this functionality yourself. Of course, only if you don't mind burning a lot of tokens at once.</p>
+<p>The elements I use are simple:</p>
+<ul>
+<li>A <code>TODO.org</code> file or similar: to define tasks, their status, and dependencies.</li>
+<li>A run script: to launch agents with the same prompt and limit the number of parallel agents.</li>
+<li>A local or remote Git repository: so agents can synchronize code with each other.</li>
+</ul>
+<p>If we were in the context of the Scrum framework:</p>
+<ul>
+<li>Project owner: that's <code>TODO.org</code>, since it defines the tasks, their description, status, and dependencies.</li>
+<li>Developers: those are the autonomous agents or the run script.</li>
+<li>Scrum Master: that's the Git repository, since it ensures all agents respect the rules and timing.</li>
+</ul>
+<h2 id="blog-single-content__title--todoorg-the-coordination-hub" class="blog-single__content-title">TODO.org: the coordination hub</h2>
+<p>The power of using Org Mode is that we can have tasks in plain text with properties and statuses. It is also readable by both humans and machines.</p>
+<pre class="highlight"><code class="language-org">* TODO Task 1
+:PROPERTIES:
+:ID: task-1
+:END:
+
+Description of task 1.
+
+* TODO Task 2
+:PROPERTIES:
+:ID: task-2
+:BLOCKER: task-1
+:END:
+
+Description of task 2, which depends on task 1.</code></pre>
+<p>Each task goes one below the other, with a title, an ID, and a detailed description. If a task depends on another, we add a <code>:BLOCKER:</code> property with the ID of the blocking task. The status of each task is indicated with the prefix <code>TODO</code>, <code>IN-PROGRESS</code>, or <code>DONE</code>. This way, agents can read the file, identify which tasks are available to execute (those with <code>TODO</code> status and no pending blockers), and mark their progress.</p>
+<p>Of course, you can use any format or platform (Jira, Trello, etc.). The only requirement is that agents can interact with it programmatically, to read tasks and mark their status.</p>
+<h2 id="blog-single-content__title--run-script-and-agent-prompt" class="blog-single__content-title">Run script and agent prompt</h2>
+<p>Defining tasks is useless if we don't have agents to execute them.</p>
+<p>We create a <code>run_agents.sh</code> script with the following content:</p>
+<pre class="highlight"><code class="language-bash">#!/bin/bash
+
+MAX_JOBS=16
+AGENT_NUM=0
+
+while true; do
+    while (( $(jobs -rp | wc -l) &gt;= MAX_JOBS )); do
+        sleep 1
+    done
+
+    git pull --rebase origin main 2&gt;/dev/null
+
+    if ! grep -q "^\* TODO" TODO.org; then
+        wait
+        break
+    fi
+
+    COMMIT=$(git rev-parse --short=6 HEAD)
+    AGENT_NUM=$((AGENT_NUM + 1))
+    LOGFILE="agent_logs/agent_${COMMIT}_${AGENT_NUM}.log"
+
+    claude --dangerously-skip-permissions -p "Your agent number is: $AGENT_NUM. $(cat AGENT_PROMPT.md)" &amp;&gt; "$LOGFILE" &amp;
+done</code></pre>
+<p>As you can see, there is a <code>MAX_JOBS</code> variable that limits the number of agents running in parallel. Before launching each one, the script does a <code>git pull</code> to read the updated state of <code>TODO.org</code>: if there are no more <code>TODO</code> tasks, it waits for the running agents to finish with <code>wait</code> and exits. Each agent will execute the same prompt, found in <code>AGENT_PROMPT.md</code>, and will save its output to a log file with the current commit hash and its agent number (<code>$AGENT_NUM</code>).</p>
+<p>I used <code>claude --dangerously-skip-permissions -p</code> to launch the agents. The <code>--dangerously-skip-permissions</code> flag is necessary so each agent can operate autonomously without stopping to ask for confirmation on every action. You can use whichever model or client you prefer, but make sure the agents can run commands without human intervention.</p>
+<p>The <code>-p</code> mode is single-shot: when Claude finishes generating its response, the process dies on its own. Even so, it's important to explicitly tell the agent to run <code>exit 0</code> via bash when no <code>TODO</code> tasks remain. This prevents the agent from getting stuck in an indefinite wait loop when all tasks are in <code>IN-PROGRESS</code> or <code>DONE</code>.</p>
+<p><code>AGENT_PROMPT.md</code> is a document, or Skill, that defines agent behavior, collaboration rules, how to choose tasks, how to block tasks, etc. An example could be the following:</p>
+<pre class="highlight"><code class="language-markdown"># Synchronization Prompt for Autonomous Agents
+
+## Context
+
+You are an autonomous agent working in collaboration with other agents on a shared Git repository. Coordination is done through a shared `TODO.org` file that acts as the single source of truth for task status.
+
+## Work environment
+
+Each agent works in its own isolated Docker instance. At startup, bring up your container from the project's `compose.yaml`:
+
+```bash
+AGENT_PORT=$((8080 + YOUR_AGENT_NUMBER)) docker compose -p agent-YOUR_AGENT_NUMBER up -d
+```
+
+You never share an instance with another agent. Each one has its own independent execution environment. The remote Git repository is the only synchronization point between agents: all coordination is done exclusively via `git pull` / `git push`.
+
+## TODO.org file format
+
+The `TODO.org` file contains tasks in the following format:
+
+```org
+* TODO Task name
+:PROPERTIES:
+:ID: task-identifier
+:END:
+
+Detailed description of what needs to be done.
+
+* TODO Another task with a dependency
+:PROPERTIES:
+:BLOCKER: identifier-of-the-blocking-task
+:END:
+
+This task can only be started when the blocking task is in DONE state.
+```
+
+### Possible task statuses
+
+| Status        | Meaning                                          |
+|---------------|--------------------------------------------------|
+| `TODO`        | Pending, available to be taken by an agent       |
+| `IN-PROGRESS` | An agent is currently executing it               |
+| `DONE`        | Completed and committed                          |
+
+### BLOCKER property
+
+If a task has the `:BLOCKER:` property, its value is the `:ID:` of another task. **You cannot start a blocked task until the referenced task is in `DONE` state.**
+
+## Work protocol
+
+Follow this cycle strictly for each task:
+
+### 1. Synchronize before choosing a task
+
+```bash
+git pull --rebase origin main
+```
+
+Read the updated `TODO.org` file.
+
+### 2. Choose an available task
+
+A task is eligible if and only if:
+
+- Its status is `TODO` (not `IN-PROGRESS` or `DONE`).
+- It has no `:BLOCKER:` property, **or** the task referenced in `:BLOCKER:` is already in `DONE` state.
+
+If there are no tasks in `TODO` state (all are `IN-PROGRESS` or `DONE`), run `exit 0` to end the process.
+
+If there are `TODO` tasks but all have pending blockers, wait a moment and go back to step 1.
+
+### 3. Mark the task as IN-PROGRESS and commit
+
+Change the task status in `TODO.org`:
+
+```diff
+- * TODO Task name
++ * IN-PROGRESS Task name
+```
+
+Commit and push immediately:
+
+```bash
+git add TODO.org
+git commit -m "start: Task name"
+git push origin main
+```
+
+&gt; **If the push fails due to a conflict**, it means another agent modified `TODO.org` at the same time. Do `git pull --rebase`, check the file status, and if the task you wanted was already taken, go back to step 1.
+
+### 4. Execute the task
+
+Do the work described in the task. Work only on what the task specifies, without modifying files outside its scope.
+
+### 5. Mark as DONE, commit and push
+
+Once the task is complete:
+
+```diff
+- * IN-PROGRESS Task name
++ * DONE Task name
+```
+
+Commit all files modified by the task together with the updated `TODO.org`:
+
+```bash
+git add -A
+git commit -m "done: Task name"
+git push origin main
+```
+
+&gt; If the push fails, do `git pull --rebase`, resolve any conflicts, and retry the push.
+
+### 6. Go back to step 1
+
+Synchronize and look for the next available task.
+
+If there are no available tasks, run `exit 0` to end the process:
+
+```bash
+exit 0
+```
+
+Since agents are launched with `claude -p`, the process ends as soon as Claude stops emitting a response. But explicitly running `exit 0` via bash guarantees the process dies even if the agent were stuck in a wait loop.
+
+## Critical rules
+
+- **NEVER** start a task that is `IN-PROGRESS` — another agent is executing it.
+- **NEVER** start a task whose `BLOCKER` is not in `DONE`.
+- **ALWAYS** do `git pull --rebase` before reading `TODO.org` to choose a task.
+- **ALWAYS** push immediately after changing a status in `TODO.org`.
+- **ALWAYS** resolve merge conflicts by keeping the most advanced status of each task (e.g., if you have `IN-PROGRESS` and the remote has `DONE`, keep `DONE`).
+- Work on **one task at a time**. Do not take multiple tasks simultaneously.
+- Commit messages must follow the format: `start: Name` / `done: Name`.
+
+## Conflict resolution in TODO.org
+
+If you encounter conflicts in `TODO.org` during a rebase, apply this logic:
+
+| Your status   | Remote status | Resulting status  |
+|---------------|---------------|-------------------|
+| `TODO`        | `IN-PROGRESS` | `IN-PROGRESS`     |
+| `TODO`        | `DONE`        | `DONE`            |
+| `IN-PROGRESS` | `DONE`        | `DONE`            |
+| `IN-PROGRESS` | `IN-PROGRESS` | **Real conflict** — keep the remote and go back to step 1 |
+
+The principle is: **the most advanced status always wins**.</code></pre>
+<h2 id="blog-single-content__title--git-for-synchronization" class="blog-single__content-title">Git for synchronization</h2>
+<p>As I mentioned at the start, we need a code synchronization mechanism between agents. For this, the Git repository is perfect. And if it works locally, even better!</p>
+<p>Initialize the repository, add the files, and make the first commit:</p>
+<pre class="highlight"><code class="language-sh">git init .
+git add .
+git commit -m "initial setup"</code></pre>
+<p>The initial commit is essential: without it, the <code>main</code> branch does not exist and agents won't be able to do <code>git pull</code> or <code>git push</code>.</p>
+<p>The script uses <code>git pull --rebase origin main</code>, so it needs a remote called <code>origin</code>. The simplest way locally is to create a bare repository and point it as origin:</p>
+<pre class="highlight"><code class="language-sh">git init --bare ../my-project-remote.git
+git remote add origin ../my-project-remote.git
+git push -u origin main</code></pre>
+<p>If you prefer to use a real remote repository (GitHub, GitLab, etc.), simply add its URL as origin and do the initial push.</p>
+<p>AI models are very good at resolving conflicts. If two agents try to take the same task, one of them will win the push and the other will have to pull, resolve the conflict, and try again. A natural and robust synchronization mechanism, with no need for locks, semaphores, or queue systems.</p>
+<p>And with that, everything is ready.</p>
+<h2 id="blog-single-content__title--run-and-results" class="blog-single__content-title">Run and results</h2>
+<p>All that's left is to run the script:</p>
+<pre class="highlight"><code class="language-sh">bash run_agents.sh</code></pre>
+<p>Each agent will read <code>TODO.org</code>, choose tasks, execute them, and update their status. You can keep it open in an editor that lets you see changes in real time, to watch the progress.</p>
+<h2 id="blog-single-content__title--real-example" class="blog-single__content-title">Real example</h2>
+<p>Let's coordinate the creation of a landing page for a trip to Mars.</p>
+<p>Your project will have the following structure:</p>
+<pre class="highlight"><code>your-project/
+├── AGENT_PROMPT.md
+├── TODO.org
+├── run_agents.sh
+└── src/</code></pre>
+<p>The <code>src/</code> folder is where agents will create the landing page files.</p>
+<p>Let's define the tasks in <code>TODO.org</code>:</p>
+<pre class="highlight"><code class="language-org">* TODO Define the landing page structure
+:PROPERTIES:
+:ID: define-structure
+:END:
+
+Create the file `src/index.html` with the following base structure for a Mars trip seat reservation landing page:
+
+- A `&lt;header&gt;` with the title "Reserve your seat to Mars" and a subtitle. Include a call-to-action (CTA) button with the text "Reserve a seat".
+- An empty `&lt;section id="stats-section"&gt;` where the reservations statistics chart will go.
+- An empty `&lt;section id="mission-section"&gt;` where the mission description will go.
+- An empty `&lt;section id="cta-section"&gt;` where the reservation form will go.
+- A `&lt;footer&gt;` with the text "Mars One Reservations · 2045".
+
+The HTML must be semantic and valid. Do not add styles or scripts yet.
+
+* TODO Add Bulma CSS
+:PROPERTIES:
+:ID: add-bulma-css
+:BLOCKER: define-structure
+:END:
+
+Read the full Bulma CSS documentation at https://bulma.io/documentation/.
+
+Add Bulma CSS to `src/index.html` via CDN. Apply Bulma classes so that:
+
+- The `&lt;header&gt;` uses the `hero` component in `is-fullheight` mode with a dark background (black or very dark blue) to evoke space. The CTA button uses the class `button is-danger is-large`.
+- Sections use `container` and `section`.
+- The `&lt;footer&gt;` uses Bulma's `footer` component.
+
+The page must look professional and modern on desktop and mobile.
+
+* TODO Add a chart with Chart.js
+:PROPERTIES:
+:ID: add-chart
+:BLOCKER: define-structure
+:END:
+
+Add Chart.js to `src/index.html` via CDN. Inside `&lt;section id="stats-section"&gt;` create a `&lt;canvas&gt;` and initialize a bar chart with reservation data by launch window:
+
+- Labels: 2041, 2042, 2043, 2044, 2045, 2046.
+- Dataset "Available seats": 500, 500, 500, 500, 500, 500.
+- Dataset "Confirmed reservations": 12, 87, 203, 341, 489, 71.
+
+The chart must have the title "Reservations by launch window", a legend, and differentiated colors. Use red and orange tones to evoke the planet.
+
+* TODO Write the copy
+:PROPERTIES:
+:ID: write-copy
+:BLOCKER: define-structure
+:END:
+
+Write all the landing page copy and insert it directly into `src/index.html`:
+
+- Header subtitle: a short, impactful phrase about being the first human to set foot on Mars.
+- `#mission-section`: a title "The mission", three paragraphs about the project (trip duration, conditions, what the seat includes), and a list of three highlighted benefits with emoji icons.
+- `#cta-section`: a title "Are you ready?", a paragraph of urgency indicating that seats are limited, and a form with fields for name, email, and preferred launch window (select with years 2041-2046) and a submit button.
+
+The tone should be epic, aspirational, and with a touch of humor.
+
+* TODO Write content for the statistics section
+:PROPERTIES:
+:ID: write-content
+:BLOCKER: define-structure write-copy add-chart
+:END:
+
+Write the text content for `&lt;section id="stats-section"&gt;` in `src/index.html`, above the chart canvas. It must include:
+
+- A title "The rhythm of history".
+- Two paragraphs that contextualize the data: what launch windows mean, why reservations grow every year, and what it implies that the 2045 window is nearly full.
+- A highlighted statistic in large text: "489 brave souls already have their seat for 2045".
+
+The tone should combine informative rigor with emotion.
+
+* TODO Review and polish the landing page
+:PROPERTIES:
+:ID: final-polish
+:BLOCKER: add-bulma-css add-chart write-copy write-content
+:END:
+
+Review `src/index.html` as a whole and apply the following adjustments:
+
+- Check that the narrative flows: impactful header, statistics that generate urgency, mission description, and closing form.
+- Make sure the chart fits visually within the Bulma layout.
+- Verify the page is responsive on small screens.
+- Check that the reservation form has the `action="#"` attribute and generates no console errors.
+- Fix any visual or layout inconsistencies.</code></pre>
+<p>In summary:</p>
+<ul>
+<li>We define the HTML structure.</li>
+<li>We add styles with Bulma CSS.</li>
+<li>We create a chart with Chart.js.</li>
+<li>We write the global page copy.</li>
+<li>We write the specific content for the statistics section.</li>
+<li>We review and polish the final result.</li>
+</ul>
+<p>Some tasks cannot be executed until others are complete.</p>
+<p>We run it with <code>bash run_agents.sh</code> and wait.</p>
+<h2 id="blog-single-content__title--conclusion" class="blog-single__content-title">Conclusion</h2>
+<p>The effort of writing tasks clearly, with the work order well defined, is something no one can take away from you. You take on the role of project owner defining the backlog, the tasks, and the priorities. And that doesn't guarantee a perfect result either. However, it forces you to think, to structure, and to select a technology stack with some criteria. Something you should never automate.</p>
+<p>If you want to dive deeper into this topic, I recommend reading the article <a href="https://www.anthropic.com/engineering/building-c-compiler">Building a C compiler</a>.</p>

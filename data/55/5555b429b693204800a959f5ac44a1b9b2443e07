@@ -1,0 +1,152 @@
+<p>
+One of the things that has always slightly bothered me about chatting with a local LLM is that it only knows what it was trained on (although I suppose most LLMs are like that) . Ask it about your own codebase, your org notes, your project docs - and it's just guessing. Well, not anymore! Ollama Buddy now ships with proper Retrieval Augmented Generation support built-in
+</p>
+
+
+<div id="orgb6e60e1" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20250424085731-emacs--Ollama-Buddy-0-9-35-Grok-Gemini-Integration-Enhanced-Sessions.jpg" alt="20250424085731-emacs--Ollama-Buddy-0-9-35-Grok-Gemini-Integration-Enhanced-Sessions.jpg" width="100%" />
+</p>
+</div>
+<section id="outline-container-org8abe774" class="outline-2">
+<h2 id="org8abe774">What even is RAG?</h2>
+<div class="outline-text-2" id="text-org8abe774">
+<p>
+If you haven't come across the term before, the basic idea is simple. Instead of asking the LLM a question cold, you first go off and find the most relevant bits of text from your own documents, then you hand those bits to the LLM along with your question. The LLM now has actual context to work with rather than just vibes. The "retrieval" part is done using vector embeddings - each chunk of your documents gets turned into a mathematical representation, and at query time your question gets the same treatment. Chunks that are mathematically "close" to your question are the ones that get retrieved.
+</p>
+
+<p>
+In this case, I have worked to keep the whole pipeline inside Emacs; it talks to Ollama directly to contact an embedding model, which then returns the required information. I have tried to make this as Emacs Org-friendly as possible by storing the embedding information in Org files.
+</p>
+</div>
+</section>
+<section id="outline-container-orgce4b067" class="outline-2">
+<h2 id="orgce4b067">Getting started</h2>
+<div class="outline-text-2" id="text-orgce4b067">
+<p>
+You'll need an embedding model pulled alongside your chat model. The default is <code>nomic-embed-text</code> which is a solid general-purpose choice:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-sh">ollama pull nomic-embed-text
+</pre>
+</div>
+
+<p>
+or just do it within ollama-buddy from the Model Management page.
+</p>
+</div>
+</section>
+<section id="outline-container-org2d2dbc4" class="outline-2">
+<h2 id="org2d2dbc4">Indexing your documents</h2>
+<div class="outline-text-2" id="text-org2d2dbc4">
+<p>
+The main entry point is <code>M-x ollama-buddy-rag-index-directory</code>. Point it at a directory and it will crawl through, chunk everything up, generate embeddings for each chunk, and save an index file. The first time you run this it can take a while depending on how much content you have and how fast your machine is - subsequent updates are much quicker as it only processes changed files.
+</p>
+
+<p>
+Supported file types (and I even managed to get pdf text extraction working!):
+</p>
+
+<ul class="org-ul">
+<li>Emacs Lisp (<code>.el</code>)</li>
+<li>Python, JavaScript, TypeScript, Go, Rust, C/C++, Java, Ruby - basically most languages</li>
+<li>Org-mode and Markdown</li>
+<li>Plain text</li>
+<li>PDF files (if you have <code>pdftotext</code> from poppler-utils installed)</li>
+<li>YAML, TOML, JSON, HTML, CSS</li>
+</ul>
+
+<p>
+Files over 1MB are skipped (configurable), and the usual suspects like <code>.git</code>, <code>node_modules</code>, <code>__pycache__</code> are excluded automatically.
+</p>
+
+<p>
+The index gets saved into <code>~/.emacs.d/ollama-buddy/rag-indexes/</code> as a <code>.rag</code> file named after the directory. You can see what you've got with <code>M-x ollama-buddy-rag-list-indexes</code>.
+</p>
+</div>
+</section>
+<section id="outline-container-orgb23b3f4" class="outline-2">
+<h2 id="orgb23b3f4">The chunking strategy</h2>
+<div class="outline-text-2" id="text-orgb23b3f4">
+<p>
+One thing I'm quite happy with here is the chunking. Rather than just splitting on a fixed character count, documents are split into overlapping word-based chunks. The defaults are:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">setq</span> ollama-buddy-rag-chunk-size 400)    <span style="color: #6a9955; font-weight: bold; font-style: italic;">; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">~500 tokens per chunk
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> ollama-buddy-rag-chunk-overlap 50)  <span style="color: #6a9955; font-weight: bold; font-style: italic;">; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">50-word overlap between chunks</span>
+</pre>
+</div>
+
+<p>
+The overlap is important - it means a piece of information that sits right at a chunk boundary doesn't get lost. Each chunk also tracks its source file and line numbers, so you can see exactly where a result came from.
+</p>
+</div>
+</section>
+<section id="outline-container-org258c924" class="outline-2">
+<h2 id="org258c924">Searching and attaching context</h2>
+<div class="outline-text-2" id="text-org258c924">
+<p>
+Once you have an index, there are two main ways to use it:
+</p>
+
+<ul class="org-ul">
+<li><code>M-x ollama-buddy-rag-search</code> - searches and displays the results in a dedicated buffer so you can read through them</li>
+
+<li><code>M-x ollama-buddy-rag-attach</code> - searches and attaches the results directly to your chat context</li>
+</ul>
+
+<p>
+The second one is the useful one for day-to-day work. After running it, your next chat message will automatically include the retrieved document chunks as context. The status line shows <code>♁N</code> (where N is the number of attached searches) so you always know what context is in play. Clear everything with <code>M-x ollama-buddy-clear-attachments</code> or <code>C-c 0</code>.
+</p>
+
+<p>
+You can also trigger searches inline using the <code>@rag()</code> syntax directly in your prompt and is something fun I have been working on to include an inline command language of sorts, but more about that in a future post.
+</p>
+
+<p>
+The similarity search uses cosine similarity with sensible defaults (hopefully!)
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">setq</span> ollama-buddy-rag-top-k 5)                  <span style="color: #6a9955; font-weight: bold; font-style: italic;">; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">return top 5 matching chunks
+</span>(<span style="color: #569cd6; font-weight: bold;">setq</span> ollama-buddy-rag-similarity-threshold 0.3)  <span style="color: #6a9955; font-weight: bold; font-style: italic;">; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">filter out low-relevance results</span>
+</pre>
+</div>
+
+<p>
+Bump <code>top-k</code> if you want more context, lower the threshold if you're not getting enough results.
+</p>
+</div>
+</section>
+<section id="outline-container-org0e298d1" class="outline-2">
+<h2 id="org0e298d1">A practical example</h2>
+<div class="outline-text-2" id="text-org0e298d1">
+<p>
+Say you've been working on a large Emacs package and you want the LLM to help you understand something specific. You'd do:
+</p>
+
+<ol class="org-ol">
+<li><code>M-x ollama-buddy-rag-index-directory</code> → point at your project directory</li>
+<li>Wait for indexing to complete (the chat header-line shows progress)</li>
+<li><code>M-x ollama-buddy-rag-attach</code> → type your search query, e.g. "streaming filter process"</li>
+<li>Ask your question in the chat buffer as normal</li>
+</ol>
+
+<p>
+The LLM now has the relevant source chunks as context and can give you a much more grounded answer than it would cold.
+</p>
+
+<p>
+And the important aspect, especially regarding local models which don't often have the huge context sizes often found in online LLMs is that it allows for very efficient context retrieval.
+</p>
+</div>
+</section>
+<section id="outline-container-org351a09f" class="outline-2">
+<h2 id="org351a09f">That's pretty much it!</h2>
+<div class="outline-text-2" id="text-org351a09f">
+<p>
+The whole thing is self-contained inside Emacs, no external packages or vector databases, you index once, search as needed, and the LLM gets actual information rather than hallucinating answers about your codebase or anything else that you would want to ingest and it will hopefully make working with local LLMs through ollama noticeably more useful and accurate.
+</p>
+</div>
+</section>

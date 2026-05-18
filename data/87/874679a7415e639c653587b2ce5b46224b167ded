@@ -1,0 +1,146 @@
+<p>The first thing to look at is the Fibonacci benchmark.  The source
+  code is here:</p>
+<pre>(in-package "CLRHACK")
+
+(progn
+  (defun fib (n)
+    (if (< n 2)
+        n
+        (+ (fib (- n 1))
+           (fib (- n 2)))))
+  (defun main ()
+    (print "Fibonacci of 10:")
+    (print (fib 10)))
+  (main))</pre>
+<p>And it compiles to this IL code: (commentary after the code)</p>
+<pre>.assembly extern mscorlib {}
+.assembly extern LispBase {}
+
+.assembly 'FibBenchmark' {}
+.module 'FibBenchmark.exe'
+
+.class public auto ansi beforefieldinit Program
+       extends [mscorlib]System.Object
+{
+    .field public static class [LispBase]Lisp.Symbol 'SYM_G545'
+
+.method public static hidebysig specialname rtspecialname void '.cctor'() cil managed
+{
+    .maxstack 8
+    ldsfld class [LispBase]Lisp.Package [LispBase]Lisp.Package::CommonLisp
+    ldstr "T"
+    callvirt instance class [LispBase]Lisp.Symbol [LispBase]Lisp.Package::'Intern'(string)
+    stsfld class [LispBase]Lisp.Symbol Program::'SYM_G545'
+    ret
+}
+
+.method public static hidebysig object 'FIB'(object) cil managed
+{
+    .maxstack 8
+    .locals (object TEMP_B)
+    ldarg 0
+    ldc.i4 2
+    box int32
+    stloc TEMP_B
+    unbox.any int32
+    ldloc TEMP_B
+    unbox.any int32
+    clt
+    brtrue TRUE543
+    ldnull
+    br END544
+TRUE543:
+    nop
+    ldsfld class [LispBase]Lisp.Symbol Program::'SYM_G545'
+END544:
+    nop
+    ldnull
+    ceq
+    brtrue ELSE546
+    ldarg 0
+    ret
+ELSE546:
+    nop
+    ldarg 0
+    ldc.i4 1
+    box int32
+    stloc TEMP_B
+    unbox.any int32
+    ldloc TEMP_B
+    unbox.any int32
+    sub
+    box int32
+    call object Program::'FIB'(object)
+    ldarg 0
+    ldc.i4 2
+    box int32
+    stloc TEMP_B
+    unbox.any int32
+    ldloc TEMP_B
+    unbox.any int32
+    sub
+    box int32
+    call object Program::'FIB'(object)
+    stloc TEMP_B
+    unbox.any int32
+    ldloc TEMP_B
+    unbox.any int32
+    add
+    box int32
+    ret
+BLOCK_END_FIB_532:
+    nop
+    ret
+}
+
+.method public static hidebysig object 'MAIN'() cil managed
+{
+    .maxstack 8
+    ldstr "Fibonacci of 10:"
+    call void [mscorlib]System.Console::'WriteLine'(object)
+    ldnull
+    pop
+    ldc.i4 10
+    box int32
+    call object Program::'FIB'(object)
+    call void [mscorlib]System.Console::'WriteLine'(object)
+    ldnull
+    ret
+BLOCK_END_MAIN_536:
+    nop
+    ret
+}
+
+.method public static hidebysig void 'Main'() cil managed
+{
+    .entrypoint
+    .maxstack 8
+    call object Program::'MAIN'()
+    pop
+    ret
+}
+
+} // end of class Program
+</pre>
+
+<p>The first thing the <code>fib</code> program does is compare
+  argument <code>x</code> to the literal number <code>2</code>.  The
+  compiler pushes argument 0 on to the stack, and then the compiler
+  pushes a integer 2 on to the stack and boxes it.</p>
+
+<p>Next, the compiler has to perform the compare.  In order to do this
+  it must unbox both arguments.  One argument is on top of the stack,
+  so it is put into a local TEMP_B so we can get to the other
+  argument.  We unbox it.  We then restore TEMP_B to the top of stack
+  and unbox it.  Finally we compare the two unboxed values for less
+  than.</p>
+
+<p>This pattern of unboxing a pair of elements from the top of stack
+  by way of a temporary local is repeated several places in the
+  compiled code as FIB rather inefficiently subtracts 1 or 2 from the
+  argument and makes the recursive call.</p>
+
+<p>This example shows that the compiler basically treats everything as
+  a .NET object.  It unboxes numbers at the last moment and boxes the
+  results as soon as they are generated.  It is not efficient
+  code.</p>

@@ -1,0 +1,44 @@
+<p>
+This post is simply about some more yak shaving and there was this one niggle that I just kept putting off, because it never really annoyed me enough, but recently I started watching a lot more video content from within dired and it finally got to me.
+</p>
+
+<p>
+The problem.  I press <code>W</code> in dired, which is bound to <code>dired-do-async-shell-command</code>, type <code>mpv</code> (or accept the default guess that my <code>dired-guess-shell-alist-user</code> provides for video files), and the video starts playing.  Great.  But when I close Emacs, the video dies too.  The whole point of an async command is that it runs in the background, right?, so why does it disappear when Emacs goes away?, this is most perplexing!
+</p>
+
+
+<div id="org147770b" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20260512184707-emacs--A-Tiny-Nohup-Keeping-Media-Alive-When-Emacs-Exits.jpg" alt="20260512184707-emacs--A-Tiny-Nohup-Keeping-Media-Alive-When-Emacs-Exits.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+Now I should say, the answer is obvious in retrospect, but it took me a little while to actually stop and think about it properly.  The command <code>dired-do-async-shell-command</code> adds a trailing <code>&amp;</code> to the shell command and passes it to <code>async-shell-command</code>, which creates a shell process - Emacs is the parent of that shell, and the shell is the parent of <code>mpv</code>.  When Emacs exits, it kills its child processes, the shell goes down, and <code>mpv</code> gets orphaned, which is fine actually, the problem is not being orphaned, the problem is that it receives a SIGHUP from the process group cleanup and dies before it can be reparented to init.  So the media stops.
+</p>
+
+<p>
+The solution is a single, tiny piece of advice.  I just prepend <code>nohup</code> to the command string before <code>dired-do-async-shell-command</code> does anything with it.  <code>nohup</code> makes the process ignore SIGHUP, so when the shell gets killed by Emacs, <code>mpv</code> is orphaned cleanly and keeps running.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/dired-async-shell-command-nohup</span> (orig-fun command <span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">&amp;optional</span> arg file-list)
+  <span style="color: #6a9955; font-style: italic;">"Wrap COMMAND with `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">nohup</span><span style="color: #6a9955; font-style: italic;">' so the process survives Emacs exit."</span>
+  (funcall orig-fun (concat <span style="color: #ce9178; font-style: italic;">"nohup "</span> command) arg file-list))
+
+(<span style="color: #569cd6; font-weight: bold;">with-eval-after-load</span> 'dired
+  (advice-add 'dired-do-async-shell-command
+              <span style="color: #c586c0; font-weight: bold;">:around</span> #'my/dired-async-shell-command-nohup))
+</pre>
+</div>
+
+<p>
+That is it.  Six lines of Elisp, five of which are boilerplate.
+</p>
+
+<p>
+And yes, this works for any command you run through <code>W</code>, not just <code>mpv</code>.  <code>gimp</code>, <code>firefox</code>, <code>libreoffice</code> - they all get the <code>nohup</code> treatment now.  Which is fine, those programs usually detach themselves anyway, but it does not hurt to have it.
+</p>
+
+<p>
+So that is the tweak.  A tiny, one-function, one-advice change that finally stopped my videos from dying every time I closed Emacs.  I suspect someone will tell me that there is a simply variable flag that I can set that enables this anyway, but hey ho!
+</p>

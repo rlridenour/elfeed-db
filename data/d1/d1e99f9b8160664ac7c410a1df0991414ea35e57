@@ -1,0 +1,92 @@
+<p>
+I haven't been very active on this blog for the last few months.
+I've recently started a new job, and part of what I've been doing in my spare time is adding to my Emacs configuration to make some of the daily chores easier (or to remove them entirely).
+</p>
+
+<p>
+If you know me, you know I'm not a fan of WebUIs, or just mouse-focused GUIs in general.
+Jira is no exception.
+Previously, I've had to deal with Jira's annoying click and drag nonsense and sort of dealt with it, but I've always wanted to be able to use it from within Emacs.
+Not just because that means no mouse-based WebUI, but also because it potentially means making custom automations around tickets.
+Enter the new job, where I'm able to make myself an API token, and therefore make use of <a href="https://github.com/ahungry/org-jira">org-jira</a> for the first time.
+</p>
+
+<p>
+You can see the config I've written around it <a href="https://git.cyan.sh/BirDt/theurgy/src/branch/master/userland/jira.el">here</a>.
+This works basically exactly as expected, although I have had to do something a bit hacky to keep the API token properly stored.
+Storing the key on MacOS as recommended in the readme wasn't working for me, so instead I've stored it as a generic password.
+When launching Jira, this password is fetched into the kill ring to be pasted into the prompt if needed.
+This is kind of terrible, but it does work well enough.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">when</span> (equal system-type 'darwin)
+  (kill-new
+   (string-trim-right (shell-command-to-string (concat <span class="org-string">"security find-generic-password -a \""</span>
+                                                     jiralib-user <span class="org-string">"\" -s \"jira\" -w"</span>)))))
+</pre>
+</div>
+
+<p>
+You should be careful when storing the API token with <code>add-generic-password</code>, make sure you write it in the command with <code>-w "&lt;token&gt;"</code> and don't copy it into the prompt.
+When I was copying it into the prompt, the token was getting cut off, which was a pain to debug because Jira cloud doesn't have 401 errors for this sort of thing on the JQL search.
+You may also notice <code>string-trim-right</code> here: the output of <code>shell-command-to-string</code> includes the trailing newline, which will mess up the auth.
+</p>
+
+<p>
+I'm also using my org projects space as the Jira workspace locally, which means I can use all the same organisation helpers as I do with my personal project files.
+</p>
+
+<p>
+In terms of automations, <code>org-jira</code> already provides useful enough keybinds for progressing tickets, leaving comments, etc., and at the moment I don't feel like I need to improve there.
+However, since this Jira instance is integrated with Bitbucket, it's convention to use the ticket number when opening a new branch for work related to that ticket.
+That way Jira can show things like PR status, etc.
+</p>
+
+<p>
+Because each Jira board or project only has one repository associated, I'm assuming that there will be only one directory for that project work, and that can be a customizable variable.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defcustom</span> <span class="org-variable-name">jira-key-directory-alist</span> '()
+  <span class="org-doc">"Directories associated with a particular project --- git repositories.
+For example, (\"CBM\" . \"~/build/etc\") will use ~/build/etc for ticket-specific commands in the CBM project."</span>
+  <span class="org-builtin">:type</span> 'alist
+  <span class="org-builtin">:group</span> 'jira
+  <span class="org-builtin">:group</span> 'theurgy)
+</pre>
+</div>
+
+<p>
+Then this simple function fetches the Jira issue ID under the cursor, opens a <code>magit</code> status buffer in the appropriate directory, and starts branch creation.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">jira-branch-ticket</span> ()
+  <span class="org-doc">"Create a branch from the current ticket, in the repository specified by `</span><span class="org-doc"><span class="org-constant">jira-key-directory-alist</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((issue-key (<span class="org-keyword">progn</span>
+                    (org-jira-copy-current-issue-key)
+                    (substring-no-properties (car kill-ring))))
+       (project-code (car (split-string
+                           issue-key
+                           <span class="org-string">"-"</span>)))
+       (project-dir (cdr (assoc project-code jira-key-directory-alist))))
+    (magit-status project-dir)
+    (kill-new issue-key)
+    (call-interactively #'magit-branch-create)))
+</pre>
+</div>
+
+<p>
+I'm not pre-selecting main/master as the origin here because it's possible that I may want to branch off something else.
+Nor am I pre-populating the branch name, just killing the ticket number, in case I need multiple branches per ticket.
+</p>
+
+<p>
+Ideally, I would like to pre-populate the <code>magit</code> branch prompt with some editable default values, but I'm not actually sure how to do that, so this will do for now.
+</p>
+
+<p>
+The next blog will look at the AWS CLI customisations I've built up, so stay tuned.
+</p>

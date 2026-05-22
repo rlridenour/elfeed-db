@@ -1,0 +1,366 @@
+
+        <link rel="stylesheet" type="text/css" href="https://rahuljuliato.com/rss-styles.css">
+        <p>You open your favorite editor, and, out of the box, Emacs writes state
+files all over the place. It puts <code>bookmarks</code> in <code>~/.emacs.d/</code>, drops
+<code>#auto-saves#</code> next to every file you edit, leaves <code>.~lockfiles~</code> in
+your projects, scribbles <code>recentf</code>, <code>history</code>, <code>saveplace</code>,
+<code>projects</code>, <code>transient/history.el</code>, <code>tramp</code>, <code>network-security.data</code>,
+<code>multisession/</code>, <code>url/</code>, <code>image-dired/</code>, <code>erc/</code>, <code>rcirc/</code>... you get
+the picture. The features are great, don't get me wrong. The default
+locations are what annoy me.</p>
+<p>Most of those files are not noise. They <em>are</em> the state that makes
+Emacs feel like Emacs across restarts. So you cannot just delete
+them. But you also do not want them spread across N different
+directories with cryptic names. (I know I don't.)</p>
+<p>I want one directory I control, every cache-bound variable pointing
+inside it, and a switch to flip it between "persistent inside my
+config" and "ephemeral in /tmp". No external package, no naming
+scheme to memorize, just a small pattern I can read top to bottom in
+<code>init.el</code>.</p>
+<p>My <a href="https://github.com/lionyxml/emacs-solo">emacs-solo</a> config used
+to hard-code a single relative path under <code>user-emacs-directory</code> for
+all these cache files. It worked, but it was inflexible. A user
+opened an issue asking if the cache location could be changed without
+forking the config, since they wanted those files somewhere else
+entirely. So I redesigned it around a <code>defcustom</code> root and an alist
+of relative paths, switchable through <code>M-x customize</code>. The version
+below is the same idea with the emacs-solo names dropped.</p>
+<hr>
+<h2>Our goal</h2>
+<p>Patch these three pieces:</p>
+<p>→ <strong>cache directory</strong>: holds every piece of mutable state Emacs writes
+during a session.</p>
+<p>→ <strong>alist map</strong>: lists every variable that needs to be pointed at that
+directory.</p>
+<p>→ <strong>helpers</strong>: one resolve a key to an absolute path, and another
+pre-creates every directory so we never get "no such file or
+directory" warnings at startup.</p>
+<p>In practice, a <code>.emacs.d</code> directory ends up looking like this:</p>
+<div class="remark-highlight"><pre class="language-text"><code class="language-text">.
+├── cache
+│   ├── auto-saves
+│   ├── erc
+│   ├── image-dired
+│   ├── multisession
+│   ├── rcirc
+│   ├── transient
+│   ├── url
+│   └── ...
+├── eln-cache
+│   └── 32_0_50-25c5b284
+├── eshell
+│   └── history
+├── init.el
+└── tree-sitter
+	├── libtree-sitter-markdown-inline.dylib
+	└── libtree-sitter-markdown.dylib</code></pre></div>
+<hr>
+<h2>Our switchable base directory</h2>
+<p>Start with a <code>defcustom</code> for the root. Using <code>defcustom</code> (instead of
+<code>defvar</code>) lets you change the value through <code>M-x customize</code> without
+editing init files, and the choice persists in <code>custom.el</code>:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defcustom</span> <span class="token variable">my/cache-directory</span></span>
+  <span class="token punctuation">(</span><span class="token car">expand-file-name</span> <span class="token string">"cache/"</span> user-emacs-directory<span class="token punctuation">)</span>
+  <span class="token string">"Base directory for Emacs cache files.
+All entries in <span class="token symbol">`my/cache-paths'</span> are resolved relative to this
+directory.  Choose one of the presets or supply any custom path.
+Changes take effect after restarting Emacs."</span>
+  <span class="token lisp-property property">:type</span> <span class="token punctuation">`(</span><span class="token car">choice</span>
+		  <span class="token punctuation">(</span><span class="token car">const</span>     <span class="token lisp-property property">:tag</span> <span class="token string">"Inside Emacs config  (cache/ in user-emacs-directory)"</span>
+					 <span class="token punctuation">,(</span><span class="token car">expand-file-name</span> <span class="token string">"cache/"</span> user-emacs-directory<span class="token punctuation">)</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">const</span>     <span class="token lisp-property property">:tag</span> <span class="token string">"System temp          (/tmp/emacs-cache/)"</span> <span class="token string">"/tmp/emacs-cache/"</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">directory</span> <span class="token lisp-property property">:tag</span> <span class="token string">"Custom directory"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:group</span> <span class="token quoted-symbol variable symbol">'my</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>The default puts everything under <code>~/.emacs.d/cache/</code>, which keeps
+the rest of <code>~/.emacs.d/</code> clean and lets you back up or delete the
+whole cache as one directory. The <code>/tmp/</code> preset is for sessions that
+should leave no trace. The <code>directory</code> choice lets you point at any
+custom path.</p>
+<p>I use <code>user-emacs-directory</code> instead of a literal <code>~/.emacs.d/</code>
+because Emacs 29 added the <code>--init-directory</code> flag, which lets you
+launch Emacs against any config directory. I use it constantly to try
+other people's configs side by side with my own without touching
+<code>~/.emacs.d/</code>. Anchoring on <code>user-emacs-directory</code> means the cache
+follows whichever config Emacs was started with, instead of every
+alternate config writing into the default <code>~/.emacs.d/</code> and stepping
+on each other.</p>
+<p>In my <code>early-init.el</code> I already load <code>custom-file</code>, but I reload it
+here too. <code>customize</code> writes its changes to <code>custom.el</code> immediately,
+so if you change the cache directory mid-session through <code>M-x customize</code> and then restart, you want the new value to apply before
+the rest of <code>init.el</code> runs and calls <code>my/cache--path</code>:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">when</span> custom-file
+  <span class="token punctuation">(</span><span class="token car">load</span> custom-file <span class="token quoted-symbol variable symbol">'noerror</span> <span class="token quoted-symbol variable symbol">'nomessage</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>The <code>when</code> guard is there because in a brand-new config <code>custom-file</code>
+is <code>nil</code>, and <code>(load nil 'noerror 'nomessage)</code> signals
+<code>(wrong-type-argument stringp nil)</code> and aborts the rest of
+<code>init.el</code>. The <code>'noerror</code> flag suppresses <code>file-error</code>, not type
+errors.</p>
+<p>This whole reload is a bit of a hack. Loading <code>custom-file</code> twice
+during startup just to get a <code>defcustom</code> value hot before the next
+form is not what Emacs intends. It only matters the first time you
+switch presets. Without it, you would wonder why your new
+<code>/tmp/emacs-cache/</code> is empty while your old <code>~/.emacs.d/cache/</code> keeps
+receiving writes.</p>
+<hr>
+<h2>Our single alist as the source of truth</h2>
+<p>The next piece is the mapping from keys to relative paths.</p>
+<p>How you organize this alist is your call. The list below is what I
+wire through <code>my/cache-path</code> in my own config, but plenty of users
+will split things differently. I deliberately keep <code>tree-sitter/</code>,
+<code>eln-cache/</code>, and <code>eshell/</code> outside this alist. <code>tree-sitter</code> and
+<code>eln-cache</code> are populated by long-running, expensive processes
+(grammar compilation, native compilation) that I want to survive when
+I reset my cache, so they live next to the config under
+<code>user-emacs-directory</code> directly. <code>eshell</code> carries my command history
+and aliases, which I treat more like dotfiles than throwaway state.
+Your workflow will pull these differently, and that is fine.</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">my/cache-paths</span></span>
+  <span class="token punctuation">'(</span><span class="token comment">;; Files:</span>
+	<span class="token punctuation">(</span><span class="token car">bookmark-file</span>               <span class="token punctuation">.</span> <span class="token string">"bookmarks"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">ielm-history-file-name</span>      <span class="token punctuation">.</span> <span class="token string">"ielm-history.eld"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">project-list-file</span>           <span class="token punctuation">.</span> <span class="token string">"projects"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">recentf-save-file</span>           <span class="token punctuation">.</span> <span class="token string">"recentf"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">savehist-file</span>               <span class="token punctuation">.</span> <span class="token string">"history"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">save-place-file</span>             <span class="token punctuation">.</span> <span class="token string">"saveplace"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-history-file</span>      <span class="token punctuation">.</span> <span class="token string">"transient/history.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-levels-file</span>       <span class="token punctuation">.</span> <span class="token string">"transient/levels.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-values-file</span>       <span class="token punctuation">.</span> <span class="token string">"transient/values.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">tramp-persistency-file-name</span> <span class="token punctuation">.</span> <span class="token string">"tramp"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">nsm-settings-file</span>           <span class="token punctuation">.</span> <span class="token string">"network-security.data"</span><span class="token punctuation">)</span>
+	<span class="token comment">;; Directories:</span>
+	<span class="token punctuation">(</span><span class="token car">auto-saves</span>                  <span class="token punctuation">.</span> <span class="token string">"auto-saves/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">auto-saves-sessions</span>         <span class="token punctuation">.</span> <span class="token string">"auto-saves/sessions/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">multisession-directory</span>      <span class="token punctuation">.</span> <span class="token string">"multisession/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">url-configuration-directory</span> <span class="token punctuation">.</span> <span class="token string">"url/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">image-dired-dir</span>             <span class="token punctuation">.</span> <span class="token string">"image-dired/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">erc-log-channels-directory</span>  <span class="token punctuation">.</span> <span class="token string">"erc/logs/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">erc-image-cache-directory</span>   <span class="token punctuation">.</span> <span class="token string">"erc/images/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">rcirc-log-directory</span>         <span class="token punctuation">.</span> <span class="token string">"rcirc/logs/"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token string">"Alist of (<span class="token argument">KEY</span> . RELATIVE-PATH) for cache locations.
+<span class="token argument">RELATIVE-PATH</span> is resolved against <span class="token symbol">`my/cache-directory'</span>.
+<span class="token argument">A</span> trailing slash on <span class="token argument">RELATIVE-PATH</span> marks the entry as a directory."</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>The convention I follow: keys are usually the names of the Emacs
+variables they will fill. That keeps <code>grep</code> useful for both the
+definition and the usage.</p>
+<p>A trailing slash on the value marks a directory (this matches
+<code>directory-name-p</code> in Emacs). No trailing slash means a file. The
+next helper uses that distinction.</p>
+<hr>
+<h2>Our helpers</h2>
+<p>The first helper turns a key into an absolute path:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/cache--path</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">key</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the absolute path for <span class="token argument">KEY</span> in <span class="token symbol">`my/cache-paths'</span>."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">rel</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> key my/cache-paths<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">unless</span> rel
+	  <span class="token punctuation">(</span><span class="token keyword">error</span> <span class="token string">"my/cache--path: Unknown key %S"</span> key<span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">expand-file-name</span> rel my/cache-directory<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p><code>assq</code> does an <code>eq</code> lookup on symbol keys. The <code>unless rel</code> branch is
+there because typos in <code>:custom</code> blocks are silent otherwise: you
+would get <code>nil</code> and Emacs would happily write to <code>nil</code>, which fails
+in confusing ways. Better to error at config load.</p>
+<p>The second helper pre-creates every directory the alist mentions, so
+we never get "directory does not exist" warnings from packages on
+first run:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/cache--ensure-dirs</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Create every directory referenced by <span class="token symbol">`my/cache-paths'</span>.
+Entries ending in <span class="token symbol">`/'</span> are created directly; other entries have their
+parent directory created."</span>
+  <span class="token punctuation">(</span><span class="token car">dolist</span> <span class="token punctuation">(</span><span class="token car">entry</span> my/cache-paths<span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">let*</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">abs</span> <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token punctuation">(</span><span class="token car">car</span> entry<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token car">dir</span> <span class="token punctuation">(</span><span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token car">directory-name-p</span> abs<span class="token punctuation">)</span>
+					abs
+				  <span class="token punctuation">(</span><span class="token car">file-name-directory</span> abs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	  <span class="token punctuation">(</span><span class="token car">make-directory</span> dir <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token car">my/cache--ensure-dirs</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>If the entry is a directory (<code>directory-name-p</code> returns <code>t</code> for
+values ending in <code>/</code>), it is created as-is. If the entry is a file,
+only the file's parent directory is created.</p>
+<p>The <code>t</code> argument to <code>make-directory</code> is the "parents" flag, the
+equivalent of <code>mkdir -p</code>. So <code>transient/history.el</code> correctly creates
+<code>&#x3C;cache>/transient/</code> even though we never list it explicitly.</p>
+<hr>
+<h2>Wiring it into <code>use-package :custom</code></h2>
+<p>Now every cache-bound variable points at our helper. Inside a
+<code>use-package emacs</code> block (or wherever you set built-ins):</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">use-package</span> emacs
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">bookmark-file</span>              <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'bookmark-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">ielm-history-file-name</span>     <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'ielm-history-file-name</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">project-list-file</span>          <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'project-list-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">recentf-save-file</span>          <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'recentf-save-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">savehist-file</span>              <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'savehist-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">save-place-file</span>            <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'save-place-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-history-file</span>     <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-history-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-levels-file</span>      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-levels-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-values-file</span>      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-values-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">nsm-settings-file</span>          <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'nsm-settings-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">multisession-directory</span>     <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'multisession-directory</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">url-configuration-directory</span> <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'url-configuration-directory</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token comment">;; The two below are *not* backups; they keep auto-save state</span>
+  <span class="token comment">;; without scattering `#file#' next to every edited buffer.</span>
+  <span class="token punctuation">(</span><span class="token car">create-lockfiles</span>  <span class="token boolean">nil</span><span class="token punctuation">)</span>   <span class="token comment">; no `.#file' lock files at all</span>
+  <span class="token punctuation">(</span><span class="token car">make-backup-files</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>   <span class="token comment">; no `file~' tilde backups at all</span>
+  <span class="token punctuation">(</span><span class="token car">auto-save-default</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span>    <span class="token comment">; auto-save *is* kept, just redirected below</span>
+</code></pre></div>
+<p>On the three settings at the bottom:</p>
+<p>→ <strong><code>create-lockfiles nil</code> and <code>make-backup-files nil</code></strong> are personal
+taste. Lockfiles warn another Emacs not to clobber your buffer, but
+they break frontend tooling that watches directories for changes
+(TypeScript, Vite, esbuild). The tilde backups I find redundant
+with modern VCS and auto-save.</p>
+<p>→ <strong><code>auto-save-default t</code></strong> stays on because auto-save is what
+rescues you when Emacs crashes. We just want it somewhere else.</p>
+<hr>
+<h2>Redirecting auto-saves</h2>
+<p>Auto-save needs two extra settings because Emacs uses path transforms
+for it instead of single-value variables:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token comment">;; We want auto-save, but no #file# cluttering, so everything goes</span>
+<span class="token comment">;; under our cache/ tree. Directories are pre-created.</span>
+<span class="token punctuation">(</span><span class="token keyword">setq</span> auto-save-list-file-prefix <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'auto-saves-sessions</span><span class="token punctuation">)</span>
+	  auto-save-file-name-transforms
+	  <span class="token punctuation">`(</span><span class="token punctuation">(</span><span class="token string">".*"</span> <span class="token punctuation">,(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'auto-saves</span><span class="token punctuation">)</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p><code>auto-save-list-file-prefix</code> controls where the "list of files with
+pending auto-saves" lives. This is what <code>M-x recover-session</code> reads.
+Pointing it at our <code>auto-saves/sessions/</code> directory means you can
+still recover after a crash, without <code>~/.emacs.d/auto-save-list/</code>
+cluttering your config.</p>
+<p><code>auto-save-file-name-transforms</code> is a list of <code>(REGEX REPLACEMENT UNIQUIFY)</code> triples. The <code>t</code> at the end is the uniquify flag, which
+encodes the original path into the filename so two files with the
+same name in different directories do not collide in the auto-save
+folder.</p>
+<p>Both end up in <code>&#x3C;cache>/auto-saves/</code>.</p>
+<hr>
+<h2>TRAMP, viper, and other late bindings</h2>
+<p>Some variables are not safely set in <code>:custom</code>, because they are
+defined inside packages that load later. For those, use <code>setopt</code>
+(which respects <code>defcustom</code> setters) inside the <code>:config</code> block:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">setopt</span> tramp-persistency-file-name <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'tramp-persistency-file-name</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">setopt</span> viper-custom-file-name      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'viper-custom-file-name</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p><code>setopt</code> is the modern equivalent of <code>setq</code> for customizable
+variables. It runs any <code>:set</code> function the variable defines, which
+<code>tramp-persistency-file-name</code> does (it triggers a reload). Plain
+<code>setq</code> would skip that and leave TRAMP confused.</p>
+<hr>
+<h2>What you get</h2>
+<p>→ <strong><code>~/.emacs.d/cache/</code> (or wherever you point it) contains
+everything.</strong> <code>du -sh</code> tells you how much state Emacs is hoarding.
+<code>rm -rf</code> resets it all without touching your config.</p>
+<p>→ <strong><code>M-x customize-variable RET my/cache-directory</code></strong> lets you flip
+between persistent and ephemeral modes without editing init
+files. Useful for screencasts where you want zero history showing,
+or for testing whether a problem is config or state.</p>
+<p>→ <strong>New packages are a two-line change.</strong> When you adopt, say,
+<code>newsticker</code>, you add one entry to <code>my/cache-paths</code> and one
+<code>(my/cache--path 'newsticker-dir)</code> line in the package's
+<code>:custom</code>. The directory is auto-created on next restart.</p>
+<p>→ <strong>You can grep for it.</strong> <code>grep my/cache--path init.el</code> lists every
+place Emacs writes state, and the alist tells you what kind.</p>
+<hr>
+<h2>The complete code</h2>
+<p>Here is everything in one block. Copy this into some temporary folder
+inside the <code>init.el</code> file. After that, <code>cd</code> into this temp directory
+and run <code>emacs --init-directory=./</code>. You can them navigate files, use
+Emacs features and check where the created files end up to.</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defcustom</span> <span class="token variable">my/cache-directory</span></span>
+  <span class="token punctuation">(</span><span class="token car">expand-file-name</span> <span class="token string">"cache/"</span> user-emacs-directory<span class="token punctuation">)</span>
+  <span class="token string">"Base directory for Emacs cache files."</span>
+  <span class="token lisp-property property">:type</span> <span class="token punctuation">`(</span><span class="token car">choice</span>
+		  <span class="token punctuation">(</span><span class="token car">const</span>     <span class="token lisp-property property">:tag</span> <span class="token string">"Inside Emacs config  (cache/ in user-emacs-directory)"</span>
+					 <span class="token punctuation">,(</span><span class="token car">expand-file-name</span> <span class="token string">"cache/"</span> user-emacs-directory<span class="token punctuation">)</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">const</span>     <span class="token lisp-property property">:tag</span> <span class="token string">"System temp          (/tmp/emacs-cache/)"</span> <span class="token string">"/tmp/emacs-cache/"</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">directory</span> <span class="token lisp-property property">:tag</span> <span class="token string">"Custom directory"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:group</span> <span class="token quoted-symbol variable symbol">'my</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">when</span> custom-file
+  <span class="token punctuation">(</span><span class="token car">load</span> custom-file <span class="token quoted-symbol variable symbol">'noerror</span> <span class="token quoted-symbol variable symbol">'nomessage</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">my/cache-paths</span></span>
+  <span class="token punctuation">'(</span><span class="token comment">;; Files:</span>
+	<span class="token punctuation">(</span><span class="token car">bookmark-file</span>               <span class="token punctuation">.</span> <span class="token string">"bookmarks"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">ielm-history-file-name</span>      <span class="token punctuation">.</span> <span class="token string">"ielm-history.eld"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">project-list-file</span>           <span class="token punctuation">.</span> <span class="token string">"projects"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">recentf-save-file</span>           <span class="token punctuation">.</span> <span class="token string">"recentf"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">savehist-file</span>               <span class="token punctuation">.</span> <span class="token string">"history"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">save-place-file</span>             <span class="token punctuation">.</span> <span class="token string">"saveplace"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-history-file</span>      <span class="token punctuation">.</span> <span class="token string">"transient/history.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-levels-file</span>       <span class="token punctuation">.</span> <span class="token string">"transient/levels.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">transient-values-file</span>       <span class="token punctuation">.</span> <span class="token string">"transient/values.el"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">tramp-persistency-file-name</span> <span class="token punctuation">.</span> <span class="token string">"tramp"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">nsm-settings-file</span>           <span class="token punctuation">.</span> <span class="token string">"network-security.data"</span><span class="token punctuation">)</span>
+	<span class="token comment">;; Directories:</span>
+	<span class="token punctuation">(</span><span class="token car">auto-saves</span>                  <span class="token punctuation">.</span> <span class="token string">"auto-saves/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">auto-saves-sessions</span>         <span class="token punctuation">.</span> <span class="token string">"auto-saves/sessions/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">multisession-directory</span>      <span class="token punctuation">.</span> <span class="token string">"multisession/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">url-configuration-directory</span> <span class="token punctuation">.</span> <span class="token string">"url/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">image-dired-dir</span>             <span class="token punctuation">.</span> <span class="token string">"image-dired/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">erc-log-channels-directory</span>  <span class="token punctuation">.</span> <span class="token string">"erc/logs/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">erc-image-cache-directory</span>   <span class="token punctuation">.</span> <span class="token string">"erc/images/"</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">rcirc-log-directory</span>         <span class="token punctuation">.</span> <span class="token string">"rcirc/logs/"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token string">"Alist of (<span class="token argument">KEY</span> . RELATIVE-PATH) for cache locations."</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/cache--path</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">key</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the absolute path for <span class="token argument">KEY</span> in <span class="token symbol">`my/cache-paths'</span>."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">rel</span> <span class="token punctuation">(</span><span class="token car">cdr</span> <span class="token punctuation">(</span><span class="token car">assq</span> key my/cache-paths<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">unless</span> rel
+	  <span class="token punctuation">(</span><span class="token keyword">error</span> <span class="token string">"my/cache--path: Unknown key %S"</span> key<span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">expand-file-name</span> rel my/cache-directory<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/cache--ensure-dirs</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Create every directory referenced by <span class="token symbol">`my/cache-paths'</span>."</span>
+  <span class="token punctuation">(</span><span class="token car">dolist</span> <span class="token punctuation">(</span><span class="token car">entry</span> my/cache-paths<span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">let*</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">abs</span> <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token punctuation">(</span><span class="token car">car</span> entry<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		   <span class="token punctuation">(</span><span class="token car">dir</span> <span class="token punctuation">(</span><span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token car">directory-name-p</span> abs<span class="token punctuation">)</span>
+					abs
+				  <span class="token punctuation">(</span><span class="token car">file-name-directory</span> abs<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	  <span class="token punctuation">(</span><span class="token car">make-directory</span> dir <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token car">my/cache--ensure-dirs</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">use-package</span> emacs
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">bookmark-file</span>               <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'bookmark-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">ielm-history-file-name</span>      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'ielm-history-file-name</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">project-list-file</span>           <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'project-list-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">recentf-save-file</span>           <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'recentf-save-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">savehist-file</span>               <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'savehist-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">save-place-file</span>             <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'save-place-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-history-file</span>      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-history-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-levels-file</span>       <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-levels-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">transient-values-file</span>       <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'transient-values-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">nsm-settings-file</span>           <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'nsm-settings-file</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">multisession-directory</span>      <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'multisession-directory</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">url-configuration-directory</span> <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'url-configuration-directory</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">create-lockfiles</span>            <span class="token boolean">nil</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">make-backup-files</span>           <span class="token boolean">nil</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">auto-save-default</span>           <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:config</span>
+  <span class="token punctuation">(</span><span class="token keyword">setq</span> auto-save-list-file-prefix <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'auto-saves-sessions</span><span class="token punctuation">)</span>
+		auto-save-file-name-transforms
+		<span class="token punctuation">`(</span><span class="token punctuation">(</span><span class="token string">".*"</span> <span class="token punctuation">,(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'auto-saves</span><span class="token punctuation">)</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">setopt</span> tramp-persistency-file-name <span class="token punctuation">(</span><span class="token car">my/cache--path</span> <span class="token quoted-symbol variable symbol">'tramp-persistency-file-name</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Adapt the alist to the packages you actually use.</p>
+<hr>
+<h2>Other Resources</h2>
+<p>If you want to read more on the topic:</p>
+<p>→ <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Auto-Save-Files.html">https://www.gnu.org/software/emacs/manual/html_node/emacs/Auto-Save-Files.html</a></p>
+<p>→ <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Variable-Definitions.html#index-defcustom">https://www.gnu.org/software/emacs/manual/html_node/elisp/Variable-Definitions.html#index-defcustom</a></p>
+<p>If you would rather install a package than maintain your own alist,
+the <a href="https://github.com/emacscollective/no-littering"><code>no-littering</code></a>
+package is a popular ready-made alternative that covers a wide set of
+variables out of the box.</p>
+<p>The version of this code I actually run, alist entries and all, lives
+in my <a href="https://github.com/lionyxml/emacs-solo">emacs-solo</a> config
+under the <code>CACHE PATHS</code> heading of <code>init.el</code>. If you end up adapting
+this for your own setup, I would love to hear which variables you
+added that I forgot.</p>

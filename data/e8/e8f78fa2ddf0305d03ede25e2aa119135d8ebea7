@@ -1,0 +1,60 @@
+<h2>Check if you're logged in</h2>
+<p>To check if you're logged in, you can call this command which lists
+information about your AWS user session, or an error if you're not
+logged in:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">$</span><span class="w"> </span><span class="nv">aws</span><span class="w"> </span><span class="n">sts</span><span class="w"> </span><span class="n">get</span><span class="o">-</span><span class="nb">caller</span><span class="o">-</span><span class="n">identity</span>
+</code></pre></div>
+
+<h1>Tail logs</h1>
+<p>Tail Cloudwatch logs, starting from 2 hours ago and keep reading
+them, pretty print these JSON log entries, but only the ones that have
+level <code>error</code>:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>aws<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--profile<span class="w"> </span>foo-prod<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>logs<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>tail<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--follow<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--since<span class="w"> </span>2h<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--filter-pattern<span class="w"> </span><span class="s1">&#39;{ $.level = &quot;error&quot; }&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>
+<span class="w">  </span>srv-bar-api<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>cut<span class="w"> </span>-d<span class="s1">&#39; &#39;</span><span class="w"> </span>-f3-<span class="w"> </span><span class="p">|</span><span class="w"> </span>
+<span class="w">  </span>jq
+</code></pre></div>
+
+<p>The filter works since the JSON log entry blobs have:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;error&quot;</span><span class="p">,</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h1>See which roles you have</h1>
+<p>This is how you see the roles your user has in the different accounts
+you can access. First, you need to get a hold of your access token and
+put it in the <code>t</code> variable:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">$</span><span class="w"> </span><span class="nv">t</span><span class="o">=</span><span class="nv">$</span><span class="err">(</span><span class="nv">jq</span><span class="w"> </span><span class="o">-</span><span class="n">r</span><span class="w"> </span><span class="o">.</span><span class="n">accessToken</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">~</span><span class="sr">/.aws/sso/cache/</span><span class="o">*.</span><span class="n">json</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="nb">grep</span><span class="w"> </span><span class="o">-</span><span class="n">v</span><span class="w"> </span><span class="n">null</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="n">head</span><span class="w"> </span><span class="o">-</span><span class="n">n1</span><span class="p">)</span>
+</code></pre></div>
+
+<p>Be sure you're logged in:</p>
+<div class="highlight"><pre><span></span><code>$ aws sso login
+</code></pre></div>
+
+<p>Then, list all account your user has acces to, and for each of these,
+list the roles that are assigned to your user:</p>
+<div class="highlight"><pre><span></span><code>$<span class="w"> </span>aws<span class="w"> </span>sso<span class="w"> </span>list-accounts<span class="w"> </span>--access-token<span class="w"> </span><span class="nv">$t</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>
+<span class="w">  </span>jq<span class="w"> </span>-r<span class="w"> </span><span class="s1">&#39;.accountList[] | .accountId + &quot; &quot; + .accountName&#39;</span><span class="w"> </span><span class="p">|</span>
+<span class="w">  </span><span class="k">while</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span>-r<span class="w"> </span>l<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<span class="w">    </span><span class="nb">read</span><span class="w"> </span>id<span class="w"> </span>name<span class="w"> </span><span class="o">&lt;&lt;&lt;</span><span class="w"> </span><span class="nv">$l</span><span class="p">;</span>
+<span class="w">    </span><span class="nb">echo</span><span class="w"> </span><span class="nv">$id</span><span class="w"> </span><span class="nv">$name</span>
+<span class="w">    </span>aws<span class="w"> </span>sso<span class="w"> </span>list-account-roles<span class="w"> </span>--account-id<span class="w"> </span><span class="nv">$id</span><span class="w"> </span>--access-token<span class="w"> </span><span class="nv">$t</span><span class="p">;</span>
+<span class="w">  </span><span class="k">done</span>
+</code></pre></div>
+
+<h1>Expose AWS credentials</h1>
+<p>Useful for scripts and programs that don't read <code>~/.aws/sso/cache</code></p>
+<div class="highlight"><pre><span></span><code>AWS_PROFILE=foo-prod aws configure export-credentials --format env
+export AWS_ACCESS_KEY_ID=ASDFAESAFQW
+export AWS_SECRET_ACCESS_KEY=aasdfaDFSASDFasdfasdfsdf
+export AWS_SESSION_TOKEN=..
+</code></pre></div>
+
+<p>You can then pipe it to <code>| sh</code> to set it in the shell.</p>

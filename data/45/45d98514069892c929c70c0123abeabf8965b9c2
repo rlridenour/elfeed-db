@@ -1,0 +1,106 @@
+<h1>Common Lisp Argument Passing in CLRHack</h1>
+    <p>The CLRHack engine translates the dynamic, flexible argument-passing semantics of Common Lisp into the static,
+strongly-typed environment of the .NET Common Language Runtime (CLR). It achieves this through a combination of
+<strong>CIL method overloading</strong>, <strong>sentinel-based defaulting</strong>, and <strong>runtime list
+construction</strong>.</p>
+
+    <h2>1. The Overloading Architecture</h2>
+    <p>Since CIL methods have a fixed arity (number of arguments), but Common Lisp functions support variable arguments, the
+compiler generates multiple entry points for every defined function.</p>
+    <ul>
+        <li><strong>Public Overloads:</strong> For every function, the compiler generates a set of <code>public static</code>
+methods (typically from 0 to 8 arguments). These serve as the "API" for both direct calls and closure invocation.</li>
+        <li><strong>The Body Method:</strong> The actual logic of the Lisp function is compiled into a single <code>private
+static</code> method named <code>[FunctionName]_Body</code>. All valid public overloads normalize their arguments and delegate
+to this method.</li>
+        <li><strong>Arity Enforcement:</strong> Overloads representing invalid argument counts (e.g., calling a 2-arg function
+with 5 args) are generated to throw a <code>Lisp.WrongNumberOfArgumentsException</code>.</li>
+    </ul>
+
+    <h2>2. Parameter Type Implementation</h2>
+
+    <h3>Required Parameters</h3>
+    <p>Required parameters are the simplest. They map directly to the leading <code>object</code> arguments in both the public
+overloads and the internal body method.</p>
+
+    <h3>Optional Parameters (<code>&amp;optional</code>)</h3>
+    <p>Handling <code>&amp;optional</code> involves a "Sentinel Pattern":</p>
+    <ul>
+        <li><strong>Sentinels:</strong> If a caller uses an overload that provides fewer than the maximum number of optional
+arguments, the compiler passes a special global constant: <code>Lisp.Undefined::Value</code>.</li>
+        <li><strong>Late Defaulting:</strong> Inside the <code>_Body</code> method, the engine generates CIL code to check if
+the argument is <code>EQ</code> to the Undefined sentinel. If the check passes, the code evaluates the Lisp default expression
+and stores the result back into the parameter using <code>starg</code>.</li>
+        <li><strong>Supplied-p:</strong> If the Lisp code defines a "supplied-p" variable, an extra boolean parameter is added
+to the <code>_Body</code> method, which is set to <code>true</code> or <code>false</code> based on the presence of the
+argument in the specific overload.</li>
+    </ul>
+
+    <h3>Rest Parameters (<code>&amp;rest</code>)</h3>
+    <p>Rest parameters are handled by runtime list construction:</p>
+    <ul>
+        <li>In the public overloads, any arguments provided beyond the required/optional count are bundled into a linked list
+using <code>Lisp.List/ListCell</code>.</li>
+        <li>The <code>_Body</code> method receives this list as a single <code>object</code> argument.</li>
+    </ul>
+
+    <h3>Keyword Parameters (<code>&amp;key</code>)</h3>
+    <p>Keyword parameters are implemented as a transformation over the <code>&amp;rest</code> mechanism:</p>
+    <ol>
+        <li>Trailing arguments are gathered into a "rest" list.</li>
+        <li>The <code>_Body</code> method defines local variables for every keyword parameter, initialized to their Lisp
+default values.</li>
+        <li><strong>The Keyword Loop:</strong> At the start of the function, the engine emits a loop that scans the rest list
+in pairs. It uses <code>Object.Equals</code> to compare each key against the pre-interned keyword symbols (e.g.,
+<code>:TEST</code>). When a match is found, the corresponding local variable is updated with the value following the key.</li>
+    </ol>
+
+    <h2>3. The Calling Mechanism</h2>
+    <h3>Direct Calls</h3>
+    <p>When the compiler identifies a call to a known <code>defun</code> in the same assembly, it emits a direct
+<code>call</code> to the public overload that exactly matches the number of provided arguments. This provides near-native
+performance for fixed-arity calls.</p>
+
+    <h3>Indirect Calls (Closures & Funcall)</h3>
+    <p>All Lisp functions are instances of the <code>Lisp.Closure</code> class. This class provides virtual
+<code>Invoke</code> methods. When a closure is created, it captures its environment and provides overrides for these
+<code>Invoke</code> methods that jump into the appropriate <code>Program</code> static overloads.</p>
+
+    <h2>4. Multiple Return Values</h2>
+    <div class="note">
+        <strong>Note:</strong> Argument passing is only half the story; return values use a side-channel.
+    </div>
+    <p>Because .NET methods return only one value, CLRHack uses a <strong>Thread-Static Side-Channel</strong> in the
+<code>Lisp.Values</code> class:</p>
+    <ul>
+        <li>The first value is returned normally as the method's return value.</li>
+        <li>Additional values are stored in <code>[ThreadStatic]</code> fields (<code>Value1</code>, <code>Value2</code>, ...
+up to <code>Value63</code>).</li>
+        <li>A <code>ReturnCount</code> field is updated to tell the caller how many values are waiting in the buffer.</li>
+    </ul>
+
+    <h2>Example CIL Generation</h2>
+    <pre>
+<span class="keyword">; Lisp: (defun add-optional (x &amp;optional (y 5)) (+ x y))</span>
+
+<span class="keyword">; Overload for 1 arg</span>
+.method public static object 'ADD-OPTIONAL'(object x) {
+    ldarg 0
+    ldsfld object [LispBase]Lisp.Undefined::Value
+    tail. call object Program::'ADD-OPTIONAL_Body'(object, object)
+    ret
+}
+
+<span class="keyword">; The Body Method</span>
+.method private static object 'ADD-OPTIONAL_Body'(object x, object y) {
+    <span class="keyword">; Defaulting logic for Y</span>
+    ldarg 1
+    ldsfld object [LispBase]Lisp.Undefined::Value
+    bne.un SKIP_DEFAULT
+    ldc.i4 5
+    box int32
+    starg 1
+SKIP_DEFAULT:
+    <span class="keyword">; ... rest of function ...</span>
+}
+    </pre>

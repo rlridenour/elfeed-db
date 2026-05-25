@@ -1,0 +1,62 @@
+<h1>Tail-Call Handling in CLRHack</h1>
+
+  <p>I decided to make proper tail recursion a fundamental requirement in CLRHack. This prevents stack overflow errors during standard recursive patterns and ensures the runtime remains stable
+  regardless of recursion depth.  Technically, Common Lisp isn't required to be tail recursive, but I want mine to be.</p>
+
+  <h2>1. Tail Position Identification</h2>
+  <p>The compiler performs a structural analysis of the Abstract Syntax Tree (AST) to identify "tail positions." An expression is in
+  a tail position if its value is the final result of the function, meaning no further work remains to be done in the current frame
+  after the call returns. The <code>generate-step2</code> walker propagates a <code>tail-p</code> flag through the following
+  logic:</p>
+  <ul>
+      <li><strong>Functions/Lambdas:</strong> The final expression in the body is in the tail position.</li>
+      <li><strong>Conditionals (IF):</strong> Both the "then" and "else" branches are in the tail position.</li>
+      <li><strong>Sequences (PROGN/LET):</strong> Only the very last form in the sequence is in the tail position.</li>
+      <li><strong>Blocks:</strong> The last form of a <code>BLOCK</code> is in the tail position, provided the block is not the
+  target of a <code>RETURN-FROM</code>.</li>
+  </ul>
+
+  <h2>2. CIL Instruction Emission</h2>
+  <p>To implement proper tail-call semantics, the compiler utilizes the native <code>tail.</code> prefix in the Common Intermediate
+  Language (CIL). When a function call is detected in a tail position, the compiler applies the following mandatory
+  transformation:</p>
+  <ol>
+      <li><strong>The Prefix:</strong> It prepends the <code>tail.</code> opcode to the <code>call</code> or <code>callvirt</code>
+  instruction.</li>
+      <li><strong>The Return:</strong> It immediately follows the call with a <code>ret</code> (return) instruction.</li>
+  </ol>
+  <p>The <code>tail.</code> prefix instructs the .NET Just-In-Time (JIT) compiler to discard the current method's stack frame before
+  jumping to the target function. This ensures that the call consumes zero additional stack space, turning the recursive call into a
+  semantic jump.</p>
+
+  <h2>3. Safety and Context Constraints</h2>
+  <p>The implementation of tail-calls is subject to specific safety rules imposed by the Common Language Runtime (CLR) to maintain
+  execution integrity:</p>
+  <ul>
+      <li><strong>Protected Regions:</strong> The CLR prohibits <code>tail.</code> calls inside <code>try</code>, <code>catch</code>,
+  or <code>finally</code> blocks. Because Lisp constructs such as <code>unwind-protect</code> and <code>handler-case</code> rely on
+  these CIL features, tail-call elimination is suspended within these specific scopes to ensure cleanup handlers and error recovery
+  mechanisms function correctly.</li>
+      <li><strong>Frame Cleanup:</strong> The compiler ensures that all local resources are in a valid state before the
+  <code>tail.</code> prefix is issued, allowing the CLR to safely deallocate the current frame.</li>
+  </ul>
+
+  <h2>Example CIL Output</h2>
+  <p>Consider a recursive counter that must be able to run indefinitely:</p>
+  <pre>
+  (defun count-down (n)
+    (if (= n 0)
+        "Done"
+        (count-down (- n 1))))
+  </pre>
+
+  <p>The compiled CIL for the recursive branch is transformed to ensure stack neutrality:</p>
+  <pre>
+      ; ... code to calculate (- n 1) ...
+      tail.
+      call object Program::'COUNT-DOWN'(object)
+      ret
+  </pre>
+
+  <p>By strictly enforcing this pattern, CLRHack guarantees that recursive programs can execute with constant stack space, fulfilling
+  my core requirement of tail recursion.</p>

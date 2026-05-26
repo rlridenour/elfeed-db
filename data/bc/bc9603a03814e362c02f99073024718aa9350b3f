@@ -1,0 +1,623 @@
+<p>I&rsquo;ve been interested in how slow CLOS slot access is in Common Lisp. Here&rsquo;s how I measured it.</p>
+<!-- more-->
+
+<p>I wanted to compare the cost of access to fields of various objects in Common Lisp. In particular I wanted to get a feel for the difference between a slot in a class defined with <code>defclass</code>, so an instance of a subclass of <code>standard-object</code>, and a field in a class defined with <code>defstruct</code>, so an instance of a subclass of <code>structure-object</code>.</p>
+
+<h2 id="a-naÃ¯ve-model-of-the-access-cost">A naÃ¯ve model of the access cost</h2>
+
+<p>I measured forms like</p>
+
+<pre class="brush: lisp"><code>(let ((s 0))
+  (declare (type fixnum s))
+  (dotimes (i n s)
+    (incf s (the fixnum (slot-value a 'a)))
+    (incf s (the fixnum (slot-value a 'b)))
+    ...))</code></pre>
+
+<p>For \(N\) iterations you might think the time \(T\) should be</p>
+
+<p>\[T = N(c_l + n(c_i + c_s)) + c_c\]</p>
+
+<p>where \(c_l\) is the per-step loop overhead, \(n\) is the number of slots, \(c_i\) is the time to increment a variable, \(c_s\) is the slot read cost (the thing we want), and \(c_c\) is the overhead of calling the function to do all this. \(N\gtrapprox 10^9\), so it&rsquo;s safe to treat \(c_c\) as zero. This is linear in \(n\), and \(T\) is a thing we can measure, so we can differentiate and get an expression for \(c_s\) which is what we want.</p>
+
+<p>\[c_s = \frac{1}{N}\frac{dT}{dn} - c_i\]</p>
+
+<p>In fact, everything works in terms of the per-step time \(t\doteq T/N\) as \(N\) varies for different classes and numbers of slots to keep the runtimes reasonable, and then \(c_s = dt/dn - c_i\).</p>
+
+<h2 id="a-better-model">A better model</h2>
+
+<p>Well, this turns out to be wrong. In particular if you estimate \(c_i\) (see <a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#notes" title="Notes">below</a> on how I did this) and use it in the above expression you will end up calculating values of \(c_s\) for structures which are either absurdly tiny (\(\sim 10^{&ndash;11}\)s for a machine with a cycle time \(\sim 10^{-9}\)s) or even negative. The reason is pretty obviously that the increment and the access are largely overlapped.</p>
+
+<p>So in what follows I simply treat \(c_i\) as zero. This may overestimate \(c_s\) somewhat. But a result of that overestimation is that the factor by which slot access is slower than structure field access will be <em>underestimated</em>, which will make CLOS seem faster than it is, since if \(a \gt b \gt c \gt 0\) then \((a - c)/(b - c) \gt a/b\). That&rsquo;s good, because what I&rsquo;m trying to demonstrate is that it&rsquo;s really slow, so an underestimation is safe.</p>
+
+<p>The new model expression for \(c_s\) is then just \(c_s = dt/dn\).</p>
+
+<h2 id="what-i-did">What I did</h2>
+
+<p>I measured slot access time in the same way for a class with 10 slots, measuring 2, 4, 6, 8 and 10 slots, and did the same thing for a structure with 10 fields.</p>
+
+<p>Because the access times and numbers of accesses per step vary widely I adjusted the number of iterations to keep the run-times sane: more than 10 seconds per test but ideally less than 60.</p>
+
+<p>Each measurement was repeated 4 times.</p>
+
+<p>I then fitted a linear function to the data for each class (least-squares fit), and used its gradient and the estimated variable-increment cost to estimate \(c_s\) for each type.</p>
+
+<p>All the measurements were done on an M1 MacBook Air, using <code>caffeinate</code> to prevent it sleeping. I measured LispWorks 8.1.2 and SBCL 2.6.4. Total run times were somewhat over an hour for each implementation.</p>
+
+<h2 id="results">Results</h2>
+
+<div class="figure"><img alt="SBCL slot access data and best fit" src="https://www.tfeb.org/fragments/img/2026/clos-slot-access-cost/sbcl-a.svg" />
+ <p class="caption">SBCL slot access data and best fit</p></div>
+
+<div class="figure"><img alt="LispWorks slot access data and best fit" src="https://www.tfeb.org/fragments/img/2026/clos-slot-access-cost/lw-a.svg" />
+ <p class="caption">LispWorks slot access data and best fit</p></div>
+
+<div class="figure"><img alt="SBCL structure field access data and best fit" src="https://www.tfeb.org/fragments/img/2026/clos-slot-access-cost/sbcl-b.svg" />
+ <p class="caption">SBCL structure field access data and best fit</p></div>
+
+<div class="figure"><img alt="LispWorks structure field access data and best fit" src="https://www.tfeb.org/fragments/img/2026/clos-slot-access-cost/lw-b.svg" />
+ <p class="caption">LispWorks structure field access data and best fit</p></div>
+
+<p>From these you can see that the results are consistent between runs and the best fit is pretty good.</p>
+
+<p>The per-slot cost is then the slope of the best fit curve, or perhaps slightly less.</p>
+
+<h3 id="structure-field-access-cost-estimate">Structure field access cost estimate</h3>
+
+<ul>
+ <li>SBCL: \(c_s \approx 3.2\times 10^{-10}\)s.</li>
+ <li>LispWorks: \(c_s \approx 3.1\times 10^{-10}\)s.</li></ul>
+
+<p>Note that these are both almost certainly a single cycle up to rounding.</p>
+
+<h3 id="standard-instance-subclass-slot-access-cost-estimate"><code>standard-instance</code> subclass slot access cost estimate</h3>
+
+<ul>
+ <li>SBCL: \(c_s \approx 1.2\times 10^{-8}\)s.</li>
+ <li>LispWorks: \(c_s \approx 1.0\times 10^{-8}\)s.</li></ul>
+
+<h3 id="ratios">Ratios</h3>
+
+<p>The ratios between these two values for each implementation are then about 38 for SBCL and about 32 for LispWorks: this is how much slower CLOS slot access is than structure field access. In fact it is probably an underestimate of how much slower it is.</p>
+
+<h2 id="what-is-obvious2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-definition2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-return1">What is obvious<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-definition" name="2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-return">1</a></sup></h2>
+
+<p>CLOS slot access is really slow.</p>
+
+<h2 id="what-is-less-obvious-but-almost-certainly-true2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-definition2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-return2">What is less obvious but almost certainly true<sup><a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-definition" name="2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-return">2</a></sup></h2>
+
+<p>This is not because multiple inheritance is inherently slow: it&rsquo;s because the design of CLOS, especially if you want to take the AMOP MOP seriously, implies crappy performance.</p>
+
+<p>Can this be fixed? Yes, I think so, with well-defined tradeoffs. Will it be? Up to implementors. So, probably not, sadly.</p>
+
+<hr />
+
+<h2 id="notes">Notes</h2>
+
+<p>To get an estimate of the time to increment a variable, \(c_i\), first measure a large number of iterations of an empty loop and then a loop which increments a variable 100 times for each step. Both of the implementations I measured do not optimize empty loops away, intentionally I think. This estimate is now not used (see above), but if it&rsquo;s not about a clock cycle (about \(3.3\times 10^{-10}\)s on M1) then probably something is wrong.</p>
+
+<hr />
+
+<h2 id="code">Code</h2>
+
+<p>This is the CL code I used.</p>
+
+<pre class="brush: lisp"><code>;;;; Some slot-value benchmarks
+;;;
+;;; None of this code is general-purpose.
+;;;
+
+(in-package :cl-user)
+
+(define-condition too-short (simple-error)
+  ((seconds :initform 0 :initarg :seconds :reader too-short-seconds)))
+
+(defmacro noting-too-short (&amp;body forms)
+  `(handler-bind ((too-short (lambda (e)
+                              (format *debug-io* "~&amp;Too short: ~,2Fs when minimum was ~Ds~%"
+                                      (too-short-seconds e)
+                                      *minimum-seconds*)
+                              (continue e))))
+     ,@forms))
+
+(defvar *minimum-seconds* 10)         ;how long it must run for
+
+(defmacro ticks (&amp;body forms)
+  `(let ((start (get-internal-real-time))
+         (end (progn
+                ,@forms
+                (get-internal-real-time))))
+     (let* ((elapsed-ticks (- end start))
+            (elapsed-seconds (/ elapsed-ticks internal-time-units-per-second)))
+       (when (&lt; elapsed-seconds *minimum-seconds*)
+         (cerror "just return ~D (~,2F seconds)"
+                 (make-condition 
+                  'too-short
+                  :format-control "~D ticks (~,2F seconds) is not long enough"
+                  :format-arguments (list elapsed-ticks (float elapsed-seconds))
+                  :seconds (float elapsed-seconds))
+                 elapsed-ticks (float elapsed-seconds)))
+       elapsed-ticks)))
+
+(defun seconds (ticks &amp;optional (divider 1))
+  (/ ticks internal-time-units-per-second divider))
+
+(defun note (control &amp;rest args)
+  (format *debug-io* "~&amp;[~?]~%" control args)
+  (force-output *debug-io*))
+
+(defmacro noting ((&amp;rest notes) &amp;body forms)
+  ;; Single value only, but this is all we need
+  `(progn
+     (format *debug-io* "~&amp;[~@{~A~^ ~}" ,@notes)
+     (force-output *debug-io*)
+     (let ((r (progn ,@forms)))
+       (format *debug-io* " -&gt; ~A]~%" r)
+       (force-output *debug-io*)
+       r)))
+
+(defun inc-n (n incs)
+  (declare (type fixnum n incs)
+           (optimize speed (safety 0)))
+  (case incs
+    (0
+     (dotimes (i n 0)))
+    (100
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s)
+         (incf s))))
+    (otherwise
+     (error "what even is this"))))
+
+(defun estimate-increment-time (&amp;key
+                                (exponent 11)
+                                &amp;aux
+                                  (n (round (expt 10 exponent)))
+                                  (n/100 (round (expt 10 (- exponent 2)))))
+  (declare (type fixnum n n/100))
+  (/ (- (seconds (noting (100 n/100) (ticks (inc-n n/100 100))) n/100)
+        (seconds (noting (0 n) (ticks (inc-n n 0))) n))
+     100))
+
+(defclass a ()
+  ((a :initform 0 :reader a-a)
+   (b :initform 0 :reader a-b)
+   (c :initform 0 :reader a-c)
+   (d :initform 0 :reader a-d)
+   (e :initform 0 :reader a-e)
+   (f :initform 0 :reader a-f)
+   (g :initform 0 :reader a-g)
+   (h :initform 0 :reader a-h)
+   (i :initform 0 :reader a-i)
+   (j :initform 0 :reader a-j)))
+
+(defstruct b
+  (a 0)
+  (b 0)
+  (c 0)
+  (d 0)
+  (e 0)
+  (f 0)
+  (g 0)
+  (h 0)
+  (i 0)
+  (j 0))
+
+(defgeneric svn (o n count &amp;key)
+  (declare (optimize speed)))
+
+(defmethod svn ((a a) n count &amp;key (reader nil))
+  (declare (type fixnum n count)
+           (optimize speed (safety 0)))
+  (if reader
+      (case count
+        (2
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (a-a a)))
+             (incf s (the fixnum (a-b a))))))
+        (4
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (a-a a)))
+             (incf s (the fixnum (a-b a)))
+             (incf s (the fixnum (a-c a)))
+             (incf s (the fixnum (a-d a))))))
+        (6
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (a-a a)))
+             (incf s (the fixnum (a-b a)))
+             (incf s (the fixnum (a-c a)))
+             (incf s (the fixnum (a-d a)))
+             (incf s (the fixnum (a-e a)))
+             (incf s (the fixnum (a-f a))))))
+        (8
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (a-a a)))
+             (incf s (the fixnum (a-b a)))
+             (incf s (the fixnum (a-c a)))
+             (incf s (the fixnum (a-d a)))
+             (incf s (the fixnum (a-e a)))
+             (incf s (the fixnum (a-f a)))
+             (incf s (the fixnum (a-g a)))
+             (incf s (the fixnum (a-h a))))))
+        (10
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (a-a a)))
+             (incf s (the fixnum (a-b a)))
+             (incf s (the fixnum (a-c a)))
+             (incf s (the fixnum (a-d a)))
+             (incf s (the fixnum (a-e a)))
+             (incf s (the fixnum (a-f a)))
+             (incf s (the fixnum (a-g a)))
+             (incf s (the fixnum (a-h a)))
+             (incf s (the fixnum (a-i a)))
+             (incf s (the fixnum (a-j a))))))
+        (otherwise
+         (error "what even is this")))
+      (case count
+        (2
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (slot-value a 'a)))
+             (incf s (the fixnum (slot-value a 'b))))))
+        (4
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (slot-value a 'a)))
+             (incf s (the fixnum (slot-value a 'b)))
+             (incf s (the fixnum (slot-value a 'c)))
+             (incf s (the fixnum (slot-value a 'd))))))
+        (6
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (slot-value a 'a)))
+             (incf s (the fixnum (slot-value a 'b)))
+             (incf s (the fixnum (slot-value a 'c)))
+             (incf s (the fixnum (slot-value a 'd)))
+             (incf s (the fixnum (slot-value a 'e)))
+             (incf s (the fixnum (slot-value a 'f))))))
+        (8
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (slot-value a 'a)))
+             (incf s (the fixnum (slot-value a 'b)))
+             (incf s (the fixnum (slot-value a 'c)))
+             (incf s (the fixnum (slot-value a 'd)))
+             (incf s (the fixnum (slot-value a 'e)))
+             (incf s (the fixnum (slot-value a 'f)))
+             (incf s (the fixnum (slot-value a 'g)))
+             (incf s (the fixnum (slot-value a 'h))))))
+        (10
+         (let ((s 0))
+           (declare (type fixnum s))
+           (dotimes (i n s)
+             (incf s (the fixnum (slot-value a 'a)))
+             (incf s (the fixnum (slot-value a 'b)))
+             (incf s (the fixnum (slot-value a 'c)))
+             (incf s (the fixnum (slot-value a 'd)))
+             (incf s (the fixnum (slot-value a 'e)))
+             (incf s (the fixnum (slot-value a 'f)))
+             (incf s (the fixnum (slot-value a 'g)))
+             (incf s (the fixnum (slot-value a 'h)))
+             (incf s (the fixnum (slot-value a 'i)))
+             (incf s (the fixnum (slot-value a 'j))))))
+        (otherwise
+         (error "what even is this")))))
+
+(defmethod svn ((b b) n count &amp;key)
+  (declare (type fixnum n)
+           (optimize speed (safety 0)))
+  (case count
+    (2
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s (the fixnum (b-a b)))
+         (incf s (the fixnum (b-b b))))))
+    (4
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s (the fixnum (b-a b)))
+         (incf s (the fixnum (b-b b)))
+         (incf s (the fixnum (b-c b)))
+         (incf s (the fixnum (b-d b))))))
+    (6
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s (the fixnum (b-a b)))
+         (incf s (the fixnum (b-b b)))
+         (incf s (the fixnum (b-c b)))
+         (incf s (the fixnum (b-d b)))
+         (incf s (the fixnum (b-e b)))
+         (incf s (the fixnum (b-f b))))))
+    (8
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s (the fixnum (b-a b)))
+         (incf s (the fixnum (b-b b)))
+         (incf s (the fixnum (b-c b)))
+         (incf s (the fixnum (b-d b)))
+         (incf s (the fixnum (b-e b)))
+         (incf s (the fixnum (b-f b)))
+         (incf s (the fixnum (b-g b)))
+         (incf s (the fixnum (b-h b))))))
+    (10
+     (let ((s 0))
+       (declare (type fixnum s))
+       (dotimes (i n s)
+         (incf s (the fixnum (b-a b)))
+         (incf s (the fixnum (b-b b)))
+         (incf s (the fixnum (b-c b)))
+         (incf s (the fixnum (b-d b)))
+         (incf s (the fixnum (b-e b)))
+         (incf s (the fixnum (b-f b)))
+         (incf s (the fixnum (b-g b)))
+         (incf s (the fixnum (b-h b)))
+         (incf s (the fixnum (b-i b)))
+         (incf s (the fixnum (b-j b))))))
+    (otherwise
+     (error "what even is this"))))
+
+(defun measure-thing (thing &amp;key
+                              (exponent 11)
+                              (specs
+                               '((2 -0.2)
+                                 (4 -0.4)
+                                 (6 -0.6)
+                                 (8 -0.8)
+                                 (10 -1)))
+                              (sleep 0)
+                      &amp;aux (cn (class-name (class-of thing))))
+  (mapcar (lambda (spec)
+            (destructuring-bind (count delta &amp;rest kws &amp;key) spec
+              (let ((iterations (round (expt 10 (+ exponent delta)))))
+                (let ((per-step (float
+                                 (seconds (noting (cn count iterations)
+                                                  (ticks (apply #'svn thing
+                                                                iterations count kws)))
+                                          iterations))))
+                  (note "~S ~D elapsed ~Ds per-step ~Ds"
+                        cn count (* per-step iterations) per-step)
+                  (when (&gt; sleep 0)
+                    (noting ("sleep" sleep)
+                      (sleep sleep)))
+                  (list cn count per-step)))))
+          specs))
+
+(defun measure-things (&amp;key
+                       (things-and-exponents `((,(make-b) 11)
+                                               (,(make-instance 'a) 10)))
+                       (log-file "thing-times.ldat")
+                       (tries 4)
+                       (sleep 5))
+  ;; Dump measurements to a log file
+  (with-standard-io-syntax
+    (with-open-file (log log-file :direction :output
+                                  :if-exists :supersede)
+      (noting-too-short
+       (let ((increment-time (float (estimate-increment-time))))
+         (note "increment time ~Ds" increment-time)
+         (pprint increment-time log)
+         (force-output log))
+        (dolist (thing-and-exponent things-and-exponents)
+          (destructuring-bind (thing exponent) thing-and-exponent
+            (note "~S exponent ~D"
+                  (class-name (class-of thing))
+                  exponent)
+            (dotimes (try tries)
+              (pprint
+               (measure-thing thing
+                              :exponent exponent
+                              :sleep sleep)
+               log)
+              (force-output log)))))))
+  log-file)</code></pre>
+
+<p>This is the Racket code which plotted the data and computed the fit &amp; cost.</p>
+
+<pre class="brush: lisp"><code>#lang racket
+
+;;;; Fit data from tsv
+;;;
+
+(require simple-polynomial
+         plot)
+
+(define (snarf from)
+  ;; Stolen from warranted (wcs.rkt): just read all the forms, safely
+  (call-with-default-reading-parameterization
+   (thunk
+    (parameterize ([read-accept-lang #f]
+                   [read-accept-reader #f])
+      (call-with-input-file from
+        (&#955; (p)
+          (for/list ([form (in-port read p)])
+            form)))))))
+
+(define (classify file-data)
+  ;; The data is an increment time, followed by lists of (class-name
+  ;; slot-count seconds) Return a hash table mapping from class names
+  ;; and the imcrememt time
+  (match-let ([(cons increment-time records) file-data])
+    (define cmap (make-hasheqv))
+    (for* ([record (in-list records)]
+           [single (in-list record)])
+      (match-let ([(list class-name count seconds) single])
+        (hash-update! cmap class-name
+                      (&#955; (c)
+                        (cons (list count seconds) c))
+                      '())))
+    (values cmap increment-time)))
+
+(define (linear-fit class-name cmap)
+  (points-&gt;best-fit-polynomial (hash-ref cmap class-name) 1))
+
+(define (slot-cost class-name cmap (increment-time 0.0))
+  (- (first (polynomial-terms (linear-fit class-name cmap)))
+     increment-time))
+
+(define (file-slot-cost class-name file
+                        #:use-increment-time (use-increment-time #f))
+  (let-values ([(cmap increment-time)
+                (classify (snarf file))])
+    (slot-cost class-name cmap (if use-increment-time
+                                   increment-time
+                                   0.0))))
+
+(define (file-A/B-ratio file #:use-increment-time (use-increment-time #f))
+  (/ (file-slot-cost 'A file #:use-increment-time use-increment-time)
+     (file-slot-cost 'B file #:use-increment-time use-increment-time)))
+
+(define (plot-linear-fit class-name cmap
+                         #:to-file (to-file #f)
+                         #:title (title #f))
+  (parameterize ([plot-font-family 'modern]
+                 [plot-width 560]
+                 [plot-x-far-axis? #f]
+                 [plot-y-far-axis? #f]
+                 [plot-x-ticks (linear-ticks #:number 5)])
+    (define pts (hash-ref cmap class-name))
+    ((if to-file
+         (curryr plot-file to-file)
+         plot)
+     (list
+      (points pts #:sym 'plus #:label (format "~A data" class-name))
+      (function (points-&gt;best-fit-polynomial pts 1) #:label "linear fit"))
+     #:x-min 0
+     #:x-max 10.5
+     #:x-label "count"
+     #:y-label "seconds/step"
+     #:title title)))
+
+(define (file-plot-linear-fit class-name file
+                              #:to-file (to-file #f)
+                              #:title (title #f))
+  (let-values ([(cmap _) (classify (snarf file))])
+    (plot-linear-fit class-name cmap
+                     #:to-file to-file
+                     #:title title)))</code></pre>
+
+<hr />
+
+<div class="footnotes">
+ <ol>
+  <li class="footnote-definition" id="2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-definition">
+   <p><em>aka</em> Conclusions&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-1-return">&#8617;</a></p></li>
+  <li class="footnote-definition" id="2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-definition">
+   <p><em>aka</em> The conclusion anybody paying attention would draw.&nbsp;<a href="https://www.tfeb.org/fragments/feeds/lisp.rss.xml#2026-05-25-measuring-slot-access-cost-in-common-lisp-footnote-2-return">&#8617;</a></p></li></ol></div>

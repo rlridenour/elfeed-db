@@ -1,0 +1,60 @@
+<h1>Multiple Return Value Implementation in CLRHack</h1>
+
+  <p>The CLRHack compiler implements Multiple Return Values (MRV) by extending the single-value limitation of the .NET Common
+  Intermediate Language (CIL) stack through a thread-local side-channel. This allows Lisp forms to communicate
+  multiple values (up to 64) across function boundaries.</p>
+
+  <h2>1. The Side-Channel Storage</h2>
+  <p>Because a CIL method can only return a single <code>object</code> on the stack, CLRHack utilizes a static class
+  <code>[LispBase]Lisp.Values</code>. This class contains <code>[ThreadStatic]</code> fields that act as a secondary communication
+  channel:</p>
+  <ul>
+      <li><strong>Primary Value:</strong> Always resides on the CIL evaluation stack.</li>
+      <li><strong><code>ReturnCount</code>:</strong> An <code>int32</code> field indicating the total number of values returned
+  (including the primary one).</li>
+      <li><strong><code>Value1</code> through <code>Value63</code>:</strong> Object fields that store the second through sixty-fourth
+  return values.</li>
+  </ul>
+
+  <h2>2. Producing Multiple Values (The Staging Logic)</h2>
+  <p>To prevent corruption during evaluation, the <code>values</code> form uses a <strong>Stage-and-Commit</strong> strategy. This is
+  necessary because the side-channel is global to the thread; if a sub-expression inside a <code>values</code> form itself returns
+  multiple values, it would overwrite the global fields before the outer <code>values</code> form is finished.</p>
+
+  <p>The compilation process for <code>(values form1 form2 ... formN)</code> follows these steps:</p>
+  <ol>
+      <li><strong>Evaluation:</strong> Each form is evaluated in order.</li>
+      <li><strong>Local Staging:</strong> The result of <code>form1</code> is kept on the stack. The results of <code>form2</code>
+  through <code>formN</code> are immediately stored into <strong>method-local variables</strong> (temporaries). This ensures that if
+  <code>form3</code> calls a function that returns multiple values, the result of <code>form2</code> is safely tucked away in a local
+  variable and cannot be overwritten.</li>
+      <li><strong>Commitment:</strong> After all forms are evaluated, the compiler generates code to move the values from the local
+  temporaries into the global <code>Value1...ValueN</code> fields.</li>
+      <li><strong>Finalization:</strong> The <code>ReturnCount</code> is set to <code>N</code>.</li>
+  </ol>
+
+  <h2>3. Preservation across Control Flow</h2>
+  <p>Certain Lisp constructs must evaluate sub-forms without allowing those sub-forms to interfere with the return values of the
+  primary form. This is handled by a <strong>Save-Restore</strong> pattern.</p>
+
+  <h3>Multiple-Value-Prog1</h3>
+  <p>The <code>multiple-value-prog1</code> form evaluates its first form, then saves the entire side-channel state (the primary
+  value, the <code>ReturnCount</code>, and all <code>ValueN</code> fields) into local variables. It then evaluates the subsequent
+  forms. After they finish, it restores the side-channel state from its locals, ensuring the values of the first form are what the
+  caller receives.</p>
+
+  <h3>Unwind-Protect</h3>
+  <p>In <code>unwind-protect</code>, the protected form is evaluated and its primary result is stored in a local variable. Crucially,
+  the <code>finally</code> block (cleanup) must not destroy the side-channel state produced by the protected form. The compiler
+  generates code at the start of the <code>finally</code> block to save <code>ReturnCount</code> and <code>Value1...63</code> into
+  locals. Once the cleanup forms complete, the state is restored from these locals before the method returns.</p>
+
+  <h2>4. Nested Multiple Values (The Re-entrancy Problem)</h2>
+  <p>The fundamental problem with a global side-channel is re-entrancy. If the compiler were to store <code>form2</code> directly
+  into the global <code>Value1</code> field, and then <code>form3</code> involved a function call like <code>(some-func)</code>, that
+  function might execute its own <code>(values ...)</code> logic. This would overwrite the global <code>Value1</code> that was just
+  set for the outer form.</p>
+
+  <p>By enforcing the use of <strong>method-local temporaries</strong> during the production of values, CLRHack ensures that the
+  global side-channel is only updated at the last possible moment ("atomically" relative to the Lisp expression), effectively
+  shielding the return values from being corrupted by nested evaluations.</p>

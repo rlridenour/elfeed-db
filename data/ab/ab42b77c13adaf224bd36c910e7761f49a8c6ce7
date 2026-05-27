@@ -1,0 +1,361 @@
+<p>Common Lisp is renowned for its excellent object system CLOS. Its implementation
+is often accompanied by the Metaobject Protocol that, while it is not part of
+the standard, allows programmers to customize the system underpinnings in
+numerous interesting ways. This level of customization doesn't come without a
+cost &#x2013; some CLOS code paths will be slower compared to open-coding equivalent
+solution while abstaining from using standard objects.</p>
+
+<p>The purpose of this blog post is to draw an intuition of differences between
+structure objects and standard objects when it comes to accessing their slots.
+From now on I'm going to refer to structure objects as structures, and standard
+objects as instances.</p>
+
+<p>We could imagine a structure is represented in memory as a tuple (CLASS SLOTS),
+while an instance is represented as a tuple (CLASS STAMP SLOTS). Modifying the
+structure class has undefined behavior, while the instance's class may
+change. This is why the instance needs to track whether it is up-to-date or
+obsolete. In our simple scheme that information is represented by a stamp that
+represents the class generation.</p>
+
+<p>Tracking whether the instance is obsolete is important, because the memory
+layout of slots may change - they may be deleted, added, or moved to different
+positions. This is convenient for long-running programs without downtime, for
+incremental development and for image-based workflows - the program may be
+modified at any time to account for changing requirements, without recompiling
+it from scratch.</p>
+
+<p>But it doesn't come without a downside. The implementation may conformingly
+assume, that structure accessors won't ever change and they may be inlined.
+That means in particular, that structure access is a simple memory reference.</p>
+
+<pre><code>(declaim (inline structure-reader-a))
+(defun structure-reader-a (object)
+  (svref (%slots object) 3))
+</code></pre>
+
+<p>While with the object we can't assume that, because we need to check whether the
+object is not obsolete (at the very least), and because readers are more generic
+functions - another level of flexibility. Inlining generic functions is hard,
+because new methods may be added at runtime and the effective method can change.
+Moreover there may be different classes that have same reader names, so we need
+to include a piece of code that uses the correct class layout for an instance.</p>
+
+<p>This is why calling instance readers involves:</p>
+
+<ul>
+<li>calling a function (can't be inlined)</li>
+<li>finding the memory layout (dispatch)</li>
+<li>verifying whether the instance is up-to-date</li>
+</ul>
+
+<p>That is exemplified by the following pseudocode that ignores other generic
+function intrinsics. Depending on the implementation of generic functions, the
+test for obsolete instances may be evaded when instances are not obsolete.</p>
+
+<pre><code>(declaim (notinline instance-reader-a))
+(define-reader-function instance-reader-a (object)
+  (unless (%up-to-date-p object)
+    ;; Among other things updates indexes for memory accesses. 
+    ;; This is a slow path.
+    (%recompile-reader-function #'instance-reader-a)
+    (return-from instance-reader-a (instance-reader-a object)))
+  (typecase object
+    (standard-class-a (svref (%slots object) 3))
+    (standard-class-b (svref (%slots object) 4))
+    (custom-class-c (slot-value object 'a))
+    (custom-class-d (slot-value object 'a))
+    (otherwise (no-applicable-method #'instance-reader-a object))))
+</code></pre>
+
+<p>All this is assuming, that we deal with standard readers. Using the metaobject
+protocol it is possible to store slot values anywhere, most notably not in a
+vector bundled with the instance, or to add additional preprocessing. I'm not
+going to touch here much on MOP - it is just to signify, that standard readers
+for standard classes may directly access the slot vector.</p>
+
+<p>At minimum, assuming a single reader and a clever dispatch algorithm:</p>
+
+<pre><code>(declaim (notinline instance-reader-a))
+(define-reader-function instance-reader-a (object)
+  (if (eql (stamp object) 42)
+      (svref (%slots object) 3)
+      (if (%up-to-date-p object)
+          (no-applicable-method #'instance-reader-a object)
+          (progn
+            (%recompile-reader-function #'instance-reader-a)
+            (return-from instance-reader-a (instance-reader-a object))))))
+</code></pre>
+
+<p>In other words comparing structure access with instance readers is comparing
+apples to oranges, because the former is a memory access, while the latter is a
+function call.</p>
+
+<p>SLOT-VALUE will be even slower, because this function is a trampoline to a more
+involved SLOT-VALUE-USING-CLASS, and to do that we need to:</p>
+
+<ul>
+<li>read the object class</li>
+<li>find the slot definition in the class</li>
+<li>invoke a generic function SLOT-VALUE-USING-CLASS</li>
+</ul>
+
+<p>The generic function SLOT-VALUE-USING-CLASS may be similar to the reader defined
+above with a caveat, that it has more arguments to dispatch on (so the dispatch
+procedure may be more involved). In any case, it is at least as slow as the
+optimal reader defined above (a single reader for the standard class).</p>
+
+<pre><code>(defun slot-value (object slot-name)
+  (let* ((class (class-of object))
+         (slots (mop:class-slots class))
+         (slot (find slot-name slots :key #'mop:slot-definition-name)))
+    (mop:slot-value-using-class class object slot)))
+</code></pre>
+
+<p>Tim Bradshaw recently <a href="https://www.tfeb.org/fragments/2026/05/25/measuring-slot-access-cost-in-common-lisp/">made a blog post</a> that claims that instance slot access is
+around 38x slower than structure access, but he compares inlined memory access
+to generic function dispatch. A fair comparison would use the operator
+<code>STANDARD-INSTANCE-ACCESS</code>.</p>
+
+<p>Metaobject protocol defines an optimized way to access instance slots that does
+not incur overhead associated with dispatching generic functions by calling the
+function <code>STANDARD-INSTANCE-ACCESS</code>. This function may be inlined and is similar
+to structure object accessors. A possible definition would look like this:</p>
+
+<pre><code>(declare (inline mop:standard-instance-access))
+(defun mop:standard-instance-access (object location)
+  (svref (%slots object) location))
+</code></pre>
+
+<p>The argument LOCATION is technically an opaque object, but for the illustration
+purposes we assume that it is an index (it usually is!). Its value may be read
+using the function <code>SLOT-DEFINITION-LOCATION</code>.</p>
+
+<p>Let's dig into benchmarks! We will measure access time to slots in equivalent
+structure and instance, each containing ten untyped slots initialized with fixnums. </p>
+
+<pre><code>(defpackage &quot;FAR-FROM-MOP&quot;
+  (:import-from #+ccl &quot;CCL&quot;
+                #+ecl &quot;MOP&quot;
+                #+lispworks &quot;CLOS&quot;
+                #+sbcl &quot;SB-MOP&quot;
+                #-(or ccl ecl lispworks sbcl) &quot;MOP&quot;
+                &quot;FINALIZE-INHERITANCE&quot;
+                &quot;CLASS-SLOTS&quot;
+                &quot;SLOT-DEFINITION-LOCATION&quot;
+                &quot;SLOT-DEFINITION-NAME&quot;
+                &quot;STANDARD-INSTANCE-ACCESS&quot;)
+  (:export &quot;FINALIZE-INHERITANCE&quot; &quot;CLASS-SLOTS&quot; &quot;SLOT-DEFINITION-LOCATION&quot;
+                &quot;SLOT-DEFINITION-NAME&quot; &quot;STANDARD-INSTANCE-ACCESS&quot;))
+
+(defpackage &quot;EU.TURTLEWARE.SLOT-BENCH&quot;
+  (:use &quot;CL&quot;)
+  (:local-nicknames (&quot;MOP&quot; &quot;FAR-FROM-MOP&quot;)))
+(in-package &quot;EU.TURTLEWARE.SLOT-BENCH&quot;)
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defclass a ()
+    ((a :initform (random 10) :reader a-a)
+     (b :initform (random 10) :reader a-b)
+     (c :initform (random 10) :reader a-c)
+     (d :initform (random 10) :reader a-d)
+     (e :initform (random 10) :reader a-e)
+     (f :initform (random 10) :reader a-f)
+     (g :initform (random 10) :reader a-g)
+     (h :initform (random 10) :reader a-h)
+     (i :initform (random 10) :reader a-i)
+     (j :initform (random 10) :reader a-j)))
+
+  (defstruct b
+    (a (random 10)) (b (random 10)) (c (random 10)) (d (random 10)) (e (random 10))
+    (f (random 10)) (g (random 10)) (h (random 10)) (i (random 10)) (j (random 10)))
+
+  (defparameter *o1* (make-instance 'a))
+  (defparameter *o2* (make-b))
+
+
+  (defparameter *locations*
+    (mapcar (lambda (slot-name)
+              (let ((class (find-class 'a)))
+                (mop:finalize-inheritance class)
+                (mop:slot-definition-location
+                 (find slot-name (mop:class-slots class)
+                       :key #'mop:slot-definition-name))))
+            '(a b c d e f g h i j))))
+</code></pre>
+
+<p>We will measure four slot reading patterns:</p>
+
+<ul>
+<li><strong>structure:</strong> structure reader</li>
+<li><strong>instance :</strong> reader, <code>SLOT-VALUE</code> and <code>MOP:STANDARD-INSTANCE-ACCESS</code></li>
+</ul>
+
+<p>Moreover, to put some pressure on a hypothesized method cache, we will randomize
+access to slots. The macro <code>expand-body</code> generates consecutive access forms:</p>
+
+<pre><code>(defmacro expand-body (type n-access)
+  (flet ((random-a () (nth (random 10) '(a-a a-b a-c a-d a-e a-f a-g a-h a-i a-j)))
+         (random-b () (nth (random 10) '(b-a b-b b-c b-d b-e b-f b-g b-h b-i b-j)))
+         (random-s () (nth (random 10) '(a b c d e f g h i j)))
+         (random-l () (nth (random 10) *locations*)))
+    (ecase type
+      (:reader
+       `(progn
+          ,@(loop repeat n-access
+                  for read = `(,(random-a) object)
+                  collect `(incf count (the fixnum ,read)))))
+      (:slot-value
+       `(progn
+          ,@(loop repeat n-access
+                  for read = `(slot-value object ',(random-s))
+                  collect `(incf count (the fixnum ,read)))))
+      (:instance-access
+       `(progn
+          ,@(loop repeat n-access
+                  for read = #+lispworks `(mop:fast-standard-instance-access object ',(random-l))
+                             #-lispworks `(mop:standard-instance-access object ',(random-l))
+                  collect `(incf count (the fixnum ,read)))))
+      (:structure-access
+       `(progn
+          ,@(loop repeat n-access
+                  for read = `(,(random-b) object)
+                  collect `(incf count (the fixnum ,read))))))))
+</code></pre>
+
+<p>Now our &quot;benchmark tool&quot; and the tests. It is a simple measurement that compares
+internal real times before and after the computation.</p>
+
+<pre><code>(defmacro do-bench (() &amp;body body)
+  `(let ((now (get-internal-real-time))
+         (cnt (progn ,@body)))
+     (values (- (get-internal-real-time) now) cnt)))
+
+(macrolet ((frob (name object access-type)
+             `(defun ,name (n &amp;aux (object ,object))
+                (declare (fixnum n)
+                         (optimize (speed 3) (safety 0) (debug 0)))
+                (do-bench ()
+                  (let ((count 0))
+                    (declare (fixnum count))
+                    (dotimes (v n count)
+                      (expand-body ,access-type 100)))))))
+  (frob test-object-v1 *o1* :reader)
+  (frob test-object-v2 *o1* :slot-value)
+  (frob test-object-v3 *o1* :instance-access)
+  (frob test-object-v4 *o2* :structure-access))
+
+(defun test-batch (n)
+  (list (test-object-v1 n)
+        (test-object-v2 n)
+        (test-object-v3 n)
+        (test-object-v4 n)))
+
+(defun do-benchmarks ()
+  (list* (list (lisp-implementation-type)
+               (lisp-implementation-version)
+               (machine-type)
+               internal-time-units-per-second)
+         (loop for e from 17 upto 26
+               for n = (expt 2 e)
+               collect (let (b)
+                         (format t &quot;... (expt 2 ~a):~%&quot; e)
+                         (setf b (test-batch n))
+                         (format t &quot;~a~%&quot; b)
+                         b))))
+</code></pre>
+
+<p>I've run these tests on four implementations. This table presents ratios of the
+access pattern compared to the best result. Absolute timings are not included.</p>
+
+<table border="2" cellpadding="6" cellspacing="0" frame="hsides" rules="groups">
+
+
+<colgroup>
+<col class="org-left" />
+
+<col class="org-right" />
+
+<col class="org-right" />
+
+<col class="org-right" />
+
+<col class="org-right" />
+</colgroup>
+<thead>
+<tr>
+<th class="org-left" scope="col">Implementation</th>
+<th class="org-right" scope="col">reader / best</th>
+<th class="org-right" scope="col">svalue / best</th>
+<th class="org-right" scope="col">access / best</th>
+<th class="org-right" scope="col">struct / best</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">CCL 1.12.2</td>
+<td class="org-right">17</td>
+<td class="org-right">12</td>
+<td class="org-right">2</td>
+<td class="org-right">1</td>
+</tr>
+
+<tr>
+<td class="org-left">ECL 26.5.5</td>
+<td class="org-right">616</td>
+<td class="org-right">719</td>
+<td class="org-right">1</td>
+<td class="org-right">175</td>
+</tr>
+
+<tr>
+<td class="org-left">LispWorks 8.1.2</td>
+<td class="org-right">22</td>
+<td class="org-right">79</td>
+<td class="org-right">1</td>
+<td class="org-right">1</td>
+</tr>
+
+<tr>
+<td class="org-left">SBCL 2.4.2</td>
+<td class="org-right">10</td>
+<td class="org-right">9</td>
+<td class="org-right">1</td>
+<td class="org-right">1</td>
+</tr>
+</tbody>
+</table>
+
+<p>Conclusions:</p>
+
+<p>Accessing slots using generic functions is indeed slower than a single memory
+access. This is because we can't inline these functions, and we must take care
+of many possibilities - most notably dispatching arguments of different classes
+and redefinitions of both the instance class and the reader generic function.
+All this cost buys us extensibility and runtime flexibility of the program.</p>
+
+<p>Readers, under certain circumstances, can be better optimized than <code>SLOT-VALUE</code>,
+because they don't have to go through another function and access class slot
+definition. CCL and SBCL don't exploit this optimization opportunity.</p>
+
+<p>Instance memory access and structure memory access times are roughly the same on
+SBCL and LispWorks, while instance access is two times slower on CCL. ECL does a
+peculiar thing where structure readers are not inlined for some reason. That
+needs investigating, but hey, the instance access is 175x faster ;-)!</p>
+
+<p>Notes:</p>
+
+<p>To avoid external dependencies, I've defined a very basic time measurement and
+used MOP operators directly defined by a few hand-picked implementations. For
+more complete solutions look into &quot;trivial-benchmark&quot; by Yukari Hafner and
+&quot;closer-mop&quot; by Pascal Costanza.</p>
+
+<p>Lispworks <code>CLOS::STANDARD-INSTANCE-ACCESS</code> does not conform to MOP specification
+and errors when supplied with the slot location (it expects the slot name). That
+severely impacts the performance of the instance access. The correct function to
+call is, for some reason, <code>CLOS::FAST-STANDARD-INSTANCE-ACCESS</code>.</p>
+
+<p>ECL performance is poor in comparison, but I have good news! I'm implementing
+Fast Generic Function Dispatch algorithm and it will get better.</p>
+
+<p>Somewhat a point of interest, but some implementations specialize
+<code>slot-value-using-class</code> and other CLOS protocols to structure classes too.</p>

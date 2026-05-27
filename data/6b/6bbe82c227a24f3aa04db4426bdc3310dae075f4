@@ -1,0 +1,76 @@
+<h2>Handling of <code>unwind-protect</code></h2>
+
+  <p>The CLRHack compiler maps Lisp <code>unwind-protect</code> semantics directly onto the <strong>Structured Exception Handling
+  (SEH)</strong> infrastructure of the .NET Common Language Runtime (CLR). Specifically, it utilizes the <code>try...finally</code>
+  construct provided by the Common Intermediate Language (CIL).</p>
+
+  <p>Lisp semantics require that the cleanup forms in an <code>unwind-protect</code> block be executed regardless of how control
+  leaves the protected form&mdash;whether via normal return, a non-local <code>throw</code>, or a lexical exit like
+  <code>return-from</code>. The CLR guarantees that a <code>finally</code> block will execute during stack unwinding, which is
+  exactly the hook required for Lisp. The implementation details are as follows:</p>
+
+  <ul>
+      <li><strong>Protected Form:</strong> The compiler generates the code for the protected form inside a CIL <code>try</code>
+  block. Upon successful completion, the primary return value is stored in a local variable, and a <code>leave</code> instruction is
+  used to exit the <code>try</code> block, which automatically triggers the transition to the <code>finally</code> block.</li>
+      <li><strong>Side-Channel Preservation:</strong> A unique challenge in Lisp is that <code>unwind-protect</code> must return the
+  values of the protected form, but cleanup forms may themselves perform operations that alter the Multiple Return Value (MRV)
+  side-channel. CLRHack exploits method-local variables to save the <code>ReturnCount</code> and the contents of <code>Value1</code>
+  through <code>Value63</code> at the very beginning of the <code>finally</code> block and restore them at the very end.</li>
+      <li><strong>Unwinding:</strong> If a <code>throw</code> or other exception occurs within the <code>try</code> block, the CLR
+  stack walker identifies the <code>finally</code> block and executes it before propagating the exception further. This ensures
+  Lisp's "cleanup guarantee" is maintained even during catastrophic or non-local control transfers.</li>
+  </ul>
+
+  <h2>Handling of <code>catch</code> and <code>throw</code></h2>
+
+  <p>Lisp's <code>catch</code> and <code>throw</code> are implemented as a <strong>Dynamic Non-Local Exit</strong> system built on
+  top of .NET's exception propagation mechanism. While CLR exceptions are typically filtered by type, Lisp requires filtering by a
+  dynamic "tag" object (compared via <code>eq</code>).</p>
+
+  <h3>The <code>throw</code> Mechanism</h3>
+  <p>When a <code>(throw tag value)</code> is evaluated, CLRHack does not simply perform a jump. Instead, it performs the following
+  steps:</p>
+  <ol>
+      <li>Evaluates the <code>tag</code> and the primary <code>value</code>.</li>
+      <li>Captures the current state of the MRV side-channel into an <code>object[]</code>.</li>
+      <li>Instantiates a specialized exception class: <code>[LispBase]Lisp.CatchThrowException</code>. This object acts as a carrier
+  for the tag, the primary value, and the captured MRV array.</li>
+      <li>Executes the CIL <code>throw</code> instruction. This initiates the CLR's SEH stack walk.</li>
+  </ol>
+
+  <h3>The <code>catch</code> Mechanism</h3>
+  <p>The <code>(catch tag body)</code> form is compiled into a <code>try...catch</code> block where the catch handler specifically
+  targets <code>CatchThrowException</code>:</p>
+  <ol>
+      <li><strong>Tag Setup:</strong> The <code>catch</code> tag is evaluated and stored in a method-local variable.</li>
+      <li><strong>Body Execution:</strong> The body forms are executed within a <code>try</code> block.</li>
+      <li><strong>The Catch Handler:</strong> When a <code>CatchThrowException</code> is intercepted, the handler performs a "Dynamic
+  Filter":
+          <ul>
+              <li>It extracts the tag from the exception object and compares it to the local <code>catch</code> tag using
+  <code>System.Object.Equals</code> (simulating Lisp's <code>eq</code> for reference types).</li>
+              <li><strong>Match:</strong> If the tags match, the handler "claims" the exception. It extracts the primary value and
+  the MRV array from the exception, restores them to the thread-local side-channel, and resumes normal execution after the
+  <code>catch</code> block.</li>
+              <li><strong>Mismatch:</strong> If the tags do not match, the handler executes the CIL <code>rethrow</code> instruction.
+  This allows the exception to continue up the stack to find a matching <code>catch</code> tag in a higher frame.</li>
+          </ul>
+      </li>
+  </ol>
+
+  <h2>Exploiting SEH for Lisp Semantics</h2>
+
+  <p>CLRHack exploits the CLR's SEH in three fundamental ways to bridge the gap between .NET and Lisp:</p>
+  <ul>
+      <li><strong>Automatic Stack Unwinding:</strong> By using <code>throw</code> and <code>try...catch</code>, the compiler
+  delegates the complex task of cleaning up stack frames, registers, and intermediate states to the highly optimized .NET
+  runtime.</li>
+      <li><strong>Guaranteed Cleanup:</strong> The <code>finally</code> block is the "silicon reality" of Lisp's
+  <code>unwind-protect</code>. The CLR ensures it runs even if an exception is re-thrown multiple times or if a thread is being
+  terminated.</li>
+      <li><strong>Payload-Heavy Exceptions:</strong> Unlike standard .NET exceptions which often carry only metadata,
+  <code>CatchThrowException</code> is exploited as a transport mechanism. It carries the entire "return state" of a Lisp expression
+  (primary value + MRV side-channel) across an arbitrary number of stack frames, allowing a <code>throw</code> to behave exactly like
+  a multi-valued return to a dynamic point.</li>
+  </ul>

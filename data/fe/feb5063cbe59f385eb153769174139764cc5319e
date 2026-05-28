@@ -1,0 +1,65 @@
+<img src="https://cella.b-cdn.net/joshblais/guix.jpg" alt="guix system" />
+<p>As a heavy emacs user, <a href="https://guix.gnu.org/">Guix system</a> seems to be the logical place to rest one’s head in the <a href="https://jasoneckert.github.io/myblog/distro-hopping/">perpetual distro hop</a>.  As an all-or-nothing type guy, I’ve been running NixOS for the better part of a year now, but Guix seems to philosophically align with me. That’s right, forget about pragmatism when you can have ideological purity!</p>
+<p>But, as one will very quickly comes to find in installing Guix, the militant push to have everything be free software means that if you are installing this system to anything other than a hardwired desktop running some sort of open source video card or a <a href="https://libreboot.org/docs/install/x200.html">librebooted ThinkPad from 2008</a>, you will be very quickly out of luck when you want to say, use wifi or run any sort of video encode.</p>
+<p>If you have the ability to plug your machine into an ethernet port, then you can install guix without much issue, but - the moment ethernet is inaccessible, you have to do a workaround.</p>
+<p>The mitigation?  Baking <a href="https://gitlab.com/uploads/-/system/project/avatar/12282827/nonguix-icon-light.png?width=96">non-guix</a> into an .iso image and installing from that instead.</p>
+<p>In this article, I will discuss how I got non-guix installed to my x230 ThinkPad, and the process to get there.</p>
+<p><a></a></p>
+<h2>What is non-guix?<a href="#what-is-non-guix">#</a></h2>
+<p>Non-Guix is a repository of proprietary drivers and the mainline linux kernel so that you can run Guix on a system that doesn’t have 100% free hardware (which is essentially every computer these days). You won’t hear about it in the mainline Guix channels as it is ideologically in conflict with what Guix is attempting to do, so it’s a bit of a <a href="https://en.wikipedia.org/wiki/Fight_Club">Fight Club</a> type scenario (you don’t talk about it).</p>
+<p>With that being said, nvidia drivers for GPUs, wifi (broadcom and intel), and some other goodies are available within the repo, so all you have to do is add “non-guix” as a channel in your channels.scm:</p>
+<figure><figcaption></figcaption><pre><code>(channel (name 'nonguix) (url "https://gitlab.com/nonguix/nonguix") (introduction  (make-channel-introduction   "897c1a470da759236cc11798f4e0a5f7d4d59fbc"   (openpgp-fingerprint    "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"))))</code></pre></figure>
+<p><a></a></p>
+<h2>Building the Non-Guix .iso<a href="#building-the-non-guix-iso">#</a></h2>
+<p>As we previously discussed, you will have a bad time when trying to install a base Guix .iso on your non-freedom respecting hardware. So, we will go ahead and bake a non-guix .iso for you so that you can use wifi to install your new system.</p>
+<p><a></a></p>
+<h3>Step One: Get Guix the package manager on your machine<a href="#step-one-get-guix-the-package-manager-on-your-machine">#</a></h3>
+<p>You will install guix (the package manager) on your machine for this. Congratulations, guix is available on pretty much every linux distribution and MacOS.</p>
+<p><a href="https://guix.gnu.org/manual/1.5.0/en/html_node/Binary-Installation.html">Installation instructions can be found here</a></p>
+<figure><figcaption></figcaption><pre><code>cd /tmpwget https://guix.gnu.org/guix-install.shchmod +x guix-install.sh./guix-install.sh</code></pre></figure>
+<p>You can then update with <code>guix pull</code>. This will take a bit of time, so go get a coffee and let it run.</p>
+<p><a></a></p>
+<h3>Step Two: Bake the .iso<a href="#step-two-bake-the-iso">#</a></h3>
+<p>to your <code>~/.config/guix/channels.scm</code> file add:</p>
+<figure><figcaption></figcaption><pre><code>(cons*    (channel        (name 'nonguix)        (url "https://gitlab.com/nonguix/nonguix")        ;; Enable signature verification:        (introduction            (make-channel-introduction                "897c1a470da759236cc11798f4e0a5f7d4d59fbc"                (openpgp-fingerprint                    "2A39 3FFF 68F4 EF7A 3D29  12AF 6F51 20A0 22FB B2D5"                )            )        )    )    %default-channels)</code></pre></figure>
+<p>and run <code>guix pull</code> once again.</p>
+<p>You will also have to clone the non-guix repo locally: <code>git clone https://gitlab.com/nonguix/nonguix.git</code> and then you can finally build the guix system .iso with <code>guix system image --image-type=iso9660 ./nonguix/nongnu/system/install.scm</code></p>
+<p>Again, this will take some time.</p>
+<p>You will be given a location in which this .iso exists after building it in the /gnu/store when it finishes. Copy that path for the next step.</p>
+<p><a></a></p>
+<h3>Writing to a USB drive<a href="#writing-to-a-usb-drive">#</a></h3>
+<p>You can now plug your USB key into your machine and we will burn in the image to the disk and make it bootable with <code>[[https://man7.org/linux/man-pages/man1/dd.1.html][dd]]</code>:</p>
+<p>run <code>[[https://linuxhandbook.com/lsblk-command/][lsblk]]</code> to find the location of your plugged in drive, then:</p>
+<figure><figcaption></figcaption><pre><code>dd if=[Path To Built Image from build command] of=/dev/[USB Drive Name from lsblk] bs=4M status=progress oflag=sync</code></pre></figure>
+<p>Congratulations, you now have a bootable non-guix .iso for installation! Reboot your machine and select the usb stick as your boot drive.</p>
+<p><a></a></p>
+<h2>Installation<a href="#installation">#</a></h2>
+<p><a></a></p>
+<h3>GRUB boot parameters<a href="#grub-boot-parameters">#</a></h3>
+<p><a></a></p>
+<h4>On some of my machines, I had to add “nomodeset” to the boot parameters in GRUB as the screens were smaller than normal.  If you don’t do this, you will potentially have a perpetual black screen instead of getting the Guix installer TUI. When the GRUB screen shows up, hit “e” and you will be able to edit the parameters here. Add “nomodeset” to the boot list, and you should be good to roll.<a href="#on-some-of-my-machines-i-had-to-add-nomodeset-to-the-boot-parameters-in-grub-as-the-screens-were-smaller-than-normal--if-you-dont-do-this-you-will-potentially-have-a-perpetual-black-screen-instead-of-getting-the-guix-installer-tui-when-the-grub-screen-shows-up-hit-e-and-you-will-be-able-to-edit-the-parameters-here-add-nomodeset-to-the-boot-list-and-you-should-be-good-to-roll">#</a></h4>
+<p><a></a></p>
+<h2>Install as normal<a href="#install-as-normal">#</a></h2>
+<p>You can then install guix as normal with the guided installer, when prompted for wifi connection, you can scan for networks and should be able to connect to your SSID without issue.</p>
+<p>You will have to change some of the generated configuration file before installation. Note the + and - lines:</p>
+<figure><figcaption></figcaption><pre><code>- (use-modules (gnu))+ (use-modules (gnu)+              (nongnu packages linux)+              (nongnu system linux-initrd))(use-service-modules cups desktop networking ssh xorg)
+(operating-system+ (kernel linux)+ (initrd microcode-initrd)+ (firmware (list linux-firmware))  (locale "en_US.utf8")  (timezone "Europe/Warsaw")  (keyboard-layout (keyboard-layout "us"))  (host-name "guixpad")
+  ;; The list of user accounts ('root' is implicit).  (users (cons* (user-account                  (name "aidan")                  (comment "Aidan")                  (group "users")                  (home-directory "/home/aidan")                  (supplementary-groups '("wheel" "netdev" "audio" "video")))                %base-user-accounts))
+  ;; Below is the list of system services. To search for available  ;; services, run 'guix system search KEYWORD' in a terminal.
+  (services   (append (list (service gnome-desktop-service-type)                 (set-xorg-configuration                  (xorg-configuration (keyboard-layout keyboard-layout))))
+           ;; This is the default list of services we           ;; are appending to.           %desktop-services))  (bootloader (bootloader-configuration                (bootloader grub-bootloader)                ( targets (list "/dev/sda"))                (keyboard-layout keyboard-layout)))  (swap-devices (list (swap-space                        (target (uuid                                 "8204b016-5101-4d32-9aba-f4a7adcb9560")))))
+  ;; The list of file systems that get "mounted".  The unique  ;; file system identifiers there ("UUIDs") can be obtained  ;; by running 'blkid' in a terminal.  (file-systems (cons* (file-system                         (mount-point "/")                         (device (uuid                                  "0be89db0-5391-44aa-9251-a87adb3ec25b"                                  'ext4))                         (type "ext4")) %base-file-systems)))</code></pre></figure>
+<p>After this, save the file and <strong>STOP</strong>, you will <strong>NOT install normally</strong> you will hit Ctrl+Alt+F3 and open a new TTY (scary black screen with a prompt). Hit <code>Enter</code> and type the following:</p>
+<p><code>herd start cow-store /mnt</code>
+and finally:
+<code>guix system init /mnt/etc/config.scm /mnt</code></p>
+<p>The system will then install and you will get just one more coffee as you wait. Caffeinated enough yet?</p>
+<p>Upon completion, reboot, pull the USB stick, and you will have your new shiny Guix system with wifi driver support available.</p>
+<p><a></a></p>
+<h2>Resources<a href="#resources">#</a></h2>
+<ul>
+<li><a href="https://github.com/AidanWelch/guix-blog">https://github.com/AidanWelch/guix-blog</a></li>
+<li><a href="https://gitlab.com/nonguix/nonguix">https://gitlab.com/nonguix/nonguix</a></li>
+</ul>
+<p>As always, God bless, and until next time.</p>
+<p>If you enjoyed this post, consider <a href="https://joshblais.com/support/">Supporting my work</a>, <a href="https://mountainthebook.com">Checking out my book</a>, <a href="https://joshblais.com/work-with-me">Working with me</a>, or sending me an <a href="mailto:josh@joshblais.com">Email</a> to tell me what you think.</p>

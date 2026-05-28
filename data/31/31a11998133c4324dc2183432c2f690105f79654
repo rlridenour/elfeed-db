@@ -1,0 +1,210 @@
+<p>I was curious: how does <a href="https://django-liveview.andros.dev/">Django LiveView</a> hold up against the original Elixir implementation when you compare them under identical conditions? Not with theoretical arguments, but with real numbers.</p>
+<p>I built an identical alert dashboard in both frameworks: add, delete, and search alerts in real time. The benchmark is automated with Playwright headless Chromium, measuring the time between the user action and the DOM change, plus the bytes sent over WebSocket per interaction.</p>
+<p>The <a href="https://git.andros.dev/andros/Django-LiveView-vs-Phoenix-LiveView">source code is in the repository</a> and is fully reproducible with Docker Compose.</p>
+<p>Let's look at the results.</p>
+<h2 id="blog-single-content__title--the-stack" class="blog-single__content-title">The stack</h2>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Django LiveView</th>
+<th>Phoenix LiveView</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Language</td>
+<td>Python 3.12</td>
+<td>Elixir 1.17.3 / OTP 27</td>
+</tr>
+<tr>
+<td>Framework</td>
+<td>Django 6.0.5</td>
+<td>Phoenix 1.7</td>
+</tr>
+<tr>
+<td>LiveView</td>
+<td>django-liveview 2.2.0</td>
+<td>phoenix_live_view 1.0</td>
+</tr>
+<tr>
+<td>Server</td>
+<td>Uvicorn 0.47.0</td>
+<td>Bandit 1.5</td>
+</tr>
+<tr>
+<td>WS layer</td>
+<td>Channels 4.3.2 + Redis 7</td>
+<td>BEAM (built-in)</td>
+</tr>
+</tbody>
+</table>
+</div><h2 id="blog-single-content__title--common-scenarios" class="blog-single__content-title">Common scenarios</h2>
+<p>I ran 10 iterations (2 warmup) for add, delete, and search on a list with a few items.</p>
+<p><img alt="Latency — common scenarios" src="https://img.andros.dev/4cyHoCANVsT6u0XZ3tv0UQFRSWg=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/05/latency_common.png" /></p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th style="text-align: right;">Django LiveView avg (ms)</th>
+<th style="text-align: right;">Phoenix avg (ms)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add alert</td>
+<td style="text-align: right;">21.91</td>
+<td style="text-align: right;">22.69</td>
+</tr>
+<tr>
+<td>Delete alert</td>
+<td style="text-align: right;">21.71</td>
+<td style="text-align: right;">22.44</td>
+</tr>
+<tr>
+<td>Search / filter</td>
+<td style="text-align: right;">6.46</td>
+<td style="text-align: right;">7.97</td>
+</tr>
+</tbody>
+</table>
+</div><p>A complete tie. Both frameworks land in the same range: ~22 ms for mutations and ~7 ms for search. The difference is statistically irrelevant.</p>
+<p><img alt="Latency distribution" src="https://img.andros.dev/VafuDrLTSVOglKF2pK0cfdRFtio=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/05/distribution_common.png" /></p>
+<h2 id="blog-single-content__title--edge-cases" class="blog-single__content-title">Edge cases</h2>
+<p>This is where things get interesting.</p>
+<p><img alt="Latency — edge case scenarios" src="https://img.andros.dev/j_lZCRo6Y45jzbP9ZwwYAP5dtXE=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/05/latency_edge.png" /></p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th style="text-align: right;">Django avg (ms)</th>
+<th style="text-align: right;">Phoenix avg (ms)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Large list (500 items)</td>
+<td style="text-align: right;">52.84</td>
+<td style="text-align: right;">49.70</td>
+</tr>
+<tr>
+<td>Rapid fire (5 clicks)</td>
+<td style="text-align: right;">270.42</td>
+<td style="text-align: right;">274.36</td>
+</tr>
+<tr>
+<td>Empty search</td>
+<td style="text-align: right;">6.56</td>
+<td style="text-align: right;">8.16</td>
+</tr>
+</tbody>
+</table>
+</div><p>With 500 alerts loaded, Phoenix is slightly faster. Rapid fire is practically identical.</p>
+<p>However, the most striking data point is the payload:</p>
+<p><img alt="Data received per action" src="https://img.andros.dev/y_z4BSMeww8cZyeFDglIivIuu3Q=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/05/payload.png" /></p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th style="text-align: right;">Django receives</th>
+<th style="text-align: right;">Phoenix receives</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Add alert</td>
+<td style="text-align: right;">5,343 B</td>
+<td style="text-align: right;">1,236 B</td>
+</tr>
+<tr>
+<td>Delete alert</td>
+<td style="text-align: right;">3,419 B</td>
+<td style="text-align: right;">735 B</td>
+</tr>
+<tr>
+<td>Search / filter</td>
+<td style="text-align: right;">4,345 B</td>
+<td style="text-align: right;">698 B</td>
+</tr>
+<tr>
+<td>Large list (500 items)</td>
+<td style="text-align: right;">327,495 B</td>
+<td style="text-align: right;">67,131 B</td>
+</tr>
+<tr>
+<td>Rapid fire (5 clicks)</td>
+<td style="text-align: right;">60,822 B</td>
+<td style="text-align: right;">12,466 B</td>
+</tr>
+</tbody>
+</table>
+</div><p>With the large list, Django LiveView transfers 327 KB per action versus Phoenix's 67 KB. Every time you add an alert with 500 already loaded, Django LiveView sends you the entire table again. Phoenix only sends the new row.</p>
+<p>It's a design difference, not an implementation flaw. In Django LiveView you explicitly define which selector to update and with what HTML:</p>
+<pre class="highlight"><code class="language-python">@liveview_handler("add_alert")
+def add_alert(consumer, content):
+    alerts = list(Alert.objects.all())
+    html = render_to_string("components/_alerts_table.html", {"alerts": alerts})
+    send(consumer, {"target": "#alerts-container", "html": html})</code></pre>
+<p>In Phoenix LiveView you update the assigns and the framework computes the diff:</p>
+<pre class="highlight"><code class="language-elixir">def handle_event("add_alert", _params, socket) do
+  alert = Alerts.create_random_alert()
+  {:noreply, assign(socket, alerts: [alert | socket.assigns.alerts])}
+end</code></pre>
+<p>Phoenix knows which part of the template changed and only sends that. Django LiveView has no such mechanism, so granularity is up to you: point to a small selector and you send less, point to a large container and you send everything. Does this matter? On slow connections or with many concurrent clients, yes. In an app with few users or small lists, it will be indistinguishable.</p>
+<h2 id="blog-single-content__title--concurrency" class="blog-single__content-title">Concurrency</h2>
+<p>What happens when multiple users act at the same time? I launched between 1 and 50 simultaneous clients all firing the same action together, synchronized with a barrier so they all start at once.</p>
+<p><img alt="Latency under concurrent load" src="https://img.andros.dev/D59gp4KYMPJwEGOCBNgt7SYL8j4=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/05/concurrency.png" /></p>
+<div class="table"><table>
+<thead>
+<tr>
+<th style="text-align: right;">Clients</th>
+<th style="text-align: right;">Django add p50</th>
+<th style="text-align: right;">Phoenix add p50</th>
+<th style="text-align: right;">Django search p50</th>
+<th style="text-align: right;">Phoenix search p50</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">18.4 ms</td>
+<td style="text-align: right;">21.4 ms</td>
+<td style="text-align: right;">10.5 ms</td>
+<td style="text-align: right;">13.6 ms</td>
+</tr>
+<tr>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">24.6 ms</td>
+<td style="text-align: right;">29.3 ms</td>
+<td style="text-align: right;">17.1 ms</td>
+<td style="text-align: right;">23.2 ms</td>
+</tr>
+<tr>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">56.0 ms</td>
+<td style="text-align: right;">52.8 ms</td>
+<td style="text-align: right;">31.4 ms</td>
+<td style="text-align: right;">38.0 ms</td>
+</tr>
+<tr>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">239.9 ms</td>
+<td style="text-align: right;">85.8 ms</td>
+<td style="text-align: right;">85.5 ms</td>
+<td style="text-align: right;">109.2 ms</td>
+</tr>
+<tr>
+<td style="text-align: right;">50</td>
+<td style="text-align: right;">483.0 ms</td>
+<td style="text-align: right;">243.8 ms</td>
+<td style="text-align: right;">303.6 ms</td>
+<td style="text-align: right;">326.6 ms</td>
+</tr>
+</tbody>
+</table>
+</div><p>With few clients (1-5) both behave similarly, with Django even slightly faster in p50. From 25 simultaneous clients the gap becomes clear: Phoenix scales better, especially on <code>add_alert</code> where at 50 clients Django doubles Phoenix's latency.</p>
+<h2 id="blog-single-content__title--conclusion" class="blog-single__content-title">Conclusion</h2>
+<p>The data answers my original question: yes, Django LiveView holds up against Phoenix LiveView. In day-to-day operations they are practically equal. Phoenix's advantage shows when the payload grows or when concurrency is high, although these are problems you can mitigate with careful design in Django LiveView by targeting more specific selectors and distributing load.</p>
+<p>The advantage of Django LiveView is staying in Python and the Django ecosystem without leaving what you already know, and that Django LiveView is more explicit and predictable: you decide what HTML to send and where to place it.</p>
+<p>I'm pleasantly surprised.</p>
+<p>PS: You are looking at a site built 100% with Django LiveView, I invite you to push its limits.</p>

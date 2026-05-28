@@ -1,0 +1,65 @@
+<p>In the CLRHack compiler, <strong>restart-bind</strong> is a primitive form that manages the dynamic lifecycle of Common Lisp
+  restarts by manipulating a thread-local stack of active restart objects.</p>
+
+  <h3>Handling of restart-bind</h3>
+  <p>When the compiler encounters a <code>restart-bind</code> form, it generates CIL code that performs the following steps:</p>
+  <ol>
+    <li><strong>Capture Previous State:</strong> It calls <code>Lisp.RestartControl::GetActiveRestarts()</code> to retrieve the
+  current list of active restarts and stores it in a frame-local variable.</li>
+    <li><strong>Construct New List:</strong> For each binding, it evaluates the restart name, handler function, and optional keyword
+  arguments (<code>:report-function</code>, <code>:interactive-function</code>, <code>:test-function</code>). It then instantiates a
+  new <code>[LispBase]Lisp.Restart</code> object and conses it onto the existing list.</li>
+    <li><strong>Install New State:</strong> It calls <code>Lisp.RestartControl::SetActiveRestarts(new_list)</code> to update the
+  dynamic environment.</li>
+    <li><strong>Protected Execution:</strong> The body of the <code>restart-bind</code> is wrapped in a CIL <code>.try</code>
+  block.</li>
+    <li><strong>Restoration:</strong> A <code>finally</code> block is emitted that restores the previously saved restart list using
+  <code>SetActiveRestarts</code>, ensuring that restarts are properly uninstalled even if the body performs a non-local exit.</li>
+  </ol>
+
+  <h3>Lexical Non-Local Exits</h3>
+  <p>The CLRHack compiler supports lexical non-local exits (e.g., <code>return-from</code> or <code>go</code>) through an
+  exception-based mechanism. During the <code>analyze-environment</code> pass, the compiler identifies if a <code>return-from</code>
+  target block is "non-local" (i.e., the return occurs within a nested closure). If so:</p>
+  <ul>
+    <li>The target <strong>block</strong> is wrapped in a <code>try/catch</code> for
+  <code>[LispBase]Lisp.BlockExitException</code>.</li>
+    <li>The <strong>block</strong> is assigned a unique string ID.</li>
+    <li>The <strong>return-from</strong> form is compiled into a <code>throw</code> of a <code>BlockExitException</code>, which
+  carries the target ID, the return value, and a captured array of multiple return values (retrieved via
+  <code>Lisp.Values::CaptureValues()</code>).</li>
+    <li>The <code>catch</code> handler verifies the target ID. If it matches, it restores any captured multiple values and resumes
+  normal execution; otherwise, it rethrows the exception.</li>
+  </ul>
+
+  <h3>Restart Search</h3>
+  <p>The search for an applicable restart is handled at runtime by <code>Lisp.RestartControl::FindRestart</code>. It performs a
+  linear search through the current thread's <code>activeRestarts</code> list (stored in a <code>[ThreadStatic]</code> field). It can
+  accept either a symbol name or a <code>Restart</code> object itself. If a name is provided, the search respects shadowing,
+  returning the innermost (most recently bound) restart with that name.</p>
+
+  <h3>Dynamic Tags</h3>
+  <p>Dynamic tags are required for the <code>catch</code> and <code>throw</code> forms used in non-local control flow. In CLRHack, a
+  dynamic tag is simply a fresh object (typically a <code>ListCell</code> or a new <code>System.Object</code>) used as a unique
+  token. This ensures that a <code>throw</code> only matches the specific <code>catch</code> frame it was intended for, avoiding
+  collisions between different invocations of the same function or different <code>restart-case</code> blocks.</p>
+
+  <h3>restart-case as an Extension of restart-bind</h3>
+  <p>In CLRHack, <strong>restart-case</strong> is implemented as a macro that expands into a combination of <code>block</code>,
+  <code>catch</code>, and <code>restart-bind</code>. It extends the basic binding functionality by providing a built-in mechanism to
+  jump back to the site of the <code>restart-case</code> when a restart is invoked.</p>
+  <p>The implementation details are as follows:</p>
+  <ul>
+    <li><strong>Exit Block:</strong> The entire expansion is wrapped in a <code>(block exit_tag ...)</code> to allow normal
+  completion of the expression.</li>
+    <li><strong>Dynamic Tag:</strong> A unique dynamic tag is created (e.g., <code>(let ((tag (list nil))) ...)</code>).</li>
+    <li><strong>Catch Frame:</strong> A <code>(catch tag ...)</code> is established around the <code>restart-bind</code> and the
+  expression.</li>
+    <li><strong>Binding:</strong> The <code>restart-bind</code> creates restarts whose handler functions are closures. When invoked,
+  these closures capture their arguments into local variables, set a unique clause ID, and then <code>throw</code> to the dynamic
+  tag.</li>
+    <li><strong>Dispatch:</strong> When the <code>throw</code> is caught, the <code>restart-case</code> body executes a
+  <code>cond</code> or <code>case</code> statement. This dispatcher checks the clause ID set by the handler and executes the
+  corresponding forms provided in the <code>restart-case</code> clause, eventually returning the result from the
+  <code>exit_tag</code> block.</li>
+  </ul>

@@ -1,0 +1,107 @@
+<p>One of the clearest signs that a function is doing too much is that it has too many arguments. When there are many arguments, the code becomes hard to read, test, and document. What is the limit?</p>
+<p>A simple rule that works well in practice:</p>
+<ul>
+<li><strong>Ideal:</strong> 0 to 2 arguments.</li>
+<li><strong>Acceptable:</strong> 3 or 4 (if well justified or using default values).</li>
+<li><strong>Bad design:</strong> 5 to infinity.</li>
+</ul>
+<p>But there are functions that need more arguments — for example, when creating a user, you need first name, last name, email, phone, address... There must be a solution that does not break the 4-argument rule.</p>
+<p>Here are some tools to consider. You decide which one fits your case best.</p>
+<h2 id="blog-single-content__title--dataclasses" class="blog-single__content-title">Dataclasses</h2>
+<p>If you have several related arguments, group them into a dataclass. The function receives a single object with everything it needs.</p>
+<pre class="highlight"><code class="language-python">from dataclasses import dataclass
+
+
+@dataclass
+class Address:
+    """Full postal address of a user.
+
+    Attributes:
+        street: Street name and number.
+        city: City of residence.
+        zip_code: Postal code of the area.
+    """
+
+    street: str
+    city: str
+    zip_code: str
+
+
+def create_user(
+    first_name: str, last_name: str, email: str, phone: str, address: Address
+) -&gt; None:
+    """Create a new user in the system.
+
+    Args:
+        first_name: User's first name.
+        last_name: Last name.
+        email: Email address.
+        phone: Contact phone number.
+        address: Full postal address.
+    """
+    # Your logic here</code></pre>
+<h3 id="blog-single-content__title--keyword-only-arguments" class="blog-single__content-title">Keyword-only arguments</h3>
+<p>The <code>*</code> in the signature forces everything that comes after it to be passed by name. Its main advantage is that it improves readability, since the code that calls the function is more explicit.</p>
+<pre class="highlight"><code class="language-python">def configure_chart(
+    title: str,
+    *,
+    width: int = 800,
+    height: int = 600,
+    line_color: str = "blue",
+    thickness: int = 2,
+) -&gt; None:
+    """Configure and render a chart.
+
+    Args:
+        title: Chart title.
+        width: Width in pixels, default 800.
+        height: Height in pixels, default 600.
+        line_color: Main line color, default "blue".
+        thickness: Line thickness in points, default 2.
+    """
+    pass
+
+
+configure_chart("My Chart", width=1024, line_color="red")</code></pre>
+<h3 id="blog-single-content__title--validation-with-msgspec" class="blog-single__content-title">Validation with msgspec</h3>
+<p>Work with a data validation library, for example <code>msgspec</code>. If you have used <code>pydantic</code>, you will feel right at home. Think of <code>msgspec</code> as a modern validator and parser, lightweight (written in C) and very efficient.</p>
+<pre class="highlight"><code class="language-python">import msgspec
+
+
+class User(msgspec.Struct, strict=True):
+    """User model with strict type validation.
+
+    Attributes:
+        name: Full name of the user.
+        age: Age in years.
+    """
+
+    name: str
+    age: int
+
+
+input_data = {"name": "Ana", "age": 28}
+
+validated_user = msgspec.convert(input_data, type=User)</code></pre>
+<p>With <code>strict=True</code>, if a type does not match exactly, it raises an error. No surprises.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>If you want to enforce this in your workflow, add the following to <code>pyproject.toml</code>:</p>
+<pre class="highlight"><code class="language-toml">[tool.ruff.lint]
+select = ["PLR0913"]</code></pre>
+<p>Ruff will then warn you every time a function has more than 5 arguments, either when run manually or through a pre-commit hook. You can change the limit by editing <code>lint.pylint.max-args</code>. Personally I prefer a limit of 4, but it depends on your preferences and needs.</p>
+<pre class="highlight"><code class="language-toml">[tool.ruff.lint]
+select = ["PLR0913"]
+mylint.max-args = 4</code></pre>
+<p>To disable the rule in a specific CI/CD pipeline or block of code, use the <code>--ignore PLR0913</code> flag.</p>
+<pre class="highlight"><code class="language-yaml">jobs:
+  lint:
+    name: Ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check --ignore PLR0913</code></pre>
+<p>The example above runs Ruff in a GitHub Actions job.</p>
+<p>I have not included <code>*args</code> and <code>**kwargs</code> because they only hide the arguments. They are useful in specific contexts (decorators, wrappers, very generic APIs), but they are not an excuse to avoid thinking about design.</p>
+<p>Hopefully, before adding a fifth argument, you ask yourself whether it really belongs there or whether it is a sign that the function is taking on too many responsibilities.</p>

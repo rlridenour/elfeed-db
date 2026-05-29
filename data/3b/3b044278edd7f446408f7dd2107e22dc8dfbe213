@@ -1,0 +1,70 @@
+<p>In the CLRHack compiler, <strong>handler-bind</strong> is a primitive form used to register condition handlers in the dynamic
+  environment. It operates by managing a thread-local list of active handler objects, ensuring that condition signaling follows the
+  standard Common Lisp search and execution rules.</p>
+
+  <h3>Handling of handler-bind</h3>
+  <p>When the compiler processes a <code>handler-bind</code> form, it generates CIL code that performs the following steps:</p>
+  <ol>
+    <li><strong>Capture Previous State:</strong> It calls <code>Lisp.HandlerControl::GetActiveHandlers()</code> to retrieve the
+  current list of active handlers and stores it in a frame-local variable.</li>
+    <li><strong>Construct New List:</strong> For each binding, it evaluates the condition type and the handler function (which is
+  typically a closure). It instantiates a new <code>[LispBase]Lisp.Handler</code> object and conses it onto the current handler
+  list.</li>
+    <li><strong>Install New State:</strong> It calls <code>Lisp.HandlerControl::SetActiveHandlers(new_list)</code> to update the
+  dynamic environment for the current thread.</li>
+    <li><strong>Protected Execution:</strong> The body of the <code>handler-bind</code> is wrapped in a CIL <code>.try</code>
+  block.</li>
+    <li><strong>Restoration:</strong> A <code>finally</code> block is emitted that calls <code>SetActiveHandlers</code> with the
+  saved list. This ensures that handlers are properly uninstalled, regardless of whether the body completes normally, signals an
+  error, or performs a non-local exit.</li>
+  </ol>
+
+  <h3>Lexical Non-Local Exits</h3>
+  <p>Handlers in Common Lisp are executed in the dynamic environment of the signaller but have lexical access to the environment
+  where they were defined. In CLRHack, if a handler function performs a non-local exit (such as a <code>throw</code> or
+  <code>return-from</code>), the compiler utilizes its exception-based jump mechanism:</p>
+  <ul>
+    <li>If the exit is a <code>throw</code>, it uses the standard <code>CatchThrowException</code> mechanism.</li>
+    <li>If the exit is a <code>return-from</code> to a block outside the handler closure, the compiler identifies this as a non-local
+  exit during <code>analyze-environment</code>. It compiles the <code>return-from</code> into a <code>throw</code> of a
+  <code>BlockExitException</code>, which is subsequently caught by the <code>try/catch</code> frame established by the target
+  <code>block</code>.</li>
+  </ul>
+
+  <h3>Handler Search</h3>
+  <p>The handler search is performed at runtime by the <code>signal</code> or <code>error</code> functions. These functions retrieve
+  the active handlers list via <code>HandlerControl.GetActiveHandlers()</code> and iterate through them. For each handler, the
+  runtime checks if the signaled condition is of the type (or a subtype of the type) the handler was registered for. If a match is
+  found, the handler function is invoked. If the handler returns normally (declines), the search continues with the next applicable
+  handler.</p>
+
+  <h3>Dynamic Tags</h3>
+  <p>The <code>handler-bind</code> implementation itself relies on the dynamic state of the thread-local <code>activeHandlers</code>
+  list. However, when used in conjunction with <code>handler-case</code>, unique dynamic tags (typically fresh <code>ListCell</code>
+  objects) are generated. These tags are used as the "target" for the <code>throw</code> performed by the handler, ensuring that the
+  control flow returns exactly to the correct <code>handler-case</code> frame and doesn't conflict with other active handler or catch
+  frames.</p>
+
+  <h3>handler-case as an Extension of handler-bind</h3>
+  <p>In CLRHack, <strong>handler-case</strong> is not a primitive but a macro that expands into a combination of <code>block</code>,
+  <code>catch</code>, and <code>handler-bind</code>. It extends <code>handler-bind</code> by providing a mechanism to automatically
+  exit the signaling context and execute a specific branch of code based on the condition caught.</p>
+  <p>The implementation details of the expansion are as follows:</p>
+  <ul>
+    <li><strong>Exit Block:</strong> The entire form is wrapped in a <code>block</code> with a unique exit tag to allow the normal
+  path to return immediately upon completion of the protected expression.</li>
+    <li><strong>Dynamic Setup:</strong> A unique dynamic tag is created for the <code>catch</code> frame. Local variables are
+  established to store the captured condition and a unique ID identifying which clause was triggered.</li>
+    <li><strong>The Binding:</strong> A <code>handler-bind</code> is generated where each handler function is a closure that, when
+  called:
+      <ol>
+        <li>Saves the signaled condition into the local <code>condition-var</code>.</li>
+        <li>Sets the <code>id-var</code> to a unique GENSYM representing that specific clause.</li>
+        <li>Performs a <code>throw</code> to the dynamic tag.</li>
+      </ol>
+    </li>
+    <li><strong>The Catch and Dispatch:</strong> A <code>catch</code> block surrounds the protected expression. If a handler performs
+  the <code>throw</code>, the <code>catch</code> returns, and a <code>cond</code> statement (the dispatcher) checks the
+  <code>id-var</code>. It then executes the body of the matching <code>handler-case</code> clause with the condition variable bound
+  to the clause's parameter.</li>
+  </ul>

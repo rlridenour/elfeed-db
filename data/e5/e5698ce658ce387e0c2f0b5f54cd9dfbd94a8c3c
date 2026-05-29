@@ -1,0 +1,468 @@
+
+<p class="wp-block-paragraph">Do you feel that Linux is sometimes too loud?<br>Systemd. Timers. Kernel updates.<br>Centralized systems are risky. Cloud are computers you don&#8217;t own.</p>
+
+
+
+<p class="wp-block-paragraph">Do you want to avoid the Big Tech pipelines?<br>Set up your own private XMPP chat system over Tor on FreeBSD.</p>
+
+
+
+<span id="more-9112"></span>
+
+
+
+<h3 class="wp-block-heading">Mission Plan</h3>
+
+
+
+<ol class="wp-block-list">
+<li>Prosody XMPP server</li>
+
+
+
+<li>SQLite backend</li>
+
+
+
+<li><strong>Tor-only</strong> access</li>
+
+
+
+<li>Group chats (MUC)</li>
+
+
+
+<li>Web-based invite system (admin-only)</li>
+
+
+
+<li>Web-based GUI (ConverseJS)</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Prerequisites</h3>
+
+
+
+<p class="wp-block-paragraph">Update your FreeBSD and its packages.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">freebsd-update fetch install</div><div class="cm-line">pkg update</div><div class="cm-line">pkg upgrade</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Install the prerequisites.</p>
+
+
+
+<h4 class="wp-block-heading">Tor</h4>
+
+
+
+<p class="wp-block-paragraph">Install Tor.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">pkg install tor</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Enable the service.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc tor_enable=&quot;YES&quot;</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Edit the&nbsp;<code>torrc</code>&nbsp;configuration file (<code>/usr/local/etc/tor/torrc</code>).</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">HiddenServiceDir /var/db/tor/my_hidden_service/ # hidden service base dir</div><div class="cm-line">HiddenServicePort 5222 127.0.0.1:5222           # XMPP client&apos;s access</div><div class="cm-line">HiddenServicePort 80   127.0.0.1:5280           # ConverseJS http access</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Restart the Tor service.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">service tor restart</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Check and&nbsp;<strong>note</strong>&nbsp;your .onion domain name.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">cat /var/db/tor/my_hidden_service/hostname</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">SQLite</h4>
+
+
+
+<p class="wp-block-paragraph">Install SQLite.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">pkg install sqlite3</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">LuaDBI</h4>
+
+
+
+<p class="wp-block-paragraph">The LuaDBI package doesn&#8217;t support SQLite by default.<br>You can reconfigure and compile it from ports.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">cd /usr/ports/databases/luadbi</div><div class="cm-line">make config</div><div class="cm-line">make package</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">The package will appear in&nbsp;<code>work-lua54/pkg/lua54-luadbi-${version}.pkg</code>.</p>
+
+
+
+<p class="wp-block-paragraph">Install it with:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">pkg install ./lua54-luadbi-${version}.pkg</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Lock the package, so&nbsp;<code>pkg</code>&nbsp;will not overwrite it.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">pkg lock lua54-luadbi</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Prosody</h3>
+
+
+
+<p class="wp-block-paragraph">Every dependency is met.<br>Now you can install and configure the Prosody XMPP server.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">pkg install prosody prosody-modules</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">The main configuration is in&nbsp;<code>/etc/prosody/prosody.cfg.lua</code>.</p>
+
+
+
+<p class="wp-block-paragraph">Set the&nbsp;<strong>admin</strong>&nbsp;user(s).</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">admins = { &quot;youruser@yoursite.onion&quot; }</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Bind Prosody to local only.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">interfaces = { &quot;127.0.0.1&quot; }</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph"><strong>Uncomment</strong>&nbsp;the following configurations:</p>
+
+
+
+<ol class="wp-block-list">
+<li><code>storage = "sql"</code></li>
+
+
+
+<li><code>sql = { driver = "SQLite3", database = "prosody.sqlite" }</code></li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Scroll down to the&nbsp;<code>VirtualHost</code>&nbsp;configuration. Add your .onion virtual host.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">VirtualHost &quot;yoursite.onion&quot;</div><div class="cm-line"></div><div class="cm-line">ssl = {</div><div class="cm-line">    key = &quot;/var/lib/prosody/yoursite.onion.key&quot;;</div><div class="cm-line">    certificate = &quot;/var/lib/prosody/yoursite.onion.crt&quot;;</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line">authentication = &quot;internal_hashed&quot;</div><div class="cm-line">c2s_require_encryption = true</div><div class="cm-line">consider_websocket_secure = true</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You can comment out the&nbsp;<code>localhost</code>&nbsp;VirtualHost in the configuration.<br>You have to use an&nbsp;<strong>Nginx reverse proxy</strong>&nbsp;if you require HTTPS for ConverseJS.</p>
+
+
+
+<p class="wp-block-paragraph">Enable and start Prosody with this configuration and generate its certificates.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc prosody_enable=&quot;YES&quot;</div><div class="cm-line">service prosody start</div><div class="cm-line">prosodyctl cert generate yoursite.onion</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Multi User Chat (MUC)</h3>
+
+
+
+<p class="wp-block-paragraph">The MUC configuration looks like this:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">-- MUC</div><div class="cm-line">Component &quot;muc.yoursite.onion&quot; &quot;muc&quot;</div><div class="cm-line">    modules_enabled = { &quot;muc_mam&quot; }</div><div class="cm-line">    restrict_room_creation = true</div><div class="cm-line">    muc_room_default_public = false</div><div class="cm-line">    muc_room_default_members_only = true</div><div class="cm-line">    muc_room_default_persistent = true</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Only admins can create group chats.<br>The rooms are not public (searchable).<br>Only registered users can be invited to the MUC rooms.<br>The rooms remain on the server even if they&#8217;re empty.</p>
+
+
+
+<h3 class="wp-block-heading">Invite System</h3>
+
+
+
+<p class="wp-block-paragraph">The web-based invite system is safer than open registration.<br>It&#8217;s more comfortable than manual user creation.</p>
+
+
+
+<p class="wp-block-paragraph">Enable and add the necessary modules:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">modules_enabled = {</div><div class="cm-line">  -- all other modules above</div><div class="cm-line">  &quot;register&quot;;</div><div class="cm-line">  &quot;invites&quot;;</div><div class="cm-line">  &quot;invites_register&quot;;</div><div class="cm-line">  &quot;invites_page&quot;;</div><div class="cm-line">  &quot;invites_register_web&quot;;</div><div class="cm-line">}</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Configure the system to handle invitations:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">allow_registration = true</div><div class="cm-line">registration_invite_only = true</div><div class="cm-line">invite_expiry = 86400 * 7 -- 7 days</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Gajim generates invite links in&nbsp;<code>Account / Execute command / Create new account invite</code>.<br><strong>Only admins can generate invites.</strong></p>
+
+
+
+<h3 class="wp-block-heading">ConverseJS Web Chat</h3>
+
+
+
+<p class="wp-block-paragraph">A web GUI can help to onboard new users faster.<br>ConverseJS is a small XMPP web client.</p>
+
+
+
+<p class="wp-block-paragraph"><code>mod_conversejs</code>&nbsp;is part of the module stack on FreeBSD.<br>You don&#8217;t have to install it separately.</p>
+
+
+
+<p class="wp-block-paragraph">Enable the module in the Prosody configuration.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">modules_enabled = {</div><div class="cm-line">  -- all other modules above</div><div class="cm-line">  &quot;conversejs&quot;;</div><div class="cm-line">}</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Configure ConverseJS to use OMEMO by default.</p>
+
+
+
+<pre class="wp-block-code"><code>conversejs_options = {
+    omemo_default = true;
+}
+
+conversejs_tags = {
+    &#091;&#091;<a href="https://cdn.conversejs.org/3rdparty/libsignal-protocol.min.js">https://cdn.conversejs.org/3rdparty/libsignal-protocol.min.js</a>]];
+}
+
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Restart Prosody and monitor the logs.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">service prosody restart</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">The web chat is accessible on&nbsp;<a href="http://yoursite.onion/conversejs">http://yoursite.onion/conversejs</a>.</p>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">You did not build a messaging app.<br>You assembled a small communication environment that does not depend on external platforms.</p>
+
+
+
+<ul class="wp-block-list">
+<li>No cloud provider.</li>
+
+
+
+<li>No algorithm deciding what is visible.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Just a server, a protocol, and a controlled access path through Tor.</p>
+
+
+
+<p class="wp-block-paragraph">But this system is not &#8220;invisible&#8221;.<br>It is not magic.<br>It reduces exposure, it does not erase it.</p>
+
+
+
+<p class="wp-block-paragraph">Tor hides location. XMPP structures communication. FreeBSD isolates execution.<br>Together they form a narrower attack surface, not a shield.</p>
+
+
+
+<p class="wp-block-paragraph">You still control users. You still manage keys. You still define trust manually.</p>
+
+
+
+<p class="wp-block-paragraph">That is the real shift.</p>
+
+
+
+<p class="wp-block-paragraph">Most systems remove responsibility from the operator. This one returns it.</p>
+
+
+
+<p class="wp-block-paragraph">If you run this setup, you are no longer just a user of communication tools.<br>You are the boundary.</p>

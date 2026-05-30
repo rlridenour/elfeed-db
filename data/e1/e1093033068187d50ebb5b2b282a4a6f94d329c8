@@ -1,0 +1,65 @@
+<h3>Implementation of SIGNAL and ERROR in CLRHack</h3>
+
+  <p>In CLRHack, the condition signaling system is implemented in the <code>Lisp.HandlerControl</code> class within the
+  <code>LispBase</code> library. It leverages .NET's <code>[ThreadStatic]</code> storage to maintain a per-thread dynamic stack of
+  active condition handlers.</p>
+
+  <h4>SIGNAL Implementation</h4>
+  <p>The <code>Signal(object condition)</code> method performs the following logic:</p>
+  <ol>
+    <li><strong>Retrieval:</strong> It fetches the <code>activeHandlers</code> list for the current thread. This list is a chain of
+  <code>[LispBase]Lisp.Handler</code> objects maintained by <code>handler-bind</code>.</li>
+    <li><strong>Iteration:</strong> It iterates linearly through the list from the most recently bound handler to the oldest.</li>
+    <li><strong>Type Matching:</strong> For each handler, it calls <code>IsType(condition, handler.ConditionType)</code>.
+      <ul>
+        <li>If the condition is a <strong>symbol</strong>, it checks for symbol equality (supporting simple symbol-based
+  conditions).</li>
+        <li>If the condition is a <strong>.NET object</strong>, it checks if the handler's type is assignable from the condition's
+  runtime type (supporting interop with system exceptions).</li>
+        <li>It treats the symbols <code>T</code> or <code>EXCEPTION</code> as catch-all types.</li>
+      </ul>
+    </li>
+    <li><strong>Handler Invocation:</strong> If a match is found:
+      <ul>
+        <li><strong>Recursive Signal Protection:</strong> Before calling the handler function, the current handler list is
+  temporarily shadowed. <code>activeHandlers</code> is set to <code>cell.rest</code> (the handlers bound <em>outside</em> the current
+  one). This ensures that if the handler itself calls <code>signal</code>, it won't trigger itself recursively.</li>
+        <li><strong>Execution:</strong> The handler's <code>Closure</code> is invoked with the condition object as its argument.</li>
+        <li><strong>Restoration:</strong> A <code>finally</code> block ensures the original <code>activeHandlers</code> list is
+  restored if the handler returns normally.</li>
+      </ul>
+    </li>
+  <h4>ERROR Implementation</h4>
+  <p>The <code>Error(object condition)</code> method build upon <code>Signal</code>:</p>
+  <ol>
+    <li><strong>Signaling Pass:</strong> It first invokes <code>Signal(condition)</code>. If a handler performs a non-local exit
+  (e.g., via <code>handler-case</code>), the <code>Error</code> method never returns.</li>
+    <li><strong>Debugger Entry:</strong> If <code>Signal</code> returns normally (meaning all handlers declined), <code>Error</code>
+  calls <code>EnterDebugger(condition)</code>.</li>
+    <li><strong>Interactive Debugging:</strong> The debugger:
+      <ul>
+        <li>Prints the condition and a list of available restarts (retrieved via
+  <code>RestartControl.GetActiveRestarts()</code>).</li>
+        <li>Provides a prompt for the user to select a restart, launch the system-level debugger (Visual Studio/Rider), or
+  abort.</li>
+        <li>If a restart is selected, it is invoked interactively (potentially gathering arguments from the user).</li>
+      </ul>
+    </li>
+    <li><strong>Final Fallback:</strong> If the debugger is exited without invoking a restart, <code>Error</code> throws a C#
+  <code>Exception</code> to ensure that execution does not continue on an invalid path.</li>
+  </ol>
+
+  <h4>Notable Implementation Decisions and Edge Cases</h4>
+  <ul>
+    <li><strong>Handler Shadowing:</strong> The decision to pop the handler list during invocation is critical for maintaining Common
+  Lisp semantics. It prevents infinite loops and ensures that "outer" handlers can handle errors raised within "inner" handlers.</li>
+    <li><strong>Unified Exception Model:</strong> CLRHack attempts to unify Lisp conditions and .NET exceptions. <code>IsType</code>
+  allows Lisp handlers to catch C# exceptions by their class name or Type object.</li>
+    <li><strong>Thread Isolation:</strong> By using <code>[ThreadStatic]</code> for <code>activeHandlers</code>, CLRHack ensures that
+  condition signaling is thread-safe. One thread signaling an error will not interfere with the handler state of another thread.</li>
+    <li><strong>Debugger Capability:</strong> The <code>SYSTEM-DEBUGGER</code> option in <code>EnterDebugger</code> is a bridge to
+  the underlying .NET environment, allowing developers to use professional IDE tools to inspect the state of the Lisp VM when an
+  unhandled error occurs.</li>
+  </ul>
+    
+    <p>signal and error complete the Common Lisp condition system implementation for CLRHack</p>

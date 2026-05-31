@@ -1,0 +1,95 @@
+<h3>Metaobject Protocol (MOP) Implementation in CLRHack</h3>
+
+  <p>The Metaobject Protocol in CLRHack is a high-performance implementation of the Common Lisp Object System (CLOS) integrated into
+  the .NET 8.0 Common Language Runtime (CLR). It provides a complete meta-compilation pipeline that bridges the gap between dynamic
+  Lisp semantics and the static CIL (Common Intermediate Language) execution model.</p>
+
+  <h4>Core Architecture</h4>
+  <p>The MOP is implemented through three primary layers:</p>
+  <ol>
+      <li><strong>The Metaobject Hierarchy (C#):</strong> A set of foundational classes in <code>LispBase</code> representing
+  classes, methods, generic functions, and slot definitions.</li>
+      <li><strong>The Runtime Engine (<code>MopRuntime</code>):</strong> A centralized orchestrator that manages class finalization,
+  method combination, dispatch caching, and instance allocation.</li>
+      <li><strong>The Compiler Bridge (Lisp):</strong> Transformations in <code>ast.lisp</code> that translate high-level CLOS forms
+  (<code>defclass</code>, <code>defmethod</code>) into optimized runtime calls.</li>
+  </ol>
+
+  <h4>Instance Representation</h4>
+  <p>Because the CLR type system is strictly single-inheritance and statically defined, CLRHack decouples Lisp-level inheritance from
+  C# inheritance. All CLOS instances are represented by the <code>StandardObjectInstance</code> class, which contains:</p>
+  <ul>
+      <li>A reference to its <code>ClassMetaobject</code>.</li>
+      <li>A private <code>object[] storage</code> array for instance slots, indexed by locations calculated during class
+  finalization.</li>
+  </ul>
+
+  <h4>The Dispatch Pipeline</h4>
+  <p>Generic function invocation is the most complex part of the implementation. When a generic function is called:</p>
+  <ol>
+      <li><strong>Cache Lookup:</strong> The <code>DiscriminatingFunction</code> first checks a thread-safe
+  <code>dispatchCache</code> using an <code>InvocationCacheKey</code> (a stack-allocated <code>struct</code>) to find a previously
+  computed effective method.</li>
+      <li><strong>Applicability & Precedence:</strong> If the cache misses, the runtime computes all applicable methods and sorts
+  them based on specializer specificity and the Class Precedence List (CPL).</li>
+      <li><strong>Method Combination:</strong> The <code>ComputeEffectiveMethod</code> logic builds a nested execution chain
+  following the <strong>Standard Method Combination</strong> rules:
+          <ul>
+              <li><code>:around</code> methods are called first, with <code>call-next-method</code> progressing to the next around
+  method or the main chain.</li>
+              <li>The main chain executes all <code>:before</code> methods, the primary method, and finally all <code>:after</code>
+  methods in reverse order.</li>
+          </ul>
+      </li>
+      <li><strong>Fast Invocation:</strong> The resulting effective method is compiled into a <code>Func&lt;object[],
+  object&gt;</code> that uses direct delegate invocation to minimize overhead.</li>
+  </ol>
+
+  <h4>Challenges and Solutions</h4>
+
+  <h5>1. Thread-Safe Non-Local Exits (call-next-method)</h5>
+  <p><strong>Challenge:</strong> <code>call-next-method</code> and <code>next-method-p</code> require access to the current
+  invocation's state (the remaining methods and original arguments). Passing this state through every function call would break
+  compatibility with standard Lisp function signatures.</p>
+  <p><strong>Solution:</strong> CLRHack utilizes <code>[ThreadStatic]</code> fields in <code>MopRuntime</code> to store the
+  <code>currentNextMethods</code> and <code>currentArguments</code>. This ensures that even in highly concurrent environments (like a
+  web server), each OS thread has its own isolated invocation context, allowing <code>call-next-method</code> to function correctly
+  without state leakage.</p>
+
+  <h5>2. Forward References and Lazy Finalization</h5>
+  <p><strong>Challenge:</strong> Lisp allows classes to refer to superclasses that haven't been defined yet. The runtime must handle
+  these "zombie" classes without crashing the JIT compiler.</p>
+  <p><strong>Solution:</strong> The system implements a <code>ForwardReferencedClassMetaobject</code>. When a class is defined, it is
+  automatically finalized (computing its CPL and slot layout). If a superclass is missing, a forward reference is created. The
+  <code>EnsureFinalized</code> protocol ensures that inheritance is resolved and slot locations are assigned the moment the class is
+  first instantiated or used in dispatch.</p>
+
+  <h5>3. Performance Overhead of the "MOP Bridge"</h5>
+  <p><strong>Challenge:</strong> A naive implementation of <code>slot-value</code> or generic dispatch using C# reflection or linear
+  searches is orders of magnitude slower than native C# member access.</p>
+  <p><strong>Solution:</strong> Three distinct optimizations were applied:
+      <ul>
+          <li><strong>O(1) Slot Access:</strong> Each <code>ClassMetaobject</code> maintains a <code>SlotDictionary</code>. Slot
+  names are mapped to physical array indices during finalization, allowing <code>slot-value</code> to perform a direct array access
+  after a single dictionary lookup.</li>
+          <li><strong>Compiler Primitives:</strong> The compiler identifies <code>SLOT-VALUE</code> and <code>MAKE-INSTANCE</code>
+  calls and emits direct CIL <code>call</code> instructions to optimized <code>Lisp.MopRuntime</code> methods, bypassing the general
+  <code>Funcall</code> path.</li>
+          <li><strong>Zero-Allocation Cache Hits:</strong> By making <code>InvocationCacheKey</code> a <code>readonly struct</code>
+  and avoiding the cloning of the argument array during cache probes, the hot-path for generic function dispatch generates zero
+  garbage for the .NET Collector.</li>
+      </ul>
+  </p>
+
+  <h5>4. Bootstrapping the COMMON-LISP Package</h5>
+  <p><strong>Challenge:</strong> Core CLOS functions like <code>make-instance</code> must be available as symbols in the
+  <code>COMMON-LISP</code> package before user code runs, but they rely on the MOP runtime being fully initialized.</p>
+  <p><strong>Solution:</strong> A <code>MopRuntime.Initialize()</code> method is injected into the entry point (<code>Main</code>) of
+  every generated assembly. This method interns the necessary symbols and binds them to <code>GenericFunctionClosureAdapter</code>
+  objects, ensuring that the MOP is "alive" before the first line of Lisp code executes.</p>
+
+<hr />
+
+<p>Vibe coding the MOP basically involved feeding chapters 4 and 5 of the <i>Art of the Meta-Object Protocol</i> into the LLM and telling it to make an implementation plan.  It came up with a twenty-step plan to bootstrap CLOS.  I then spent the rest of the day instructing an agent to take on each task of the twenty-step plan in sequential order.  At the end of the day, I had a working MOP</p>
+
+<p>This is the end of my series of posts on CLRHack.</p>

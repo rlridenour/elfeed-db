@@ -1,0 +1,51 @@
+<p>Under the functional programming paradigm, functions should be pure: the same input always produces the same output, with no side effects. But sometimes theory clashes with reality. When you use constants you start to depend on scope. There are variables external to the function. Constants, by definition, don't break purity since they are... constant. The result is predictable. However, we make testing harder, since we have to import them or create mocks, the code starts to be less readable, becomes less portable, and we also add an element of fragility since we can't control their value or the location of those external values.</p>
+<p>An example of the above would be:</p>
+<pre class="highlight"><code class="language-python">TAX = 0.21
+
+def calculate_total(price: float) -&gt; float:
+    return price + (price * TAX)</code></pre>
+<p>What happens if the tax changes between countries? And what if wherever I call <code>calculate_total</code> already has its own <code>TAX</code>?</p>
+<p>Let me give you some solutions.</p>
+<h2 id="blog-single-content__title--dependency-injection-with-functoolspartial" class="blog-single__content-title">Dependency injection with functools.partial</h2>
+<p>You can use partial application with <code>functools.partial</code>. The base functions receive everything as parameters and then we "fix" the constants to create the final versions.</p>
+<pre class="highlight"><code class="language-python">from functools import partial
+
+
+def calculate_total(tax: float, price: float) -&gt; float:
+    return price + (price * tax)
+
+
+def apply_discount(discount: float, price: float) -&gt; float:
+    return price - discount
+
+
+TAX = 0.21
+BASE_DISCOUNT = 5.0
+
+calculate_total_spain = partial(calculate_total, TAX)
+apply_fixed_discount = partial(apply_discount, BASE_DISCOUNT)
+
+print(calculate_total_spain(100))  # 121.0</code></pre>
+<p>Here we gain maximum purity. The base functions are one hundred percent reusable, easy to test (you just pass different configurations as arguments) and isolated from the environment.</p>
+<p>The cost is some visual complexity if your team isn't used to <code>partial</code>.</p>
+<h2 id="blog-single-content__title--closures" class="blog-single__content-title">Closures</h2>
+<p>Another way is to encapsulate the functions inside a constructor function, a kind of <em>factory</em>.</p>
+<pre class="highlight"><code class="language-python">def create_pricing_system(tax: float, discount: float):
+
+    def calculate_total(price: float) -&gt; float:
+        return price + (price * tax)
+
+    def apply_discount(price: float) -&gt; float:
+        return price - discount
+
+    def process_invoice(price: float) -&gt; float:
+        return apply_discount(calculate_total(price))
+
+    return calculate_total, apply_discount, process_invoice
+
+
+calculate, discount_fn, process = create_pricing_system(0.21, 5.0)</code></pre>
+<p>The constants are trapped in the <em>closure</em>, and we logically group the functions that share context without resorting to classes, thus avoiding mutable state.</p>
+<p>The downside is that it can make reading harder if the inner functions grow too large.</p>
+<h2 id="blog-single-content__title--conclusions" class="blog-single__content-title">Conclusions</h2>
+<p>Python is multiparadigm, so you're not forced to marry a single approach. The important thing is to be aware of the trade-off: the more a function looks outward, the easier it is to write, but the harder it is to test in isolation.</p>

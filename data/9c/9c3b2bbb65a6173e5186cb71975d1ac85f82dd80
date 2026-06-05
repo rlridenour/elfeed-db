@@ -1,0 +1,106 @@
+<p>I'd like to show you how to connect a <a href="https://meshtastic.org/">Meshtastic</a> device over USB directly to Emacs using a package I built for myself called <a href="https://git.andros.dev/andros/meshtastic.el">meshtastic.el</a>.</p>
+<h2 id="blog-single-content__title--how-it-works" class="blog-single__content-title">How it works</h2>
+<p><code>meshtastic.el</code> spawns a Python subprocess that talks to the device over serial. Messages arrive as JSON lines at the Emacs process filter.</p>
+<pre class="mermaid">flowchart LR
+    D["📻 Meshtastic\ndevice"]:::device
+    B["🐍 meshtastic-bridge.py\n(Python subprocess)"]:::bridge
+    E["meshtastic.el\n(Emacs)"]:::emacs
+
+    D <-->|"USB serial"| B
+    B <-->|"JSON\nstdin / stdout"| E
+
+    classDef device fill:#37474F,stroke:#263238,stroke-width:2px,color:#fff
+    classDef bridge fill:#00897B,stroke:#00695C,stroke-width:2px,color:#fff
+    classDef emacs fill:#7B1FA2,stroke:#4A148C,stroke-width:2px,color:#fff</pre>
+<p>They are shown in ERC-style chat buffers.</p>
+<h2 id="blog-single-content__title--installation" class="blog-single__content-title">Installation</h2>
+<p>The first thing you need to do is install the Meshtastic Python library.</p>
+<pre class="highlight"><code class="language-sh">pip install meshtastic</code></pre>
+<p>Next, install my package. It's available on <a href="https://melpa.org/#/meshtastic">MELPA</a>.</p>
+<pre class="highlight"><code>M-x package-install RET meshtastic RET</code></pre>
+<p>Otherwise you can use use-package and :vc, which are native to Emacs.</p>
+<pre class="highlight"><code class="language-elisp">(use-package meshtastic
+  :vc (:url "https://git.andros.dev/andros/meshtastic.el"
+       :rev :newest))</code></pre>
+<h2 id="blog-single-content__title--configuration" class="blog-single__content-title">Configuration</h2>
+<h3 id="blog-single-content__title--linux" class="blog-single__content-title">Linux</h3>
+<p>Find the port with:</p>
+<pre class="highlight"><code class="language-sh">ls /dev/ttyUSB* /dev/ttyACM*</code></pre>
+<pre class="highlight"><code class="language-elisp">(setq meshtastic-serial-port "/dev/ttyUSB0")</code></pre>
+<p>If you get a permission error, add your user to the <code>dialout</code> group:</p>
+<pre class="highlight"><code class="language-sh">sudo usermod -aG dialout $USER</code></pre>
+<h3 id="blog-single-content__title--macos" class="blog-single__content-title">macOS</h3>
+<p>Ports on macOS use the <code>cu.usbserial-*</code> scheme:</p>
+<pre class="highlight"><code class="language-sh">ls /dev/cu.usbserial-*</code></pre>
+<pre class="highlight"><code class="language-elisp">(setq meshtastic-serial-port "/dev/cu.usbserial-0001")</code></pre>
+<h3 id="blog-single-content__title--windows" class="blog-single__content-title">Windows</h3>
+<pre class="highlight"><code class="language-elisp">(setq meshtastic-serial-port "COM3")
+(setq meshtastic-python-executable "python")</code></pre>
+<p>The port number appears in Device Manager, under "Ports (COM &amp; LPT)".</p>
+<h2 id="blog-single-content__title--usage" class="blog-single__content-title">Usage</h2>
+<p>With everything ready, you can run <code>M-x meshtastic</code>. The bridge starts automatically and the welcome screen shows the connection status:</p>
+<pre class="highlight"><code>  Meshtastic
+  ======================================
+
+  Connection
+  Port:      /dev/ttyUSB0
+  Status:    Connected
+  Node:      Hilltop Relay (!a1b2c3d4)
+
+  Statistics
+  Nodes:     12
+  Channels:  2
+
+  --------------------------------------
+
+  [c] Channels          [n] Nodes
+  [g] Refresh           [q] Quit
+
+  --------------------------------------</code></pre>
+<p>While connecting, the status shows <code>Connecting...</code>. Once the connection is established it changes to <code>Connected</code> and the node and channel statistics appear without needing to refresh manually.</p>
+<h2 id="blog-single-content__title--channel-list" class="blog-single__content-title">Channel list</h2>
+<p>Press <code>c</code> to see the available channels:</p>
+<pre class="highlight"><code>  ID  Name          Role
+  0   LongFast      Primary
+  1   HikingGroup   Secondary</code></pre>
+<p>Press <code>RET</code> on any channel to open its chat, or use the <code>0</code>-<code>7</code> keys directly.</p>
+<h2 id="blog-single-content__title--node-list" class="blog-single__content-title">Node list</h2>
+<p>Press <code>n</code> to see all the nodes on the mesh:</p>
+<pre class="highlight"><code>  Hops  Name                           Node ID         Last heard  Battery
+  0     🟢 Hilltop Relay               !a1b2c3d4       now         85%
+  1     🟢 Solar Node 7                !d4e5f6a7       12m         -
+  2     🟢 BaseStation K9              !b8c9d0e1       5m          62%
+  3     ⚫ Mountain Peak               !f2a3b4c5       1h          -</code></pre>
+<p>The list is sorted by hops. The 🟢 indicator means the node has been heard in the last 15 minutes. The <strong>Battery</strong> column shows the battery level when the node has sent telemetry; <code>-</code> if there's no data yet.</p>
+<p>The list updates automatically when nodes exchange information on the mesh, without needing to press <code>g</code>.</p>
+<h2 id="blog-single-content__title--chat" class="blog-single__content-title">Chat</h2>
+<p>Press <code>RET</code> on a channel or node to open the chat buffer:</p>
+<pre class="highlight"><code>[08:15] &lt;Hilltop Relay&gt; Good morning mesh!
+[08:20] &lt;BaseStation K9&gt; Morning! Signal is great today
+[08:21] &lt;Solar Node 7&gt; Copy that, 3 hops from here
+[09:05] &lt;BaseStation K9&gt; Confirmed ✓
+#LongFast&gt; _</code></pre>
+<p>Type your message after the prompt and press <code>RET</code> to send. Your own messages show <code>·</code> while they wait for confirmation from the bridge and change to <code>✓</code> when the bridge confirms the send.</p>
+<p>Navigate the input history with <code>M-p</code> and <code>M-n</code>.</p>
+<h2 id="blog-single-content__title--traceroute" class="blog-single__content-title">Traceroute</h2>
+<p>Press <code>t</code> on any node in the list to send a traceroute. A dedicated log buffer opens:</p>
+<pre class="highlight"><code>[08:30:01] → Solar Node 7 (!d4e5f6a7)
+  ✓ → Hilltop Relay → BaseStation K9 (8.0dB) → Solar Node 7
+  ← Solar Node 7 → BaseStation K9 (7.0dB) → Hilltop Relay
+
+[08:31:15] → Mountain Peak (!f2a3b4c5)
+  ⧖ Pending...</code></pre>
+<p>Each entry shows the forward route with the SNR values of each hop, and the return route. While waiting for the response, <code>⧖ Pending...</code> appears and updates as soon as it arrives.</p>
+<p>You can also use <code>M-x meshtastic-traceroute</code> from a DM buffer (it uses the chat's node) or from any other buffer (it asks for the Node ID).</p>
+<h2 id="blog-single-content__title--send-position" class="blog-single__content-title">Send position</h2>
+<p><code>M-x meshtastic-send-position</code> sends your GPS coordinates to the selected node. It uses <code>calendar-latitude</code> and <code>calendar-longitude</code> if they are configured in Emacs; if not, it falls back to the device's own GPS; and if there's none either, it shows an error.</p>
+<p>It works from the node list, from a DM, or from any buffer (in which case it asks for the Node ID).</p>
+<h2 id="blog-single-content__title--limitations" class="blog-single__content-title">Limitations</h2>
+<p>We shouldn't equate a modern messaging app with a LoRa conversation. Its limitations are structural and you have to learn to live with them. Emacs can't get around them.</p>
+<ul>
+<li><strong>No history on startup</strong>: the bridge has no database. Only the messages received since it started are available.</li>
+<li><strong>Limited bandwidth</strong>: LoRa is a long-range but low-speed radio. Messages must be short.</li>
+<li><strong>One device per instance</strong>: each Emacs instance connects to a single serial port.</li>
+<li><strong>Messages can be lost</strong>: nobody guarantees that messages reach the recipient.</li>
+</ul>
+<p>But what has no limit is the fun and all the people you can get to meet in your area.</p>

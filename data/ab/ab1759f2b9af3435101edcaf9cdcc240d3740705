@@ -1,0 +1,384 @@
+
+<p class="wp-block-paragraph">The classic system administration changed a lot in a decade.<br>Virtualization and container technology went through a remarkable improvement.</p>
+
+
+
+<p class="wp-block-paragraph">They have a stable place in the systems:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Virtual machines run almost isolated from the host system.</li>
+
+
+
+<li>Containers sit on the top of the same kernel bringing a lightweight separation.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph"><a href="https://docs.freebsd.org/en/books/handbook/jails/">FreeBSD Jails</a>&nbsp;don&#8217;t compete with containers.<br>They don&#8217;t substitute virtual machines.<br>Jails just fill a gap.</p>
+
+
+
+<span id="more-9126"></span>
+
+
+
+<h3 class="wp-block-heading">Configuration</h3>
+
+
+
+<p class="wp-block-paragraph">You learn to set up lightweight&nbsp;<em>&#8220;thin</em>&#8221; jails here with:</p>
+
+
+
+<ul class="wp-block-list">
+<li>ZFS shanpshots</li>
+
+
+
+<li>VNET networking</li>
+
+
+
+<li>Resource limits</li>
+</ul>
+
+
+
+<h4 class="wp-block-heading">Host System Networking</h4>
+
+
+
+<p class="wp-block-paragraph">For a VNET configuration where every jail has it&#8217;s own network stack and IP,<br>bring up a bridge device on the host.</p>
+
+
+
+<p class="wp-block-paragraph">In&nbsp;<strong>this example</strong>&nbsp;the</p>
+
+
+
+<ul class="wp-block-list">
+<li>host network device is called&nbsp;<code>em0</code></li>
+
+
+
+<li>bridge device becomes&nbsp;<code>bridge0</code></li>
+
+
+
+<li>host IP address is&nbsp;<code>192.168.1.5</code></li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Change them according to your system.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc ifconfig_em0=&quot;up&quot;</div><div class="cm-line">sysrc cloned_interfaces=&quot;bridge0&quot;</div><div class="cm-line">sysrc ifconfig_bridge0=&quot;inet 192.168.1.5/24 addm em0 up&quot;</div><div class="cm-line">sysrc defaultrouter=&quot;192.168.1.1&quot;</div><div class="cm-line">sysrc gateway_enable=&quot;YES&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Enable loading the epairs in the&nbsp;<code>/boot/loader.conf</code>&nbsp;file.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">if_epair_load=&quot;YES&quot;</div><div class="cm-line">if_bridge_load=&quot;YES&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Restart the networking after the change.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">service netif restart &amp;&amp; service routing restart</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Warning: you may lose your connection.</p>
+
+
+
+<p class="wp-block-paragraph">Bridge0 must come up live with the configured IP address.</p>
+
+
+
+<h4 class="wp-block-heading">Host System Jails Configuration</h4>
+
+
+
+<p class="wp-block-paragraph">Enable running jails in the&nbsp;<code>rc.conf</code>.<br>You can do it with the&nbsp;<code>sysrc</code>&nbsp;command.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc jail_enable=&quot;YES&quot;</div><div class="cm-line">sysrc jail_parallel_start=&quot;YES&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create and set up the jails ZFS dataset.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">zfs create zroot/jails</div><div class="cm-line">zfs set mountpoint=/usr/local/jails compression=on zroot/jails</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create the ZFS dataset for the future jails.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">zfs create zroot/jails/containers</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create the template dataset.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">zfs create -p zroot/jails/templates/15.0-RELEASE</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Download and extract a FreeBSD base system into it.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">cd /usr/local/jails/templates/15.0-RELEASE/</div><div class="cm-line">fetch https://download.freebsd.org/ftp/releases/amd64/amd64/15.0-RELEASE/base.txz</div><div class="cm-line">tar -xf base.txz --unlink</div><div class="cm-line">cd</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Set up the networking of the template, and make sure it&#8217;s updated.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">cp /etc/resolv.conf /usr/local/jails/templates/15.0-RELEASE/etc/resolv.conf</div><div class="cm-line">cp /etc/localtime /usr/local/jails/templates/15.0-RELEASE/etc/localtime</div><div class="cm-line">freebsd-update -b /usr/local/jails/templates/15.0-RELEASE/ fetch install</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a new snapshot of the template.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">zfs snapshot zroot/jails/templates/15.0-RELEASE@base</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Create A Jail</h3>
+
+
+
+<p class="wp-block-paragraph">Clone the template snapshot with ZFS. I use the&nbsp;<code>test-jail-name</code>&nbsp;as a jail name.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">zfs clone zroot/jails/templates/15.0-RELEASE@base zroot/jails/containers/test-jail-name</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Define the jail&#8217;s configuration in&nbsp;<code>/etc/jail.conf.d/test-jail-name.conf</code>.</p>
+
+
+
+<p class="wp-block-paragraph">Warning: in this manual setup the first jail&#8217;s epair is&nbsp;<code>epair0</code>.<br>Additional jails must have&nbsp;<strong>unique epair numbers</strong>, like&nbsp;<code>epair1</code>, then&nbsp;<code>epair2</code>.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">test-jail-name {</div><div class="cm-line">  host.hostname = &quot;${name}&quot;;</div><div class="cm-line">  path = &quot;/usr/local/jails/containers/${name}&quot;;</div><div class="cm-line"></div><div class="cm-line">  exec.start = &quot;/bin/sh /etc/rc&quot;;</div><div class="cm-line">  exec.stop = &quot;/bin/sh /etc/rc.shutdown&quot;;</div><div class="cm-line">  exec.consolelog = &quot;/var/log/jail_console_${name}.log&quot;;</div><div class="cm-line">  exec.clean;</div><div class="cm-line">  persist;</div><div class="cm-line">  mount.devfs;</div><div class="cm-line"></div><div class="cm-line">  allow.raw_sockets; # Required for ping/icmp inside VNET</div><div class="cm-line"></div><div class="cm-line">  vnet;</div><div class="cm-line">  # Define the epair pair</div><div class="cm-line">  # epair0a stays on host, epair0b goes to jail</div><div class="cm-line">  vnet.interface = &quot;epair0b&quot;;</div><div class="cm-line"></div><div class="cm-line">  # Hook for interface creation/destruction</div><div class="cm-line">  exec.prestart  = &quot;ifconfig epair0 create up&quot;;</div><div class="cm-line">  exec.prestart += &quot;ifconfig bridge0 addm epair0a&quot;;</div><div class="cm-line">  exec.poststop  = &quot;ifconfig bridge0 deletem epair0a&quot;;</div><div class="cm-line">  exec.poststop += &quot;ifconfig epair0a destroy&quot;;</div><div class="cm-line">}</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph"><code>epair0a</code>&nbsp;is on the host side,&nbsp;<code>epair0b</code>&nbsp;is in the jail.</p>
+
+
+
+<p class="wp-block-paragraph">Set up the networking in the jail.</p>
+
+
+
+<p class="wp-block-paragraph">Edit the&nbsp;<code>rc.conf</code>&nbsp;inside the jail (<code>vim /usr/local/jails/containers/test-jail-name /etc/rc.conf/</code>):</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">ifconfig_epair0b=&quot;inet 192.168.1.6 netmask 255.255.255.0&quot;</div><div class="cm-line">defaultrouter=&quot;192.168.1.1&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Make sure you set the proper epair number.</p>
+
+
+
+<h3 class="wp-block-heading">Start The Jail</h3>
+
+
+
+<p class="wp-block-paragraph">Start up the jail with the&nbsp;<code>service</code>&nbsp;command:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">service jail start test-jail-name</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">If you want to start it automatically at host boot add the jail to the&nbsp;<code>rc.conf</code></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc jail_list=&quot;test-jail-name&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Jail Resource Limits</h3>
+
+
+
+<p class="wp-block-paragraph">In&nbsp;<code>/boot/loader.conf</code>&nbsp;enable to set the resource limits:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">kern.racct.enable=1</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Then update the&nbsp;<code>rc.conf</code>&nbsp;too:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sysrc racct_enable=&quot;YES&quot;</div><div class="cm-line">sysrc rctl_enable=&quot;YES&quot;</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Reboot the machine.</p>
+
+
+
+<p class="wp-block-paragraph">Format&nbsp;<code>rctl -a jail:&lt;jailname&gt;:resource:action=amount/percentage</code></p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">rctl -a jail:test-jail-name:memoryuse:deny=2G</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">FreeBSD and the jails are not better or worse than Linux and containers.<br>It&#8217;s a different architecture.</p>
+
+
+
+<p class="wp-block-paragraph">Jails are fast and lightweight &#8211; still they behave like OS virtualization.</p>
+
+
+
+<p class="wp-block-paragraph">Operators can choose the best system for the task.</p>

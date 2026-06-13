@@ -1,0 +1,104 @@
+
+         
+         <p>When we call <code class="language-plaintext highlighter-rouge">dired</code> from Lisp, we can pass it a list of files instead
+of a directory. This gives us a fully fledged Dired buffer for those
+files. My most common use-case is to produce flat listing, so that I
+do not have to go searching in exactly which directory some file is
+(e.g. in the Downloads folder there is some zip archive that I
+downloaded with a bunch of files in a complex structure).</p>
+
+<h2>A flat Dired listing</h2>
+
+<p>For a while now I have been using my own command to create a Dired
+buffer from the current directory (which can always be updated on
+demand with <code class="language-plaintext highlighter-rouge">M-x cd</code>). It is <code class="language-plaintext highlighter-rouge">prot-dired-search-flat-list</code>. Here is
+the code:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">prot-dired-regexp-history</span> <span class="no">nil</span>
+  <span class="s">"Minibuffer history of `prot-dired-regexp-prompt'."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired-regexp-prompt</span> <span class="p">()</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">default</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">prot-dired-regexp-history</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">read-regexp</span>
+     <span class="p">(</span><span class="nv">format-prompt</span> <span class="s">"Files matching REGEXP"</span> <span class="nv">default</span><span class="p">)</span>
+     <span class="nv">default</span> <span class="ss">'prot-dired-regexp-history</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired--get-files</span> <span class="p">(</span><span class="nv">regexp</span><span class="p">)</span>
+  <span class="s">"Return files matching REGEXP, recursively from `default-directory'."</span>
+  <span class="p">(</span><span class="nv">directory-files-recursively</span> <span class="nv">default-directory</span> <span class="nv">regexp</span> <span class="no">nil</span><span class="p">))</span>
+
+<span class="c1">;;;###autoload</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired-search-flat-list</span> <span class="p">(</span><span class="nv">regexp</span><span class="p">)</span>
+  <span class="s">"Return a Dired buffer for files matching REGEXP.
+Perform the search recursively from the current directory."</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">prot-dired-regexp-prompt</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">if-let*</span> <span class="p">((</span><span class="nv">files</span> <span class="p">(</span><span class="nv">prot-dired--get-files</span> <span class="nv">regexp</span><span class="p">))</span>
+            <span class="p">(</span><span class="nv">relative-paths</span> <span class="p">(</span><span class="nb">mapcar</span> <span class="nf">#'</span><span class="nv">file-relative-name</span> <span class="nv">files</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">dired</span> <span class="p">(</span><span class="nb">cons</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"prot-flat-dired for `%s'"</span> <span class="nv">regexp</span><span class="p">)</span> <span class="nv">relative-paths</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">error</span> <span class="s">"No files matching `%s'"</span> <span class="nv">regexp</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>I could modify <code class="language-plaintext highlighter-rouge">prot-dired-search-flat-list</code> to also prompt for a
+directory, though I optimise for the common workflow of operating from
+where I am (and I generally do not like overloading the <code class="language-plaintext highlighter-rouge">C-u</code> with
+special cases that I will never remember—a new command with a name I
+can search for is better).</p>
+
+<h2>Flat listing limited to last modified since DAYS</h2>
+
+<p>Yesterday I had the need to browse a massive directory, but only
+wanted to get a couple of files out of it. I realised that I had to
+filter my last modified, so I extended my above use-case with the new
+command <code class="language-plaintext highlighter-rouge">prot-dired-search-flat-list-since-days</code>. Here is what I came
+up with:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defvar</span> <span class="nv">prot-dired-days-prompt-history</span> <span class="no">nil</span>
+  <span class="s">"Minibuffer history for `prot-dired-days-prompt'."</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired-days-prompt</span> <span class="p">()</span>
+  <span class="s">"Prompt for days and return them as a number."</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nb">first</span> <span class="p">(</span><span class="nb">car</span> <span class="nv">prot-dired-days-prompt-history</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">default</span> <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nb">stringp</span> <span class="nb">first</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nv">string-to-number</span> <span class="nb">first</span><span class="p">))))</span>
+    <span class="p">(</span><span class="nv">read-number</span> <span class="s">"Number of days: "</span> <span class="nv">default</span> <span class="ss">'prot-dired-days-prompt-history</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired--get-last-modified</span> <span class="p">(</span><span class="nv">files</span> <span class="nv">days</span><span class="p">)</span>
+  <span class="s">"Return list of FILES last modified since DAYS."</span>
+  <span class="p">(</span><span class="nv">seq-filter</span>
+   <span class="p">(</span><span class="k">lambda</span> <span class="p">(</span><span class="nv">file</span><span class="p">)</span>
+     <span class="p">(</span><span class="nv">and-let*</span> <span class="p">((</span><span class="nv">attributes</span> <span class="p">(</span><span class="nv">file-attributes</span> <span class="nv">file</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">last-modified</span> <span class="p">(</span><span class="nb">nth</span> <span class="mi">5</span> <span class="nv">attributes</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">last-modified-seconds</span> <span class="p">(</span><span class="nv">time-to-seconds</span> <span class="nv">last-modified</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">current-time</span> <span class="p">(</span><span class="nv">current-time</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">current-time-seconds</span> <span class="p">(</span><span class="nv">time-to-seconds</span> <span class="nv">current-time</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">delta-seconds</span> <span class="p">(</span><span class="nb">*</span> <span class="nv">days</span> <span class="mi">24</span> <span class="mi">60</span> <span class="mi">60</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">oldest-seconds</span> <span class="p">(</span><span class="nb">-</span> <span class="nv">current-time-seconds</span> <span class="nv">delta-seconds</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">_</span> <span class="p">(</span><span class="nb">&gt;=</span> <span class="nv">last-modified-seconds</span> <span class="nv">oldest-seconds</span><span class="p">)))))</span>
+   <span class="nv">files</span><span class="p">))</span>
+
+<span class="c1">;;;###autoload</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">prot-dired-search-flat-list-since-days</span> <span class="p">(</span><span class="nv">regexp</span> <span class="nv">days</span><span class="p">)</span>
+  <span class="s">"Return Dired buffer with files matching REGEXP up to DAYS since last modification.
+Perform the search recursively from the current directory."</span>
+  <span class="p">(</span><span class="nv">interactive</span>
+   <span class="p">(</span><span class="nb">list</span>
+    <span class="p">(</span><span class="nv">prot-dired-regexp-prompt</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">prot-dired-days-prompt</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">if-let*</span> <span class="p">((</span><span class="nv">files</span> <span class="p">(</span><span class="nv">prot-dired--get-files</span> <span class="nv">regexp</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nv">if-let*</span> <span class="p">((</span><span class="nv">files-filtered</span> <span class="p">(</span><span class="nv">prot-dired--get-last-modified</span> <span class="nv">files</span> <span class="nv">days</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">relative-paths</span> <span class="p">(</span><span class="nb">mapcar</span> <span class="nf">#'</span><span class="nv">file-relative-name</span> <span class="nv">files-filtered</span><span class="p">)))</span>
+          <span class="p">(</span><span class="nv">dired</span> <span class="p">(</span><span class="nb">cons</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"prot-flat-dired since %d days for `%s'"</span> <span class="nv">days</span> <span class="nv">regexp</span><span class="p">)</span> <span class="nv">relative-paths</span><span class="p">))</span>
+        <span class="p">(</span><span class="nb">error</span> <span class="s">"No files last modified within the last %d days"</span> <span class="nv">days</span><span class="p">))</span>
+    <span class="p">(</span><span class="nb">error</span> <span class="s">"No files matching `%s'"</span> <span class="nv">regexp</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>Note that I always design my minibuffer prompts to have their own
+history, because then I only get relevant entries when I press <code class="language-plaintext highlighter-rouge">M-p</code>
+(<code class="language-plaintext highlighter-rouge">previous-history-element</code>) and <code class="language-plaintext highlighter-rouge">M-n</code> (<code class="language-plaintext highlighter-rouge">next-history-element</code>) at the
+prompt (and the built-in <code class="language-plaintext highlighter-rouge">savehist-mode</code> takes care to persist those).</p>
+
+<p>Everything is part of my Emacs configuration: <a href="https://protesilaos.com/emacs/dotemacs">https://protesilaos.com/emacs/dotemacs</a>.
+I will not be updating this article, so make sure to check for any
+further refinements there.</p>
+        
+      

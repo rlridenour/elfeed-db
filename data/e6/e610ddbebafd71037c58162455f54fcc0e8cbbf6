@@ -1,0 +1,48 @@
+<figure><img data-recalc-dims="1" height="778" width="1360" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2025/06/glenn-shaferbrown.png?resize=1360%2C778&#038;ssl=1" alt="Glenn Fleishman, art by Shafer Brown" data-image-w="" data-image-h="" class=" jetpack-broken-image"></figure>
+<p>I have a Mac Studio M2 Max with 32 GB of RAM and a 1 TB SSD in front of me. While not the most powerful personal computer you can purchase today, it is among the most computationally capable ever made—a vastly capable machine. So why do I have to wait for typing to catch up with me and see a rainbow spinner on the regular?</p>
+<p>I’ll tell you why: iCloud Drive and Spotlight. Apple lacks any transparency about how iCloud Drive works or fails. The same is true of Spotlight. These big black boxes churn away, performing a million billion operations a day, and we don’t know exactly what they do. That’s not me being conspiratorial: I honestly don’t care what’s happening under the hood—until it breaks. Without diagnostic tools, even someone like me, ostensibly an expert, can be completely at a loss and waste many hours.</p>
+<p>I wrote “<a href="https://tidbits.com/2023/10/12/cloudy-with-a-chance-of-insanity-unsticking-icloud-drive/">Cloudy with a Chance of Insanity: Unsticking iCloud Drive</a>” for TidBITS back in October 2023 about a multi-month odyssey with Apple technical support in trying to dislodge unsyncable files.<sup id="fnref-40176-sync"><a href="https://sixcolors.com#fn-40176-sync" class="jetpack-footnote" title="Read footnote.">1</a></sup> That problem has barely surfaced since—an 80K file will sometimes get stuck for a while—and I thought Apple might have really solved syncing, at least as exhibited on my Mac. I receive dramatically fewer emails about iCloud Drive than I used to, which is another data point.</p>
+<p>But Mr. Edge Case here can always find a way to break something.<sup id="fnref-40176-edge"><a href="https://sixcolors.com#fn-40176-edge" class="jetpack-footnote" title="Read footnote.">2</a></sup> I’ve been working on a large manuscript for my upcoming book, <em><a href="https://www.kickstarter.com/projects/glennf/flong-time-no-see">Flong Time, No See</a></em>, a revised and expanded collection of researched articles I’ve written about printing and type history over the last several years.<sup id="fnref-40176-flong"><a href="https://sixcolors.com#fn-40176-flong" class="jetpack-footnote" title="Read footnote.">3</a></sup> I pasted in text that was typically copied from Web pages, and wound up with over 250 footnotes.</p>
+<p>While putting together the files for this book, Apple released its <a href="https://sixcolors.com/post/2026/01/apple-launches-creator-studio-pro-app-collection/">Creator Studio system</a>, and shipped Pages 15. After having no problems, I dutifully switched over. This was months ago, and as I continued to work on this reasonably large file—weighing it at about 60,000 words now—everything seemed fine.</p>
+<p>A few weeks ago, however, I started to experience system slowdowns. Pages was taking up 12 GB of system memory! System load went through the roof! CPU consumption was outlandish! All signs pointed to <code>corespotlightd</code>, a long-time enemy of performance. That daemon handles background indexing for Spotlight, and the slightest thing wrong in a file or directory, or perhaps due to mild corruption in its underlying files, turns it into a rampaging beast that eats processor cycles like I consume potato chips.<sup id="fnref-40176-potato"><a href="https://sixcolors.com#fn-40176-potato" class="jetpack-footnote" title="Read footnote.">4</a></sup></p>
+<p>There’s a well-known procedure for killing this beast, though another is spawned from its remains: stop the index, delete the index files, restart, and re-enable indexing. From the Terminal, use these commands. Make a backup before proceeding. <strong>Take extreme care with <code>rm -rf</code>, as a misstep in entering or copying can wipe out files!</strong></p>
+<pre><code> sudo mdutil -a -i off
+ rm -rf ~/Library/Metadata/CoreSpotlight
+</code></pre>
+<p>You can use Restart from the Apple Menu while holding down the Option key (to avoid being asked), or you can take a shortcut from Terminal, assuming you have ensured all files are saved:</p>
+<pre><code> sudo reboot
+</code></pre>
+<p>After your Mac restarts, go back to the Terminal and re-enable indexing:</p>
+<pre><code> sudo mdutil -a -i on
+</code></pre>
+<p>For many (perhaps most) people, this solves the problem. For me, it just delayed it. With some isolation using System Settings: Spotlight: Search Privacy, I added specific folders, such as mail archives, since that seemed like it might be part of the problem.</p>
+<figure><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2026/06/search-privacy-tahoe-bordered.png?ssl=1" alt="Screenshot of Search Privacy dialog inside System Settings: Spotlight in macOS 27 Tahoe." data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>Search Privacy lets you exclude volumes and directories from Spotlight indexing, which can remove unwanted results and sometimes (only sometimes!) reduce thrashing.</figcaption></figure>
+<p>One piece of advice I found suggested that if I thought Pages was the problem, I should exclude the iCloud Drive path containing Pages files. Fine! I clicked the plus icon in Search Privacy, pressed Command-Shift-G to bring up the path dialog, entered <code>~/Library/Mobile Documents/com~apple~Pages/</code>, and clicked Choose. This seemed to work for a while, then nothing availed.</p>
+<p>Finally, after analyzing logs and caches, the culprit was clear. It was not that large a Pages file: every time I saved, Spotlight’s worker bee was performing excessive re-indexing that consumed gigabytes and one or more processor cores. Moving the file to a local directory (in my Documents folder) while editing eliminated the problem. It also freed up space, as the temporary Spotlight indexes and Time Machine snapshots had become absurdly large.</p>
+<figure><img data-recalc-dims="1" decoding="async" src="https://i0.wp.com/sixcolors.com/wp-content/uploads/2026/06/flong-time-footnotes-bordered.png?ssl=1" alt="Screenshot of several high-numbered footnotes from a manuscript with excessive detail." data-image-w="" data-image-h="" class=" jetpack-broken-image"><figcaption>289 footnotes seem to be fine for Pages, but Spotlight and iCloud Drive find them hard to swallow.</figcaption></figure>
+<p>What could Apple have done to help here? This is where I would hope machine learning, coupled with some interactive code- and system-expertise bots, could help:</p>
+<ul>
+<li>Note that a system component is acting well outside known parameters.</li>
+<li>Identify CPU usage that is tied to Apple-owned processes.</li>
+<li>Provide a troubleshooting tool, even suggesting it in notifications.</li>
+<li>Create human-readable logs that don’t require system administrator knowledge to interpret.</li>
+</ul>
+<p>In the case I describe above, an Apple-created daemon was rampaging out of control due to a single identifiable file!—cascading into other problems. It should be solvable by Apple. The fact that we have more power under the hood by orders of magnitude in the past, coupled with neural cores in the CPU packages, just makes this even more embarrassing. Solve Siri, Apple, yes, but real transparency and troubleshooting in macOS would also make a big difference.</p>
+<p>[<em>Got a question for the column? You can email glenn@sixcolors.com or use</em> <code>/glenn</code> <em>in our <a href="https://sixcolors.com/subscribe/">subscriber-only</a> Discord community.</em>]</p>
+<div class="footnotes">
+<hr>
+<ol>
+<li id="fn-40176-sync">
+I should have made an unsinkable/unsyncable pun in the title, but there is an <a href="https://en.wikipedia.org/wiki/L%27esprit_de_l%27escalier">esprit d’escalier</a> moment for everything. <a href="https://sixcolors.com#fnref-40176-sync" title="Return to main content.">↩</a>
+</li>
+<li id="fn-40176-edge">
+An “edge case” is something that is often considered unlikely to occur with a product, whether software, hardware, or mechanical. Yet, no matter how much I’m just trying to get something done, I apparently trigger edge cases all the time. Software companies “love” me for this. <a href="https://sixcolors.com#fnref-40176-edge" title="Return to main content.">↩</a>
+</li>
+<li id="fn-40176-flong">
+Flong is a kind of paper-like mold that was extremely useful during the days of metal-based relief printing. Of course, you can <a href="https://www.kickstarter.com/projects/glennf/flong-time-no-see">pre-order a copy</a> to get the full scoop! <a href="https://sixcolors.com#fnref-40176-flong" title="Return to main content.">↩</a>
+</li>
+<li id="fn-40176-potato">
+Just ask my family. <a href="https://sixcolors.com#fnref-40176-potato" title="Return to main content.">↩</a>
+</li>
+</ol>
+</div>

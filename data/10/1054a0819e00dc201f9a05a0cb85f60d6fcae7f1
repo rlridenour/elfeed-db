@@ -1,0 +1,875 @@
+<p>I'm not going to convince you that testing is necessary — if you're reading this article, you already know that. Instead, I'll go straight to the point and show you how to work with Pytest to write unit tests, integration tests, functional tests, and more. I'll focus on various techniques and tools you can use in your Pythonic projects, though the same patterns apply to other languages.</p>
+<h2 id="blog-single-content__title--testing-libraries-in-python" class="blog-single__content-title">Testing libraries in Python</h2>
+<p>Let's start with a list of essential libraries for testing in Python:</p>
+<ul>
+<li><a href="https://docs.pytest.org/en/stable/">pytest</a>: The main testing framework in Python. Supports unit, integration, and functional tests, among others. Highly extensible with plugins.</li>
+<li><a href="https://github.com/pytest-dev/pytest-env">pytest-env</a>: Manages environment variables in tests. Useful for configuring database connection strings, API keys, etc.</li>
+<li><a href="https://github.com/pytest-dev/pytest-xdist">pytest-xdist</a>: Runs tests in parallel across multiple CPU cores. Useful for speeding up the test suite.</li>
+<li><a href="https://github.com/pytest-dev/pytest-asyncio">pytest-asyncio</a>: Runs tests for code that uses asyncio.</li>
+<li><a href="https://github.com/lundberg/respx">respx</a>: Simulates HTTP requests made with the httpx library (compatible with async code).</li>
+<li><a href="https://github.com/adamchainz/time-machine">time-machine</a>: An alternative to freezegun. Faster and works better with async code.</li>
+<li><a href="https://github.com/joke2k/faker">faker</a>: Generates fake data (names, emails, addresses, phone numbers, etc.) for tests.</li>
+<li><a href="https://github.com/litestar-org/polyfactory">polyfactory</a>: A modern factory library with great support for Pydantic, dataclasses, and attrs.</li>
+<li><a href="https://github.com/syrupy-project/syrupy">syrupy</a>: Snapshot testing for pytest.</li>
+<li><a href="https://github.com/samuelcolvin/dirty-equals">dirty-equals</a>: Flexible equality assertions like <code>IsUUID()</code>, <code>IsDatetime()</code>, <code>IsPartialDict()</code>. Ideal for verifying parts of responses.</li>
+<li><a href="https://github.com/HypothesisWorks/hypothesis">hypothesis</a>: The reference library for property-based testing. Automatically generates test cases from specifications.</li>
+</ul>
+<p>We'll use many of these, and they complement each other, but everything relies on <code>pytest</code> as the main testing framework.</p>
+<h2 id="blog-single-content__title--anatomy-of-a-test" class="blog-single__content-title">Anatomy of a test</h2>
+<p>Let's start with the basics: how to write a test.</p>
+<p>You need to create a separate test file, usually with the <code>test_</code> prefix or the <code>_test.py</code> suffix. Inside that file, you define test functions that must also follow the naming convention (starting with <code>test_</code>).</p>
+<p>Each test function should contain one or more assertions that verify the expected behavior of the code you're testing.</p>
+<p>For example, inside a file called <code>test_sum.py</code>, we could have the following test for a <code>sum</code> function:</p>
+<pre class="highlight"><code class="language-python">def test_sum():
+    assert sum([1, 2, 3]) == 6</code></pre>
+<p>Use a descriptive function name for each test, and split the test into 3 parts: given (data setup), when (execution of the code under test) and then (result verification).</p>
+<pre class="highlight"><code class="language-python">def is_tropic(latitude, longitude):
+    pass
+
+def test_is_tropic():
+    # Given
+    latitude = 0
+    longitude = 0
+
+    # When
+    result = is_tropic(latitude, longitude)
+
+    # Then
+    assert result #= True
+
+
+def test_is_not_tropic():
+    # Given
+    latitude = 45
+    longitude = 45
+
+    # When
+    result = is_tropic(latitude, longitude)
+
+    # Then
+    assert not result #= False</code></pre>
+<h2 id="blog-single-content__title--factory-fixtures-or-creating-reusable-test-objects" class="blog-single__content-title">Factory fixtures or creating reusable test objects</h2>
+<p>Suppose that to test a function we need to create a complex object, such as a library that gives me the current weather depending on a location. Instead of creating that object every time we need it in our tests, we can use a pytest fixture to create a reusable test object.</p>
+<p>This is how we'd do it without a fixture:</p>
+<pre class="highlight"><code class="language-python">def test_get_current_weather_new_york():
+    # Given
+    weather_service = WeatherService()
+
+    # When
+    weather = weather_service.get_current_weather(location="New York")
+
+    # Then
+    assert weather.temperature &gt; 0
+
+
+def test_get_current_weather_london():
+    # Given
+    weather_service = WeatherService()
+
+    # When
+    weather = weather_service.get_current_weather(location="London")
+
+    # Then
+    assert weather.temperature &gt; 0</code></pre>
+<p>Every time a test runs, the instantiation code is repeated, which violates the DRY principle and makes maintenance more expensive.</p>
+<blockquote>
+<p>The DRY (Don't Repeat Yourself) principle tells us not to repeat code, but to abstract it into functions, classes, or fixtures so it's easier to maintain and reuse.</p>
+</blockquote>
+<p>And this is how we'd do it using a fixture:</p>
+<pre class="highlight"><code class="language-python">import pytest
+
+
+@pytest.fixture
+def weather_service():
+    return WeatherService()
+
+
+def test_get_current_weather_new_york(weather_service):
+    # Given
+    # No need to create the WeatherService object, we already have it as an argument
+
+    # When
+    weather = weather_service.get_current_weather(location="New York")
+
+    # Then
+    assert weather.temperature &gt; 0
+
+
+def test_get_current_weather_london(weather_service):
+    # Given
+    # No need to create the WeatherService object, we already have it as an argument
+
+    # When
+    weather = weather_service.get_current_weather(location="London")
+
+    # Then
+    assert weather.temperature &gt; 0</code></pre>
+<p>You can also use fixtures to create test objects with specific data, read test files (CSV, JSON, etc.), configuration constants, etc.</p>
+<p>If you work with Pydantic models or dataclasses, <a href="https://github.com/litestar-org/polyfactory"><code>polyfactory</code></a> lets you generate test instances without having to fill in every field by hand:</p>
+<pre class="highlight"><code class="language-python">from polyfactory.factories.pydantic_factory import ModelFactory
+from pydantic import BaseModel
+
+
+class WeatherData(BaseModel):
+    location: str
+    temperature_celsius: float
+    conditions: str
+    humidity: int
+
+
+class WeatherDataFactory(ModelFactory):
+    __model__ = WeatherData
+
+
+def test_weather_factory():
+    weather = WeatherDataFactory.build()
+    assert isinstance(weather.temperature_celsius, float)
+
+    weather_list = WeatherDataFactory.batch(size=5)
+    assert len(weather_list) == 5</code></pre>
+<p><code>build()</code> generates an instance with valid random values. You can override the fields you care about and let the library fill in the rest.</p>
+<h2 id="blog-single-content__title--test-driven-development-triangulation" class="blog-single__content-title">Test-driven Development Triangulation</h2>
+<p>How can I overcome the blank page fear when writing tests? Triangulation is a technique that gets you past that initial block. But don't confuse it with traditional TDD!</p>
+<blockquote>
+<p>TDD (Test Driven Development) is the most widely used testing-based programming practice among developers. It consists of following a work design opposite to traditional testing, writing the test first and only adding new code if it fails.</p>
+</blockquote>
+<p>With the triangulation approach, instead of writing a failing test first, you write three passing tests. Then you refactor the code to eliminate duplication between them.</p>
+<p>Let's understand it with a practical example. Suppose we want to implement a function that checks whether a string is an anagram of another (2 words that have the same letters but in a different order).</p>
+<p>First we write a very simple passing test:</p>
+<pre class="highlight"><code class="language-python">def test_anagram_simple():
+    assert is_anagram("amor", "roma") #=&gt; True
+
+# First implementation: very simple, with a specific case
+def is_anagram(s1, s2):
+    return sorted(s1) == sorted(s2)</code></pre>
+<p>Then we write another passing test with a different case:</p>
+<pre class="highlight"><code class="language-python">def test_anagram_with_spaces():
+    assert is_anagram("amor", "a rom")
+    assert is_anagram("a rom", "amor")
+    assert is_anagram("maor", "a m o r")
+
+# Second implementation: we expand with the first exception, but it's still not general
+def is_anagram(s1, s2):
+    return sorted(s1.replace(" ", "")) == sorted(s2.replace(" ", ""))</code></pre>
+<p>And finally, a third passing test with uppercase letters:</p>
+<pre class="highlight"><code class="language-python">def test_anagram_with_uppercase():
+    assert is_anagram("Amor", "Roma")
+    assert is_anagram("a Rom", "Amor")
+    assert is_anagram("maOr", "a m o r")
+    assert is_anagram("Amor", "ROMA")
+
+# Third implementation: now we have a general function
+def is_anagram(s1, s2):
+    return sorted(s1.replace(" ", "").lower()) == sorted(s2.replace(" ", "").lower())</code></pre>
+<p>From there, we can refactor the code to eliminate duplication between tests, or write more tests to cover additional cases (such as accents, special characters, etc.).</p>
+<p>However, when we start having a large list of tests for the same function, it will help us to use <code>parametrize</code> to avoid duplication between them.</p>
+<h2 id="blog-single-content__title--parametrizing-tests-to-run-the-same-test-with-different-data-sets" class="blog-single__content-title">Parametrizing tests to run the same test with different data sets</h2>
+<p>Let's rescue the previous example, the last test we wrote, to parametrize it and add many more cases.</p>
+<p>With <code>pytest.mark.parametrize</code> we can run the same test with different data sets.</p>
+<p>First we define the <code>parametrize</code> decorator with the different test cases we want to run.</p>
+<pre class="highlight"><code class="language-python">import pytest
+
+@pytest.mark.parametrize(
+    "string_1, string_2",
+    [
+        pytest.param("amor", "roma", id="simple"),
+        pytest.param("amor", "a rom", id="with_spaces"),
+        pytest.param("Amor", "Roma", id="with_uppercase"),
+        pytest.param("a Rom", "Amor", id="with_spaces_and_uppercase"),
+        pytest.param("maOr", "a m o r", id="with_a_lot_of_spaces_and_uppercase"),
+        pytest.param("Amor", "ROMA", id="with_uppercase_2"),
+        pytest.param("amór", "romá", id="with_accents"),
+        pytest.param("#amor", "rom#a", id="with_special_characters"),
+    ]
+)
+</code></pre>
+<p>Each tuple contains the arguments that will be passed to the test function. The <code>id</code> parameter is optional, but very useful for identifying each test case.</p>
+<p>A decorator by itself is not very practical. Now we define the test function that will run with each pair of strings:</p>
+<pre class="highlight"><code class="language-python">def test_check_anagram(string_1, string_2):
+    assert is_anagram(string_1, string_2)</code></pre>
+<p><code>pytest</code> will take care of running this test function with each pair of strings defined in the parameter list, without doing anything else.</p>
+<p>All together it would look something like this:</p>
+<pre class="highlight"><code class="language-python">import pytest
+
+@pytest.mark.parametrize(
+    "string_1, string_2",
+    [
+        pytest.param("amor", "roma", id="simple"),
+        pytest.param("amor", "a rom", id="with_spaces"),
+        pytest.param("Amor", "Roma", id="with_uppercase"),
+        pytest.param("a Rom", "Amor", id="with_spaces_and_uppercase"),
+        pytest.param("maOr", "a m o r", id="with_a_lot_of_spaces_and_uppercase"),
+        pytest.param("Amor", "ROMA", id="with_uppercase_2"),
+        pytest.param("amór", "romá", id="with_accents"),
+        pytest.param("#amor", "rom#a", id="with_special_characters"),
+    ]
+)
+def test_check_anagram(string_1, string_2):
+    assert is_anagram(string_1, string_2)
+
+def is_anagram(s1, s2):
+    return sorted(s1.replace(" ", "").lower()) == sorted(s2.replace(" ", "").lower())</code></pre>
+<h2 id="blog-single-content__title--test-abstractionsprotocolscontracts-not-concrete-implementations" class="blog-single__content-title">Test abstractions/protocols/contracts, not concrete implementations</h2>
+<p>A very common problem when writing tests is that we tend to test concrete implementations rather than abstractions or protocols.</p>
+<p>For example, suppose we want to use an external resource like an API that returns climate information (<code>api.open-meteo.com</code>).</p>
+<p>A common, and wrong, pattern would be to include calls to that API directly in our tests:</p>
+<pre class="highlight"><code class="language-python">import requests
+
+def test_get_current_weather():
+    # Given
+    response = requests.get("https://api.open-meteo.com/v1/forecast?latitude=35&amp;longitude=139&amp;hourly=temperature_2m")
+    data = response.json()
+
+    # When
+    temperature = data["hourly"]["temperature_2m"][0]
+
+    # Then
+    assert temperature &gt; 0</code></pre>
+<p>What happens if the API is unavailable? Or if the response format changes? Or if the weather changes and the temperature is less than or equal to 0? These tests would be fragile and unreliable. Moreover, any small change in the API would force us to change all the tests that depend on it.</p>
+<p>Instead, use an abstraction or protocol to interact with that API, and then mock or stub that abstraction in your tests.</p>
+<pre class="highlight"><code class="language-python">import requests
+from typing import Protocol
+
+# We define the interface (Protocol) that implementations must fulfill
+class WeatherGatewayInterface(Protocol):
+    def get_temperature(self, latitude: float, longitude: float) -&gt; float | None:
+        pass
+
+# Real implementation using Open-Meteo
+class OpenMeteoGateway:
+    def get_temperature(self, latitude: float, longitude: float) -&gt; float | None:
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current_weather": "true"
+        }
+        try:
+            response = requests.get(url, params=params, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            return data["current_weather"]["temperature"]
+        except Exception:
+            # Following clean architecture, we handle exceptions by returning None
+            # so the use case can structure the error
+            return None
+
+@pytest.fixture
+def weather_gateway():
+    return OpenMeteoGateway()
+
+def test_get_current_weather(weather_gateway):
+    # Given
+    latitude = 35
+    longitude = 139
+
+    # When
+    temperature = weather_gateway.get_temperature(latitude, longitude)
+
+    # Then
+    assert temperature &gt; 0</code></pre>
+<blockquote>
+<p>A protocol is an interface that defines a set of methods and properties that a class must implement.</p>
+</blockquote>
+<p>So we'll follow a decoupled design where we have a <code>WeatherGatewayInterface</code> that defines the contract that implementations must fulfill, and a concrete implementation <code>OpenMeteoGateway</code> that interacts with the Open-Meteo API. In our tests we can round things out by creating a fixture that returns an instance of <code>OpenMeteoGateway</code>.</p>
+<blockquote>
+<p>How does <code>OpenMeteoGateway</code> know it must comply with <code>WeatherGatewayInterface</code>? It doesn't, but that's not necessary. In Python, duck typing handles that. As long as <code>OpenMeteoGateway</code> has a <code>get_temperature</code> method with the same signature as the one defined in <code>WeatherGatewayInterface</code>, it will be considered to fulfill that protocol.</p>
+</blockquote>
+<p>We've already solved the first step: testing an abstraction rather than a concrete implementation. Now let's see how we can automatically generate test data to cover more cases, and later avoid depending on the real API for testing.</p>
+<h2 id="blog-single-content__title--generating-test-data" class="blog-single__content-title">Generating test data</h2>
+<p>With the previous tests I depend on the inputs I've defined myself, which means my tests will be full of biases. To avoid that, I can use data generation tools.</p>
+<p>We have 2 paths: define what random data, or define what test cases we want to generate from specifications.</p>
+<h3 id="blog-single-content__title--faker" class="blog-single__content-title">Faker</h3>
+<p>To generate random test data such as names, emails, addresses, phone numbers, etc., we can use the <code>faker</code> library.</p>
+<pre class="highlight"><code class="language-python">from faker import Faker
+
+fake = Faker()
+name = fake.name()
+email = fake.email()
+password = fake.password()</code></pre>
+<p>Each time we call <code>fake.name()</code>, <code>fake.email()</code>, etc., we get a different value.</p>
+<p>Suppose we want to test some random locations for our <code>is_tropic</code> function. We could use <code>faker</code> to generate random latitudes and longitudes within certain ranges:</p>
+<pre class="highlight"><code class="language-python">from faker import Faker
+
+fake = Faker()
+
+def test_random_locations():
+    latitude = fake.latitude()
+    longitude = fake.longitude()
+    result = is_tropic(latitude, longitude)
+
+    # Here we could make assertions based on the generated latitude and longitude
+    if -23.43691 &lt;= latitude &lt;= 23.43691:
+        assert result #= True
+    else:
+        assert not result #= False</code></pre>
+<p>We'll never be certain that randomly generated data covers all possible cases, but it's better than the hardcoded data we define ourselves.</p>
+<h3 id="blog-single-content__title--hypothesis-for-automatically-generating-test-cases-based-on-specifications" class="blog-single__content-title">Hypothesis for automatically generating test cases based on specifications</h3>
+<p>With the previous code we only validate a single random case. We could include a loop with several iterations to generate multiple random cases. However, we have a much more powerful tool for that.</p>
+<p>With <code>hypothesis</code> we can define specifications for the test data we want to generate, and the library will take care of creating test cases automatically based on those specifications. It goes beyond random data generation, as it includes invariants (nulls, empty values, negatives, etc.) and edge cases (maximum values, minimums, etc.) that could break our code.</p>
+<pre class="highlight"><code class="language-python">from hypothesis import given, strategies as st
+
+@given(
+    latitude=st.floats(min_value=-90, max_value=90),
+    longitude=st.floats(min_value=-180, max_value=180)
+)
+def test_random_locations(latitude, longitude):
+    result = is_tropic(latitude, longitude)
+
+    if -23.43691 &lt;= latitude &lt;= 23.43691:
+        assert result #= True
+    else:
+        assert not result #= False</code></pre>
+<p>Although it may seem similar to <code>faker</code> at first glance, it's actually running dozens or even hundreds of combinations of latitudes and longitudes behind the scenes. It does the heavy lifting for us.</p>
+<h2 id="blog-single-content__title--wrappers" class="blog-single__content-title">Wrappers</h2>
+<p>Suppose I want to test the current weather in New York, and I know it's sunny. To do that I create the <code>get_current_weather</code> function, which in turn calls <code>datetime.now()</code> to get the current date and time.</p>
+<pre class="highlight"><code class="language-python">def get_current_weather(location):
+    current_time = datetime.now()
+    weather = weather_service.get_weather(location, current_time)
+    return weather
+
+def test_get_current_weather():
+    weather = get_current_weather("New York")
+    assert weather.status == "sunny"</code></pre>
+<p>So far so good. You run it and it works. What about tomorrow?</p>
+<p>Sometimes we need to test functionality that depends on variable elements such as:</p>
+<ul>
+<li>Random numbers</li>
+<li>Dates and times</li>
+<li>Hashing</li>
+<li>Access to external resources (such as databases or APIs)</li>
+</ul>
+<p>Anything that can make tests non-deterministic or hard to reproduce. And all of them, of course, make our tests not always work the way we'd like.</p>
+<p>To deal with this, we can use a wrapper that lets us fix those variable values during test execution.</p>
+<p>A wrapper is a function that wraps another function to modify its behavior in some way. It's used when we want to interact with a function differently from how we'd normally do it.</p>
+<p>Let's create one for <code>datetime.now()</code>. Suppose we know that on June 1, 2024 at 12:00 PM in New York it was sunny. That's very valuable information we can use for testing. What we'll do is create a wrapper that lets us fix the current date and time during test execution, so that whenever we call <code>datetime.now()</code> it returns that specific date and time.</p>
+<pre class="highlight"><code class="language-python">class FixedTimeProvider:
+    """Test implementation - returns a fixed time."""
+
+    def __init__(self, fixed_time: datetime):
+        self._fixed_time = fixed_time
+
+    def now(self) -&gt; datetime:
+        return self._fixed_time</code></pre>
+<p>We also need to modify <code>WeatherService</code> to receive a <code>time_provider</code> as an argument in its constructor, and use that time provider instead of calling <code>datetime.now()</code> directly:</p>
+<pre class="highlight"><code class="language-python">class WeatherService:
+    """Weather service that depends on TimeProvider for timestamp control."""
+
+    def __init__(self, time_provider: TimeProvider):
+        self._time_provider = time_provider
+
+    def get_current_weather(self, city: str) -&gt; Weather:
+        current_time = self._time_provider.now()
+
+        return Weather(
+            status="sunny",
+            temperature=25.0,
+            checked_at=current_time
+        )</code></pre>
+<p>With these pieces in place we can start building our tests in a more controlled and reliable way.</p>
+<p>We create a fixture that returns an instance of <code>FixedTimeProvider</code> with the date and time we want to fix:</p>
+<pre class="highlight"><code class="language-python">from datetime import datetime, timezone
+
+import pytest
+
+from time_provider import FixedTimeProvider
+from weather_service import WeatherService
+
+
+@pytest.fixture
+def fixed_time():
+    return datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture
+def time_provider(fixed_time):
+    return FixedTimeProvider(fixed_time)
+
+
+@pytest.fixture
+def weather_service(time_provider):
+    return WeatherService(time_provider)
+</code></pre>
+<ul>
+<li>The <code>fixed_time</code> fixture returns a <code>datetime</code> object with the date and time we want to fix.</li>
+<li>The <code>time_provider</code> fixture returns an instance of <code>FixedTimeProvider</code> with the fixed date and time.</li>
+<li>The <code>weather_service</code> fixture returns an instance of <code>WeatherService</code> that uses the <code>time_provider</code> to get the current date and time.</li>
+</ul>
+<p>We've created an instance of <code>WeatherService</code> that depends on a <code>time_provider</code> to get the current date and time. When <code>datetime.now()</code> is called inside <code>WeatherService</code>, it will actually call <code>FixedTimeProvider.now()</code>, which returns the fixed date and time we've defined.</p>
+<p>To use it in our tests, we simply pass the <code>time_provider</code> fixture as an argument to the test function.</p>
+<pre class="highlight"><code class="language-python">def test_get_current_weather_sets_checked_at(weather_service, fixed_time):
+    # When
+    weather = weather_service.get_current_weather("New York")
+
+    # Then
+    assert weather.status == "sunny"
+    assert weather.checked_at == fixed_time  # Clean and simple!
+
+
+def test_weather_timestamp_is_controlled(weather_service):
+    # When
+    weather1 = weather_service.get_current_weather("New York")
+    weather2 = weather_service.get_current_weather("London")
+
+    # Then - Both have the same timestamp (as expected in tests)
+    assert weather1.checked_at == weather2.checked_at
+</code></pre>
+<blockquote>
+<p>This design pattern is known as Dependency Injection (DI), and it's very useful for making our code easier to test and maintain. By injecting dependencies instead of creating them directly inside our functions or classes, we can easily change the behavior.</p>
+</blockquote>
+<p>You also have a library called <a href="https://time-machine.readthedocs.io/en/latest/"><code>time-machine</code></a> that does exactly the same thing as our wrapper, but in a more elegant way and with support for async code. You can use it like this:</p>
+<pre class="highlight"><code class="language-python">import datetime as dt
+from zoneinfo import ZoneInfo
+import time_machine
+
+hill_valley_tz = ZoneInfo("America/Los_Angeles")
+
+
+@time_machine.travel(dt.datetime(1985, 10, 26, 1, 24, tzinfo=hill_valley_tz))
+def test_delorean():
+    assert dt.date.today().isoformat() == "1985-10-26"</code></pre>
+<p>But it adds one more dependency to your project. Depending on your project's complexity, your own wrapper or <code>time-machine</code> may be more convenient.</p>
+<p>Now let's look at another example with a wrapper for random numbers. Suppose we have a function that generates a random number between 1 and 10, and we want to test it deterministically.</p>
+<p>We start by creating a wrapper that lets us fix the random number during test execution:</p>
+<pre class="highlight"><code class="language-python">class FixedRandomProvider:
+    """Test implementation - returns a fixed number."""
+
+    def __init__(self, fixed_number: int):
+        self._fixed_number = fixed_number
+
+    def randint(self, a: int, b: int) -&gt; int:
+        return self._fixed_number</code></pre>
+<p>Now it's time to configure the fixtures following the same pattern as before. We create a fixture that returns an instance of <code>FixedRandomProvider</code> with the random number we want to fix:</p>
+<pre class="highlight"><code class="language-python">import pytest
+
+from random_provider import FixedRandomProvider
+from dice_game import DiceGame
+
+
+@pytest.fixture
+def dice_game_winning():
+    """Game with a fixed winning roll (5)."""
+    random_provider = FixedRandomProvider(5)
+    return DiceGame(random_provider)
+
+
+@pytest.fixture
+def dice_game_losing():
+    """Game with a fixed losing roll (2)."""
+    random_provider = FixedRandomProvider(2)
+    return DiceGame(random_provider)
+
+
+def test_roll_dice_winning(dice_game_winning):
+    # When
+    result = dice_game_winning.roll_dice()
+
+    # Then
+    assert result.value == 5
+    assert result.is_winning is True
+
+
+def test_roll_dice_losing(dice_game_losing):
+    # When
+    result = dice_game_losing.roll_dice()
+
+    # Then
+    assert result.value == 2
+    assert result.is_winning is False</code></pre>
+<p>Another option is to use the <a href="https://github.com/samuelcolvin/dirty-equals"><code>dirty-equals</code></a> library, which lets us make flexible equality assertions.</p>
+<pre class="highlight"><code class="language-python">from dirty_equals import IsUUID, IsDatetime, IsPositiveInt
+
+def test_weather_response_shape(weather_provider_hot):
+    recommender = OutdoorActivityRecommender(weather_provider_hot)
+    result = recommender.recommend(40.4168, -3.7038)
+
+    assert result["id"] == IsUUID()
+    assert result["created_at"] == IsDatetime()
+    assert result["temperature_celsius"] == IsPositiveInt()</code></pre>
+<p>The assertion passes if the value satisfies the type condition, not if it matches exactly.</p>
+<h2 id="blog-single-content__title--mocking-or-stubbing-to-simulate-the-behavior-of-external-dependencies-without-actually-accessing-them" class="blog-single__content-title">Mocking or stubbing to simulate the behavior of external dependencies without actually accessing them</h2>
+<p>In a previous example we implemented an external dependency like <code>OpenMeteoGateway</code> that interacts with the Open-Meteo API. It's a bad idea for several reasons:</p>
+<ul>
+<li>It's slow, since every time the test runs, a call is made whose latency depends on the network and the external server.</li>
+<li>It's fragile, since if the API changes or becomes unavailable, our tests will fail.</li>
+<li>It's expensive, since some external APIs have usage limits or costs associated with calls.</li>
+<li>It's unreliable: we can't guarantee that responses will always be the same.</li>
+</ul>
+<p>Among many other problems. So instead of interacting with the real API, we can use mocking or stubbing to simulate the behavior of that external dependency without actually accessing it.</p>
+<p>Mocking isn't only for external APIs. We can also use it to simulate the behavior of databases, real-time services, message queues, etc.</p>
+<h3 id="blog-single-content__title--reading-data" class="blog-single__content-title">Reading data</h3>
+<p>Let's assume we have a function that gets the current weather at a given location, and we want to test it without making real calls to the Open-Meteo API.</p>
+<p>We'll start by defining an abstraction or protocol that defines the contract that implementations interacting with the Open-Meteo API must fulfill:</p>
+<pre class="highlight"><code class="language-python">@dataclass
+class WeatherData:
+    """Weather information from external system."""
+    location: str
+    temperature_celsius: float
+    conditions: str
+    humidity: int
+
+
+class WeatherProvider(Protocol):
+    def get_current_weather(self, latitude: float, longitude: float) -&gt; WeatherData:
+        pass</code></pre>
+<p>Now we can create a concrete implementation of that interface that interacts with the Open-Meteo API, and another test implementation that returns fixed data for our tests.</p>
+<p>Production will have the real implementation:</p>
+<pre class="highlight"><code class="language-python">class OpenMeteoWeatherProvider:
+    def get_current_weather(self, latitude: float, longitude: float) -&gt; WeatherData:
+        # Logic to interact with the Open-Meteo API
+        pass</code></pre>
+<p>But we'll use the test implementation that returns fixed data for our tests:</p>
+<pre class="highlight"><code class="language-python">class FixedWeatherProvider:
+    def get_current_weather(self, latitude: float, longitude: float) -&gt; WeatherData:
+        # Logic to return fixed test data
+        pass</code></pre>
+<p>Python provides the <code>unittest.mock</code> library that lets us create simulated objects (mocks) that mimic the behavior of real objects, and inside it is the <code>create_autospec</code> function. It will help us create a mock that respects the signature of the function or method we're simulating.</p>
+<p>For example, if we want to create a mock of <code>WeatherProvider</code>, we can use <code>create_autospec</code> to make sure the mock has the same signature as the <code>WeatherProvider</code> interface:</p>
+<pre class="highlight"><code class="language-python">provider = create_autospec(WeatherProvider)</code></pre>
+<p>The <code>provider</code> variable is now a mock of <code>WeatherProvider</code>. This means any call to <code>provider.get_current_weather</code> must have the same parameters and return types as the method defined in <code>WeatherProvider</code>.</p>
+<p>We can configure the behavior of the mock's methods using <code>return_value</code>. For example, we can make <code>provider.get_current_weather</code> return a <code>WeatherData</code> object with specific test data:</p>
+<pre class="highlight"><code class="language-python">provider.get_current_weather.return_value = WeatherData(
+    location="Madrid",
+    temperature_celsius=30.0,
+    conditions="Clear",
+    humidity=40,
+)</code></pre>
+<p>Now we can configure the fixtures where we'll include mocks of <code>WeatherProvider</code> that return specific test data for each test case:</p>
+<pre class="highlight"><code class="language-python">@pytest.fixture
+def weather_provider_hot():
+    """Mocked provider returning hot weather."""
+    provider = create_autospec(WeatherProvider)
+    provider.get_current_weather.return_value = WeatherData(
+        location="Madrid",
+        temperature_celsius=30.0,
+        conditions="Clear",
+        humidity=40,
+    )
+    return provider
+
+
+@pytest.fixture
+def weather_provider_mild():
+    """Mocked provider returning mild weather."""
+    provider = create_autospec(WeatherProvider)
+    provider.get_current_weather.return_value = WeatherData(
+        location="Barcelona",
+        temperature_celsius=20.0,
+        conditions="Partly cloudy",
+        humidity=60,
+    )
+    return provider</code></pre>
+<p>We're missing one last piece. We have nothing to test. The <code>WeatherProvider</code> mock is just a simulated object that returns test data, but we don't have any function or class that uses that provider to do something with that data. For that, let's create an <code>OutdoorActivityRecommender</code> class that uses the <code>WeatherProvider</code> to recommend outdoor activities based on the weather:</p>
+<pre class="highlight"><code class="language-python">class OutdoorActivityRecommender:
+    """Recommends outdoor activities based on weather."""
+
+    def __init__(self, weather_provider: WeatherProvider):
+        self._weather_provider = weather_provider
+
+    def recommend(self, latitude: float, longitude: float) -&gt; ActivityRecommendation:
+        weather = self._weather_provider.get_current_weather(latitude, longitude)
+
+        if weather.temperature_celsius &gt; 25:
+            return ActivityRecommendation(
+                activity="Swimming",
+                reason=f"Perfect! It's {weather.temperature_celsius}°C",
+            )
+        elif weather.temperature_celsius &gt; 15:
+            return ActivityRecommendation(
+                activity="Hiking",
+                reason=f"Great weather at {weather.temperature_celsius}°C",
+            )
+        elif weather.temperature_celsius &gt; 0:
+            return ActivityRecommendation(
+                activity="Skiing",
+                reason=f"Snow weather! {weather.temperature_celsius}°C",
+            )
+        else:
+            return ActivityRecommendation(
+                activity="Stay indoors",
+                reason=f"Very cold at {weather.temperature_celsius}°C",
+            )
+</code></pre>
+<p>Now we can simulate the behavior of the Open-Meteo API in our tests.</p>
+<pre class="highlight"><code class="language-python">def test_recommends_swimming_when_hot(weather_provider_hot):
+    # Given
+    recommender = OutdoorActivityRecommender(weather_provider_hot)
+
+    # When
+    result = recommender.recommend(40.4168, -3.7038)
+
+    # Then
+    assert result.activity == "Swimming"
+    assert "30.0°C" in result.reason
+
+
+def test_recommends_hiking_when_mild(weather_provider_mild):
+    # Given
+    recommender = OutdoorActivityRecommender(weather_provider_mild)
+
+    # When
+    result = recommender.recommend(41.3851, 2.1734)
+
+    # Then
+    assert result.activity == "Hiking"
+    assert "20.0°C" in result.reason</code></pre>
+<p>The production flow will be:</p>
+<ol>
+<li><code>OutdoorActivityRecommender</code> receives a <code>WeatherProvider</code> as a dependency, specifically <code>OpenMeteoWeatherProvider</code>.</li>
+<li><code>OpenMeteoWeatherProvider</code> uses the <code>get_current_weather</code> function to get the weather data.</li>
+<li><code>get_current_weather</code> makes a call to the Open-Meteo API to get the current weather at the given location.</li>
+<li>The Open-Meteo API returns a response depending on the latitude and longitude provided.</li>
+</ol>
+<p>Now our mock replaces the real <code>WeatherProvider</code>, returning fixed test data when <code>get_current_weather</code> is called.</p>
+<p>This design pattern is portable to other programming languages and testing frameworks. The idea is always the same: abstract external dependencies behind an interface or protocol, and then use mocks or stubs to simulate their behavior in tests.</p>
+<p>To simplify the process with HTTP requests, you can use the <code>respx</code> library that does exactly the same thing as the previous example, but in a more elegant way and with support for async code. You can use it like this:</p>
+<pre class="highlight"><code class="language-python">import httpx
+import respx
+
+from httpx import Response
+
+@respx.mock
+def test_get_current_weather():
+    # Given
+    my_route = respx.get("https://api.open-meteo.com/v1/forecast").mock(
+        return_value=Response(200, json={
+            "current_weather": {
+                "temperature": 30.0,
+                "conditions": "Clear",
+                "humidity": 40
+            }
+        })
+    )
+
+    # When
+    response = httpx.get("https://api.open-meteo.com/v1/forecast?latitude=40.4168&amp;longitude=-3.7038")
+    data = response.json()
+
+    # Then
+    assert data["current_weather"]["temperature"] == 30.0
+    assert data["current_weather"]["conditions"] == "Clear"
+    assert data["current_weather"]["humidity"] == 40</code></pre>
+<p>Don't be afraid to work with other protocols like WebSockets, gRPC, AMQP, etc.</p>
+<h3 id="blog-single-content__title--writingmodifying-data" class="blog-single__content-title">Writing/modifying data</h3>
+<p>Testing write or modification operations requires a different approach from reads: it's not enough to verify that the function doesn't fail, we need to confirm that the data was saved correctly and with the expected values.</p>
+<p>Following the same decoupled design, we define the repository protocol:</p>
+<pre class="highlight"><code class="language-python">class WeatherRepositoryInterface(Protocol):
+
+    def save(self, weather: WeatherData) -&gt; None:
+        pass
+
+    def update(self, weather_id: int, weather: WeatherData) -&gt; None:
+        pass</code></pre>
+<p>Instead of connecting to a real database, we create a stub (fake implementation) that internally records the calls it receives:</p>
+<pre class="highlight"><code class="language-python">class FakeWeatherRepository:
+
+    def __init__(self):
+        self.saved: list[WeatherData] = []
+        self.updated: list[tuple[int, WeatherData]] = []
+
+    def save(self, weather: WeatherData) -&gt; None:
+        self.saved.append(weather)
+
+    def update(self, weather_id: int, weather: WeatherData) -&gt; None:
+        self.updated.append((weather_id, weather))</code></pre>
+<p>Unlike a mock from <code>create_autospec</code>, the stub lets us inspect exactly what data was written, not just whether the method was invoked.</p>
+<p>We configure the fixtures with the stub and the service that uses it:</p>
+<pre class="highlight"><code class="language-python">@pytest.fixture
+def weather_repository():
+    return FakeWeatherRepository()
+
+@pytest.fixture
+def weather_saver(weather_repository):
+    return WeatherSaver(weather_repository)</code></pre>
+<p>And now we can test both writes and updates:</p>
+<pre class="highlight"><code class="language-python">def test_save_weather(weather_saver, weather_repository):
+    # Given
+    weather = WeatherData(
+        location="Madrid",
+        temperature_celsius=30.0,
+        conditions="Clear",
+        humidity=40,
+    )
+
+    # When
+    weather_saver.save(weather)
+
+    # Then
+    assert len(weather_repository.saved) == 1
+    assert weather_repository.saved[0].location == "Madrid"
+    assert weather_repository.saved[0].temperature_celsius == 30.0
+
+
+def test_update_weather(weather_saver, weather_repository):
+    # Given
+    weather = WeatherData(
+        location="Madrid",
+        temperature_celsius=35.0,
+        conditions="Hot",
+        humidity=20,
+    )
+
+    # When
+    weather_saver.update(weather_id=1, weather=weather)
+
+    # Then
+    assert len(weather_repository.updated) == 1
+    weather_id, updated_weather = weather_repository.updated[0]
+    assert weather_id == 1
+    assert updated_weather.temperature_celsius == 35.0</code></pre>
+<p>If you prefer not to write the stub by hand, you can use <code>create_autospec</code> and verify that the mock was called with the correct arguments:</p>
+<pre class="highlight"><code class="language-python">from unittest.mock import create_autospec
+
+@pytest.fixture
+def weather_repository():
+    return create_autospec(WeatherRepositoryInterface)
+
+def test_save_weather_with_mock(weather_repository):
+    # Given
+    saver = WeatherSaver(weather_repository)
+    weather = WeatherData(
+        location="Madrid",
+        temperature_celsius=30.0,
+        conditions="Clear",
+        humidity=40,
+    )
+
+    # When
+    saver.save(weather)
+
+    # Then
+    weather_repository.save.assert_called_once_with(weather)</code></pre>
+<p>Use the stub when you need to inspect the exact content of the written data. Use <code>create_autospec</code> when you only need to confirm that the method was called with the correct arguments.</p>
+<h2 id="blog-single-content__title--snapshot-testing-to-compare-a-functions-output-with-a-previously-saved-version" class="blog-single__content-title">Snapshot testing to compare a function's output with a previously saved version</h2>
+<p>In the previous strategy, we created fake objects (mocks or stubs) to simulate the behavior of external dependencies. It works well for small, controlled cases, but when the output of the function we want to test is large or complex, writing assertions for every field can be tedious.</p>
+<p>Let's learn how to compare a function's output with a previously saved version, which is known as snapshot testing.</p>
+<p>The strategy is simple:</p>
+<ol>
+<li>We run the function we want to test.</li>
+<li>We save its output to a snapshot file.</li>
+<li>On subsequent runs, we compare the current output with the saved snapshot.</li>
+</ol>
+<p>Every time the output changes, we run the first 2 steps again to update the snapshot. This way, if the change is intentional, we update the snapshot. If the change is unintentional, the test will fail and alert us that something has changed.</p>
+<p>The reference library for this with pytest is <a href="https://syrupy-project.github.io/syrupy/"><code>syrupy</code></a>.</p>
+<p>Let's look at different examples of snapshot testing for various use cases.</p>
+<h3 id="blog-single-content__title--api-response" class="blog-single__content-title">API response</h3>
+<p>Suppose we have an endpoint that returns the current weather for a location. The test would look something like this:</p>
+<pre class="highlight"><code class="language-python">import pytest
+
+from app import app
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+def test_get_weather_response(client):
+    response = client.get("/weather/Madrid")
+
+    assert response.status_code == 200
+    assert response.json()['country'] == "Spain"</code></pre>
+<p>To include snapshot testing, we import <code>SnapshotAssertion</code> from <code>syrupy.assertion</code> and add it as an argument to the test function:</p>
+<pre class="highlight"><code class="language-python"># test_api.py
+import pytest
+from fastapi.testclient import TestClient
+from syrupy.assertion import SnapshotAssertion # New
+
+from app import app
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+def test_get_weather_response(client, snapshot: SnapshotAssertion): # New
+    response = client.get("/weather/Madrid")
+
+    assert response.status_code == 200
+    assert response.json() == snapshot # New
+    assert response.json()['country'] == "Spain"</code></pre>
+<p>The first time you run the test it will fail because no snapshot exists yet. To create it:</p>
+<pre class="highlight"><code class="language-bash">pytest --snapshot-update</code></pre>
+<p>Syrupy will generate a <code>__snapshots__/test_api.ambr</code> file with the serialized output:</p>
+<pre class="highlight"><code># __snapshots__/test_api.ambr
+# serializer version: 1
+# name: test_get_weather_response
+  dict({
+    'conditions': 'Partly cloudy',
+    'forecast': list([
+      dict({
+        'conditions': 'Sunny',
+        'day': 'Monday',
+        'temperature_celsius': 24.0,
+      }),
+      ...
+    ]),
+    'humidity': 65,
+    'location': 'Madrid',
+    'country': 'Spain',
+    'temperature_celsius': 22.5,
+    'wind_speed_kmh': 15.0,
+  })
+# ---</code></pre>
+<p>From that point on, any change in the response will cause the test to fail. If the change is intentional (adding a field, for example), you update the snapshot:</p>
+<pre class="highlight"><code class="language-bash"># Update all snapshots
+pytest --snapshot-update
+
+# Update only the snapshot for a specific test
+pytest test_api.py::test_get_weather_response --snapshot-update</code></pre>
+<blockquote>
+<p>Only update the snapshot when you're sure the change is correct. Doing it blindly removes the protection against regressions.</p>
+</blockquote>
+<p>An important requirement: variable values like dates or IDs must be fixed before doing snapshot testing. Otherwise the snapshot will change on every run. For that you already have the wrappers and dependency injection we covered earlier.</p>
+<h3 id="blog-single-content__title--csv" class="blog-single__content-title">CSV</h3>
+<p>Snapshot testing is also useful for testing CSV exports. Suppose we have a function that generates a CSV with the historical temperature data:</p>
+<pre class="highlight"><code class="language-python"># weather_export.py
+import csv
+import io
+
+
+def export_weather_to_csv(records: list[dict]) -&gt; str:
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=["date", "location", "temperature_celsius", "conditions"])
+    writer.writeheader()
+    writer.writerows(records)
+    return output.getvalue()</code></pre>
+<p>The test with snapshot:</p>
+<pre class="highlight"><code class="language-python">from syrupy.assertion import SnapshotAssertion
+from weather_export import export_weather_to_csv
+
+
+def test_export_weather_to_csv(snapshot: SnapshotAssertion):
+    # Given
+    records = [
+        {"date": "2024-06-01", "location": "Madrid", "temperature_celsius": 30.0, "conditions": "Sunny"},
+        {"date": "2024-06-02", "location": "Madrid", "temperature_celsius": 28.5, "conditions": "Partly cloudy"},
+        {"date": "2024-06-03", "location": "Madrid", "temperature_celsius": 25.0, "conditions": "Rainy"},
+    ]
+
+    # When
+    result = export_weather_to_csv(records)
+
+    # Then
+    assert result == snapshot</code></pre>
+<p>Syrupy will save the exact CSV content. If someone changes the column order, the separator, or the value format, the test will catch it.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>Throughout the article we've seen several techniques and tools that you can combine depending on what you need to test:</p>
+<ul>
+<li><strong>Fixtures</strong> to reuse test objects and keep the code DRY.</li>
+<li><strong>Triangulation</strong> to break the initial block and build the implementation incrementally.</li>
+<li><strong>Parametrization</strong> to cover many cases with a single test.</li>
+<li><strong>Abstractions and protocols</strong> to decouple the code from its external dependencies, making it possible to replace them in tests.</li>
+<li><strong>Data generation</strong> with <code>faker</code> for realistic data and <code>hypothesis</code> to find edge cases you wouldn't have thought of.</li>
+<li><strong>Wrappers and dependency injection</strong> to control non-deterministic elements like dates, random numbers, or external access.</li>
+<li><strong>Mocks and stubs</strong> to simulate the behavior of external dependencies without actually accessing them.</li>
+<li><strong>Snapshot testing</strong> to protect the shape of responses or exports without writing one assertion per field.</li>
+</ul>
+<p>None of these techniques excludes the others. A test can use a mock for the API, a wrapper for the date, and finish with a snapshot. The key is to apply each tool where it reduces friction, not where it adds it.</p>
+<p>One last tip: a test suite that takes 10 minutes to run is a suite nobody runs. Keep tests fast, isolated, and deterministic, and they'll be an ally rather than a burden. If the suite still grows, <a href="https://github.com/pytest-dev/pytest-xdist"><code>pytest-xdist</code></a> runs it in parallel by distributing tests across available cores:</p>
+<pre class="highlight"><code class="language-bash"># Use all available cores
+pytest -n auto
+
+# Use a specific number of workers
+pytest -n 4</code></pre>
+<p>With large suites, the time savings can be considerable without changing a single line of the tests themselves.</p>

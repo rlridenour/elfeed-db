@@ -1,0 +1,161 @@
+<p>[Equations in this post may not look right (or appear at all) in your RSS reader. Go to <a href="https://leancrew.com/all-this/2026/06/world-cup-combinatorics-again/">the original article</a> to see them rendered properly.]</p>
+  <hr />
+  <p>At the end of yesterday’s post about <a href="https://leancrew.com/all-this/2026/06/world-cup-combinatorics/">the combinatorics of the World Cup group stage</a>, I said “this is good enough for me.” Turns out that was a lie. Today I rewrote some of the code to come up with a slightly more detailed result.</p>
+<p>The last bit of work in that post was to generate the 40 unique point totals that can come from a group. These are the possible totals, with no regard for which team gets which total:</p>
+<pre><code>9 6 3 0     7 6 3 1     7 3 2 2     5 5 3 2
+9 6 1 1     7 6 2 1     6 6 6 0     5 5 3 1
+9 4 4 0     7 5 4 0     6 6 4 1     5 5 2 2
+9 4 3 1     7 5 3 1     6 6 3 3     5 4 4 3
+9 4 2 1     7 5 2 1     6 5 4 1     5 4 4 2
+9 3 3 3     7 4 4 1     6 5 2 2     5 4 3 2
+9 2 2 2     7 4 3 3     6 4 4 3     5 3 3 2
+7 7 3 0     7 4 3 2     6 4 4 2     4 4 4 4
+7 7 1 1     7 4 3 1     5 5 5 0     4 4 4 3
+7 6 4 0     7 4 2 2     5 5 4 1     3 3 3 3
+</code></pre>
+<p>As discussed early in yesterday’s post, there are <math xmlns="http://www.w3.org/1998/Math/MathML"><mrow><msup><mn>3</mn><mn>6</mn></msup><mo>=</mo><mn>729</mn></mrow></math> ways the six games of a group can turn out, so today’s script associates each of the above totals with the game results that add up to that total. I built a dictionary in which the keys are the totals shown above—expressed as tuples, like <code>(7, 7, 1, 1)</code>—and the values are lists of lists of game result lists, like</p>
+<pre><code>[[[3, 0, 0, 0],
+  [3, 0, 0, 0],
+  [1, 0, 0, 1],
+  [0, 1, 1, 0],
+  [0, 0, 0, 3],
+  [0, 0, 0, 3]],
+ [[3, 0, 0, 0],
+  [1, 0, 1, 0],
+  [3, 0, 0, 0],
+  [0, 0, 3, 0],
+  [0, 1, 0, 1],
+  [0, 0, 3, 0]],
+ [[0, 3, 0, 0],
+  [0, 0, 3, 0],
+  [1, 0, 0, 1],
+  [0, 1, 1, 0],
+  [0, 3, 0, 0],
+  [0, 0, 3, 0]],
+ [[0, 3, 0, 0],
+  [1, 0, 1, 0],
+  [0, 0, 0, 3],
+  [0, 3, 0, 0],
+  [0, 1, 0, 1],
+  [0, 0, 0, 3]],
+ [[1, 1, 0, 0],
+  [3, 0, 0, 0],
+  [3, 0, 0, 0],
+  [0, 3, 0, 0],
+  [0, 3, 0, 0],
+  [0, 0, 1, 1]],
+ [[1, 1, 0, 0],
+  [0, 0, 3, 0],
+  [0, 0, 0, 3],
+  [0, 0, 3, 0],
+  [0, 0, 0, 3],
+  [0, 0, 1, 1]]]
+</code></pre>
+<p>The innermost lists in this output are the points accumulated in a single game. For example, <code>[1, 1, 0, 0]</code> represents a game in which the first two teams in the group played to a draw. So the above result tells us that there are six ways the six games in a group can lead to a <code>(7, 7, 1, 1)</code> table at the end of the stage.</p>
+<p>Here’s the Python code that built the dictionary and printed out a summary of the results:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  from itertools import product
+ 4:  from collections import defaultdict
+ 5:  import numpy as np
+ 6:  
+ 7:  # Possible point distributions from each game.
+ 8:  game1 = [[3, 0, 0, 0], [0, 3, 0, 0], [1, 1, 0, 0]]
+ 9:  game2 = [[3, 0, 0, 0], [0, 0, 3, 0], [1, 0, 1, 0]]
+10:  game3 = [[3, 0, 0, 0], [0, 0, 0, 3], [1, 0, 0, 1]]
+11:  game4 = [[0, 3, 0, 0], [0, 0, 3, 0], [0, 1, 1, 0]]
+12:  game5 = [[0, 3, 0, 0], [0, 0, 0, 3], [0, 1, 0, 1]]
+13:  game6 = [[0, 0, 3, 0], [0, 0, 0, 3], [0, 0, 1, 1]]
+14:  
+15:  # Enumerate all possible six-game results, and put them in a dictionary.
+16:  # The keys are the sorted point totals and the values are the list of
+17:  # game results.
+18:  games = defaultdict(list)
+19:  results = np.array(list(product(game1, game2, game3, game4, game5, game6)))
+20:  for r in results:
+21:    points = tuple(sorted(r.sum(axis=0).tolist(), reverse=True))
+22:    games[points].append(r.tolist())
+23:  
+24:  # Show how many game results lead to each tuple of sorted point totals.
+25:  count = 0
+26:  p = sorted(games.keys(), reverse=True)
+27:  for k in p:
+28:    count += len(games[k])
+29:    print(f'({" ".join(str(p) for p in k)}): {len(games[k]):3d}')
+30:  print(f'    Total: {count:3d}')
+</code></pre>
+<p>The output is</p>
+<pre><code>(9 6 3 0):  24
+(9 6 1 1):  12
+(9 4 4 0):  12
+(9 4 3 1):  24
+(9 4 2 1):  24
+(9 3 3 3):   8
+(9 2 2 2):   4
+(7 7 3 0):  12
+(7 7 1 1):   6
+(7 6 4 0):  24
+(7 6 3 1):  24
+(7 6 2 1):  24
+(7 5 4 0):  24
+(7 5 3 1):  24
+(7 5 2 1):  24
+(7 4 4 1):  36
+(7 4 3 3):  24
+(7 4 3 2):  24
+(7 4 3 1):  24
+(7 4 2 2):  24
+(7 3 2 2):  12
+(6 6 6 0):   8
+(6 6 4 1):  24
+(6 6 3 3):  24
+(6 5 4 1):  24
+(6 5 2 2):  12
+(6 4 4 3):  36
+(6 4 4 2):  24
+(5 5 5 0):   4
+(5 5 4 1):  24
+(5 5 3 2):  12
+(5 5 3 1):  12
+(5 5 2 2):  12
+(5 4 4 3):  24
+(5 4 4 2):  24
+(5 4 3 2):  24
+(5 3 3 2):  12
+(4 4 4 4):   6
+(4 4 4 3):   8
+(3 3 3 3):   1
+    Total: 729
+</code></pre>
+<p>where the numbers after the colons are the number of ways the games can go to result in the given totals. There is, for example, only one way to get <code>(3, 3, 3, 3)</code>, which is for every game to end in a draw.</p>
+<p>The code is not clever in any way. I build the <code>games</code> dictionary (actually a <a href="https://docs.python.org/3/library/collections.html#collections.defaultdict"><code>defaultdict</code></a>) one step at a time via the loop in Lines 20–22. As with yesterday’s script, I generate all the 729 game results using the <a href="https://docs.python.org/3.13/library/itertools.html#itertools.product"><code>product</code> function</a> from the <code>itertools</code> library and use NumPy’s <a href="https://numpy.org/doc/stable/reference/generated/numpy.sum.html"><code>sum</code> function</a> to add up the points from each of those results. The output comes from Lines 25–30.</p>
+<p>If I run this script in an interactive environment, like <a href="https://ipython.readthedocs.io/en/stable/">IPython</a> or <a href="https://jupyter-console.readthedocs.io/en/latest/">Jupyter</a>, I can pull out the games that lead to any set of points. I think the <code>(5, 4, 3, 2)</code> total is fun because it’s the only straight among the 40 possibilities. After some reformatting, here’s what <code>games[(5, 4, 3, 2)]</code> returns:</p>
+<pre><code>(3 0 0 0) (0 0 3 0) (1 0 0 1) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(3 0 0 0) (1 0 1 0) (0 0 0 3) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(3 0 0 0) (1 0 1 0) (1 0 0 1) (0 3 0 0) (0 1 0 1) (0 0 1 1) 
+(3 0 0 0) (1 0 1 0) (1 0 0 1) (0 1 1 0) (0 3 0 0) (0 0 1 1) 
+(0 3 0 0) (3 0 0 0) (1 0 0 1) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(0 3 0 0) (1 0 1 0) (3 0 0 0) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(0 3 0 0) (1 0 1 0) (1 0 0 1) (0 0 3 0) (0 1 0 1) (0 0 1 1) 
+(0 3 0 0) (1 0 1 0) (1 0 0 1) (0 1 1 0) (0 0 0 3) (0 0 1 1) 
+(1 1 0 0) (3 0 0 0) (0 0 0 3) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(1 1 0 0) (3 0 0 0) (1 0 0 1) (0 0 3 0) (0 1 0 1) (0 0 1 1) 
+(1 1 0 0) (3 0 0 0) (1 0 0 1) (0 1 1 0) (0 1 0 1) (0 0 3 0) 
+(1 1 0 0) (0 0 3 0) (3 0 0 0) (0 1 1 0) (0 1 0 1) (0 0 1 1) 
+(1 1 0 0) (0 0 3 0) (1 0 0 1) (0 3 0 0) (0 1 0 1) (0 0 1 1) 
+(1 1 0 0) (0 0 3 0) (1 0 0 1) (0 1 1 0) (0 1 0 1) (0 0 0 3) 
+(1 1 0 0) (1 0 1 0) (3 0 0 0) (0 1 1 0) (0 0 0 3) (0 0 1 1) 
+(1 1 0 0) (1 0 1 0) (3 0 0 0) (0 1 1 0) (0 1 0 1) (0 0 0 3) 
+(1 1 0 0) (1 0 1 0) (0 0 0 3) (0 1 1 0) (0 3 0 0) (0 0 1 1) 
+(1 1 0 0) (1 0 1 0) (0 0 0 3) (0 1 1 0) (0 1 0 1) (0 0 3 0) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 3 0 0) (0 0 0 3) (0 0 1 1) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 3 0 0) (0 1 0 1) (0 0 3 0) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 0 3 0) (0 3 0 0) (0 0 1 1) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 0 3 0) (0 1 0 1) (0 0 0 3) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 1 1 0) (0 3 0 0) (0 0 0 3) 
+(1 1 0 0) (1 0 1 0) (1 0 0 1) (0 1 1 0) (0 0 0 3) (0 0 3 0) 
+</code></pre>
+<p>Notice that in every set of six games (i.e., each row), there are two games that end in a win and four that end in a draw. The team with five points has a win and two draws; the team with four points has a win, a draw, and a loss; the team with three points has three draws; and the team with two points has two draws and a loss.</p>
+<p>OK, <em>now</em> I’m done.</p>
+  

@@ -1,0 +1,332 @@
+<p>Most of us learn Emacs one motion at a time – <code class="language-plaintext highlighter-rouge">C-f</code> for a character, <code class="language-plaintext highlighter-rouge">M-f</code>
+for a word, <code class="language-plaintext highlighter-rouge">C-n</code> for a line. Useful, but those commands don’t know anything
+about the <em>structure</em> of your code. Emacs has a whole other family of commands
+that operate on balanced expressions and definitions instead, and once they
+become muscle memory they’re hard to give up.</p>
+
+<p>Lisp hackers know these commands intimately – they’re the foundation
+<a href="https://paredit.org/">paredit</a> builds on. What’s less appreciated is that they
+work in plenty of other languages too. I’ve been leaning on them heavily while
+building <a href="https://github.com/bbatsov/neocaml">neocaml</a>, my tree-sitter package
+for OCaml programming, so I’ll use OCaml for the examples here. The commands themselves are
+general, though, and most of what follows applies to any structure-aware major
+mode.</p>
+
+<!--more-->
+
+<h2 id="sexps-and-defuns">Sexps and defuns</h2>
+
+<p>Two terms show up everywhere in this corner of Emacs, and both are inherited
+from its Lisp roots:</p>
+
+<ul>
+  <li>A <strong>sexp</strong> (“symbolic expression”) is a
+<a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Expressions.html">balanced expression</a>:
+a literal, an
+identifier, a parenthesized group, a list, a function application – whatever
+the major mode considers one self-contained unit.</li>
+  <li>A <strong>defun</strong> is a top-level definition. In Lisp that’s a <code class="language-plaintext highlighter-rouge">defun</code>; in OCaml it’s
+a <code class="language-plaintext highlighter-rouge">let</code> binding, a type definition, a module, and so on.</li>
+</ul>
+
+<p>The names are Lispy, but the <em>concepts</em> are general, and that’s the whole point.
+Every command below is built on one of these two notions.</p>
+
+<h2 id="moving-around">Moving around</h2>
+
+<p>These are the everyday workhorses. In the examples, <code class="language-plaintext highlighter-rouge">█</code> marks point (the
+cursor).</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Keybinding</th>
+      <th>Command</th>
+      <th>What it does</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-f</code></td>
+      <td><code class="language-plaintext highlighter-rouge">forward-sexp</code></td>
+      <td>Move forward over a balanced expression</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-b</code></td>
+      <td><code class="language-plaintext highlighter-rouge">backward-sexp</code></td>
+      <td>Move backward over a balanced expression</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-d</code></td>
+      <td><code class="language-plaintext highlighter-rouge">down-list</code></td>
+      <td>Move <em>into</em> a bracketed group</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-u</code></td>
+      <td><code class="language-plaintext highlighter-rouge">backward-up-list</code></td>
+      <td>Move <em>out</em> of the enclosing group</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-a</code></td>
+      <td><code class="language-plaintext highlighter-rouge">beginning-of-defun</code></td>
+      <td>Jump to the start of the current definition</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-e</code></td>
+      <td><code class="language-plaintext highlighter-rouge">end-of-defun</code></td>
+      <td>Jump to the end of the current definition</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The interesting thing about <code class="language-plaintext highlighter-rouge">forward-sexp</code> is that it moves over the <em>largest</em>
+expression starting at point. At the head of a function application, that’s the
+whole call:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">r</span> <span class="o">=</span> <span class="err">█</span><span class="nn">List</span><span class="p">.</span><span class="n">map</span> <span class="p">(</span><span class="k">fun</span> <span class="n">x</span> <span class="o">-&gt;</span> <span class="n">x</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="n">numbers</span>
+</code></pre></div></div>
+
+<p>After <code class="language-plaintext highlighter-rouge">C-M-f</code>:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">r</span> <span class="o">=</span> <span class="nn">List</span><span class="p">.</span><span class="n">map</span> <span class="p">(</span><span class="k">fun</span> <span class="n">x</span> <span class="o">-&gt;</span> <span class="n">x</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="n">numbers</span><span class="err">█</span>
+</code></pre></div></div>
+
+<p>But inside a collection it steps over one element at a time, which is exactly
+what you want when you’re editing the elements:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">xs</span> <span class="o">=</span> <span class="p">[</span> <span class="err">█</span><span class="n">aa</span><span class="p">;</span> <span class="n">bb</span><span class="p">;</span> <span class="n">cc</span> <span class="p">]</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">xs</span> <span class="o">=</span> <span class="p">[</span> <span class="n">aa</span><span class="err">█</span><span class="p">;</span> <span class="n">bb</span><span class="p">;</span> <span class="n">cc</span> <span class="p">]</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">down-list</code> and <code class="language-plaintext highlighter-rouge">backward-up-list</code> are a great pair for repositioning. The
+latter is especially nice in a structure-aware mode because it understands
+<em>keyword-delimited</em> blocks, not just parens. From deep inside a <code class="language-plaintext highlighter-rouge">struct</code> body,
+<code class="language-plaintext highlighter-rouge">C-M-u</code> climbs out to the enclosing module:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nc">M</span> <span class="o">=</span> <span class="k">struct</span>
+  <span class="k">let</span> <span class="n">x</span> <span class="o">=</span> <span class="mi">1</span>
+  <span class="k">let</span> <span class="n">y</span> <span class="o">=</span> <span class="err">█</span><span class="mi">2</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">module</span> <span class="nc">M</span> <span class="o">=</span> <span class="err">█</span><span class="k">struct</span>
+  <span class="k">let</span> <span class="n">x</span> <span class="o">=</span> <span class="mi">1</span>
+  <span class="k">let</span> <span class="n">y</span> <span class="o">=</span> <span class="mi">2</span>
+<span class="k">end</span>
+</code></pre></div></div>
+
+<h2 id="editing-with-structure">Editing with structure</h2>
+
+<p>Movement is only half the story. The same structural knowledge powers a set of
+editing commands that are far more precise than their line- or character-based
+cousins.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Keybinding</th>
+      <th>Command</th>
+      <th>What it does</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-SPC</code></td>
+      <td><code class="language-plaintext highlighter-rouge">mark-sexp</code></td>
+      <td>Mark the next balanced expression</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-k</code></td>
+      <td><code class="language-plaintext highlighter-rouge">kill-sexp</code></td>
+      <td>Kill the expression after point</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">C-M-t</code></td>
+      <td><code class="language-plaintext highlighter-rouge">transpose-sexps</code></td>
+      <td>Swap the two expressions around point</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">M-x delete-pair</code></td>
+      <td><code class="language-plaintext highlighter-rouge">delete-pair</code></td>
+      <td>Remove a matched delimiter pair</td>
+    </tr>
+    <tr>
+      <td><code class="language-plaintext highlighter-rouge">M-x raise-sexp</code></td>
+      <td><code class="language-plaintext highlighter-rouge">raise-sexp</code></td>
+      <td>Replace the enclosing expression with the one at point</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><code class="language-plaintext highlighter-rouge">kill-sexp</code> removes a whole expression without you having to hunt for where it
+ends:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">xs</span> <span class="o">=</span> <span class="err">█</span><span class="p">(</span><span class="nn">List</span><span class="p">.</span><span class="n">rev</span> <span class="n">ys</span><span class="p">)</span> <span class="o">@@</span> <span class="n">tl</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">xs</span> <span class="o">=</span> <span class="err">█</span> <span class="o">@@</span> <span class="n">tl</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">transpose-sexps</code> swaps the expressions on either side of point – a one-keystroke
+way to fix arguments you passed in the wrong order:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">path</span> <span class="o">=</span> <span class="nn">Filename</span><span class="p">.</span><span class="n">concat</span> <span class="n">dir</span> <span class="err">█</span><span class="n">file</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">path</span> <span class="o">=</span> <span class="nn">Filename</span><span class="p">.</span><span class="n">concat</span> <span class="n">file</span> <span class="n">dir</span><span class="err">█</span>
+</code></pre></div></div>
+
+<p>(There’s much more to say about transposition – I covered the whole family in
+<a href="/blog/2026/03/04/transpose-all-the-things/">Transpose All The Things</a>.)</p>
+
+<p><code class="language-plaintext highlighter-rouge">delete-pair</code> unwraps a bracketed group: put point on the opening delimiter and
+it deletes both it and its match.</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">area</span> <span class="o">=</span> <span class="n">pi</span> <span class="o">*.</span> <span class="err">█</span><span class="p">(</span><span class="n">r</span> <span class="o">*.</span> <span class="n">r</span><span class="p">)</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">area</span> <span class="o">=</span> <span class="n">pi</span> <span class="o">*.</span> <span class="err">█</span><span class="n">r</span> <span class="o">*.</span> <span class="n">r</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">delete-pair</code> has a subtle dependency on structure that I ran into head-on while
+working on neocaml – it relies on the mode’s notion of a sexp to find the
+matching delimiter. I wrote that adventure up separately in
+<a href="/blog/2026/03/14/removing-paired-delimiters-in-emacs/">Removing Paired Delimiters in Emacs</a>.</p>
+
+<p>Finally, <code class="language-plaintext highlighter-rouge">raise-sexp</code> replaces the <em>enclosing</em> expression with the
+sub-expression at point. It’s the fastest way I know to strip a wrapper – here,
+dropping a <code class="language-plaintext highlighter-rouge">Some</code> around a call:</p>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">process</span> <span class="p">(</span><span class="nc">Some</span> <span class="err">█</span><span class="p">(</span><span class="n">find_opt</span> <span class="n">key</span> <span class="n">tbl</span><span class="p">))</span>
+</code></pre></div></div>
+
+<div class="language-ocaml highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">let</span> <span class="n">result</span> <span class="o">=</span> <span class="n">process</span> <span class="err">█</span><span class="p">(</span><span class="n">find_opt</span> <span class="n">key</span> <span class="n">tbl</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>One caveat: <code class="language-plaintext highlighter-rouge">raise-sexp</code> needs something to raise <em>into</em>. Invoke it at the top
+level of a binding, where nothing surrounds the expression, and it’ll complain
+about unbalanced parentheses. Reach for it inside a call, a list, or a
+parenthesized expression.</p>
+
+<h2 id="the-same-key-different-behavior">The same key, different behavior</h2>
+
+<p>Here’s the part that trips people up: <strong>these commands behave differently from
+one major mode to the next</strong>, because each mode gets to define what “an
+expression” or “a definition” actually means. They do it through a few
+buffer-local hooks – chiefly <code class="language-plaintext highlighter-rouge">forward-sexp-function</code> (which backs <code class="language-plaintext highlighter-rouge">C-M-f</code>/<code class="language-plaintext highlighter-rouge">C-M-b</code>
+and everything built on them, including <code class="language-plaintext highlighter-rouge">kill-sexp</code>, <code class="language-plaintext highlighter-rouge">transpose-sexps</code>, and
+<code class="language-plaintext highlighter-rouge">delete-pair</code>) and <code class="language-plaintext highlighter-rouge">beginning-of-defun-function</code> / <code class="language-plaintext highlighter-rouge">end-of-defun-function</code> for
+defun motion. What plugs into those hooks has changed a lot over the years.</p>
+
+<h3 id="the-classic-backing-syntax-tables-and-regexps">The classic backing: syntax tables and regexps</h3>
+
+<p>For most of Emacs’s history, structural commands rested on the
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Syntax-Tables.html">syntax table</a> –
+the per-mode table that classifies each character as an open or close delimiter,
+a string quote, a word or symbol constituent, and so on.
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Motion-via-Parsing.html"><code class="language-plaintext highlighter-rouge">scan-sexps</code> and <code class="language-plaintext highlighter-rouge">scan-lists</code></a>
+walk the buffer counting delimiters according to that table, and
+that’s what <code class="language-plaintext highlighter-rouge">forward-sexp</code> falls back on when a mode sets nothing special. It’s
+wonderfully cheap and works in <em>any</em> buffer, even plain text – but it’s purely
+lexical. It counts brackets and respects quoting, yet has no idea what a
+function or a block actually <em>is</em>. That’s why vanilla <code class="language-plaintext highlighter-rouge">backward-up-list</code> can’t
+climb out of a <code class="language-plaintext highlighter-rouge">begin ... end</code> or OCaml <code class="language-plaintext highlighter-rouge">struct ... end</code> block: those aren’t
+bracket characters, so as far as the syntax table is concerned they don’t exist.</p>
+
+<p>Modes that wanted more had two classic options:</p>
+
+<ul>
+  <li><a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/SMIE.html">SMIE</a>
+(the Simple Minded Indentation Engine). Modes like <code class="language-plaintext highlighter-rouge">ruby-mode</code> and
+<code class="language-plaintext highlighter-rouge">octave-mode</code> feed SMIE a small operator-precedence grammar, and <code class="language-plaintext highlighter-rouge">smie-setup</code>
+points <code class="language-plaintext highlighter-rouge">forward-sexp-function</code> at <code class="language-plaintext highlighter-rouge">smie-forward-sexp-command</code>. Suddenly <code class="language-plaintext highlighter-rouge">C-M-f</code>
+understands keyword-delimited blocks like <code class="language-plaintext highlighter-rouge">if ... end</code>, not just parens.</li>
+  <li>Regexps for definitions. A <code class="language-plaintext highlighter-rouge">beginning-of-defun-function</code> that scans for a
+header pattern, and an <code class="language-plaintext highlighter-rouge">imenu-generic-expression</code> for the imenu index. Quick to
+write, but heuristic – easily fooled by code inside strings and comments, or by
+unconventional formatting.</li>
+</ul>
+
+<h3 id="the-tree-sitter-backing-a-real-parse-tree">The tree-sitter backing: a real parse tree</h3>
+
+<p>Tree-sitter modes answer the same questions from an actual
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Parsing-Program-Source.html">concrete syntax tree</a>.
+<code class="language-plaintext highlighter-rouge">forward-sexp-function</code> becomes <code class="language-plaintext highlighter-rouge">treesit-forward-sexp</code>; on Emacs 30+, a mode
+declares named “things” – <code class="language-plaintext highlighter-rouge">sexp</code>, <code class="language-plaintext highlighter-rouge">list</code>, <code class="language-plaintext highlighter-rouge">sentence</code>, <code class="language-plaintext highlighter-rouge">defun</code>, <code class="language-plaintext highlighter-rouge">text</code> – via
+<code class="language-plaintext highlighter-rouge">treesit-thing-settings</code>, and the navigation commands consult them. Defun motion
+goes through <code class="language-plaintext highlighter-rouge">treesit-beginning-of-defun</code> (driven by <code class="language-plaintext highlighter-rouge">treesit-defun-type-regexp</code>),
+and imenu through <code class="language-plaintext highlighter-rouge">treesit-simple-imenu-settings</code>.</p>
+
+<p>Because it’s the real grammar rather than a delimiter count, it’s accurate
+exactly where the lexical approach has to guess. That’s why, earlier, <code class="language-plaintext highlighter-rouge">C-M-f</code>
+could treat the whole <code class="language-plaintext highlighter-rouge">List.map ...</code> application as one node, and <code class="language-plaintext highlighter-rouge">C-M-u</code> could
+climb out of a paren-less <code class="language-plaintext highlighter-rouge">struct</code> block – and why a stray brace inside a string
+never throws it off. The price of admission is a compiled grammar and a
+reasonably recent Emacs.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<p>This layering is also why a command like <code class="language-plaintext highlighter-rouge">delete-pair</code> can quietly misbehave: it
+leans on the mode’s <code class="language-plaintext highlighter-rouge">forward-sexp-function</code> to find the matching delimiter, so if
+that disagrees with the buffer’s syntax table you get surprising deletions.
+Getting these foundations right is a big part of what makes a structure-aware
+major mode feel solid.</p>
+
+<h2 id="what-about-paredit">What about paredit?</h2>
+
+<p>As mentioned in the beginning of this articles, all of this probably reminds
+(some of) you of <a href="https://paredit.org/">paredit</a> – and it should. paredit takes
+the same structural ideas and turns them up to eleven, adding slurping, barfing,
+splicing, and the famous guarantee that your parens always stay balanced. The
+built-in commands here are the humbler, mode-agnostic ancestors of those ideas.</p>
+
+<p>For non-Lisp languages there are spiritual successors built on tree-sitter.
+<a href="https://github.com/mickeynp/combobulate">Combobulate</a> is the most ambitious –
+a full structural editing and navigation package for tree-sitter modes, with
+drag, splice, and “move by sibling” commands. <a href="https://github.com/AmaiKinono/puni">puni</a>
+takes a different tack, offering paredit-style soft deletion that works across
+many languages by leaning on <code class="language-plaintext highlighter-rouge">forward-sexp-function</code>. (If you do mix paredit
+with other tools, mind the keybindings – I wrote about some common clashes in
+<a href="/blog/2026/03/27/paredit-keybinding-conflicts/">Paredit Keybinding Conflicts</a>.)</p>
+
+<h2 id="more-than-movement-and-editing">More than movement and editing</h2>
+
+<p>Once a mode knows how to find sexps and defuns, a surprising number of other
+features come along for the ride – all powered by the same structural framework:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">narrow-to-defun</code> (<code class="language-plaintext highlighter-rouge">C-x n d</code>) – narrow the buffer to just the current
+definition. Wonderful for focusing on one function at a time, and it uses the
+exact same defun detection as <code class="language-plaintext highlighter-rouge">C-M-a</code>/<code class="language-plaintext highlighter-rouge">C-M-e</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">which-function-mode</code> – show the name of the definition point is in, in
+the mode line. It needs the mode to know where definitions begin and end.</li>
+  <li><a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Imenu.html"><code class="language-plaintext highlighter-rouge">imenu</code></a> –
+jump to a definition by name. Same structural underpinning.</li>
+  <li>Folding – <code class="language-plaintext highlighter-rouge">outline-minor-mode</code>, <code class="language-plaintext highlighter-rouge">hs-minor-mode</code>, and the tree-sitter
+outline support on Emacs 30+ all fold along structural boundaries.</li>
+  <li>Expanding the region – repeatedly hitting <code class="language-plaintext highlighter-rouge">C-M-SPC</code> grows the selection
+by sexp, and packages like <a href="/blog/2026/03/03/expreg-expand-region-reborn/">expreg</a>
+generalize that to grow by structural node.</li>
+</ul>
+
+<h2 id="wrapping-up">Wrapping up</h2>
+
+<p>The <code class="language-plaintext highlighter-rouge">C-M-</code>-prefixed commands are some of the best returns on investment in all
+of Emacs. They’re not Lisp-only, they’re not tree-sitter-only, and they quietly
+get smarter as major modes teach Emacs about their syntax. Learn the handful in
+the tables above – <code class="language-plaintext highlighter-rouge">C-M-f</code>/<code class="language-plaintext highlighter-rouge">C-M-b</code>, <code class="language-plaintext highlighter-rouge">C-M-u</code>/<code class="language-plaintext highlighter-rouge">C-M-d</code>, <code class="language-plaintext highlighter-rouge">C-M-SPC</code>, <code class="language-plaintext highlighter-rouge">C-M-k</code>,
+<code class="language-plaintext highlighter-rouge">C-M-a</code>/<code class="language-plaintext highlighter-rouge">C-M-e</code> – and you’ll feel the difference in every language you touch.</p>
+
+<p>And if a couple of these (<code class="language-plaintext highlighter-rouge">delete-pair</code>, <code class="language-plaintext highlighter-rouge">raise-sexp</code>) feel essential but lack
+default bindings, give them keys in your major mode of choice. Your future self,
+mid-refactor, will thank you.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Tree-sitter support was introduced in Emacs 29, but it got significantly better in Emacs 30. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

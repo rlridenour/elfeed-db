@@ -1,0 +1,32 @@
+<p>
+I use <code>org-roam</code> for taking notes, but I also like to have indexes (just org roam nodes that link their contents) that link everything together.
+This means that if I want nodes properly linked when I make them, I first have to find the index they belong to insert them into, which really ruins the flow.
+I would rather go through the graph regularly and clean things up later, but aside from squinting at <code>org-roam-ui</code> finding those orphan nodes is actually quite annoying from within Emacs.
+</p>
+
+<p>
+Thankfully I stumbled upon <a href="https://justin.abrah.ms/notes/generating-connections-within-org-roam">this note</a> by Justin Abrahms, which gives a nice SQL query for finding orphans, and I've written a bit of Elisp around it to prompt for the resulting nodes with completing read.
+Hopefully someone else finds this useful!
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span class="org-keyword">defun</span> <span class="org-function-name">org-roam-find-orphan</span> ()
+  <span class="org-doc">"Find all orphaned nodes and then provide their paths to open with completing-read."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let*</span> ((org-roam--db (sqlite-open org-roam-db-location))
+       (org-roam-orphans
+        (sqlite-select
+         org-roam--db
+         <span class="org-string">"select * from nodes n
+where not exists ( select null from links l where n.id = l.source )
+and not exists ( select null from links l where n.id = l.dest );"</span>)))
+    (sqlite-close org-roam--db)
+    (find-file
+     (completing-read
+      <span class="org-string">"Orphan node: "</span>
+      (mapcar
+       (<span class="org-keyword">lambda</span> (rec)
+       (string-replace <span class="org-string">"\""</span> <span class="org-string">""</span> (cadr rec)))
+       org-roam-orphans)))))
+</pre>
+</div>

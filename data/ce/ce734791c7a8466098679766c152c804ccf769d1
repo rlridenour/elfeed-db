@@ -1,0 +1,73 @@
+<p>
+I have been doing a lot of fiddling with images lately, mostly through dired and image-dired, and one little thing has been bugging me for a while.  When I open an image in Emacs, <code>image-mode</code> happily shows me the picture, but it never tells me the one bit of information I actually want to know, how big is the thing?, width, height, file size, that sort of thing.  You can of course bounce out to a shell and run <code>identify</code> or <code>file</code>, but that feels silly when Emacs already has the image loaded.
+</p>
+
+
+<div id="org65ba1d7" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20260430074958-emacs--A-Tiny-Header-line-Tweak-Image-Dimensions-in-image-mode.jpg" alt="20260430074958-emacs--A-Tiny-Header-line-Tweak-Image-Dimensions-in-image-mode.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+So I thought, right, this should be a five minute job, just slap something into the header-line on <code>image-mode-hook</code> and be done with it.  And it more or less was, although there was a small wrinkle along the way that is worth mentioning, because it caught me out.
+</p>
+
+<p>
+Here is what ended up in my init.el:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #6a9955; font-weight: bold; font-style: italic;">;;</span><span style="color: #6a9955; font-weight: bold; font-style: italic;">
+</span><span style="color: #6a9955; font-weight: bold; font-style: italic;">;; </span><span style="color: #6a9955; font-weight: bold; font-style: italic;">-&gt; image-mode-dimensions
+</span><span style="color: #6a9955; font-weight: bold; font-style: italic;">;;</span><span style="color: #6a9955; font-weight: bold; font-style: italic;">
+</span>
+(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/image-mode-show-dimensions</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Display the open image's pixel dimensions and file size in the header line."</span>
+  (<span style="color: #569cd6; font-weight: bold;">when</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (derived-mode-p 'image-mode)
+             buffer-file-name
+             (file-exists-p buffer-file-name))
+    (<span style="color: #569cd6; font-weight: bold;">condition-case</span> err
+        (<span style="color: #569cd6; font-weight: bold;">let*</span> ((image (<span style="color: #569cd6; font-weight: bold;">or</span> (image-get-display-property)
+                          (create-image buffer-file-name)))
+               (size (image-size image t))
+               (width (car size))
+               (height (cdr size))
+               (bytes (file-attribute-size
+                       (file-attributes buffer-file-name))))
+          (<span style="color: #569cd6; font-weight: bold;">setq</span> header-line-format
+                (format <span style="color: #ce9178; font-style: italic;">" %d x %d px   %s"</span>
+                        width height
+                        (file-size-human-readable bytes))))
+      (<span style="color: #f44747; font-weight: bold;">error</span>
+       (<span style="color: #569cd6; font-weight: bold;">setq</span> header-line-format
+             (format <span style="color: #ce9178; font-style: italic;">" image dimensions unavailable: %S"</span> err))))))
+
+(add-hook 'image-mode-hook #'my/image-mode-show-dimensions)
+(add-hook 'image-mode-new-window-functions
+          (<span style="color: #569cd6; font-weight: bold;">lambda</span> (<span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">&amp;rest</span> _) (my/image-mode-show-dimensions)))
+</pre>
+</div>
+
+<p>
+A few notes on what is going on here.  The <code>or</code> around <code>image-get-display-property</code> and <code>create-image</code> means we use the displayed image spec when it is there (cheaper, no extra file read), and fall back to building one from the file path when it is not.  <code>image-size</code> with a non-nil second argument returns dimensions in actual pixels rather than canvas units, which is what I want.  <code>file-size-human-readable</code> gives me a nice <code>2.4M</code> rather than <code>2516582</code>, because nobody reads bytes directly.
+</p>
+
+<p>
+The <code>condition-case</code> is there because images can occasionally throw, especially when something has gone wrong with <code>imagemagick</code> or an unsupported format sneaks in, and I would rather see a polite header-line message than have the hook explode and pollute <code>*Messages*</code> every time I open a picture.
+</p>
+
+<p>
+The second hook, <code>image-mode-new-window-functions</code>, is the one that handles the case where you flip between image and text view of the same buffer with <code>C-c C-c</code>, since the image gets re-displayed and the header-line needs to refresh too.
+</p>
+
+<p>
+So now when I pop open an image, I get a nice little header-line that reads something like:
+</p>
+
+<pre class="example" id="orgfe7ba9d">
+1920 x 1080 px   2.4M
+</pre>
+
+<p>
+A small thing, but the kind of small thing that makes Emacs feel like it fits a bit more snugly around how I actually work.
+</p>

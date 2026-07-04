@@ -1,0 +1,183 @@
+<p>I maintain a bunch of theme ports these days: <a href="https://github.com/bbatsov/zenburn-emacs">Zenburn</a>,
+<a href="https://github.com/bbatsov/solarized-emacs">Solarized</a>,
+<a href="https://github.com/bbatsov/tokyo-night-emacs">Tokyo Night</a>, and most recently
+<a href="https://github.com/bbatsov/batppuccin-emacs">Batppuccin</a>. Every one of them
+wants screenshots in the README, ideally one per variant, so people can compare
+the flavors at a glance.</p>
+
+<p>I’d been putting this off forever, because taking the screenshots by hand is
+such a chore. Load a theme, resize the frame, arrange a nice-looking buffer, take
+a screenshot, crop it, then repeat for every single flavor. And the results are
+never quite consistent: the font is a little different, the window is a slightly
+different size, the crop is off by a few pixels. Multiply that by four flavors
+across several themes and you can see why I kept finding better things to do.</p>
+
+<p>So recently I finally did what I should have done from the start and taught Emacs
+to take the screenshots for me. What started as a five-minute hack turned into a
+surprisingly deep little rabbit hole, so I figured it was worth a write-up.</p>
+
+<p>The core idea is simple: spin up a throwaway <code class="language-plaintext highlighter-rouge">emacs -Q</code>, load the theme, show a
+sample buffer in a frame of a fixed size, and capture just that window. Because
+every step is scripted, the screenshots come out identical in layout, and
+regenerating the whole set after a color tweak is a single command.</p>
+
+<p><img src="/assets/images/emacs-theme-screenshots.png" alt="Four Batppuccin flavors, generated automatically" /></p>
+
+<h2 id="a-clean-disposable-frame">A clean, disposable frame</h2>
+
+<p>The first half of the job is pure Emacs Lisp. I want a frame with no
+distractions (no tool bar, menu bar, or scroll bars), a nice font, a fixed size,
+and of course the theme loaded:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">setq</span> <span class="nv">inhibit-startup-screen</span> <span class="no">t</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">menu-bar-mode</span> <span class="mi">-1</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">tool-bar-mode</span> <span class="mi">-1</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">scroll-bar-mode</span> <span class="mi">-1</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">setq-default</span> <span class="nv">cursor-type</span> <span class="no">nil</span><span class="p">)</span>          <span class="c1">; hide the cursor for a clean shot</span>
+<span class="p">(</span><span class="nv">set-face-attribute</span> <span class="ss">'default</span> <span class="no">nil</span> <span class="ss">:family</span> <span class="s">"Fira Code"</span> <span class="ss">:height</span> <span class="mi">150</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'custom-theme-load-path</span> <span class="s">"/path/to/theme"</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'batppuccin-mocha</span> <span class="no">t</span><span class="p">)</span>
+
+<span class="p">(</span><span class="nv">set-frame-size</span> <span class="p">(</span><span class="nv">selected-frame</span><span class="p">)</span> <span class="mi">92</span> <span class="mi">36</span><span class="p">)</span>
+<span class="p">(</span><span class="nv">find-file</span> <span class="s">"sample.el"</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>I load all of this into a throwaway Emacs:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>emacs -Q --eval '(load "setup.el")'
+</code></pre></div></div>
+
+<p>A couple of things bit me here that are worth calling out:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">emacs -L some/dir</code> puts a directory on the <code class="language-plaintext highlighter-rouge">load-path</code>, but <code class="language-plaintext highlighter-rouge">load-theme</code>
+searches <code class="language-plaintext highlighter-rouge">custom-theme-load-path</code>. Those are two different lists, so remember
+to add the theme’s directory to the latter.</li>
+  <li>If your sample file lives in a project with a <code class="language-plaintext highlighter-rouge">.dir-locals.el</code>, opening it can
+pop up an “unsafe local variables” prompt that blocks the whole script. Setting
+<code class="language-plaintext highlighter-rouge">enable-local-variables</code> and <code class="language-plaintext highlighter-rouge">enable-dir-local-variables</code> to <code class="language-plaintext highlighter-rouge">nil</code> sidesteps
+that.</li>
+</ul>
+
+<p>I use an Emacs Lisp file as the sample, by the way. It highlights nicely and,
+being the mother tongue, needs no third-party major mode, which keeps the whole
+setup dependency-free.</p>
+
+<p>Now there’s a pretty Emacs frame on screen. The other half of the problem is
+turning it into a PNG.</p>
+
+<h2 id="option-1-let-emacs-export-itself">Option 1: let Emacs export itself</h2>
+
+<p>The cleanest approach doesn’t involve a screenshot at all. If your Emacs is built
+with Cairo (as the GTK build on Linux typically is), it has a wonderful function
+called <code class="language-plaintext highlighter-rouge">x-export-frames</code> that renders a frame straight to an image:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">with-temp-file</span> <span class="s">"shot.svg"</span>
+  <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nv">x-export-frames</span> <span class="no">nil</span> <span class="ss">'svg</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>It can emit <code class="language-plaintext highlighter-rouge">svg</code>, <code class="language-plaintext highlighter-rouge">pdf</code>, <code class="language-plaintext highlighter-rouge">postscript</code>, or <code class="language-plaintext highlighter-rouge">png</code>. No external tools, no
+window-manager wrangling, no “don’t touch the mouse while it runs”. Emacs simply
+hands you the picture. If you’re on a Cairo build, stop reading and use this.</p>
+
+<p>Alas, I’m on macOS, where Emacs uses the NS toolkit and <code class="language-plaintext highlighter-rouge">x-export-frames</code> isn’t
+available (you get a friendly <code class="language-plaintext highlighter-rouge">void-function</code>). So I had to go the screenshot
+route.</p>
+
+<h2 id="option-2-screenshot-the-window">Option 2: screenshot the window</h2>
+
+<p>macOS ships with <code class="language-plaintext highlighter-rouge">screencapture</code>, which can grab a rectangular region of the
+screen. The trick is knowing exactly where the Emacs frame is. Conveniently,
+Emacs knows: <code class="language-plaintext highlighter-rouge">frame-edges</code> reports the outer pixel coordinates of the frame:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">e</span> <span class="p">(</span><span class="nv">frame-edges</span> <span class="no">nil</span> <span class="ss">'outer-edges</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nv">with-temp-file</span> <span class="s">"/tmp/geom"</span>
+    <span class="p">(</span><span class="nv">insert</span> <span class="p">(</span><span class="nb">format</span> <span class="s">"%d %d %d %d"</span> <span class="p">(</span><span class="nb">nth</span> <span class="mi">0</span> <span class="nv">e</span><span class="p">)</span> <span class="p">(</span><span class="nb">nth</span> <span class="mi">1</span> <span class="nv">e</span><span class="p">)</span> <span class="p">(</span><span class="nb">nth</span> <span class="mi">2</span> <span class="nv">e</span><span class="p">)</span> <span class="p">(</span><span class="nb">nth</span> <span class="mi">3</span> <span class="nv">e</span><span class="p">)))))</span>
+</code></pre></div></div>
+
+<p>The shell side reads those coordinates and captures the rectangle:</p>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">read </span>L T R B &lt; /tmp/geom
+screencapture <span class="nt">-x</span> <span class="nt">-R</span> <span class="s2">"</span><span class="nv">$L</span><span class="s2">,</span><span class="nv">$T</span><span class="s2">,</span><span class="k">$((</span>R <span class="o">-</span> L<span class="k">))</span><span class="s2">,</span><span class="k">$((</span>B <span class="o">-</span> T<span class="k">))</span><span class="s2">"</span> out.png
+</code></pre></div></div>
+
+<p>And that’s basically it. Except it isn’t.</p>
+
+<h2 id="the-part-nobody-warns-you-about">The part nobody warns you about</h2>
+
+<p>Here’s the catch with region capture: <code class="language-plaintext highlighter-rouge">screencapture -R</code> grabs whatever happens
+to be on screen at those coordinates. If any other window is sitting on top of
+the Emacs frame, you’ll cheerfully capture <em>that</em> instead. And since I like to
+keep working while the script churns through a dozen flavors, this happened all
+the time. I’d end up with a screenshot of my terminal, my browser, or my <em>other</em>
+Emacs.</p>
+
+<p>I ended up stacking a few tricks. First I float the frame above everything else
+with the <code class="language-plaintext highlighter-rouge">z-group</code> frame parameter, <code class="language-plaintext highlighter-rouge">(set-frame-parameter nil 'z-group 'above)</code>.
+Then, since an Emacs launched from a background shell isn’t the active
+application and starts out buried behind the other windows, I pull it forward
+with <code class="language-plaintext highlighter-rouge">(ns-hide-emacs 'activate)</code>.</p>
+
+<p>Neither of those is bulletproof on its own, so the real safety net is checking
+the result. After each capture I sample a pixel from a corner that should be the
+theme’s background and compare it to the color Emacs reports for the <code class="language-plaintext highlighter-rouge">default</code>
+face. If they don’t match, I know I grabbed the wrong window, so I wait a moment
+and try again. That one check is what makes the whole thing safe to run while I
+keep working. Asking ImageMagick for a single pixel is enough:</p>
+
+<div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>magick out.png <span class="nt">-crop</span> <span class="s1">'1x1+24+420'</span> +repage <span class="nt">-format</span> <span class="s1">'%[pixel:p{0,0}]'</span> info:
+</code></pre></div></div>
+
+<p>Capturing a <em>specific window</em> by its ID would sidestep the stacking problem
+entirely, but on recent macOS enumerating window IDs requires Screen Recording
+permission for whatever process asks, and I couldn’t get that from a plain
+script. Floating the frame and verifying the result turned out to be simpler and
+more reliable.</p>
+
+<h2 id="a-few-finishing-touches">A few finishing touches</h2>
+
+<p>A couple of smaller tweaks made the output look properly polished. GUI Emacs on
+macOS colors the native title bar according to the frame’s <code class="language-plaintext highlighter-rouge">ns-appearance</code>
+parameter, so I set it to <code class="language-plaintext highlighter-rouge">light</code> for light themes and <code class="language-plaintext highlighter-rouge">dark</code> for dark ones, and
+add <code class="language-plaintext highlighter-rouge">ns-transparent-titlebar</code> so the bar blends into the buffer background. It’s
+a tiny detail, but it makes the whole window feel like one piece. (It’s also the
+same trick that fixes an unreadable title bar under light themes, but that’s a
+story for another day.)</p>
+
+<p>The other tweak was really a bugfix. Every so often a shot came out with a stray
+glyph or two at the top of the buffer, some redisplay artifact I never bothered
+to fully diagnose. Forcing a <code class="language-plaintext highlighter-rouge">(redraw-display)</code> right before I read out the frame
+geometry made it go away.</p>
+
+<h2 id="other-roads-not-taken">Other roads not taken</h2>
+
+<p>If you want to run this on a server or in CI, the story gets even better on
+Linux. You can start a virtual X display with <code class="language-plaintext highlighter-rouge">Xvfb</code>, run the Cairo Emacs build
+against it, and use <code class="language-plaintext highlighter-rouge">x-export-frames</code>: fully headless, perfectly reproducible,
+and with none of the “is the right window on top?” nonsense. That’s the setup I’d
+reach for if I ever wanted to generate these in a GitHub Action.</p>
+
+<p>There are also plenty of other capture tools depending on your platform:
+ImageMagick’s <code class="language-plaintext highlighter-rouge">import</code> and the venerable <code class="language-plaintext highlighter-rouge">scrot</code> on X11, <code class="language-plaintext highlighter-rouge">grim</code> on Wayland,
+<code class="language-plaintext highlighter-rouge">gnome-screenshot</code>, and so on. Most of them can target a specific window, which
+is handy. One thing that <em>won’t</em> work is <code class="language-plaintext highlighter-rouge">emacs --batch</code>: batch mode has no GUI
+frame, so there’s nothing to photograph. You genuinely need a real, on-screen
+frame (or Cairo’s off-screen rendering).</p>
+
+<h2 id="where-this-is-headed">Where this is headed</h2>
+
+<p>For now this lives as a small <code class="language-plaintext highlighter-rouge">tools/</code> script inside my Batppuccin repo: a
+<code class="language-plaintext highlighter-rouge">sample.el</code> to display, an Emacs Lisp file to set up the frame, and a shell
+script to drive the capture and verification. It has already saved me a ton of
+tedium. Regenerating four flavors’ worth of screenshots is one command, and they
+come out identical every time.</p>
+
+<p>But all of my theme ports have the same need, and the logic is almost entirely
+theme-agnostic. So I suspect I’ll eventually pull it out into a little standalone
+project: point it at a theme directory, hand it a sample file, and let it produce
+a consistent gallery for any theme. If that sounds useful to you as well, let me
+know. It might just nudge me into actually doing it.</p>
+
+<p>Until then, I hope some of these ideas save you a bit of manual cropping.
+Automating the boring parts is what Emacs is all about.</p>

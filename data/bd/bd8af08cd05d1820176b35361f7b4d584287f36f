@@ -1,0 +1,45 @@
+<p>Recently I stumbled on a funny kind of race in distributed systems. I believe even the <a href="https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing">classic texts</a> don't cover that.</p>
+
+<p>So say we have a system <code class="language-plaintext highlighter-rouge">S</code> sending commands to a receiver <code class="language-plaintext highlighter-rouge">R</code> over network. <code class="language-plaintext highlighter-rouge">S</code> maintains network outbox and inbox handled by separate threads. A command is expected to complete with certain result sent back before the deadline, or else <code class="language-plaintext highlighter-rouge">S</code> would assume a request timed out. Quite basic so far.</p>
+
+<p>However a certain class of commands (and only it) was timing out. They would fail regularly on some networks, sporadically on others and seemingly never on some. Perplexingly they were really simple commands, amounting to little else than sending back a reading of <code class="language-plaintext highlighter-rouge">R</code>'s internal state. Increasing the command deadline had no apparent effect. Adding logging in places helped little and in fact often resulted in the issue disappearing.</p>
+
+<p>Simplifying it quite a bit the ~S~ side looked something like this:</p>
+
+<figure class="highlight"><pre><code class="language-lisp"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+</pre></td><td class="code"><pre><span class="p">(</span><span class="nb">defun</span> <span class="nv">handle-outbox</span> <span class="p">(</span><span class="nv">socket</span> <span class="nv">queue</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">command</span> <span class="p">(</span><span class="nb">pop</span> <span class="nv">queue</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nb">handler-case</span> <span class="p">(</span><span class="nv">send-command</span> <span class="nv">socket</span> <span class="nv">command</span><span class="p">))</span>
+      <span class="p">(</span><span class="nv">network-error</span> <span class="p">(</span><span class="nv">c</span><span class="p">)</span>
+	<span class="p">(</span><span class="nv">log-network-error</span> <span class="nv">c</span><span class="p">))</span>
+      <span class="p">(</span><span class="ss">:no-error</span> <span class="p">(</span><span class="nv">c</span><span class="p">)</span>
+	<span class="p">(</span><span class="nv">register-command-awaiting-response</span> <span class="nv">command</span><span class="p">))))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">handle-inbox</span> <span class="p">(</span><span class="nv">socket</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nv">reply</span> <span class="p">(</span><span class="nv">receive-incoming</span> <span class="nv">socket</span><span class="p">))</span>
+	<span class="p">(</span><span class="nv">corresponding-command</span>
+	  <span class="p">(</span><span class="nv">command-awaiting-response</span> <span class="nv">response</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nb">when</span> <span class="nv">corresponding-command</span>
+      <span class="p">(</span><span class="nv">process-reply-for-command</span> <span class="nv">command</span> <span class="nv">response</span><span class="p">))))</span>
+</pre></td></tr></tbody></table></code></pre></figure>
+
+<p>You see now what was happening: <code class="language-plaintext highlighter-rouge">S</code> was sending the command, <code class="language-plaintext highlighter-rouge">R</code> processing it, sending the reply and <code class="language-plaintext highlighter-rouge">S</code> handling the reply <em>before</em> the bookkeeping of outbox process would record the command. Then the response wouldn't match anything and be discarded as orphaned. Later the inbox would timeout the command (not shown).</p>
+
+<p>The bookkeeping wasn't even that heavyweight: just storing some structures and perhaps couple expensive calls to set up a condition variable but that was enough.</p>
+
+<p>Naturally any kind of latency (be it due to network load or extraneous syslog calls) would alleviate that. The fix was to make the code inelegant but correct by registering the command before the send attempt and un-registering in the event of failure.</p>
+
+<p><em>tl;dr a network can be way too fast</em></p>

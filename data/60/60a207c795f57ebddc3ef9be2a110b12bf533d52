@@ -1,0 +1,82 @@
+<h2 id="the-problem">The problem</h2>
+<p>My email setup is the usual text based machinery I keep writing about: <a href="https://macowners.club/posts/email-emacs-mu4e-macos/">Mu4e with mu, isync (mbsync) and msmtp</a>. It works beautifully – until one day it did not.</p>
+<p>When I moved emails around in Emacs – with <code>mu4e-headers-mark-for-move</code>, <code>mu4e-headers-mark-for-refile</code> or other command – the <strong>date</strong> of the moved email changed. A mail from last March would suddenly float to the top of the mailbox as if it had just arrived.</p>
+<h2 id="the-diagnosis">The diagnosis</h2>
+<p>The <code>Date:</code> header inside the message is never touched – that is why Mu4e always looks correct, it shows the date parsed from that header.</p>
+<p>What changes is the <strong>arrival date</strong>: the IMAP &ldquo;internal date&rdquo; the server stores separately from the body. That is what <code>Mail.app</code> shows and sorts by (&ldquo;Date Received&rdquo;).</p>
+<p>The culprit is this setting, which I need to avoid duplicate-UID errors with mbsync:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">setq</span> <span class="nv">mu4e-change-filenames-when-moving</span> <span class="no">t</span><span class="p">)</span>
+</span></span></code></pre></div><p>With it on, Mu4e does not just move the file on refile – it rewrites the message as a brand-new Maildir file, <strong>as if freshly delivered</strong>, resetting its arrival time to <em>now</em>. mbsync then pushes that up and the server stamps the new internal date. <code>Mail.app</code> is exempt because it moves server-side via IMAP <code>MOVE</code>, which preserves the internal date.</p>
+<h2 id="first-fix-copyarrivaldate--necessary-not-sufficient">First fix: CopyArrivalDate (necessary, not sufficient)</h2>
+<p>The fix lives in mbsync, not Emacs. In <code>~/.maildir/mbsyncrc</code>, once at the top so it applies to every channel:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-cfg" data-lang="cfg"><span class="line"><span class="cl"><span class="na">CopyArrivalDate yes</span>
+</span></span></code></pre></div><p>This propagates the arrival time with the message instead of letting the server stamp a fresh one. But on its own it was <strong>still wrong</strong> – because mbsync reads that arrival time from the file&rsquo;s modification time (<code>mtime</code>), and Mu4e already reset the <code>mtime</code> to <em>now</em> when it rewrote the file. So <code>CopyArrivalDate</code> faithfully copies the wrong value.</p>
+<h2 id="the-real-fix-restore-the-mtimes-before-syncing">The real fix: restore the mtimes before syncing</h2>
+<p>I keep <code>mu4e-change-filenames-when-moving</code> at <code>t</code> and, right before each sync, walk the Maildir, read each message&rsquo;s <code>Date:</code> header, and set the file&rsquo;s <code>mtime</code> to match. Then <code>CopyArrivalDate yes</code> carries the correct value up.</p>
+<p>Thank god for Claude Code for the help with the Python script.</p>
+<p><code>~/.maildir/fix-maildir-mtimes.py</code>:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-python" data-lang="python"><span class="line"><span class="cl"><span class="ch">#!/usr/bin/env python3</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="s2">&#34;&#34;&#34;Restore Maildir mtimes from each message&#39;s Date: header, so that
+</span></span></span><span class="line"><span class="cl"><span class="s2">mbsync&#39;s CopyArrivalDate propagates the correct received date.&#34;&#34;&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">os</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">sys</span>
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="nn">time</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+</span></span><span class="line"><span class="cl"><span class="kn">from</span> <span class="nn">email.parser</span> <span class="kn">import</span> <span class="n">BytesParser</span>
+</span></span><span class="line"><span class="cl"><span class="kn">from</span> <span class="nn">email.utils</span> <span class="kn">import</span> <span class="n">parsedate_to_datetime</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">maildir</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">expanduser</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&#34;~/.maildir&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="n">window</span>  <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">sys</span><span class="o">.</span><span class="n">argv</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">2</span> <span class="k">else</span> <span class="mi">2</span> <span class="o">*</span> <span class="mi">86400</span>
+</span></span><span class="line"><span class="cl"><span class="n">cutoff</span>  <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">window</span> <span class="k">if</span> <span class="n">window</span> <span class="k">else</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">maildir</span><span class="o">.</span><span class="n">rglob</span><span class="p">(</span><span class="s2">&#34;cur/*&#34;</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="k">try</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">st</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">stat</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="n">window</span> <span class="ow">and</span> <span class="n">st</span><span class="o">.</span><span class="n">st_mtime</span> <span class="o">&lt;</span> <span class="n">cutoff</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="k">continue</span>
+</span></span><span class="line"><span class="cl">        <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="s2">&#34;rb&#34;</span><span class="p">)</span> <span class="k">as</span> <span class="n">fh</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">msg</span> <span class="o">=</span> <span class="n">BytesParser</span><span class="p">()</span><span class="o">.</span><span class="n">parse</span><span class="p">(</span><span class="n">fh</span><span class="p">,</span> <span class="n">headersonly</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="n">dt</span> <span class="o">=</span> <span class="n">parsedate_to_datetime</span><span class="p">(</span><span class="n">msg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&#34;Date&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="n">dt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="k">continue</span>
+</span></span><span class="line"><span class="cl">        <span class="n">ts</span> <span class="o">=</span> <span class="n">dt</span><span class="o">.</span><span class="n">timestamp</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nb">abs</span><span class="p">(</span><span class="n">st</span><span class="o">.</span><span class="n">st_mtime</span> <span class="o">-</span> <span class="n">ts</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">os</span><span class="o">.</span><span class="n">utime</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="p">(</span><span class="n">ts</span><span class="p">,</span> <span class="n">ts</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="k">continue</span>
+</span></span></code></pre></div><h2 id="wrapping-it-in-front-of-mbsync">Wrapping it in front of mbsync</h2>
+<p>Rather than hooking &ldquo;into&rdquo; mbsync, I put a wrapper <em>in front of</em> it. This is <code>~/.maildir/sync-mail.py</code> (yes, the <code>.py</code> on a bash script is a small lie – it started life in Python):</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="cp">#!/usr/bin/env bash
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl">~/.maildir/fix-maildir-mtimes.py <span class="s2">&#34;</span><span class="nv">$HOME</span><span class="s2">/.maildir&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nb">exec</span> mbsync <span class="s2">&#34;</span><span class="nv">$@</span><span class="s2">&#34;</span>
+</span></span></code></pre></div><p>The fixer runs against the whole <code>~/.maildir</code> root, covering every account in one pass. <code>$@</code> is forwarded straight to mbsync, so I can pass a single channel name or <code>--all</code>. Make both files executable:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">chmod +x ~/.maildir/fix-maildir-mtimes.py ~/.maildir/sync-mail.py
+</span></span></code></pre></div><h2 id="hooking-it-into-mu4e">Hooking it into Mu4e</h2>
+<p>Mu4e simply runs whatever is in <code>mu4e-get-mail-command</code>, so I point that at the wrapper. By default it syncs everything:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nv">customize-set-variable</span> <span class="ss">&#39;mu4e-get-mail-command</span>
+</span></span><span class="line"><span class="cl">                        <span class="p">(</span><span class="nf">concat</span> <span class="p">(</span><span class="nv">executable-find</span> <span class="s">&#34;~/.maildir/sync-mail.py&#34;</span><span class="p">)</span> <span class="s">&#34; --all&#34;</span><span class="p">))</span>
+</span></span></code></pre></div><p>And for the times I want to sync a single account, <code>timu-mu4e-get-mail</code> lets me pick it first:</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span class="line"><span class="cl"><span class="p">(</span><span class="nb">defun</span> <span class="nv">timu-mu4e-get-mail</span> <span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="s">&#34;Select the Account before syncing.
+</span></span></span><span class="line"><span class="cl"><span class="s">This makes the syncing of mails more flexible.&#34;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">interactive</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="p">(</span><span class="nb">let</span> <span class="p">((</span><span class="nv">mu4e-get-mail-command</span>
+</span></span><span class="line"><span class="cl">         <span class="p">(</span><span class="nf">concat</span>
+</span></span><span class="line"><span class="cl">          <span class="s">&#34;~/.maildir/sync-mail.py &#34;</span>
+</span></span><span class="line"><span class="cl">          <span class="p">(</span><span class="nf">completing-read</span>
+</span></span><span class="line"><span class="cl">           <span class="s">&#34;Which Account: &#34;</span>
+</span></span><span class="line"><span class="cl">           <span class="o">&#39;</span><span class="p">(</span><span class="s">&#34;icloud&#34;</span> <span class="s">&#34;aimebertrand&#34;</span> <span class="s">&#34;moclub&#34;</span> <span class="s">&#34;--all&#34;</span><span class="p">)))))</span>
+</span></span><span class="line"><span class="cl">    <span class="p">(</span><span class="nv">mu4e-update-mail-and-index</span> <span class="no">t</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">keymap-set</span> <span class="nv">mu4e-headers-mode-map</span> <span class="s">&#34;M-r&#34;</span> <span class="nf">#&#39;</span><span class="nv">timu-mu4e-get-mail</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">keymap-set</span> <span class="nv">mu4e-main-mode-map</span>    <span class="s">&#34;M-r&#34;</span> <span class="nf">#&#39;</span><span class="nv">timu-mu4e-get-mail</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">(</span><span class="nv">keymap-set</span> <span class="nv">mu4e-view-mode-map</span>    <span class="s">&#34;M-r&#34;</span> <span class="nf">#&#39;</span><span class="nv">timu-mu4e-get-mail</span><span class="p">)</span>
+</span></span></code></pre></div><p>Because <code>sync-mail.py</code> runs the fixer <em>before</em> <code>exec mbsync</code>, every sync I trigger with <code>M-r</code> repairs the dates first – asynchronously, so Emacs never blocks. If you also sync outside Emacs (<code>cron</code>, <code>launchd</code>, a terminal), point those at <code>sync-mail.py</code> too, or a background sync could re-clobber a freshly moved message.</p>
+<h2 id="conclusion">Conclusion</h2>
+<p>Three moving parts: <code>CopyArrivalDate yes</code> in <code>mbsyncrc</code>, <code>fix-maildir-mtimes.py</code> to restore the mtimes, and <code>sync-mail.py</code> wrapping both as the single entry point behind <code>mu4e-get-mail-command</code>.</p>
+<p>Two honest caveats: it only fixes messages going <strong>forward</strong> – already-moved mails keep their overwritten server date – and some servers may stamp their own date on upload regardless. For my mailboxes it works wonderfully though. Yeah!!!</p>

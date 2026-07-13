@@ -1,0 +1,102 @@
+<p>I’ve been using <code class="language-plaintext highlighter-rouge">flyspell-mode</code> for the better part of two decades, and I’ve
+written about it <a href="/blog/2025/03/31/essential-flyspell/">a couple of times</a>
+<a href="/blog/2019/05/24/spell-checking-comments/">before</a>. It gets the job
+done, but it has always felt a bit creaky to me - it checks words one at a time
+as you type, <code class="language-plaintext highlighter-rouge">flyspell-buffer</code> is painfully slow in big buffers, and you have to
+remember to enable <code class="language-plaintext highlighter-rouge">flyspell-prog-mode</code> in your programming modes, so it would
+check only comments and strings there.</p>
+
+<p>Recently, as part of the ongoing overhaul of my <a href="https://github.com/bbatsov/emacs.d">personal Emacs
+config</a>, I finally replaced it with
+<a href="https://github.com/minad/jinx">jinx</a> and I can already tell you that I’m not
+going back.</p>
+
+<!--more-->
+
+<h2 id="why-jinx">Why Jinx?</h2>
+
+<p>Jinx is a modern spell-checker by Daniel Mendler (of
+<a href="https://github.com/minad/vertico">vertico</a>,
+<a href="https://github.com/minad/consult">consult</a> and
+<a href="https://github.com/minad/corfu">corfu</a> fame), built on top of
+<a href="https://rrthomas.github.io/enchant/">libenchant</a>.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup> Quite a few things make
+it a great alternative to Flyspell:</p>
+
+<ul>
+  <li>It’s fast. Jinx checks only the visible part of the buffer (it hooks into
+Emacs’s JIT font-locking machinery), so it doesn’t matter if your buffer is
+100 lines or 100,000 lines long. There’s no need for anything like
+<code class="language-plaintext highlighter-rouge">flyspell-buffer</code> - misspellings simply get highlighted as they scroll into
+view.</li>
+  <li>One mode everywhere. <code class="language-plaintext highlighter-rouge">global-jinx-mode</code> replaces both <code class="language-plaintext highlighter-rouge">flyspell-mode</code> and
+<code class="language-plaintext highlighter-rouge">flyspell-prog-mode</code>. Jinx decides what to check based on faces, so in
+programming modes it automatically limits itself to comments and strings.</li>
+  <li>Enchant is a facade over many spell-checking backends - Hunspell, Nuspell,
+Aspell, and (notably) AppleSpell on macOS. That last one means Jinx can use
+macOS’s built-in dictionaries and you don’t have to install any yourself.</li>
+  <li>Support for multiple languages at once. Set <code class="language-plaintext highlighter-rouge">jinx-languages</code> to something
+like <code class="language-plaintext highlighter-rouge">"en_US bg"</code> and Jinx will check both English and Bulgarian in the same
+buffer. As someone who writes in two languages every day, this alone would
+have sold me on it.</li>
+  <li>A much nicer correction UI. <code class="language-plaintext highlighter-rouge">M-$</code> (<code class="language-plaintext highlighter-rouge">jinx-correct</code>) pops up a
+<code class="language-plaintext highlighter-rouge">completing-read</code> menu (lovely if you’re using <code class="language-plaintext highlighter-rouge">vertico</code>) with the
+suggestions, and below them - entries for saving the word to your personal
+dictionary, as a file-local word, or just for the current session. <code class="language-plaintext highlighter-rouge">C-u M-$</code>
+corrects all the misspellings in the buffer in one go.</li>
+</ul>
+
+<h2 id="the-setup">The Setup</h2>
+
+<p>Here’s the relevant bit of my config:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">jinx</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:hook</span> <span class="p">(</span><span class="nv">emacs-startup</span> <span class="o">.</span> <span class="nv">global-jinx-mode</span><span class="p">)</span>
+  <span class="ss">:bind</span> <span class="p">((</span><span class="s">"M-$"</span> <span class="o">.</span> <span class="nv">jinx-correct</span><span class="p">)</span>
+         <span class="p">(</span><span class="s">"C-M-$"</span> <span class="o">.</span> <span class="nv">jinx-languages</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">M-$</code> is bound to <code class="language-plaintext highlighter-rouge">ispell-word</code> by default, so rebinding it to <code class="language-plaintext highlighter-rouge">jinx-correct</code>
+feels quite natural. <code class="language-plaintext highlighter-rouge">jinx-languages</code> allows you to switch the active languages
+for the current buffer on the fly.</p>
+
+<p>One thing to keep in mind - Jinx uses a small native module to talk to
+libenchant, and this module gets compiled automatically the first time you
+enable the mode. In other words - you’ll need <code class="language-plaintext highlighter-rouge">libenchant</code> (plus <code class="language-plaintext highlighter-rouge">pkgconf</code>) and
+a C compiler on your system:</p>
+
+<div class="language-shell highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c"># macOS</span>
+brew <span class="nb">install </span>enchant
+
+<span class="c"># Debian/Ubuntu</span>
+<span class="nb">sudo </span>apt <span class="nb">install </span>libenchant-2-dev pkgconf
+</code></pre></div></div>
+
+<p>Admittedly, that’s a bit more setup than Flyspell, which is built-in and only
+needs an external <code class="language-plaintext highlighter-rouge">aspell</code>/<code class="language-plaintext highlighter-rouge">hunspell</code> binary. Flyspell will probably remain the
+path of least resistance, but in my opinion the small extra effort pays for
+itself many times over.</p>
+
+<p><strong>Note:</strong> Dropping Flyspell also frees up <code class="language-plaintext highlighter-rouge">C-.</code> and <code class="language-plaintext highlighter-rouge">C-;</code>, which happen to be
+prime keybinding real estate. In my setup they are now bound to
+<a href="https://github.com/oantolin/embark">embark</a>’s <code class="language-plaintext highlighter-rouge">embark-act</code> and <code class="language-plaintext highlighter-rouge">embark-dwim</code>,
+but that’s a topic for another article.</p>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>Funny enough, I knew about Jinx for quite a while, but I kept using Flyspell
+mostly because of inertia. I guess old habits die hard! Now that I’ve finally
+made the switch, I can’t help but wonder what took me so long.</p>
+
+<p>Have you tried Jinx already? Are you still happily using Flyspell (or something
+else entirely)? I’d love to hear your thoughts in the comments!</p>
+
+<p>That’s all I have for you today. Keep fixing those typos!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>I guess the name makes sense - what do you get from an enchantment gone wrong? A jinx! <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

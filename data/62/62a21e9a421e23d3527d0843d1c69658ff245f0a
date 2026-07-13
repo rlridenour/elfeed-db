@@ -1,0 +1,101 @@
+<p>If you’ve ever written some Emacs Lisp that pokes around in a buffer, chances
+are you’ve needed to answer a deceptively simple question at some point - is
+point inside a string or a comment right now? It comes up constantly: when
+you’re font-locking something, when you’re computing completion candidates, when
+you’re navigating code and want to skip over the bits that aren’t actually code.</p>
+
+<p>The workhorse behind all of this is <code class="language-plaintext highlighter-rouge">syntax-ppss</code>. The name is a bit of a
+mouthful of abbreviations - it’s short for “syntax parse-partial-sexp”, and that
+<code class="language-plaintext highlighter-rouge">ppss</code> tail stands for “parse-partial-sexp state”, which is the value you get
+back from Emacs’s low-level <code class="language-plaintext highlighter-rouge">parse-partial-sexp</code> (itself short for “parse partial
+s-expression”). Say that three times fast. Anyway, you hand <code class="language-plaintext highlighter-rouge">syntax-ppss</code> a
+position (or just call it at point), it parses the buffer up to there and returns
+that parser state - how deeply nested in parens you are, whether you’re in a
+string, where the enclosing list started, and so on.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<p>There’s just one catch. That parser state is a plain list of eleven elements,
+and for the longest time the only way to get anything out of it was to reach in
+by position:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; are we inside a string?</span>
+<span class="p">(</span><span class="nb">nth</span> <span class="mi">3</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>
+
+<span class="c1">;; ... or a comment?</span>
+<span class="p">(</span><span class="nb">nth</span> <span class="mi">4</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>
+
+<span class="c1">;; where did that string or comment start?</span>
+<span class="p">(</span><span class="nb">nth</span> <span class="mi">8</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>I don’t know about you, but I can never remember what lives at which index.
+<code class="language-plaintext highlighter-rouge">nth 3</code> tells you precisely nothing about what you’re checking. Every time I ran
+into code like this I’d have to pull up <code class="language-plaintext highlighter-rouge">C-h f parse-partial-sexp RET</code> and count
+elements in the docstring. Magic numbers scattered all over the place, and not
+the fun kind.</p>
+
+<p>Turns out Emacs 26.1 fixed this years ago and I somehow missed the memo. It
+ships a <code class="language-plaintext highlighter-rouge">ppss</code> struct (yes, that abbreviation again) with proper named accessors
+for every field. And here’s
+the neat part - the struct is defined with <code class="language-plaintext highlighter-rouge">:type list</code>, which means it’s
+literally the same list <code class="language-plaintext highlighter-rouge">syntax-ppss</code> already returns. No wrapping, no
+conversion. You just call the accessor on the value you already have:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">ppss-string-terminator</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>       <span class="c1">; inside a string?</span>
+<span class="p">(</span><span class="nv">ppss-comment-depth</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>           <span class="c1">; inside a comment?</span>
+<span class="p">(</span><span class="nv">ppss-comment-or-string-start</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span> <span class="c1">; where it started</span>
+</code></pre></div></div>
+
+<p>Now the code says what it means. These are the accessors I reach for the most,
+though there’s one for every slot in the list:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">ppss-string-terminator</code> is non-nil when point sits inside a string (<code class="language-plaintext highlighter-rouge">nth 3</code>).</li>
+  <li><code class="language-plaintext highlighter-rouge">ppss-comment-depth</code> is non-nil inside a comment (<code class="language-plaintext highlighter-rouge">nth 4</code>).</li>
+  <li><code class="language-plaintext highlighter-rouge">ppss-comment-or-string-start</code> gives you the position where the current string or comment began, or nil if you’re in neither (<code class="language-plaintext highlighter-rouge">nth 8</code>).</li>
+  <li><code class="language-plaintext highlighter-rouge">ppss-innermost-start</code> is the start of the innermost list containing point (<code class="language-plaintext highlighter-rouge">nth 1</code>), which is handy when you want to jump out to the enclosing form.</li>
+  <li><code class="language-plaintext highlighter-rouge">ppss-depth</code> is how many levels of parens deep you are (<code class="language-plaintext highlighter-rouge">nth 0</code>).</li>
+</ul>
+
+<p>If you’re worried about the cost of a function call on a hot path like
+font-locking, don’t be. The accessors come with compiler macros, so
+<code class="language-plaintext highlighter-rouge">(ppss-string-terminator state)</code> compiles down to the exact same
+<code class="language-plaintext highlighter-rouge">(nth 3 state)</code> you’d have typed by hand. You get the readable name at read time
+and pay nothing at run time. And since <code class="language-plaintext highlighter-rouge">parse-partial-sexp</code> returns the same kind
+of list, all of these work on its result too.</p>
+
+<p>There’s another helper worth knowing about for the most common check of all -
+am I in a string or a comment, never mind which one. That’s <code class="language-plaintext highlighter-rouge">syntax-ppss-context</code>,
+which returns the symbol <code class="language-plaintext highlighter-rouge">string</code>, the symbol <code class="language-plaintext highlighter-rouge">comment</code>, or nil:</p>
+
+<div class="language-elisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="k">if</span> <span class="p">(</span><span class="nv">syntax-ppss-context</span> <span class="p">(</span><span class="nv">syntax-ppss</span><span class="p">))</span>
+    <span class="p">(</span><span class="nv">message</span> <span class="s">"not in code"</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">message</span> <span class="s">"somewhere in the code"</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>A single call in place of the <code class="language-plaintext highlighter-rouge">(or (nth 3 state) (nth 4 state))</code> dance you see
+all over the place. There’s also <code class="language-plaintext highlighter-rouge">syntax-ppss-toplevel-pos</code> for getting back to
+the enclosing top-level form. And plenty of major modes still bundle their own
+little <code class="language-plaintext highlighter-rouge">foo-in-string-p</code> predicates - now you know what they’re doing under the
+hood.</p>
+
+<p>The usual caveat about built-in libraries applies: the <code class="language-plaintext highlighter-rouge">ppss</code> accessors arrived
+in Emacs 26.1, so if for some reason you’re still targeting something older
+you’ll have to live with the <code class="language-plaintext highlighter-rouge">nth</code> calls. In 2026 that’s unlikely to trouble
+anyone.</p>
+
+<p>I went on a little cleanup spree in <a href="https://github.com/clojure-emacs/cider">CIDER</a>’s
+codebase recently and swapped every one of these positional lookups for the named
+accessors. It’s the kind of change
+that touches a lot of lines but risks nothing, and the diff ends up reading like
+documentation. If you’ve got a stray <code class="language-plaintext highlighter-rouge">nth 3 (syntax-ppss)</code> lurking in your own
+config or packages, it’s a five-minute upgrade well worth making.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p><code class="language-plaintext highlighter-rouge">syntax-ppss</code> is really just <code class="language-plaintext highlighter-rouge">parse-partial-sexp</code> run from the start of the top-level form down to your position, with a cache in front of it so that repeated calls at nearby positions stay cheap. That caching is why you should prefer it over calling <code class="language-plaintext highlighter-rouge">parse-partial-sexp</code> yourself most of the time. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

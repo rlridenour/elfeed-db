@@ -1,0 +1,152 @@
+
+<div class="post-date">2026 May 23</div><div id="outline-container-org9589df0" class="outline-2">
+<h2 id="org9589df0">Light or dark? GNOME side</h2>
+<div class="outline-text-2" id="text-org9589df0">
+<p>
+I like both, depending on how much light is in the room. I much prefer to set my desktop light or dark manually than to automate with timers.
+</p>
+
+<p>
+On GNOME light or dark is <code>color-scheme</code> and you can set read and set it from the command line. You can read it from the command line (default light theme is called <code>default</code>)
+</p>
+
+<pre class="example" id="orgaa10530">
+$ gsettings get org.gnome.desktop.interface color-scheme | tr -d "'"
+default
+</pre>
+
+<p>
+and you can set it from the command line (default dark theme is called <code>prefer-dark</code>)
+</p>
+
+<pre class="example" id="org2f509ab">
+$ gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+</pre>
+
+<p>
+will change it to dark.
+</p>
+
+<p>
+(You can also set other preferred GNOME themes this way.)
+</p>
+</div>
+</div>
+<div id="outline-container-orgb6e3726" class="outline-2">
+<h2 id="orgb6e3726">Light or dark? Emacs side</h2>
+<div class="outline-text-2" id="text-orgb6e3726">
+<p>
+<a href="https://protesilaos.com/">Protesilaos</a> has published a <a href="https://github.com/protesilaos/ef-themes">gazillion</a> <a href="https://github.com/protesilaos/doric-themes">pretty themes</a>, but I prefer his <a href="https://github.com/protesilaos/doric-themes"><code>modus-themes</code></a> for their visual simplicity and also for their UI amenities. For example you can set one light theme (<code>modus-operandi</code> family) and one dark theme (<code>modus-vivendi</code> family) and toggle between them:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setopt</span> modus-themes-to-toggle '(modus-operandi-tinted modus-vivendi-tinted))
+(<span class="org-keyword">bind-key</span> <span class="org-string">"C-c m"</span> #'modus-themes-toggle)
+</code></pre>
+</div>
+
+<p>
+And there is the custom-variable <code>custom-enabled-themes</code>, usually set in your <code>custom-file</code>, that determines what themes are initially enabled.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setopt</span> custom-enabled-themes '(modus-operandi-tinted modus-vivendi-tinted))
+</code></pre>
+</div>
+
+<p>
+The order of this list determines which theme is activated by default: the first one.
+</p>
+</div>
+</div>
+<div id="outline-container-org7c48485" class="outline-2">
+<h2 id="org7c48485">Matching Emacs to GNOME</h2>
+<div class="outline-text-2" id="text-org7c48485">
+<p>
+But when I start Emacs, I want the startup theme to match the GNOME theme! So I took <code>custom-enabled-themes</code> out of the custom file and added these lines to <code>early-init.el</code>:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defconst</span> <span class="org-variable-name">jeh/modus-themes-list</span>
+  (<span class="org-keyword">let*</span> ((light 'modus-operandi-tinted)
+         (dark 'modus-vivendi-tinted)
+         (gnome-theme
+          (car (split-string
+                (shell-command-to-string
+                 <span class="org-string">"gsettings get org.gnome.desktop.interface color-scheme | tr -d \"'\""</span>)))))
+    (<span class="org-keyword">cond</span> ((string= gnome-theme <span class="org-string">"default"</span>)
+           `(,light ,dark))
+          ((string= gnome-theme <span class="org-string">"prefer-dark"</span>)
+           `(,dark ,light))))
+  <span class="org-doc">"List of modus themes IN ORDER: first element is the default theme,</span>
+<span class="org-doc">which depends on whether the GNOME color-scheme is light or dark."</span>)
+
+(<span class="org-keyword">setopt</span> custom-enabled-themes  jeh/modus-themes-list)
+(<span class="org-keyword">setopt</span> modus-themes-to-toggle jeh/modus-themes-list)
+</code></pre>
+</div>
+</div>
+</div>
+<div id="outline-container-orgf7eed20" class="outline-2">
+<h2 id="orgf7eed20">Toggling them together</h2>
+<div class="outline-text-2" id="text-orgf7eed20">
+<p>
+I wish I could remember from whom I stole this little bash script to toggle GNOME theme. Note the last line I added, which also toggles Emacs theme.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-bash"><code><span class="org-comment-delimiter">#</span><span class="org-comment">!/usr/bin/</span><span class="org-keyword">env</span><span class="org-comment"> bash</span>
+<span class="org-variable-name">class</span>=org.gnome.desktop.interface 
+<span class="org-variable-name">name</span>=color-scheme
+<span class="org-variable-name">status</span>=$(<span class="org-sh-quoted-exec">gsettings get "$class" "$name" | tr -d "'"</span>)
+<span class="org-keyword">if</span> [[ $<span class="org-variable-name">status</span> = <span class="org-string">"default"</span> || $<span class="org-variable-name">status</span> = <span class="org-string">"prefer-light"</span> ]]; <span class="org-keyword">then</span>
+    <span class="org-variable-name">new_status</span>=<span class="org-string">"prefer-dark"</span>
+<span class="org-keyword">else</span>
+    <span class="org-variable-name">new_status</span>=<span class="org-string">"default"</span>
+<span class="org-keyword">fi</span>
+gsettings set <span class="org-string">"$class"</span> <span class="org-string">"$name"</span> <span class="org-string">"$new_status"</span>
+emacsclient -e <span class="org-string">'(modus-themes-toggle)'</span>
+</code></pre>
+</div>
+
+<p>
+Save it to somewhere in your path (e.g. <code>~/bin/gnome-toggle-light-dark.sh</code>) and <code>chmod +x ~/bin/gnome-toggle-light-dark.sh</code>. Test it from the command line.
+</p>
+
+<p>
+The best part is that GNOME lets you bind a keyboard shortcut to a script:
+</p>
+
+<pre class="example" id="org0f66858">
+Settings ⟶
+    Keyboard ⟶
+        View and Customize Shortcuts ⟶
+            Custom Shortcuts ⟶
+                + (add shortcut)
+</pre>
+
+
+<figure id="org58f48c9">
+<img src="./static/gnome-settings-screenshot-1.png" alt="gnome-settings-screenshot-1.png" width="800px">
+
+</figure>
+
+
+<figure id="org01ffa63">
+<img src="./static/gnome-settings-screenshot-2.png" alt="gnome-settings-screenshot-2.png" width="600px">
+
+</figure>
+
+
+<figure id="org95106a4">
+<img src="./static/gnome-settings-screenshot-3.png" alt="gnome-settings-screenshot-3.png" width="600px">
+
+</figure>
+
+<p>
+Now you can toggle GNOME and Emacs themes together as the sky determines your mood.
+</p>
+</div>
+</div>
+<div class="taglist"><a href="https://jamesendreshowell.com/tags.html">tags</a>: <a href="https://jamesendreshowell.com/tag-emacs.html">emacs</a> <a href="https://jamesendreshowell.com/tag-gnome.html">gnome</a> </div></div>
+<!-- BEGIN EMFED COMMENT BLOCK -->

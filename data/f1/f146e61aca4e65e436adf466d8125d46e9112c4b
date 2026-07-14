@@ -1,0 +1,101 @@
+
+<div class="post-date">2026 Apr 04</div><p>
+It was really fun to learn about 
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Advising-Functions.html"><i>advising</i> Lisp functions</a>
+to extend functionality in Emacs. My first use case was to run a custom function every time a certain function in
+<a href="https://bastibe.de/about.html">Bastian Bechtold</a>&rsquo;s
+<a href="https://github.com/bastibe/org-static-blog"><code>org-static-blog</code></a> is called. Of course, I could customize that function directly in my own fork, but Lisp advice allows you to modify functions without clobbering them directly. This approach has aesthetic and practical advantages.
+</p>
+
+<p>
+But I&rsquo;ve struggled to understand the concepts and implementation of advice. Today I 
+<a href="https://fediscience.org/@jameshowell/116348033254934806">posted to Mastodon</a>
+about how excited I was to get my first working use, and 
+<a href="https://fediscience.org/@pkal@social.sdfeu.org">Philip</a> asked me to share the code.
+</p>
+
+<p>
+My problem was specifying HTML boilerplate that <code>org-static-blog</code> puts in each post when it publishes all the static files, using string variables like <code>org-static-blog-page-header</code>. These strings are complex enough that I put them in their own files, like these lines in the <code>#header.html</code> file that specifies the page metadata:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-html"><code>&lt;<span class="org-function-name">script</span> <span class="org-variable-name">type</span>=<span class="org-string">"module"</span> <span class="org-variable-name">src</span>=<span class="org-string">"https://esm.sh/emfed@"</span>&gt;&lt;/<span class="org-function-name">script</span>&gt;
+&lt;<span class="org-function-name">meta</span> <span class="org-variable-name">name</span>=<span class="org-string">"author"</span> <span class="org-variable-name">content</span>=<span class="org-string">"James Endres Howell"</span>&gt;
+&lt;<span class="org-function-name">meta</span> <span class="org-variable-name">name</span>=<span class="org-string">"referrer"</span> <span class="org-variable-name">content</span>=<span class="org-string">"no-referrer"</span>&gt;
+&lt;<span class="org-function-name">link</span> <span class="org-variable-name">href</span>=<span class="org-string">"static/style.css"</span> <span class="org-variable-name">rel</span>=<span class="org-string">"stylesheet"</span> <span class="org-variable-name">type</span>=<span class="org-string">"text/css"</span> /&gt;
+&lt;<span class="org-function-name">meta</span> <span class="org-variable-name">name</span>=<span class="org-string">"fediverse:creator"</span> <span class="org-variable-name">content</span>=<span class="org-string">"@jameshowell@fediscience.org"</span>&gt;
+&lt;<span class="org-function-name">meta</span> <span class="org-variable-name">property</span>=<span class="org-string">"og:image"</span> 
+      <span class="org-variable-name">content</span>=<span class="org-string">"https://jamesendreshowell.com/static/education-of-james-endres-howell.png"</span>&gt;
+</code></pre>
+</div>
+
+<p>
+First, Stack Exchange and I solved the problem of reading a file into a string. (?! How is this not a native function!? Maybe I missed something obvious.)
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">jeh/file-to-string</span> (file)
+  <span class="org-doc">"Return a string that is the contents of FILE."</span>
+  (<span class="org-keyword">with-temp-buffer</span>
+    (insert-file-contents file)
+    (buffer-string)))
+</code></pre>
+</div>
+
+<p>
+And then, for example:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">setq</span> org-static-blog-page-header
+      (jeh/file-to-string 
+       (expand-file-name <span class="org-string">"#header.html"</span> org-static-blog-template-blocks-directory)))
+</code></pre>
+</div>
+
+<p>
+The unscratched itch was that every time I edit one of these files, <i>I always, <b>but always</b>, forget to update the appropriate variable</i> with the contents of the file! And so publishing doesn&rsquo;t reflect the changes, and I get confused, and then I remember&hellip;.
+</p>
+
+<p>
+Here is the solution:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>
+(<span class="org-keyword">defun</span> <span class="org-function-name">jeh/org-static-blog-read-templates</span> (<span class="org-type">&amp;rest</span> ignore)
+  <span class="org-doc">"Set org-static-blog-page -header, -preamble, -postamble variables</span>
+<span class="org-doc">by reading files from `</span><span class="org-doc"><span class="org-constant">org-static-blog-template-blocks-directory</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">setq</span> org-static-blog-page-header             <span class="org-comment-delimiter">;;; </span><span class="org-comment">HTML to put in the &lt;head&gt; of each page.</span>
+        (jeh/file-to-string 
+         (expand-file-name <span class="org-string">"#header.html"</span> org-static-blog-template-blocks-directory)))
+  (<span class="org-keyword">setq</span> org-static-blog-page-preamble           <span class="org-comment-delimiter">;;; </span><span class="org-comment">HTML to put before the content of each page.</span>
+        (jeh/file-to-string 
+         (expand-file-name <span class="org-string">"#preamble.html"</span> org-static-blog-template-blocks-directory)))
+  (<span class="org-keyword">setq</span> org-static-blog-page-postamble          <span class="org-comment-delimiter">;;; </span><span class="org-comment">HTML to put after the content of each page.</span>
+        (format (jeh/file-to-string 
+                 (expand-file-name <span class="org-string">"#postamble.html"</span> org-static-blog-template-blocks-directory))
+                (number-to-string emacs-major-version)
+                (number-to-string emacs-minor-version)
+                org-version)))
+
+<span class="org-comment-delimiter">;;; </span><span class="org-comment">Re-read the template files before publishing,</span>
+<span class="org-comment-delimiter">;;; </span><span class="org-comment">so changes will be included in output.</span>
+(advice-add #'org-static-blog-publish <span class="org-builtin">:before</span> #'jeh/org-static-blog-read-templates)
+</code></pre>
+</div>
+
+<p>
+The function <code>jeh/org-static-blog-read-templates</code> sets the variables
+<code>org-static-blog-page-header</code>,
+<code>org-static-blog-page-preamble</code>, and
+<code>org-static-blog-page-postamble</code> to the contents of the appropriate files. Making that function a hook to the function which generates all the static pages, <code>org-static-blog-publish</code>, solves my problem. But there is no hook for it! I had a suspicion that <code>add-advice</code> could give me the same result, and&mdash;I hope you&rsquo;re sitting down&mdash;I
+<a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Advice-Combinators.html">read the fine manual</a>
+and learned that the syntax of the last line accomplishes that very thing.
+</p>
+
+<p>
+Of course, <code>advice-add</code> (and related functions) can do much more! Maybe as I learn I will be able to customize functions from other packages without just banging on a local fork.
+</p>
+<div class="taglist"><a href="https://jamesendreshowell.com/tags.html">tags</a>: <a href="https://jamesendreshowell.com/tag-emacs.html">emacs</a> </div></div>
+<!-- BEGIN EMFED COMMENT BLOCK -->

@@ -1,0 +1,136 @@
+<p>As part of the ongoing overhaul of my <a href="https://github.com/bbatsov/emacs.d">Emacs setup</a>
+I’ve been trying to make the most of the built-in functionality that recent Emacs
+releases keep quietly shipping. My in-buffer completion setup is
+<a href="/blog/2026/07/13/cape-corfus-best-friend/">based on <code class="language-plaintext highlighter-rouge">corfu</code> and <code class="language-plaintext highlighter-rouge">cape</code></a>
+these days, but it turns out I had overlooked a nice Emacs 30 addition
+in the same area - <code class="language-plaintext highlighter-rouge">completion-preview-mode</code>.
+It gives you inline completion suggestions - the “ghost text” UI that GitHub
+Copilot and friends made famous<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup> - except here it’s powered by plain old
+Emacs completions.</p>
+
+<!--more-->
+
+<h2 id="what-it-does">What It Does</h2>
+
+<p>As you type, <code class="language-plaintext highlighter-rouge">completion-preview-mode</code> shows a grayed-out preview of the top
+completion candidate right after point - inline, in the buffer itself. No popup,
+no minibuffer, no fuss. If the suggestion is what you want, press <code class="language-plaintext highlighter-rouge">TAB</code> to accept
+it. If not, just keep typing and the preview updates (or goes away).</p>
+
+<p><img src="/assets/images/completion-preview-ghost-text.png" alt="Ghost text suggesting the rest of a symbol as you type" /></p>
+
+<p>The part I like best - the candidates come from <code class="language-plaintext highlighter-rouge">completion-at-point-functions</code>,
+which means the preview is fed by the exact same backends as <code class="language-plaintext highlighter-rouge">corfu</code> and
+<code class="language-plaintext highlighter-rouge">company</code>. If you’ve already set up <code class="language-plaintext highlighter-rouge">cape-dabbrev</code>, <code class="language-plaintext highlighter-rouge">cape-file</code> or <code class="language-plaintext highlighter-rouge">eglot</code>,
+all of them power the ghost text automatically. Batteries very much included.</p>
+
+<h2 id="enabling-it">Enabling It</h2>
+
+<p>You can try it out in the current buffer with <code class="language-plaintext highlighter-rouge">M-x completion-preview-mode</code>.
+If you like what you see, you can enable it everywhere:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">global-completion-preview-mode</span> <span class="mi">1</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>Here’s the relevant bit of my config:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">completion-preview</span>
+  <span class="ss">:ensure</span> <span class="no">nil</span> <span class="c1">; built-in</span>
+  <span class="ss">:config</span>
+  <span class="c1">;; cycle through the other candidates with M-n/M-p (those two</span>
+  <span class="c1">;; commands have no default bindings)</span>
+  <span class="p">(</span><span class="nv">define-key</span> <span class="nv">completion-preview-active-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-n"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">completion-preview-next-candidate</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">define-key</span> <span class="nv">completion-preview-active-mode-map</span> <span class="p">(</span><span class="nv">kbd</span> <span class="s">"M-p"</span><span class="p">)</span> <span class="nf">#'</span><span class="nv">completion-preview-prev-candidate</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">global-completion-preview-mode</span> <span class="mi">+1</span><span class="p">))</span>
+</code></pre></div></div>
+
+<h2 id="essential-keybindings">Essential Keybindings</h2>
+
+<p>While a preview is visible you can make use of the following keybindings:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">TAB</code> (<code class="language-plaintext highlighter-rouge">completion-preview-insert</code>) - accept the suggested completion</li>
+  <li><code class="language-plaintext highlighter-rouge">M-i</code> (<code class="language-plaintext highlighter-rouge">completion-preview-complete</code>) - insert only the longest common prefix
+of all the candidates (the preview underlines it, so you know in advance what
+you’ll get) and let you keep typing from there</li>
+  <li><code class="language-plaintext highlighter-rouge">M-n</code> / <code class="language-plaintext highlighter-rouge">M-p</code> (<code class="language-plaintext highlighter-rouge">completion-preview-next-candidate</code> / <code class="language-plaintext highlighter-rouge">completion-preview-prev-candidate</code>) -
+cycle through the other candidates; those are not bound by default, but the
+docs themselves suggest <code class="language-plaintext highlighter-rouge">M-n</code> and <code class="language-plaintext highlighter-rouge">M-p</code> (see my config above)</li>
+</ul>
+
+<p>Here’s <code class="language-plaintext highlighter-rouge">M-i</code> in action. I had typed <code class="language-plaintext highlighter-rouge">my-pro</code>, and pressing <code class="language-plaintext highlighter-rouge">M-i</code> filled in
+<code class="language-plaintext highlighter-rouge">ject-find-</code>, stopping exactly where the two candidates (<code class="language-plaintext highlighter-rouge">my-project-find-file</code>
+and <code class="language-plaintext highlighter-rouge">my-project-find-dir</code>) diverge:</p>
+
+<p><img src="/assets/images/completion-preview-common-prefix.png" alt="M-i completes up to the longest common prefix of the candidates" /></p>
+
+<p>And when you cycle with <code class="language-plaintext highlighter-rouge">M-n</code>, Emacs even tells you where you are in the
+candidate list in the echo area:</p>
+
+<p><img src="/assets/images/completion-preview-cycling.png" alt="Cycling through the completion candidates with M-n" /></p>
+
+<p>There’s basic mouse support as well - clicking the ghost text with <code class="language-plaintext highlighter-rouge">mouse-1</code>
+inserts it, and scrolling the mouse wheel over it cycles through the candidates.
+(I doubt I’ll ever use that, but it’s kind of cute)</p>
+
+<h2 id="fine-tuning">Fine-tuning</h2>
+
+<p>A few user options to adjust the behavior:<sup id="fnref:2" role="doc-noteref"><a href="#fn:2" class="footnote" rel="footnote">2</a></sup></p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; show the preview only after typing at least 3 characters (the default)</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">completion-preview-minimum-symbol-length</span> <span class="mi">3</span><span class="p">)</span>
+
+<span class="c1">;; wait a bit before showing the preview (by default it shows up instantly)</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">completion-preview-idle-delay</span> <span class="mf">0.2</span><span class="p">)</span>
+
+<span class="c1">;; show a preview only when there's exactly one candidate</span>
+<span class="p">(</span><span class="nv">setopt</span> <span class="nv">completion-preview-exact-match-only</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p>There’s also <code class="language-plaintext highlighter-rouge">completion-preview-commands</code> - the list of commands after which
+the preview appears (things like <code class="language-plaintext highlighter-rouge">self-insert-command</code>). You’ll rarely need to
+touch it, but it’s good to know it’s there if some command you use doesn’t
+trigger the preview.</p>
+
+<h2 id="do-you-still-need-corfu">Do You Still Need Corfu?</h2>
+
+<p>When I first read about <code class="language-plaintext highlighter-rouge">completion-preview-mode</code> I assumed it was competing
+with <code class="language-plaintext highlighter-rouge">corfu</code> and <code class="language-plaintext highlighter-rouge">company</code>, but I’ve come to think that’s the wrong way to look
+at it. They draw candidates from the same source and simply present them
+differently - <code class="language-plaintext highlighter-rouge">corfu</code> gives you the full candidate list with annotations and
+documentation, while the preview gives you the single most likely candidate
+with zero visual ceremony. These days I run both: the ghost text handles the
+“obviously I meant that symbol” cases with a single <code class="language-plaintext highlighter-rouge">TAB</code>, and <code class="language-plaintext highlighter-rouge">corfu</code>’s popup
+kicks in when I actually need to browse.</p>
+
+<p>Admittedly, two completion UIs at once won’t be everyone’s cup of tea. If you
+find it too busy, a nice middle ground is to enable <code class="language-plaintext highlighter-rouge">completion-preview-mode</code>
+only where a popup feels out of place - e.g. in <code class="language-plaintext highlighter-rouge">eshell-mode</code> or <code class="language-plaintext highlighter-rouge">comint-mode</code>
+buffers.</p>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>Emacs 30 keeps chipping away at my list of third-party packages - <code class="language-plaintext highlighter-rouge">which-key</code>
+and EditorConfig support are now built-in, and <code class="language-plaintext highlighter-rouge">completion-preview-mode</code>
+covers a niche I didn’t even know I wanted covered. Not bad for a “boring”
+stable release!</p>
+
+<p>Have you tried <code class="language-plaintext highlighter-rouge">completion-preview-mode</code> already? Are you a ghost text person
+or a popup person? (or both, like me) I’d love to hear your thoughts in the
+comments!</p>
+
+<p>That’s all I have for you today. Keep completing!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Unlike the AI assistants, the suggestions here come straight from your
+buffers and your <code class="language-plaintext highlighter-rouge">completion-at-point-functions</code>. No subscription needed
+and no hallucinations included. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+    <li id="fn:2" role="doc-endnote">
+      <p>If you’re wondering what’s this <code class="language-plaintext highlighter-rouge">setopt</code> thing - check out
+<a href="/blog/2025/04/06/goodbye-setq-hello-setopt/">this article</a>. <a href="#fnref:2" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

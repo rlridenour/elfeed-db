@@ -1,0 +1,127 @@
+<p>I’ve been using <a href="https://github.com/minad/corfu">corfu</a> for in-buffer
+completion for a while now and I’m quite happy with it. There was one thing
+that kept bugging me, though - the completion popup would only ever show
+whatever the current major mode’s completion function had to offer. No plain
+word completion, no file name completion - if the major mode (or your LSP
+server) didn’t know about something, neither did the popup.</p>
+
+<p>Turns out I was simply missing one piece of the puzzle, namely
+<a href="https://github.com/minad/cape">cape</a>.</p>
+
+<!--more-->
+
+<h2 id="the-problem">The Problem</h2>
+
+<p>A bit of background first. Modern Emacs completion is built around
+<code class="language-plaintext highlighter-rouge">completion-at-point-functions</code> (capfs for short) - each major mode registers a
+function that knows how to complete things in its buffers, and UIs like
+<code class="language-plaintext highlighter-rouge">corfu</code> (or the built-in <code class="language-plaintext highlighter-rouge">completion-at-point</code>) simply display the results.</p>
+
+<p>The catch is that most major modes register <em>only</em> their own capf. That’s why
+the trusty old <code class="language-plaintext highlighter-rouge">dabbrev</code>-style completion (complete any word that appears in
+your buffers) is nowhere to be found in the popup, even though most of us have
+been relying on it for decades via <code class="language-plaintext highlighter-rouge">M-/</code>.</p>
+
+<h2 id="enter-cape">Enter Cape</h2>
+
+<p>Cape (<strong>C</strong>ompletion <strong>A</strong>t <strong>P</strong>oint <strong>E</strong>xtensions) is another package by the
+prolific Daniel Mendler and it does exactly what its name suggests - it
+provides a bunch of extra capfs that you can mix into any buffer:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">cape-dabbrev</code> - complete words from the current and other buffers (the star
+of the show, in my opinion)</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-file</code> - complete file paths</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-keyword</code> - complete programming language keywords</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-elisp-symbol</code> - complete Elisp symbols anywhere (e.g. in comments or docstrings)</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-dict</code> - complete words from a dictionary file</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-line</code> - complete entire lines from the buffer</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-emoji</code> - complete emoji, if that’s your thing (Emacs 29+)</li>
+</ul>
+
+<p>My setup is deliberately minimal - buffer words and file names everywhere, on
+top of whatever the major mode provides:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">use-package</span> <span class="nv">cape</span>
+  <span class="ss">:ensure</span> <span class="no">t</span>
+  <span class="ss">:init</span>
+  <span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'completion-at-point-functions</span> <span class="nf">#'</span><span class="nv">cape-dabbrev</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">add-hook</span> <span class="ss">'completion-at-point-functions</span> <span class="nf">#'</span><span class="nv">cape-file</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>That’s it. Now when I type a few characters, <code class="language-plaintext highlighter-rouge">corfu</code> shows the major mode’s
+candidates <em>and</em> falls back to buffer words when there’s nothing smarter to
+offer. Typing a path like <code class="language-plaintext highlighter-rouge">~/proj</code> offers to complete it as a file name. It’s
+one of those small quality of life improvements you stop noticing after a day,
+because it feels like it has always been there.</p>
+
+<p><strong>Note:</strong> Every cape capf is also an interactive command, so you can invoke
+them on demand - e.g. <code class="language-plaintext highlighter-rouge">M-x cape-file</code> to complete a file name regardless of
+your setup. Cape’s README suggests putting them on the <code class="language-plaintext highlighter-rouge">C-c p</code> prefix, but for
+me (and my fellow <a href="https://github.com/bbatsov/projectile">Projectile</a> users)
+that’s a no-go, as <code class="language-plaintext highlighter-rouge">C-c p</code> is Projectile territory. Pick your own prefix if
+you want quick access to them.</p>
+
+<h2 id="tips-and-tricks">Tips and Tricks</h2>
+
+<p>A few practical things worth knowing:</p>
+
+<ul>
+  <li>Type <code class="language-plaintext highlighter-rouge">file:</code> anywhere and <code class="language-plaintext highlighter-rouge">cape-file</code> kicks in for the text right after it,
+even in places where a path wouldn’t normally be recognized (say, in the
+middle of a comment). The prefix is customizable via <code class="language-plaintext highlighter-rouge">cape-file-prefix</code>.</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-dabbrev</code> gathers its candidates from buffers with the same major mode
+by default, so your Elisp buffers won’t pollute the completions of your
+Clojure buffers. If you want different behavior, that’s
+<code class="language-plaintext highlighter-rouge">cape-dabbrev-buffer-function</code>.</li>
+  <li>If you set <code class="language-plaintext highlighter-rouge">tab-always-indent</code> to <code class="language-plaintext highlighter-rouge">complete</code> (as I do), <code class="language-plaintext highlighter-rouge">TAB</code> becomes the
+perfect trigger for the whole completion stack - it indents the line if
+needed and otherwise summons <code class="language-plaintext highlighter-rouge">corfu</code> with all your capfs, cape ones included:</li>
+</ul>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;; smart tab behavior - indent or complete</span>
+<span class="p">(</span><span class="k">setq</span> <span class="nv">tab-always-indent</span> <span class="ss">'complete</span><span class="p">)</span>
+</code></pre></div></div>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">cape-dict</code> reads from <code class="language-plaintext highlighter-rouge">/usr/share/dict/words</code> by default, which is fine on
+macOS and most Linux distros, but you can point <code class="language-plaintext highlighter-rouge">cape-dict-file</code> to any word
+list - e.g. one for your native language.</li>
+</ul>
+
+<h2 id="a-couple-of-power-tricks">A Couple of Power Tricks</h2>
+
+<p>Cape also ships a few combinators that are worth knowing about:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">cape-capf-super</code> merges several capfs into one, so their candidates show up
+in a single unified popup. (e.g. you can blend <code class="language-plaintext highlighter-rouge">eglot</code>’s completion with
+<code class="language-plaintext highlighter-rouge">cape-dabbrev</code>)</li>
+  <li><code class="language-plaintext highlighter-rouge">cape-company-to-capf</code> converts <code class="language-plaintext highlighter-rouge">company-mode</code> backends into capfs, which is
+super handy if there’s a company backend for your favorite tool but no capf
+in sight.</li>
+</ul>
+
+<p>I haven’t needed either of them yet, but it’s good to know they are there.</p>
+
+<h2 id="closing-thoughts">Closing Thoughts</h2>
+
+<p>If you’re already on the <code class="language-plaintext highlighter-rouge">vertico</code>/<code class="language-plaintext highlighter-rouge">consult</code>/<code class="language-plaintext highlighter-rouge">corfu</code> bandwagon, <code class="language-plaintext highlighter-rouge">cape</code> is
+pretty much a mandatory addition - <code class="language-plaintext highlighter-rouge">corfu</code> deliberately stays small and
+focused, and <code class="language-plaintext highlighter-rouge">cape</code> is the intended way to extend what it can complete.<sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup>
+Funny enough, I went years without it simply because I never stopped to ask
+why file names wouldn’t complete in the popup. Sometimes you don’t know
+something is missing until you try it.</p>
+
+<p>What’s in your <code class="language-plaintext highlighter-rouge">completion-at-point-functions</code>? Any cape goodies I’ve
+overlooked? Let me know in the comments!</p>
+
+<p>That’s all I have for you today. Keep completing (at point)!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>Also, let’s be honest - corfu wearing a cape is a pretty great mental image. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>

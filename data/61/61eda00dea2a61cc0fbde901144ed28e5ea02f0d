@@ -1,0 +1,123 @@
+<p>All my notes live in <a href="https://protesilaos.com/emacs/denote" rel="noopener noreferrer" target="_blank">Denote</a>, the fantastic Emacs package by Protesilaos Stavrou. The system is perfect while I am at the computer... but I wanted to read and edit my notes from my phone. I did not find anything that respected the Denote convention, so I built it myself: <a href="https://apps.apple.com/us/app/dotdenote/id6773266542" rel="noopener noreferrer" target="_blank">Dotdenote</a>, an iOS app that reads, edits and creates notes following the Denote naming scheme over WebDAV. It is open source, you can browse the code at <a href="https://git.andros.dev/andros/dotdenote">git.andros.dev/andros/dotdenote</a>.</p>
+<p><img alt="Dotdenote note list with search, showing Denote notes with their tags and dates" class="medium" src="https://img.andros.dev/JhXaSpDPP-H8UmAEXumBNUpW2xU=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/07/dotdenote-note-list.png" /></p>
+<p><img alt="Dotdenote note detail rendering an Org note with headings, lists and a table" class="medium" src="https://img.andros.dev/leYuHhHqHzoltV00VwkTK6GIZ2Q=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/07/dotdenote-note-detail.png" /></p>
+<p><img alt="Dotdenote settings screen with the server URL, notes path, credentials and the test connection button" class="medium" src="https://img.andros.dev/2BjMmEqae6yslZK7UzXmhAgsorA=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/07/dotdenote-settings.png" /></p>
+<p>The app does not lock your notes anywhere: it talks to any WebDAV server, so they remain plain text files under your control. In this mini tutorial we will set up a WebDAV server with Docker, put an Nginx in front of it, and connect the app to your existing Denote notes. In less than 10 minutes you will be browsing your Zettelkasten from your phone.</p>
+<h2 id="blog-single-content__title--what-you-need" class="blog-single__content-title">What you need</h2>
+<ul>
+<li>A machine to host the server: a home server, a Raspberry Pi, a VPS, or even your laptop.</li>
+<li>Docker with the Compose plugin installed. You don't need to use Docker, you can run the WebDAV server and Nginx directly on your machine, but Docker makes it easier to set up and maintain.</li>
+<li>Your Denote notes folder (<code>.org</code>, <code>.md</code> or <code>.txt</code> files).</li>
+<li>An iPhone with <a href="https://apps.apple.com/us/app/dotdenote/id6773266542" rel="noopener noreferrer" target="_blank">Dotdenote</a> installed.</li>
+</ul>
+<h2 id="blog-single-content__title--step-1-create-the-project-structure" class="blog-single__content-title">Step 1: Create the project structure</h2>
+<p>We will use <a href="https://github.com/hacdias/webdav" rel="noopener noreferrer" target="_blank">hacdias/webdav</a>, a small and solid WebDAV server, behind an Nginx reverse proxy. Both run as containers.</p>
+<p>Create a folder for the stack and copy your notes inside <code>data/notes/</code>:</p>
+<pre class="highlight"><code class="language-bash">mkdir -p denote-server/data/notes
+cd denote-server
+cp -r ~/Documents/notes/* data/notes/</code></pre>
+<p>The <code>notes</code> subfolder is important: the app uses <code>/notes/</code> as its default notes path, so this layout works out of the box.</p>
+<h2 id="blog-single-content__title--step-2-configure-the-webdav-server" class="blog-single__content-title">Step 2: Configure the WebDAV server</h2>
+<p>Create <code>config.yaml</code> with the server settings and your credentials:</p>
+<pre class="highlight"><code class="language-yaml">address: 0.0.0.0
+port: 6065
+directory: /data
+permissions: CRUD
+users:
+  - username: denote
+    password: change-me-please</code></pre>
+<p>A couple of notes:</p>
+<ul>
+<li><code>directory</code> is the key used since v5 of hacdias/webdav (older tutorials mention <code>scope</code>, which no longer works).</li>
+<li><code>permissions: CRUD</code> gives the user full read and write access, which is what the app needs to create and edit notes.</li>
+</ul>
+<h2 id="blog-single-content__title--step-3-configure-nginx" class="blog-single__content-title">Step 3: Configure Nginx</h2>
+<p>Create <code>nginx.conf</code>. WebDAV uses HTTP methods and headers that a default proxy config does not forward, so we pass them explicitly:</p>
+<pre class="highlight"><code class="language-nginx">server {
+    listen 80;
+    client_max_body_size 1g;
+
+    location / {
+        proxy_pass http://webdav:6065;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # WebDAV specific headers. Destination arrives as an absolute URL,
+        # rewrite it to a path so the backend accepts it.
+        set $destination $http_destination;
+        if ($destination ~ ^https?://[^/]+(/.*)$) {
+            set $destination $1;
+        }
+        proxy_set_header Destination $destination;
+        proxy_set_header Depth $http_depth;
+        proxy_set_header Overwrite $http_overwrite;
+    }
+}</code></pre>
+<h2 id="blog-single-content__title--step-4-the-compose-file" class="blog-single__content-title">Step 4: The Compose file</h2>
+<p>Create <code>compose.yaml</code> gluing everything together:</p>
+<pre class="highlight"><code class="language-yaml">services:
+  webdav:
+    image: hacdias/webdav:latest
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+      - ./data:/data
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - webdav</code></pre>
+<p>Your folder should now look like this:</p>
+<pre class="highlight"><code class="language-none">denote-server/
+├── compose.yaml
+├── config.yaml
+├── nginx.conf
+└── data/
+    └── notes/
+        ├── 20240322T131856--my-note-title__emacs_notes.org
+        └── ...</code></pre>
+<p>Start it:</p>
+<pre class="highlight"><code class="language-bash">docker compose up -d</code></pre>
+<h2 id="blog-single-content__title--step-5-test-the-server" class="blog-single__content-title">Step 5: Test the server</h2>
+<p>The app checks the connection with a <code>PROPFIND</code> request, so let's do exactly the same with <code>curl</code> (replace the IP with the address of your server):</p>
+<pre class="highlight"><code class="language-bash">curl -u denote:change-me-please -X PROPFIND -H 'Depth: 1' http://192.168.1.50:8080/notes/</code></pre>
+<p>If you get an XML response listing your notes, the server is ready. If you get a <code>401</code>, check the credentials in <code>config.yaml</code>; if you get a <code>404</code>, check that your notes live inside <code>data/notes/</code>.</p>
+<h2 id="blog-single-content__title--step-6-connect-the-app" class="blog-single__content-title">Step 6: Connect the app</h2>
+<p>Download Dotdenote from the App Store: <a href="https://apps.apple.com/us/app/dotdenote/id6773266542" rel="noopener noreferrer" target="_blank">https://apps.apple.com/us/app/dotdenote/id6773266542</a></p>
+<p>Open the app and fill in the setup form:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL</td>
+<td><code>http://192.168.1.50:8080</code></td>
+</tr>
+<tr>
+<td>NOTES PATH</td>
+<td><code>/notes/</code> (the default)</td>
+</tr>
+<tr>
+<td>USERNAME</td>
+<td><code>denote</code></td>
+</tr>
+<tr>
+<td>PASSWORD</td>
+<td><code>change-me-please</code></td>
+</tr>
+</tbody>
+</table>
+</div><p>Tap <code>[ test connection ]</code>. When you see the check mark, save, and your Denote notes will appear in the list: you can search them, open them, edit them, and create new ones. Every note the app creates follows the Denote convention (<code>IDENTIFIER--title__keywords.ext</code>) with the proper front matter for Org, Markdown or plain text, so everything stays perfectly compatible with Emacs.</p>
+<p>The password is stored in the iOS Keychain, and the notes never touch any third-party service: the app only talks to your server.</p>
+<h2 id="blog-single-content__title--optional-expose-it-to-the-internet" class="blog-single__content-title">Optional: expose it to the internet</h2>
+<p>The setup above is fine inside your home network or over a VPN like WireGuard or Tailscale. If you want to reach your notes from anywhere, do not expose plain HTTP: put a domain in front of the server and add TLS. The quickest path is to run Nginx on the host (or use a proxy like Caddy or Traefik) with a Let's Encrypt certificate from Certbot, pointing to <code>127.0.0.1:8080</code>. Then use <code>https://notes.example.com</code> as the URL in the app, everything else stays the same.</p>
+<p>Enjoy it!</p>

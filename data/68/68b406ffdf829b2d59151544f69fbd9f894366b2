@@ -1,0 +1,139 @@
+<p>
+Flymake has been quietly sitting in my config for years doing exactly what it says on the tin, squiggly lines under things that are wrong, and I mostly left it alone. But recently I noticed I was doing the same little dance over and over: spot a warning, squint at the modeline counter, run `M-x flymake-show-buffer-diagnostics`, scroll through the list to find the thing I was actually looking at, then flip back. Two windows, zero connection between them.
+</p>
+
+<p>
+So I wired it up properly, and while I was in there I gave it a set of keybindings that feel right to my muscle memory.
+</p>
+
+
+<div id="orgcc3f832" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20260409061315-emacs--Wiring-Flymake-Diagnostics-into-a-Follow-Mode.jpg" alt="20260409061315-emacs--Wiring-Flymake-Diagnostics-into-a-Follow-Mode.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+The obvious bindings for stepping through errors are `M-n` and `M-p`, and most people using flymake bind exactly those. The problem is that in my config `M-n` and `M-p` are already taken, they step through simply-annotate annotations (which is itself a very handy thing and I am not giving it up!). So I shifted a key up and went with the shifted variants: `M-N` for next, `M-P` for previous, and `M-M` to toggle the diagnostics buffer.
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">setq</span> flymake-show-diagnostics-at-end-of-line nil)
+(<span style="color: #569cd6; font-weight: bold;">with-eval-after-load</span> 'flymake
+  (define-key flymake-mode-map (kbd <span style="color: #ce9178; font-style: italic;">"M-N"</span>) #'flymake-goto-next-error)
+  (define-key flymake-mode-map (kbd <span style="color: #ce9178; font-style: italic;">"M-P"</span>) #'flymake-goto-prev-error))
+</pre>
+</div>
+
+<p>
+With <code>M-M</code> I wanted it to be a bit smarter than just "open the buffer". If it is already visible I want it gone, if it is not I want it up. The standard toggle pattern:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/flymake--diag-buffer</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Return the visible flymake diagnostics buffer, or nil."</span>
+  (seq-some (<span style="color: #569cd6; font-weight: bold;">lambda</span> (b)
+              (<span style="color: #569cd6; font-weight: bold;">and</span> (<span style="color: #569cd6; font-weight: bold;">with-current-buffer</span> b
+                     (derived-mode-p 'flymake-diagnostics-buffer-mode))
+                   (get-buffer-window b)
+                   b))
+            (buffer-list)))
+
+(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/flymake-toggle-diagnostics</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Toggle the flymake diagnostics buffer."</span>
+  (<span style="color: #569cd6; font-weight: bold;">interactive</span>)
+  (<span style="color: #569cd6; font-weight: bold;">let</span> ((buf (my/flymake--diag-buffer)))
+    (<span style="color: #569cd6; font-weight: bold;">if</span> buf
+        (quit-window nil (get-buffer-window buf))
+      (flymake-show-buffer-diagnostics)
+      (my/flymake-sync-diagnostics))))
+</pre>
+</div>
+
+<p>
+Now the interesting bit. What I really wanted was a follow mode, something like how the compilation buffer tracks position or how Occur highlights the current hit. When my point lands on an error in the source buffer, the corresponding row in the diagnostics buffer should light up. That way the diagnostics window becomes a live index of where I am rather than a static dump and think in general this is how a lot of other IDEs work.
+</p>
+
+<p>
+I tried the lazy route first, turning on hl-line-mode in the diagnostics buffer and calling hl-line-highlight from a post-command-hook in the source buffer. The line lit up once and then refused to move. Nothing I did would shift it. This is because hl-line-highlight is really only designed to be driven from the window whose line is being highlighted, and I was firing it from afar.
+</p>
+
+<p>
+Ok, so why not just manage my own overlay:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">defvar</span> <span style="color: #9cdcfe; font-weight: bold; font-style: italic;">my/flymake--sync-overlay</span> nil
+  <span style="color: #6a9955; font-style: italic;">"Overlay used to highlight the current entry in the diagnostics buffer."</span>)
+
+(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/flymake-sync-diagnostics</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Highlight the diagnostics buffer entry matching the error at point."</span>
+  (<span style="color: #569cd6; font-weight: bold;">when-let*</span> ((buf (my/flymake--diag-buffer))
+              (win (get-buffer-window buf))
+              (diag (<span style="color: #569cd6; font-weight: bold;">or</span> (car (flymake-diagnostics (point)))
+                        (car (flymake-diagnostics (line-beginning-position)
+                                                  (line-end-position))))))
+    (<span style="color: #569cd6; font-weight: bold;">with-current-buffer</span> buf
+      (<span style="color: #569cd6; font-weight: bold;">save-excursion</span>
+        (goto-char (point-min))
+        (<span style="color: #569cd6; font-weight: bold;">let</span> ((found nil))
+          (<span style="color: #569cd6; font-weight: bold;">while</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (not found) (not (eobp)))
+            (<span style="color: #569cd6; font-weight: bold;">let</span> ((id (tabulated-list-get-id)))
+              (<span style="color: #569cd6; font-weight: bold;">if</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (listp id) (eq (plist-get id <span style="color: #c586c0; font-weight: bold;">:diagnostic</span>) diag))
+                  (<span style="color: #569cd6; font-weight: bold;">setq</span> found (point))
+                (forward-line 1))))
+          (<span style="color: #569cd6; font-weight: bold;">when</span> found
+            (<span style="color: #569cd6; font-weight: bold;">unless</span> (overlayp my/flymake--sync-overlay)
+              (<span style="color: #569cd6; font-weight: bold;">setq</span> my/flymake--sync-overlay (make-overlay 1 1))
+              (overlay-put my/flymake--sync-overlay 'face 'highlight)
+              (overlay-put my/flymake--sync-overlay 'priority 100))
+            (move-overlay my/flymake--sync-overlay
+                          found
+                          (min (point-max) (1+ (line-end-position)))
+                          buf)
+            (set-window-point win found)))))))
+</pre>
+</div>
+
+<p>
+My first pass at the walk through the tabulated list did not work. I was comparing (tabulated-list-get-id) directly against the diagnostic returned by flymake-diagnostics using eq, and it was always false, which meant found stayed nil forever and the overlay never moved. A dive into flymake.el revealed why. Each row in the diagnostics buffer stores its ID as a plist, not as the diagnostic itself:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-nil">(list :diagnostic diag
+      :line line
+      :severity ...)
+</pre>
+</div>
+
+<p>
+So I need to pluck out :diagnostic before comparing. Obvious in hindsight, as these things always are. With plist-get in place the comparison lines up and the overlay moves exactly where I want it, tracking every navigation command.
+</p>
+
+<p>
+The fallback lookup using line-beginning-position and line-end-position is there because flymake-diagnostics (point) only returns something if point is strictly inside the diagnostic span. When I land between errors or on the same line as an error but a few columns off, I still want the diagnostics buffer to track, so I widen the search to the whole line.
+</p>
+
+<p>
+Finally, wrap the hook in a minor mode so I can toggle it per buffer and enable it automatically whenever flymake comes up:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">define-minor-mode</span> <span style="color: #dcdcaa; font-weight: bold;">my/flymake-follow-mode</span>
+  <span style="color: #6a9955; font-style: italic;">"Sync the diagnostics buffer to the error at point."</span>
+  <span style="color: #c586c0; font-weight: bold;">:lighter</span> nil
+  (<span style="color: #569cd6; font-weight: bold;">if</span> my/flymake-follow-mode
+      (add-hook 'post-command-hook #'my/flymake-sync-diagnostics nil t)
+    (remove-hook 'post-command-hook #'my/flymake-sync-diagnostics t)))
+
+(add-hook 'flymake-mode-hook #'my/flymake-follow-mode)
+(define-key flymake-mode-map (kbd <span style="color: #ce9178; font-style: italic;">"M-M"</span>) #'my/flymake-toggle-diagnostics)
+</pre>
+</div>
+
+<p>
+The end result is nice. M-M pops the diagnostics buffer, M-N and M-P walk through the errors, and as I navigate the source the matching row in the diagnostics buffer highlights in step with me. If I close the buffer with another M-M everything goes quiet, and I can still step through with M-N/M-P on their own.
+</p>
+
+<p>
+Three little keybindings and twenty lines of elisp, but they turn flymake from a static reporter into something that actually feels connected to where I am in the buffer.
+</p>

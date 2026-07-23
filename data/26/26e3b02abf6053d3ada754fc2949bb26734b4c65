@@ -1,0 +1,151 @@
+<p>My blog has no comment form: no text box, no captcha, no third-party JavaScript widget. And yet, any reader can comment on an article, reply to another comment and get notified when someone answers them. The trick is using email as the user interface.</p>
+<p>Let me start with a disclaimer: I am well aware that not everyone has the technical skills to build a system like mine, and I am not trying to fool anyone by sugarcoating its implementation. This is aimed at the 0.1%, those crazy people who embrace the ideas of an open, universal web where you own your data. That said, I will leave the pieces behind as code examples, so anyone who wants to try has a place to start.</p>
+<p>I can tell you upfront that you need nothing exotic: a mailbox, a filter in your email provider, a database, a couple of scripts and a cron job. My site is built with <a href="https://django-liveview.andros.dev/">Django LiveView</a>, with Huey as the background task manager, but the examples will be in Flask: less magic, fewer lines and easier to translate to your favorite framework.</p>
+<p>But first we have to answer a question.</p>
+<h2 id="blog-single-content__title--why-email" class="blog-single__content-title">Why email?</h2>
+<p>We cannot go on without listing the advantages it has over a traditional web form:</p>
+<ul>
+<li>I avoid building a form and a backend with all the complexity that entails: validation, bot protection, error messages, and so on.</li>
+<li>I get a direct communication channel with the reader: I can notify them by email when someone replies, and they can reply to me. I can even start a private conversation if I want to.</li>
+<li>I ask for no registrations or user accounts: the reader does not have to create a profile, remember a password or fill in a captcha.</li>
+<li>The reader writes comfortably and from wherever they want: their favorite email client, with their spell checker and their keyboard shortcuts, whether in the terminal, on their phone or in a webmail.</li>
+<li>Spam filtering is handled by my email provider, which has spent decades perfecting it. I do not have to reinvent the wheel.</li>
+<li>Receiving an email is more reliable than a web form submission: my backend can be down or overloaded, but the email will keep retrying until the server is available again. No data is lost.</li>
+</ul>
+<p>Besides, there is no input more simple, familiar and accessible than email.</p>
+<p>There is a deeper reason too: comments are content as well, and the IndieWeb principle of <em>own your data</em> applies to them just the same. If they live in a third-party service like Disqus and it shuts down, changes its terms or kicks you out, it takes years of conversation with it. In my database and under my domain, I am their custodian. And this channel coexists peacefully with webmentions, which collect what other websites say about my articles: email collects everyone else. I told you about it in <a href="/blog/0b8e451e/i-joined-the-indieweb-heres-what-i-learned/">I joined the IndieWeb, here's what I learned</a>.</p>
+<p>Of course, I still have to maintain a database to store the comments and their relationships, with a minimal backend to render them. It is not a serverless system.</p>
+<h2 id="blog-single-content__title--the-architecture-in-one-minute" class="blog-single__content-title">The architecture in one minute</h2>
+<p>The whole system boils down to four pieces talking to each other:</p>
+<pre class="mermaid">sequenceDiagram
+    participant R as Reader
+    participant M as Mailbox
+    participant T as Scheduled task
+    participant D as Database
+    R->>M: Email to comment+article-{uuid}@your-domain.com
+    M->>M: The filter moves it from the inbox to website/comments
+    T->>M: Every 5 minutes it reads the folder over IMAP
+    T->>D: Turns the email into a comment
+    T->>M: Deletes the processed email
+    D->>R: The article renders the comment with its reply address
+    opt Replying to a comment
+        R->>M: Email to comment+reply-{id}@your-domain.com
+        T->>R: Notification email to the author of the parent comment
+    end</pre>
+<ol>
+<li>Each article generates a unique email address and shows it on the page, inviting readers to leave a comment.</li>
+<li>The reader writes an email to that address, with their comment in the body of the message. The subject and any HTML are ignored: only the plain text matters.</li>
+<li>A filter in the email provider moves those emails from the inbox to a specific folder. For example <code>website/comments</code>.</li>
+<li>A scheduled task reads that folder over IMAP every 5 minutes.</li>
+<li>If it finds an email, it turns it into a comment in the database and then deletes the processed email.</li>
+<li>The comment is rendered on the article page with a new unique email address to reply to it.</li>
+</ol>
+<p>And if someone replies to a comment, an email is sent to the author of the parent comment, letting them know that someone has answered.</p>
+<p>Now let's look at each piece in depth.</p>
+<h2 id="blog-single-content__title--an-address-for-every-article" class="blog-single__content-title">An address for every article</h2>
+<p>The first piece is <em>plus addressing</em>, also called subaddressing: almost every email provider (Fastmail, Gmail, Proton...) delivers any email sent to <code>user+whatever@domain.com</code> to the mailbox of <code>user@domain.com</code>. There is no need to create any new address: the suffix after the <code>+</code> is free and infinite.</p>
+<p>That lets me encode the destination of the comment inside the address itself:</p>
+<ul>
+<li><code>comment+article-{uuid}@your-domain.com</code> to comment on the article with that identifier.</li>
+<li><code>comment+reply-{id}@your-domain.com</code> to reply to the comment with that id.</li>
+</ul>
+<p>The reader does not have to type anything weird: the article page has a "Leave a comment" button that reveals the address with its <code>mailto:</code> link. One important detail: the address is not in the initial HTML, it is injected when the button is pressed (in my case over websocket, with Django LiveView). That way the scrapers that harvest addresses to send spam never see it. Next to each comment there is also a "Reply" button that reveals its <code>comment+reply-{id}@</code> address.</p>
+<p>In Flask, generating the address is one line in the view:</p>
+<pre class="highlight"><code class="language-python">@app.route("/blog/&lt;uuid&gt;/")
+def article(uuid):
+    post = get_article(uuid)
+    comment_email = f"comment+article-{uuid}@your-domain.com"
+    return render_template("article.html", post=post, comment_email=comment_email)</code></pre>
+<p>And in the template, the good old link:</p>
+<pre class="highlight"><code class="language-html">&lt;a href="mailto:{{ comment_email }}"&gt;{{ comment_email }}&lt;/a&gt;</code></pre>
+<p>The subject of the email is completely ignored: only the body matters. Fewer decisions for the reader.</p>
+<h2 id="blog-single-content__title--a-filter-in-the-email-provider" class="blog-single__content-title">A filter in the email provider</h2>
+<p>Here is the piece that makes everything convenient: a filter in the email provider itself. I have a rule configured that checks with a regular expression whether the recipient starts with a certain pattern, and in that case moves the email to a specific folder:</p>
+<ul>
+<li><strong>Condition</strong>: the recipient matches the regex <code>^comment\+</code>.</li>
+<li><strong>Action</strong>: move to the <code>website/comments</code> folder.</li>
+</ul>
+<p>The benefits are twofold. On one hand, my personal inbox stays clean: comments do not mix with my email. On the other, the script that processes the comments only needs to read that folder: it never touches the rest of the mailbox. If an email is in <code>website/comments</code>, it is by definition a comment candidate. And since the filter runs on the provider's server, it works even if my website is down: the comments pile up in the folder, waiting patiently.</p>
+<h2 id="blog-single-content__title--the-task-that-processes-the-emails" class="blog-single__content-title">The task that processes the emails</h2>
+<p>Every 5 minutes, although it could be every few seconds if I wanted, a scheduled task connects to the folder over IMAP, processes the emails and turns them into comments.</p>
+<p>In Flask you can achieve the same with APScheduler or with a simple cron job running a script.</p>
+<p>First, the regular expressions that decipher the recipient:</p>
+<pre class="highlight"><code class="language-python">import re
+from email.utils import parseaddr
+
+ARTICLE_RE = re.compile(r"comment\+article-([a-zA-Z0-9-]+)@")
+REPLY_RE = re.compile(r"comment\+reply-(\d+)@")</code></pre>
+<p>Then, extracting the body of the message:</p>
+<pre class="highlight"><code class="language-python">def extract_body(msg):
+    body = None
+    for part in msg.walk():
+        if part.get_content_type() == "text/plain":
+            payload = part.get_payload(decode=True)
+            charset = part.get_content_charset() or "utf-8"
+            body = payload.decode(charset, errors="replace")
+            break
+    if body and "\n-- \n" in body:
+        body = body.split("\n-- \n")[0]
+    return body.strip() if body else None</code></pre>
+<p>Two design decisions live in this function:</p>
+<ol>
+<li><strong>Only <code>text/plain</code> is accepted</strong>. Emails that only bring HTML are ignored: I do not want to sanitize someone else's HTML on my website, and every email client knows how to send plain text. But beware: plain text does not mean harmless. The body can carry <code>&lt;script&gt;</code> written as text, so when you render it on the page let the template engine escape it (Jinja and Django do it by default) and never insert it as raw HTML. I am speaking from experience: I found a <code>|safe</code> rendering the comments in my own template while writing this article.</li>
+<li><strong>The signature is cut automatically</strong>. The <a href="https://www.rfc-editor.org/rfc/rfc3676" rel="noopener noreferrer" target="_blank">RFC 3676</a> standard defines that signatures are separated by a line containing exactly <code>--</code>. Everything after it goes away: nobody wants their "Sent from my iPhone" published on a blog.</li>
+</ol>
+<p>With that, processing a message is deciding which kind it is and saving it:</p>
+<pre class="highlight"><code class="language-python">def process_message(msg):
+    author_name, author_email = parseaddr(msg.get("From", ""))
+    if not author_name:
+        author_name = author_email.split("@")[0]
+    body = extract_body(msg)
+    if body is None:
+        return True
+    to_address = msg.get("To", "")
+    if match := ARTICLE_RE.search(to_address):
+        return save_comment(match.group(1), author_name, author_email, body)
+    if match := REPLY_RE.search(to_address):
+        return save_reply(int(match.group(1)), author_name, author_email, body)
+    return False</code></pre>
+<ol>
+<li>The author's name comes from the <code>From</code> header. If the reader has no name configured, the part of their address before the at sign is used.</li>
+<li>An email with no useful body (empty or HTML-only) returns <code>True</code>: it is handled and can be deleted, even though it produces no comment.</li>
+<li>An email whose recipient matches no pattern returns <code>False</code>: it stays in the folder and will be retried in the next cycle.</li>
+</ol>
+<p>And the loop that connects to the mailbox:</p>
+<pre class="highlight"><code class="language-python">import email
+import imaplib
+
+def fetch_comments():
+    mail = imaplib.IMAP4_SSL("imap.fastmail.com")
+    mail.login(IMAP_USER, IMAP_PASSWORD)
+    mail.select("website/comments")
+    _, message_ids = mail.search(None, "ALL")
+    for email_id in message_ids[0].split():
+        _, data = mail.fetch(email_id, "(RFC822)")
+        msg = email.message_from_bytes(data[0][1])
+        if process_message(msg):
+            mail.store(email_id, "+FLAGS", "\\Deleted")
+    mail.expunge()
+    mail.logout()</code></pre>
+<p>Successfully processed emails are deleted from the folder, and the ones that fail stay. The folder works as a job queue with free retries: if the database was down or anything else went wrong, the next cycle will try again. To schedule the execution, APScheduler needs three lines:</p>
+<pre class="highlight"><code class="language-python">scheduler = BackgroundScheduler()
+scheduler.add_job(fetch_comments, "interval", minutes=5)
+scheduler.start()</code></pre>
+<h2 id="blog-single-content__title--reply-notifications" class="blog-single__content-title">Reply notifications</h2>
+<p>Each comment has its own reply address, shown next to the comment on the page: <code>comment+reply-{id}@</code>. The reader can press the "Reply" button and their email client will open a new message with that address in the <code>To</code> field.</p>
+<p>How do I notify the author of the original comment that someone has replied? Easy, we already have their email. This closes the circle of the conversation. We can include a link to the article or directly the reply address of the new comment. They do not even have to visit the website.</p>
+<p>A practical tip: the notification will go out from an address like <code>no-reply@your-domain.com</code>. Make sure you register it as an authorized sending identity in your email provider, or the SMTP server will reject emails to external recipients. It happened to me, and the error (a 551 that only showed up with certain recipients) was not exactly easy to diagnose.</p>
+<h2 id="blog-single-content__title--how-do-i-find-out-that-i-have-new-comments" class="blog-single__content-title">How do I find out that I have new comments?</h2>
+<p>I created an RSS feed with the latest comments: <a href="https://en.andros.dev/blog/comments/feed/">https://en.andros.dev/blog/comments/feed/</a>. It is not just for me: since it is public, any curious reader can subscribe and follow the blog's conversations from their RSS reader. Then, with an automation that is beside the point right now, I send myself an email with the body of the comment plus its reply address.</p>
+<p>Boring but effective.</p>
+<h2 id="blog-single-content__title--not-everything-is-perfect" class="blog-single__content-title">Not everything is perfect</h2>
+<p>Everything has a cost:</p>
+<ul>
+<li>Not everyone wants to write to me from their real email address. There are different strategies to deal with it, like disposable email addresses, but it is inconvenient.</li>
+<li>There is latency between the reader commenting and the comment showing up on the article. Since it is not a chat, it does not need to be immediate either.</li>
+<li>To edit a comment, you have to talk to me personally. Which has the indirect advantage that I get to moderate the changes.</li>
+</ul>
+<p>However, I believe the reward is well worth the cost.</p>
+<h2 id="blog-single-content__title--conclusion" class="blog-single__content-title">Conclusion</h2>
+<p>Comments live under your domain and not in a third party's silo, the experience is good, and it is built on protocols with decades of service that will keep working when the trendy comment box of the day has shut down. Building things to last is also a design decision.</p>
+<p>If you build something similar for your blog, I would love to hear about it. You already know how to leave me a comment.</p><hr><p>Will you buy me a coffee? This is how I keep writing without ads or paywalls. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-ad250446@andros.dev" class="link">comment+article-ad250446@andros.dev</a> to leave a comment. The subject will be ignored.</p>

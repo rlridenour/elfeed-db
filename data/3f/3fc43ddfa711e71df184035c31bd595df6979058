@@ -1,0 +1,722 @@
+<p>
+Parsing is a fundamental skill for any programmer.
+Understanding how text is read by the computer, and better yet knowing how to tell the computer to read text in a robust manner, opens the door to solving problems in completely new ways.
+There have been many times for me that knowing how to make a parser has had utility.
+A good example is <a href="https://github.com/BirDt/gqlm">GQLM</a>, a macro pre-processor step for GraphQL, which addressed two annoyances I had with the language (and AWS AppSync).
+Another example is validating an email generator for AWS SES; since the parser code for the high level email grammar is pretty concise.
+And of course, making your own programming languages (which I would call a personal hobby) requires understanding parsing to some degree as well.
+</p>
+
+<p>
+Recently, I've wanted to rewrite an old project of mine, a <a href="https://github.com/BirDt/dxtr/">simple dice roller</a>, in Gambit.
+I have a lot of more complex functionality I've been wanting to add and experiment with, particularly the ability to roll against hex-flower tables or use Markov chains to model NPC emotions and other stateful things.
+I also want to give the tool a proper "language" for rolling dice, which is where parsing comes in.
+</p>
+
+<p>
+Unfortunately, Gambit doesn't have any nice (or at least, easy to find) libraries for writing parsers, so I need to make my own.
+And because this is my tenth time doing this at this point, I thought I would run through the basic structure both for my own future reference and so you-who-reads-this-blog can also quickly write your own parsing toolkit.
+The approach I'll use is called "parser combinators", which are particularly popular in Haskell (and other functional languages) but are generally good for building parsers quickly.
+</p>
+
+<p>
+Parser combinators have the advantage of being extremely quick to work with and build, and produce very readable code.
+In the example implementation in this tutorial, you will see that our parser code ends up looking remarkably close to the grammar we're trying to parse.
+This comes with the downside of parser combinators being slow compared to well-made LL or LR parsers (which is why tools like Bison exist); though in practice I still prefer working with them for the readability benefits.
+Another hitch, which I'll explain when it comes up, is shared with other LL parsers: that being that left-recursive grammars can and will cause infinite loops.
+This part always trips me up when I need to write a parser again for whatever reason, but I'll explain how to work around it both in the grammar and parser code itself.
+</p>
+
+<p>
+This blog will show an implementation in Scheme, however the principles here are the same in any language, however your language must support first-class functions and closures to use this approach.
+Thankfully, most modern languages do, and so you should be able to use this tutorial to implement your own parsing library in any of JavaScript, Python, Rust, or whatever your favourite language is.
+</p>
+
+<div class="outline-2">
+<h2 id="what-are-parser-combinators-actually-what-are-combinators">What are Parser Combinators? Actually, what are Combinators?</h2>
+<div class="outline-text-2">
+<p>
+Simply put, a combinator is just a function that takes some number of other functions and returns a function that combines or modifies their functionality in some way.
+Some examples:
+</p>
+<ul class="org-ul">
+<li><code>g = identity(f)</code> where calling <code>g(1)</code> is the same as calling <code>f(1)</code>.</li>
+<li><code>g = complement(f)</code> where calling <code>g(1)</code> is the same as calling <code>not f(1)</code>.</li>
+<li><code>g = flip(f)</code> where calling <code>g(1, 2)</code> is the same as calling <code>f(2, 1)</code>.</li>
+<li><code>g = compose(f, h)</code> where calling <code>g(1)</code> is the same as calling <code>f(h(1))</code>.</li>
+</ul>
+<p>
+And the list goes on.
+</p>
+
+<p>
+Parser combinators work the same way.
+We have a one or a few basic functions that check if the first "unit" of the list we give them matches their parameter, and if it does we return true along with the matched value and remainder of the list.
+In the implementation shown here, I'm going to work with characters and strings, but this same approach works with lexer tokens, numbers, or whatever else you want to use.
+</p>
+
+<p>
+Then, we have some functions that order those unit matchers into larger structures that are more useful to us.
+Let's go over a really simple pseudocode example:
+</p>
+<ul class="org-ul">
+<li><code>char(x)</code> produces a function (parser) that returns true if the first character of the given string is "x".</li>
+<li><code>sequence(parser...)</code> produces a parser that returns true if the string matches, in order, all parsers given to it.</li>
+<li>So we can make a parser <code>g = sequence(char("a"), char("b"), char("c"))</code>.
+<ul class="org-ul">
+<li><code>g("abc")</code> returns true.</li>
+<li><code>g("def")</code> returns false.</li>
+<li><code>g("abcdef")</code> returns true as well as the remainder of the input string, "def".</li>
+</ul></li>
+</ul>
+
+<p>
+If this seems simple, that's because it is.
+Parser combinators are simple to implement, simple to understand, and yet more powerful than tools such as regex.
+It's a wonder that more languages don't implement them as core functionality.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="what-combinators-do-we-need">What Combinators Do We Need?</h2>
+<div class="outline-text-2">
+<p>
+Before we get started actually writing the code, we first need to understand what it is we need to implement.
+The formal definition of regex gives us a good starting point.
+You likely already know regex, but the extended regex that you're used to from your language of choice is a bit more than we need here.
+The formal definition is far simpler, with 3 constants:
+</p>
+<ul class="org-ul">
+<li>The empty set, &empty;.</li>
+<li>The set containing only the empty string, &epsilon;.</li>
+<li>The set containing a single character.</li>
+</ul>
+<p>
+And 3 operations:
+</p>
+<ul class="org-ul">
+<li>Concatenation, such as <code>ab</code> to first match <code>a</code> and then <code>b</code>.</li>
+<li>Alternation, such as <code>a|b</code> to match either <code>a</code> or <code>b</code>.</li>
+<li>Kleene star, to such as <code>a</code> to match zero or more <code>a</code>'s sequentially.</li>
+</ul>
+
+<p>
+Aside from the empty set, which we don't really need, this is also all the specification we need for parsing.
+In other words, the base library only has 5 functions:
+</p>
+<ul class="org-ul">
+<li>A parser that matches an empty input (such as <code>""</code> or an empty list, or <code>#EOF</code>).</li>
+<li>A parser that matches a single unit of whatever it is we're parsing.
+This can either be a single character, or it can be a lexer token, or a struct, or object, or whatever else.</li>
+<li>A parser that parses a sequence (from left to right) of parsers (this is our <code>sequence</code> function from before).</li>
+<li>A parser that parses either of the parsers given to it, <code>either</code>.</li>
+<li>A parser that parses a given parser zero or more times, <code>many</code>.</li>
+</ul>
+
+<p>
+We will then extend our library to create a bunch of shortcuts.
+For example, <code>one-or-more</code> could be implemented as a <code>sequence</code> of a single parser, followed by <code>many</code> of the same parser.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="constant-parsers">Constant Parsers</h2>
+<div class="outline-text-2">
+<p>
+Our first parser, the empty input, is easy (I mean none of this is that complex), but it sets the structure for how we'll implement all of our parsers.
+</p>
+
+<p>
+Each parser is a function which returns a function that takes a single <code>input</code> parameter.
+For our <code>eof</code> parser, the returned function checks if <code>input</code> is an empty string.
+If it is, we return two values: the first being the matched text (in this case an empty list, the Scheme equivalent of <code>null</code>), and the second being the remaining text in the string (which is an empty string, because we have nothing left over).
+If the input is not an empty string, we return False.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">eof</span>)
+  (<span class="org-keyword">lambda</span> (input)
+    (<span class="org-keyword">if</span> (= 0 (string-length input))
+        (cons '() <span class="org-string">""</span>)
+        #f)))
+</pre>
+</div>
+
+<p>
+<i>Note for those not familiar with Scheme, <code>cons</code> is just creating a pair of two values here.</i>
+<i>The function <code>car</code> will access the first value, and <code>cdr</code> will access the second value.</i>
+</p>
+
+<p>
+Simple enough, right?
+</p>
+
+<p>
+Next up is the unit parser.
+We're doing string parsing here, so our unit is a single character.
+We will do this by passing the character value into the function so we can reference it in the returned closure.
+If the string is not empty, and the first character is the character we specified, we return the matched character and then the remaining string.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">char</span> chr)
+  (<span class="org-keyword">lambda</span> (input)
+    (<span class="org-keyword">if</span> (<span class="org-keyword">and</span> (&lt; 0 (string-length input))
+           (equal? (string-ref input 0) chr))
+        (cons chr (substring input 1 (string-length input)))
+        #f)))
+</pre>
+</div>
+
+<p>
+And that's it for the constants.
+You can of course substitute <code>char</code> for a different parser, such as <code>struct</code> or <code>token</code> or any other unit.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="basic-combinators">Basic Combinators</h2>
+<div class="outline-text-2">
+<p>
+Let's have a look at sequence first, which I'm going to shorten just to <code>seq</code>.
+The <code>seq</code> function takes a list of parsers as input.
+It then iterates through each parser, adding the result on to the previous result.
+If it ever fails to parse, then return false immediately.
+</p>
+
+<p>
+<i>Procedural programmers avert your eyes, I'm using recursion and not loops.</i>
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">seq</span> . parsers)
+  (<span class="org-keyword">define</span> (<span class="org-function-name">match-next</span> p result rest)
+    (<span class="org-keyword">if</span> (= p (length parsers))
+      (cons result rest)
+      (<span class="org-keyword">let*</span> ((parser (list-ref parsers p))
+             (parse-result (parser rest)))
+        (<span class="org-keyword">if</span> parse-result
+            (match-next (+ 1 p)
+                        (append result (list (car parse-result)))
+                        (cdr parse-result))
+            #f))))
+  (<span class="org-keyword">lambda</span> (input)
+    (match-next 0 '() input)))
+</pre>
+</div>
+
+<p>
+We can test this function to prove that it works, including already functioning with nested sequence parsers.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">((seq (char #\f) (char #\o) (char #\o)) <span class="org-string">"foo"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\f #\o #\o) . "")
+</span>((seq (char #\f) (char #\o) (char #\o)) <span class="org-string">"foodie"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\f #\o #\o) . "die")
+</span>((seq (char #\f) (seq (char #\o) (char #\o))) <span class="org-string">"foodie"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\f (#\o #\o)) . "die")</span>
+</pre>
+</div>
+
+<p>
+<code>either</code> is similarly simple.
+It takes a list of parsers as input, and iterates through them until one of them parses, then returns the successful result.
+If none of the parsers match, it returns false.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">either</span> . parsers)
+  (<span class="org-keyword">define</span> (<span class="org-function-name">test-parser</span> p input)
+    (<span class="org-keyword">if</span> (null? p)
+      #f
+      (<span class="org-keyword">let*</span> ((parser (car p))
+             (parse-result (parser input)))
+        (<span class="org-keyword">if</span> parse-result
+            parse-result
+            (test-parser (cdr p) input)))))
+  (<span class="org-keyword">lambda</span> (input)
+    (test-parser parsers input)))
+</pre>
+</div>
+
+<p>
+And some simple tests (for brevity, I won't prove that it handles nesting and remainder - just take my word for it):
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">((either (char #\a) (char #\b)) <span class="org-string">"a"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (#\a . "")
+</span>((either (char #\a) (char #\b)) <span class="org-string">"b"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (#\b . "")</span>
+</pre>
+</div>
+
+<p>
+And the last of our core functions, <code>many</code>.
+<code>many</code> takes a single parser and matches it against the input string until it fails.
+<code>many</code> never returns False, because technically zero matches is allowed.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">many</span> parser)
+  (<span class="org-keyword">define</span> (<span class="org-function-name">match-next</span> result rest)
+    (<span class="org-keyword">let</span> ((parse-result (parser rest)))
+      (<span class="org-keyword">if</span> parse-result
+        (match-next (append result (list (car parse-result)))
+                    (cdr parse-result))
+        (cons result rest))))
+  (<span class="org-keyword">lambda</span> (input)
+    (match-next '() input)))
+</pre>
+</div>
+
+<p>
+And tests (again, made more concise for brevity):
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">((many (char #\a)) <span class="org-string">"a"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\a) . "")
+</span>((many (char #\a)) <span class="org-string">""</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (() . "")
+</span>((many (char #\a)) <span class="org-string">"aaabbb"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\a #\a #\a) . "bbb")</span>
+</pre>
+</div>
+
+<p>
+And that's finished off our core functions.
+Even with just this, we can already implement any parser we want, but it'll be annoying and we can make the core library a bit more useful.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="improving-the-core-parsing-arithmetic">Improving the Core: Parsing Arithmetic</h2>
+<div class="outline-text-2">
+<p>
+To do that, let's define a specific parsing problem: parsing basic arithmetic expressions.
+We want to handle the following:
+</p>
+<ol class="org-ol">
+<li>All the basic arithmetic operations, so addition, subtraction, multiplication and division; with the correct order of operations.</li>
+<li>Whole numbers, decimal numbers, and negative numbers.</li>
+<li>Brackets to change the order of operations.</li>
+</ol>
+<p>
+We'll also ignore whitespace and strip it from the input to the parser.
+This is the grammar we'll write:
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">&lt;expression&gt; ::= &lt;sum&gt;
+&lt;sum&gt; ::= &lt;product&gt; ((<span class="org-string">"+"</span> | <span class="org-string">"-"</span>) &lt;product&gt;)*
+&lt;product&gt; ::= &lt;value&gt; ((<span class="org-string">"*"</span> | <span class="org-string">"/"</span>) &lt;value&gt;)*
+&lt;value&gt; ::= &lt;number&gt; | &lt;closed expression&gt; | &lt;negation&gt;
+&lt;negation&gt; ::= <span class="org-string">"-"</span> &lt;value&gt;
+&lt;closed expression&gt; ::= <span class="org-string">"("</span> &lt;expression&gt; <span class="org-string">")"</span>
+&lt;number&gt; ::= &lt;digit&gt; &lt;digit&gt;* <span class="org-string">"."</span> &lt;digit&gt;* | &lt;digit&gt; &lt;digit&gt;*
+&lt;digit&gt; ::= <span class="org-string">"0"</span> | <span class="org-string">"1"</span> | <span class="org-string">"2"</span> | ... | <span class="org-string">"8"</span> | <span class="org-string">"9"</span>
+</pre>
+</div>
+
+<p>
+If you're not sure how to read BNF, <a href="https://en.wikipedia.org/wiki/Backus%E2%80%93Naur_form">Wikipedia has a great explanation</a>.
+</p>
+
+<p>
+One thing to note is the way we've defined our <code>&lt;sum&gt;</code> and <code>&lt;product&gt;</code> grammars is not left-recursive.
+This is because, like any LL parser, parser combinators will loop infinitely on a left-recursive grammar, such as the one below:
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">&lt;sum&gt; ::= &lt;sum&gt; (<span class="org-string">"+"</span> | <span class="org-string">"-"</span>) &lt;sum&gt; | &lt;value&gt; 
+</pre>
+</div>
+<p>
+We can expand this grammar out in our heads, but the computer will struggle with it, because it will infinitely try to parse that first <code>&lt;sum&gt;</code>.
+</p>
+
+<p>
+Let's define <code>digit</code> first.
+We can do this by cheating a bit with Scheme's <code>apply</code> function.
+Basically, we just use <code>map</code> to build a list of <code>char</code> parsers from a list of characters (each digit), then pass that to <code>either</code>.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> <span class="org-function-name">digit</span>
+  (apply either
+       (<span class="org-keyword">map</span>
+        (<span class="org-keyword">lambda</span> (x) (char x))
+        (string-&gt;list <span class="org-string">"0123456789"</span>))))
+</pre>
+</div>
+
+<p>
+<code>(digit "1")</code> will return <code>(#\1 . "")</code>.
+</p>
+
+<p>
+With <code>digit</code>, we can define <code>number</code> as essentially identical to our grammar above:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> <span class="org-function-name">number</span>
+  (either
+   (seq digit
+      (many digit)
+      (char #\.)
+      (many digit))
+   (seq digit
+      (many digit))))
+</pre>
+</div>
+
+<p>
+There are a few improvements to be made here though.
+Specifically, with some BNF extensions we could shorten this grammar by making the decimal optional, and making digit "one or many" and not just many.
+</p>
+<div class="org-src-container">
+<pre class="src src-fundamental">number ::= &lt;digit&gt;+ (<span class="org-string">"."</span> &lt;digit&gt;*)?
+</pre>
+</div>
+<p>
+We can, of course, add these two as combinators just as well.
+</p>
+
+<p>
+One or many is the easiest, it's really just a sequence of one parser followed by many of the same parser:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">one-plus</span> parser)
+  (seq parser (many parser)))
+</pre>
+</div>
+<p>
+One thing to note is that this won't return one flat list because of how the <code>seq</code> combinator works.
+Instead, we will see something like this:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">((one-plus (char #\a)) <span class="org-string">"aaa"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((#\a (#\a #\a)) . "")</span>
+</pre>
+</div>
+<p>
+We can fix this behaviour with post-processing, which we'll go over soon.
+</p>
+
+<p>
+Before that, let's implement our optional parser <code>opt</code>.
+<code>opt</code> checks a particular parser against its input.
+If it succeeds, then easy we just return the output of the parser.
+Otherwise, we want to return null and the input string; we don't return False here, because the parser <i>did</i> succeed.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">opt</span> parser)
+  (<span class="org-keyword">lambda</span> (input)
+    (<span class="org-keyword">let</span> ((res (parser input)))
+      (<span class="org-keyword">if</span> res
+        res
+        (cons '() input)))))
+</pre>
+</div>
+
+<p>
+With these two additional combinators, we can now implement the shorter version of the grammar!
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> <span class="org-function-name">number</span>
+  (seq (one-plus digit)
+       (opt (seq (char #\.)
+               (many digit)))))
+</pre>
+</div>
+<p>
+In my opinion this is perhaps less readable, but it is nicer to make this a bit more concise.
+</p>
+
+<p>
+There's just one problem: our output when parsing a number is kind of horrible:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(number <span class="org-string">"123.4"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (((#\1 (#\2 #\3)) (#\. (#\4))) . "")</span>
+</pre>
+</div>
+<p>
+Wouldn't it be great if this just returned us an actual number?
+Well, that's where post-processing comes in.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="post-processing">Post-Processing</h2>
+<div class="outline-text-2">
+<p>
+Sometimes, as the output of one of our parsers, we want to do more than return just the raw list of units.
+This is most obvious in our number example, I would love to have that output either the string <code>"123.4"</code> or just the number itself <code>123.4</code>.
+This can be done with post-processing, which is another combinator that simply runs a parser, and if it succeeds in parsing it runs a given function against the returned parse tree.
+Let's call this function <code>post-process</code>.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">post-process</span> processor parser)
+  (<span class="org-keyword">lambda</span> (input)
+    (<span class="org-keyword">let</span> ((res (parser input)))
+      (<span class="org-keyword">if</span> res
+        (cons (processor (car res))
+              (cdr res))
+        #f))))
+</pre>
+</div>
+<p>
+Now we can adjust our <code>number</code> parser like so:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> <span class="org-function-name">number</span>
+  (post-process
+   (<span class="org-keyword">lambda</span> (result)
+     (string-&gt;number
+      (list-&gt;string
+       (flatten result))))
+   (seq (one-plus digit)
+      (opt (seq (char #\.)
+                (many digit))))))
+</pre>
+</div>
+<p>
+And now our parser outputs numbers properly:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-scheme">(number <span class="org-string">"123.4"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (123.4 . "")</span>
+</pre>
+</div>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="implementing-the-rest">Implementing the Rest</h2>
+<div class="outline-text-2">
+<p>
+We now have enough to implement every single grammar rule, so here's the rest of them.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> <span class="org-function-name">digit</span>
+  (apply either
+       (<span class="org-keyword">map</span>
+        (<span class="org-keyword">lambda</span> (x) (char x))
+        (string-&gt;list <span class="org-string">"0123456789"</span>))))
+
+(<span class="org-keyword">define</span> <span class="org-function-name">number</span>
+  (post-process
+   (<span class="org-keyword">lambda</span> (result)
+     (string-&gt;number
+      (list-&gt;string
+       (flatten result))))
+   (seq (one-plus digit)
+      (opt (seq (char #\.)
+                (many digit))))))
+
+(<span class="org-keyword">define</span> (<span class="org-function-name">closed-expr</span> input)
+  ((post-process
+    (<span class="org-keyword">lambda</span> (res)
+      (list (cadr res)))
+    (seq
+     (char #\()
+     expression
+     (char #\)))) input))
+
+(<span class="org-keyword">define</span> (<span class="org-function-name">negation</span> input)
+  ((post-process
+    (<span class="org-keyword">lambda</span> (res)
+      (- (cadr res)))
+    (seq (char #\-)
+       value)) input))
+
+(<span class="org-keyword">define</span> <span class="org-function-name">value</span>
+  (either number closed-expr negation))
+
+(<span class="org-keyword">define</span> <span class="org-function-name">product</span>
+  (seq
+   value
+   (many (seq (either (char #\*)
+                    (char #\/))
+            value))))
+
+(<span class="org-keyword">define</span> <span class="org-function-name">sum</span>
+  (seq
+   product
+   (many (seq (either (char #\+)
+                    (char #\-))
+            product))))
+
+(<span class="org-keyword">define</span> <span class="org-function-name">expression</span> sum)
+</pre>
+</div>
+
+<p>
+You can see that we can more or less follow the exact BNF grammar for our rules.
+One thing to note is that we've made <code>closed-expr</code> and <code>negation</code> functions rather than variables here.
+This is so when they are called, they will see the declaration of <code>expression</code> and <code>value</code>, which depend on these two.
+This is called lazy loading.
+</p>
+
+<p>
+This grammar does parse:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(expression <span class="org-string">"2*(3+-4)*5"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; (((2 ((#\* (((3 ()) ((#\+ (-4 ())))))) (#\* 5))) ()) . "")</span>
+</pre>
+</div>
+<p>
+However, this can still be improved.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="cleaning-up">Cleaning Up</h2>
+<div class="outline-text-2">
+<p>
+The first thing that comes to mind is all those empty lists hovering about.
+Those are the result of our use of <code>many</code> in the <code>sum</code> and <code>product</code> parsers, as the <code>many</code> can of course match nothing, in which case we get an empty list.
+</p>
+
+<p>
+To fix this, we can simply add the following as a post-processor for <code>sum</code> and <code>product</code>:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">strip-null-cdr</span> res)
+  (<span class="org-keyword">if</span> (equal? '() (last res))
+      (car res)
+      res))
+</pre>
+</div>
+
+<p>
+Now we get a much more sane result.
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(expression <span class="org-string">"2*(3+-4)*5"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((2 ((#\* ((3 ((#\+ -4))))) (#\* 5))) . "")</span>
+</pre>
+</div>
+
+<p>
+If you're working in a non-Scheme language, this is likely where you can get off.
+You may want to add a post-processor that converts this into a parser node, instead of just using a list, but essentially the next step after this is making an interpreter, which I won't be covering here.
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="interpreting-the-result">Interpreting the Result</h2>
+<div class="outline-text-2">
+<p>
+However, if you're using Scheme or Lisp, there is one last trick that we can do here as a shortcut to build a full interpreter: <i>we can reorder this tree into a valid Lisp form, then pass it to eval</i>.
+</p>
+
+<p>
+This is actually fairly easy to do, all you need is one more post-processor for our two left-associative operations <code>sum</code> and <code>product</code> to reorganise the whole tree and convert the operation characters into symbols.
+</p>
+
+<p>
+Our output at the moment is not really a true parse tree in the working sense.
+It lacks associativity, and is essentially just a list of values.
+What we want to do is re-orgnise it into a left-assocative tree, and we can do this with a fairly simple algorithm:
+</p>
+<ol class="org-ol">
+<li>Start with the left-most node of the list.</li>
+<li>Iterate over each node in the remaining list.</li>
+<li>In each iteration, make a list with 3 elements; the operator of the current iteration's operation, the value from the previous iteration (the left-most node to start), and the remainder of the operation.</li>
+<li>Save the value of that iteration and use it in the next iteration.</li>
+<li>Keep going until you hit the end of the list.</li>
+</ol>
+
+<p>
+In Scheme, this gives us the following code:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(<span class="org-keyword">define</span> (<span class="org-function-name">left-associative</span> res)
+  (<span class="org-keyword">define</span> (<span class="org-function-name">iter</span> acc next)
+    (<span class="org-keyword">if</span> (null? next)
+      acc
+      (<span class="org-keyword">let</span> ((op (car next)))
+        (iter (list (string-&gt;symbol (list-&gt;string (list (car op))))
+                    acc
+                    (cadr op))
+              (cdr next)))))
+  (<span class="org-keyword">if</span> (<span class="org-keyword">and</span> (pair? res) (not (symbol? (car res))))
+      (iter (car res) (cadr res))
+      res))
+</pre>
+</div>
+
+<p>
+You will notice we only adjust the list here if the first item in the list is not a symbol.
+If we don't do this, the post-processor in <code>sum</code> will try to reorganise the already left-associative output of <code>product</code>.
+If our expression only has <code>product</code> operations, then this will cause an error, so that catch prevents doubling up.
+It's a bit messy, but then again the better option here is to parse this into an actual tree.
+This is just a hack possible in Lisp.
+</p>
+
+<p>
+Which we can then add as a post-processor to <code>sum</code> and <code>product</code>, and run the parser to observe the output:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(expression <span class="org-string">"1+2+3"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((+ (+ 1 2) 3) . "")
+</span>(expression <span class="org-string">"1*2*3"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((* (* 1 2) 3) . "")
+</span>(expression <span class="org-string">"1+2*3"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((+ 1 (* 2 3)) . "")
+</span>(expression <span class="org-string">"2*3+4"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((+ (* 2 3) 4) . "")
+</span>(expression <span class="org-string">"2+(3+-4)*5"</span>) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ((+ 2 (* ((+ 3 -4)) 5)) . "")</span>
+</pre>
+</div>
+
+<p>
+Wow! That looks a lot like Scheme, and we're maintaining the order of operations too!
+In fact, we can pass the first element of any output here directly to <code>eval</code> and it will work just fine:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(eval (car (expression <span class="org-string">"1+2+3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 6
+</span>(eval (car (expression <span class="org-string">"1*2*3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 6
+</span>(eval (car (expression <span class="org-string">"1+2*3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 7
+</span>(eval (car (expression <span class="org-string">"2*3+4"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 10
+</span>(eval (car (expression <span class="org-string">"2+(3+-4)*5"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; ERROR: Operator is not a procedure: (-1)</span>
+</pre>
+</div>
+
+<p>
+Oh wait, have we screwed something up here?
+</p>
+
+<p>
+Take a look at the parser output again: <code>(3+-4)</code> is put into double brackets <code>((+ 3 -4))</code>, which means that the result of that addition is being called as a function, <code>(-1)</code>.
+That ain't right.
+</p>
+
+<p>
+Fortunately, it's easy to see where the problem is: in the <code>closed-expr</code>.
+This parser is currently returning whatever it parses inside a list.
+This is a trivial fix, we'll just remove the <code>list</code> from the <code>closed-expr</code> post-processor, and just return the <code>cadr</code> of it's result.
+</p>
+
+<p>
+And finally:
+</p>
+<div class="org-src-container">
+<pre class="src src-scheme">(eval (car (expression <span class="org-string">"1+2+3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 6
+</span>(eval (car (expression <span class="org-string">"1*2*3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 6
+</span>(eval (car (expression <span class="org-string">"1+2*3"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 7
+</span>(eval (car (expression <span class="org-string">"2*3+4"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; 10
+</span>(eval (car (expression <span class="org-string">"2+(3+-4)*5"</span>))) <span class="org-comment-delimiter">;; </span><span class="org-comment">=&gt; -3</span>
+</pre>
+</div>
+
+<p>
+Everything is as it should be!
+</p>
+</div>
+</div>
+
+<div class="outline-2">
+<h2 id="closing-up">Closing Up</h2>
+<div class="outline-text-2">
+<p>
+Hopefully this has helped you learn a little bit more about parsing and the problems that good parsing can solve.
+</p>
+
+<p>
+As I said at the start, the main reason I wrote this post is to accompany my own parser library implementation in Gambit.
+You can find that implementation here: <a href="https://git.cyan.sh/BirDt/parque">I've called it Parque</a>.
+The library is built using only base R7RS, so it should work in any Scheme that supports R7RS' <code>define-library</code>.
+</p>
+
+<p>
+While the implementation described in this blog post is already useful, it's more of a quick method for implementing combinators.
+I want Parque to be better than this, so I will extend it with some other combinators and a proper parser output record instead of just pairs.
+This blog post will remain as a reference for quickly implementing these functions.
+</p>
+</div>
+</div>

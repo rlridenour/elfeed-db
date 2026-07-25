@@ -1,0 +1,106 @@
+<p><a href="https://github.com/oantolin/embark">Embark</a> is one of those packages that
+quietly rewires how you use Emacs. Think of it as a context-aware right-click:
+you invoke <code class="language-plaintext highlighter-rouge">embark-act</code> (I keep it on <code class="language-plaintext highlighter-rouge">C-.</code>) on whatever’s at point - a file
+name, a symbol, a URL - and Embark offers a menu of things you can do with it.
+The neat part is that it’s completely extensible, so you can teach it about new
+kinds of targets. Lately two of my projects, CIDER and Projectile, have grown
+Embark integrations, in slightly different ways, and both are worth a look.</p>
+
+<p>Let’s start with CIDER, and teach Embark about Clojure symbols, so <code class="language-plaintext highlighter-rouge">embark-act</code>
+on one offers a bunch
+of CIDER commands:</p>
+
+<p><img src="/assets/images/cider-embark.png" alt="CIDER actions in Embark" /></p>
+
+<p>So <code class="language-plaintext highlighter-rouge">d</code> shows the documentation, <code class="language-plaintext highlighter-rouge">.</code> jumps to the definition, <code class="language-plaintext highlighter-rouge">r</code> finds
+references, <code class="language-plaintext highlighter-rouge">i</code> inspects the value, <code class="language-plaintext highlighter-rouge">c</code> opens ClojureDocs and <code class="language-plaintext highlighter-rouge">a</code> runs apropos -
+the usual CIDER commands, a keystroke away from wherever your cursor happens to
+be.</p>
+
+<p>Here’s the setup. It’s a handful of little wrappers around the CIDER commands, a
+keymap that binds them, a target finder that spots a Clojure symbol at point,
+and the bit of wiring that ties it all together:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-doc</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-doc-lookup</span> <span class="nv">sym</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-find-def</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-find-var</span> <span class="no">nil</span> <span class="nv">sym</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-fn-refs</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-xref-fn-refs</span> <span class="no">nil</span> <span class="nv">sym</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-inspect</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-inspect-expr</span> <span class="nv">sym</span> <span class="p">(</span><span class="nv">cider-current-ns</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-clojuredocs</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-clojuredocs-lookup</span> <span class="nv">sym</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-apropos</span> <span class="p">(</span><span class="nv">sym</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span> <span class="s">"sClojure symbol: "</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">cider-apropos</span> <span class="nv">sym</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defvar</span> <span class="nv">my-cider-embark-symbol-map</span>
+  <span class="p">(</span><span class="k">let</span> <span class="p">((</span><span class="nb">map</span> <span class="p">(</span><span class="nv">make-sparse-keymap</span><span class="p">)))</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"d"</span> <span class="nf">#'</span><span class="nv">my-cider-embark-doc</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"."</span> <span class="nf">#'</span><span class="nv">my-cider-embark-find-def</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"r"</span> <span class="nf">#'</span><span class="nv">my-cider-embark-fn-refs</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"i"</span> <span class="nf">#'</span><span class="nv">my-cider-embark-inspect</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"c"</span> <span class="nf">#'</span><span class="nv">my-cider-embark-clojuredocs</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">define-key</span> <span class="nb">map</span> <span class="s">"a"</span> <span class="nf">#'</span><span class="nv">my-cider-embark-apropos</span><span class="p">)</span>
+    <span class="nb">map</span><span class="p">))</span>
+
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">my-cider-embark-target</span> <span class="p">()</span>
+  <span class="p">(</span><span class="nb">when</span> <span class="p">(</span><span class="nv">derived-mode-p</span> <span class="ss">'clojure-mode</span> <span class="ss">'clojurescript-mode</span> <span class="ss">'clojurec-mode</span>
+                        <span class="ss">'clojure-ts-mode</span> <span class="ss">'cider-repl-mode</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">when-let*</span> <span class="p">((</span><span class="nv">bounds</span> <span class="p">(</span><span class="nv">bounds-of-thing-at-point</span> <span class="ss">'symbol</span><span class="p">))</span>
+                <span class="p">(</span><span class="nv">sym</span> <span class="p">(</span><span class="nv">cider-symbol-at-point</span><span class="p">)))</span>
+      <span class="p">(</span><span class="nb">unless</span> <span class="p">(</span><span class="nv">string-empty-p</span> <span class="nv">sym</span><span class="p">)</span>
+        <span class="o">`</span><span class="p">(</span><span class="nv">cider-clojure-symbol</span> <span class="o">,</span><span class="nv">sym</span> <span class="o">.</span> <span class="o">,</span><span class="nv">bounds</span><span class="p">)))))</span>
+
+<span class="p">(</span><span class="nv">with-eval-after-load</span> <span class="ss">'embark</span>
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'embark-target-finders</span> <span class="nf">#'</span><span class="nv">my-cider-embark-target</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'embark-keymap-alist</span> <span class="o">'</span><span class="p">(</span><span class="nv">cider-clojure-symbol</span> <span class="nv">my-cider-embark-symbol-map</span><span class="p">))</span>
+  <span class="p">(</span><span class="nv">add-to-list</span> <span class="ss">'embark-keymap-alist</span> <span class="o">'</span><span class="p">(</span><span class="nv">cider</span> <span class="nv">my-cider-embark-symbol-map</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>That last <code class="language-plaintext highlighter-rouge">cider</code> line is my favorite bit. CIDER’s symbol prompts (things like
+<code class="language-plaintext highlighter-rouge">cider-doc</code> and <code class="language-plaintext highlighter-rouge">cider-find-var</code>) can read through <code class="language-plaintext highlighter-rouge">completing-read</code> and tag
+their candidates with the <code class="language-plaintext highlighter-rouge">cider</code> completion category, so pointing that category
+at the same keymap means <code class="language-plaintext highlighter-rouge">embark-act</code> works on the <em>candidates</em> too. You start
+typing a symbol to read its docs, spot it in the candidate list, decide you’d
+rather jump to its definition - <code class="language-plaintext highlighter-rouge">C-. .</code> and you’re there, no retyping. Symbols
+in your code and candidates in the minibuffer end up sharing one set of actions.</p>
+
+<p>Projectile took the opposite tack and ships its Embark integration out of the
+box - there’s nothing to configure, it wires itself up as soon as Embark is
+loaded. Two things happen. Acting on a project candidate (say, in
+<code class="language-plaintext highlighter-rouge">projectile-switch-project</code>) gives you project-specific actions - switch to it,
+open its VC interface, drop into <code class="language-plaintext highlighter-rouge">dired</code>, or remove it from the known-projects
+list - instead of the generic file actions you’d otherwise get:</p>
+
+<p><img src="/assets/images/projectile-embark.png" alt="Embark actions on a Projectile project" /></p>
+
+<p>And when you act on a project <em>file</em> candidate, Projectile makes sure the path
+resolves against the project root, so Embark’s file actions land on the right
+file no matter what your <code class="language-plaintext highlighter-rouge">default-directory</code> happens to be.</p>
+
+<p>You might wonder why Projectile ships this while CIDER leaves it to you. It comes
+down to what each integration is. Projectile’s is mostly about making the
+completion categories it already exposes behave correctly under Embark, plus a
+small and fairly obvious set of project actions - there isn’t much to bikeshed
+there. CIDER’s symbol actions are a bigger, more personal grab-bag: which
+commands you want on that menu, and which keys you put them on, is very much a
+matter of taste. A recipe you copy and tailor felt like the better fit. Same
+idea, two problems that wanted different answers.</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>
+
+<p><strong>P.S.</strong> If you’re not using Embark yet, the actions above are just the start -
+once you start thinking of <code class="language-plaintext highlighter-rouge">embark-act</code> as “do something with the thing at
+point”, it’s hard to stop.</p>

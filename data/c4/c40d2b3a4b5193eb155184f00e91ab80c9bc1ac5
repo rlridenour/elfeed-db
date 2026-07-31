@@ -1,0 +1,424 @@
+
+        <link rel="stylesheet" type="text/css" href="https://rahuljuliato.com/rss-styles.css">
+        <p>My <a href="/posts/emacs-31-around-the-corner">last post</a> was a tour of Emacs
+31, which has since moved into pretest. Sean Whitton announced
+<a href="https://lists.gnu.org/archive/html/emacs-devel/2026-07/msg00270.html">31.0.91</a>,
+the second pretest, on July 23rd, and that's what I'm writing this on.
+One of the sections in that post was a short list of new completion
+knobs, three lines of config I mentioned and moved on from. Those three
+lines turned into a month-long experiment, so they get their own post.</p>
+<p>I know how that title reads, so let me put it in context before you
+close the tab. It comes from someone who ran company, moved to Corfu,
+and then left Corfu behind for icomplete, which has been my weapon of
+choice for years now, for both the minibuffer and in-buffer completion.</p>
+<p>And I didn't just use icomplete. I sent patches to it.
+<a href="https://lists.gnu.org/archive/html/bug-gnu-emacs/2025-03/msg02638.html">bug#75784</a>,
+which brought vertical in-buffer behavior and prefix indicators to
+icomplete, is mine, and I wrote about the road to it
+<a href="/posts/in-buffer-icomplete">here</a> and
+<a href="/posts/in-buffer-icomplete-2">here</a>. So when I say I turned icomplete
+off for a month, understand that I was arguing with my own past self,
+and that the title isn't me saying the last few years were wasted. It's
+me saying the floor moved.</p>
+<p>What made me try was Emacs 31 itself. The <code>*Completions*</code> buffer
+improved nicely while I wasn't looking, and I wanted to know whether the
+UI I'd been layering on top of it was still earning its place.</p>
+<p>While I was drafting this, Protesilaos published <a href="https://www.youtube.com/watch?v=yH0Gan6xMTo">a video on the
+same territory</a>. I haven't
+watched it all the way through yet, and I'm publishing anyway, because
+what follows is my month with this setup rather than a summary of his.
+His videos have shaped a lot of how I think about Emacs, so go watch it
+too. I'll probably end up fixing some of my own setup after I do.</p>
+<p>Everything below runs on stock Emacs 31. Save the snippets into a
+<code>test.el</code> and launch with:</p>
+<div class="remark-highlight"><pre class="language-sh"><code class="language-sh">emacs <span class="token parameter variable">-Q</span> <span class="token parameter variable">--load</span> test.el
+</code></pre></div>
+<p>The full playground file (search for <code>test.el</code>) is at the bottom of
+the post if you'd rather skip ahead.</p>
+<h2>Two completions, one buffer</h2>
+<p>Emacs completes in two places, and it's worth keeping them apart in
+your head:</p>
+<p>✔️ <strong>Minibuffer completion.</strong> <code>M-x</code>, <code>C-x C-f</code>, <code>C-x b</code>, every
+<code>completing-read</code> prompt in every package you have. You type in the
+minibuffer, candidates come from a completion table.</p>
+<p>✔️ <strong>In-buffer completion.</strong> <code>completion-at-point</code>, the thing bound to
+<code>M-TAB</code>, and to <code>TAB</code> if you set <code>tab-always-indent</code> to <code>complete</code>.
+You type in a normal buffer and the candidates come from
+<code>completion-at-point-functions</code>: elisp symbols, file names, whatever
+your LSP server offers through Eglot.</p>
+<p>Corfu and company handle the second case. Vertico, ivy and friends
+handle the first. You probably run one of each. Emacs covers both with
+the same <code>*Completions*</code> buffer, which surprised me, and it means one
+block of config does the whole job.</p>
+<h2>The base config</h2>
+<p>This is what I run:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/minibuffer-truncate-lines</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Keep minibuffer lines unwrapped."</span>
+  <span class="token punctuation">(</span><span class="token keyword">setq</span> truncate-lines <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">use-package</span> minibuffer
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:bind</span> <span class="token punctuation">(</span> <span class="token lisp-property property">:map</span> minibuffer-visible-completions-up-down-map
+		  <span class="token punctuation">(</span><span class="token string">"C-n"</span> <span class="token punctuation">.</span> minibuffer-next-completion<span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token string">"C-p"</span> <span class="token punctuation">.</span> minibuffer-previous-completion<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:hook</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">minibuffer-setup</span> <span class="token punctuation">.</span> cursor-intangible-mode<span class="token punctuation">)</span>
+		 <span class="token punctuation">(</span><span class="token car">minibuffer-setup</span> <span class="token punctuation">.</span> my/minibuffer-truncate-lines<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">tab-always-indent</span> <span class="token quoted-symbol variable symbol">'complete</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-auto-help</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-auto-select</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-eager-update</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-eager-display</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-visible-completions</span> <span class="token quoted-symbol variable symbol">'up-down</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-show-help</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-styles</span> <span class="token punctuation">'(</span><span class="token car">partial-completion</span> flex initials<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-format</span> <span class="token quoted-symbol variable symbol">'one-column</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-max-height</span> <span class="token number">10</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-sort</span> <span class="token quoted-symbol variable symbol">'historical</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">enable-recursive-minibuffers</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">read-buffer-completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">read-file-name-completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-prompt-properties</span>
+   <span class="token punctuation">'(</span><span class="token car">read-only</span> <span class="token boolean">t</span> intangible <span class="token boolean">t</span> cursor-intangible <span class="token boolean">t</span> face minibuffer-prompt<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-depth-indicate-mode</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-electric-default-mode</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Two of those carry the post, and both are new in Emacs 31:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token lisp-property property">:custom</span>
+<span class="token comment">;; ...</span>
+<span class="token punctuation">(</span><span class="token car">completion-eager-update</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">completion-eager-display</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+<span class="token comment">;; ...</span>
+</code></pre></div>
+<p><code>completion-eager-display</code> decides whether <code>*Completions*</code> shows up on
+its own. <code>completion-eager-update</code> decides whether it refreshes as you
+type. Both default to <code>'auto</code> in Emacs 31, which means "only if the
+completion table asks for it," and almost nothing asks. Set both to <code>t</code>
+and you stop summoning the buffer with <code>TAB</code>. It's already open.</p>
+<p>Run <code>emacs -Q</code>, hit <code>M-x</code>, type <code>wind</code>, and you get nothing but your own
+text in the minibuffer. Load the config above, do the same, and 34
+candidates appear the moment you stop typing. Keep typing <code>move-del</code> and
+the list narrows to 5 without you touching a key that isn't a letter.</p>
+<p><code>completions-format 'one-column</code> and <code>completions-max-height 10</code> are
+what turn that list into a vertical one. The default is <code>'horizontal</code>,
+which packs candidates across the window like <code>ls</code> output. One column,
+capped at ten lines, reads as a dropdown.</p>
+<p><code>completions-sort 'historical</code> sorts alphabetically and then floats
+whatever you picked recently to the top. It's the smallest of these
+settings and the one I'd miss first.</p>
+<p>That exact moment, below: four letters typed into <code>M-x</code>, no <code>TAB</code>
+pressed, 34 candidates already sitting there in one column.</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-01.png" alt="completions demo 01"></p>
+<p><code>completion-auto-select t</code> moves point into the <code>*Completions*</code> window
+when <code>TAB</code> pops it up, so you can navigate the list without a second
+key to get there. <code>completion-show-help nil</code> drops the two-line
+"Click or type RET on a completion to select it" banner from the top of
+the buffer, which I've read enough times for one lifetime.</p>
+<p><code>enable-recursive-minibuffers</code> plus <code>minibuffer-depth-indicate-mode</code>
+belong together: the first lets you start a minibuffer command from
+inside another one, the second puts a <code>[2]</code> in the prompt so you know
+how deep you are. <code>minibuffer-electric-default-mode</code> hides the
+<code>(default foo)</code> part of a prompt as soon as you type, and brings it
+back if you erase.</p>
+<p>The <code>minibuffer-prompt-properties</code> line keeps point out of the
+read-only prompt text, and <code>cursor-intangible-mode</code> on
+<code>minibuffer-setup-hook</code> is what enforces it. <code>truncate-lines</code> in the
+minibuffer keeps long candidates on one line instead of ballooning the
+minibuffer to N rows.</p>
+<p>One of those settings needs a keybinding to go with it. With
+<code>minibuffer-visible-completions</code> set to <code>'up-down</code>, the arrow keys move
+point inside <code>*Completions*</code> while you're still typing in the
+minibuffer, and <code>RET</code> takes the highlighted candidate instead of your
+literal input. Left and right still move in the minibuffer, which is
+why I use <code>'up-down</code> rather than <code>t</code>.</p>
+<p>By the way, I tend to avoid arrow keys, <code>M-&#x3C;some-arrow-direction></code>
+doesn't feel natural in a completion list for me. That's why I set
+<code>C-n</code> and <code>C-p</code> like this:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token lisp-property property">:bind</span> <span class="token punctuation">(</span><span class="token lisp-property property">:map</span> minibuffer-visible-completions-up-down-map
+	   <span class="token punctuation">(</span><span class="token string">"C-n"</span> <span class="token punctuation">.</span> minibuffer-next-completion<span class="token punctuation">)</span>
+	   <span class="token punctuation">(</span><span class="token string">"C-p"</span> <span class="token punctuation">.</span> minibuffer-previous-completion<span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Below, the same list after a couple of <code>C-n</code>. The highlight has walked
+down to <code>windmove-delete-default-keybindings</code> while the cursor is still
+in the minibuffer, where I'm still typing.</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-02.png" alt="completions demo 02"></p>
+<h2>The same buffer, in your code</h2>
+<p>This setting is the one that made the experiment worth running:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token lisp-property property">:custom</span>
+<span class="token comment">;; ...</span>
+<span class="token punctuation">(</span><span class="token car">tab-always-indent</span> <span class="token quoted-symbol variable symbol">'complete</span><span class="token punctuation">)</span>
+<span class="token comment">;; ...</span>
+</code></pre></div>
+<p><code>TAB</code> in a code buffer now indents the line if it needs indenting, then
+completes if it doesn't. Open <code>*scratch*</code>, type <code>(window-lay</code>, hit
+<code>TAB</code>. Emacs fills in the common prefix, <code>window-layout-</code>. Hit <code>TAB</code>
+again and <code>*Completions*</code> opens with the five commands that match, with
+point already inside it thanks to <code>completion-auto-select</code>. <code>C-n</code> to
+the one you want, <code>RET</code>, done.</p>
+<p>The same keys and config as the minibuffer half, in a code buffer now.</p>
+<p>After the second <code>TAB</code>, below: the buffer holds <code>(window-layout-</code>, the
+five commands sit underneath, and the first is already selected.</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-03.png" alt="completions demo 03"></p>
+<p><code>*Completions*</code> is a real window, so it takes room in your frame instead
+of floating over it. After a month I've stopped noticing, and I got
+something back for it: the candidate list is an ordinary buffer, so I
+can search it, scroll it, and yank out of it.</p>
+<h2>Where LSP completion goes wrong</h2>
+<p>One place did annoy me enough to write code.</p>
+<p>My completion styles are:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token lisp-property property">:custom</span>
+<span class="token comment">;; ...</span>
+<span class="token punctuation">(</span><span class="token car">completion-styles</span> <span class="token punctuation">'(</span><span class="token car">partial-completion</span> flex initials<span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token comment">;; ...</span>
+</code></pre></div>
+<p><code>flex</code> is the fuzzy one: it matches an in-order subset of what you
+typed, so <code>faL</code> finds <code>faLinkedin</code> and <code>faList</code> without you spelling
+out the middle. Exactly what I want from an LSP buffer, where I
+half-remember a name and want to see the family.</p>
+<p>But <code>flex</code> does two jobs, and only one of them is filtering. Its
+<code>try-completion</code> also merges the surviving candidates and inserts the
+result. With <code>tab-always-indent</code> set to <code>complete</code>, that merge happens
+on <code>TAB</code>, before you ever see the list.</p>
+<p>The case that cost me an afternoon comes from this blog's own source.
+<code>components/footer.tsx</code> imports a handful of FontAwesome icons. I wanted
+<code>faLinkedin</code>, so I typed <code>faL</code> and pressed <code>TAB</code> once:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token comment">;; I typed:            faL</span>
+<span class="token comment">;; TAB left me with:   faEnvelopeSquare</span>
+</code></pre></div>
+<p>And no list is shown, <code>faEnvelopeSquare</code> matches <code>faL</code> under flex
+because the <code>l</code> sits inside "Envelope", and that's where the merge
+landed. <code>TAB</code> typed sixteen characters I didn't ask for, hid the
+candidates I did want, and left me deleting.</p>
+<p>The frame below shows the whole thing. The echo area tells me <code>Complete, but not unique</code>, which is Emacs admitting it guessed and still showing
+me none of the alternatives:</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-04-01.png" alt="completions demo 04a"></p>
+<p>That's the gap I kept hitting between the default UI and what icomplete
+had trained me to expect. icomplete shows me candidates on <code>TAB</code>. Here
+it types at me.</p>
+<p>Eglot ran into this too and works around it with its own
+<code>eglot--dumb-flex</code> style, which skips the merge. That fixes the typing
+and loses the scoring, so candidates come back in whatever order the
+server sent them.</p>
+<p>I wanted both: <code>flex</code>'s filtering and relevance sorting, and no
+insertion until I pick something. So I wrapped it.</p>
+<h2>flex-noinsert</h2>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/flex-noinsert-try-completion</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">string</span> <span class="token argument variable">table</span> <span class="token argument variable">pred</span> <span class="token argument variable">point</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Flex <span class="token symbol">`try-completion'</span> that never auto-extends the input on <span class="token argument">TAB</span>.
+
+The stock <span class="token symbol">`flex'</span> completion style does two jobs: it filters
+candidates by fuzzy (subsequence) match, and its <span class="token symbol">`try-completion'</span>
+merges the surviving candidates, inserting their common expansion
+into the buffer.  With <span class="token symbol">`tab-always-indent'</span> set to <span class="token symbol">`complete'</span> that
+merge means <span class="token argument">TAB</span> silently types a candidate (often a far, wrong one)
+*before* the *Completions* list is shown.  Eglot's own
+<span class="token symbol">`eglot--dumb-flex'</span> avoids the merge but gives no relevance sorting.
+
+This wrapper keeps flex's filtering and scoring (so prefix matches
+sort first, fuzzy ones last) but suppresses the merge:
+
+  <span class="token argument">-</span> no candidates           -> nil   (no match)
+  <span class="token argument">-</span> exactly one candidate   -> complete it fully (<span class="token argument">TAB</span> still finishes
+							   a unique completion)
+  <span class="token argument">-</span> two or more candidates  -> return <span class="token argument">STRING</span> unchanged, so <span class="token argument">TAB</span> only
+							   pops the *Completions* list and lets
+							   you pick, inserting nothing.
+
+<span class="token argument">STRING</span>, <span class="token argument">TABLE</span>, <span class="token argument">PRED</span> and <span class="token argument">POINT</span> are the usual <span class="token symbol">`try-completion'</span> args."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">all</span> <span class="token punctuation">(</span><span class="token car">completion-flex-all-completions</span> string table pred point<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">cond</span>
+	 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token keyword">null</span> all<span class="token punctuation">)</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+	 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">=</span> <span class="token punctuation">(</span><span class="token car">safe-length</span> all<span class="token punctuation">)</span> <span class="token number">1</span><span class="token punctuation">)</span>
+	  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">sole</span> <span class="token punctuation">(</span><span class="token car">car</span> all<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		<span class="token punctuation">(</span><span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token car">string=</span> sole string<span class="token punctuation">)</span> <span class="token boolean">t</span> <span class="token punctuation">(</span><span class="token keyword">cons</span> sole <span class="token punctuation">(</span><span class="token car">length</span> sole<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	 <span class="token punctuation">(</span><span class="token boolean">t</span> <span class="token punctuation">(</span><span class="token keyword">cons</span> string point<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">;; Register the `flex-noinsert' style: same filtering/sorting as</span>
+<span class="token comment">;; `flex', but with the wrapper above as its try function.</span>
+<span class="token punctuation">(</span><span class="token car">add-to-list</span> <span class="token quoted-symbol variable symbol">'completion-styles-alist</span>
+			 <span class="token punctuation">'(</span><span class="token car">flex-noinsert</span>
+			   my/flex-noinsert-try-completion
+			   completion-flex-all-completions
+			   <span class="token string">"Flex matching that never extends input on <span class="token argument">TAB</span>."</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token comment">;; Reuse flex's metadata tweak so *Completions* sorts by flex score.</span>
+<span class="token punctuation">(</span><span class="token car">put</span> <span class="token quoted-symbol variable symbol">'flex-noinsert</span> <span class="token quoted-symbol variable symbol">'completion--adjust-metadata</span>
+	 <span class="token quoted-symbol variable symbol">'completion--flex-adjust-metadata</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>A completion style in Emacs is four things in a list: a name, a
+<code>try-completion</code> function, an <code>all-completions</code> function, and a doc
+string. I reuse <code>completion-flex-all-completions</code> unchanged, so
+filtering and scoring are stock <code>flex</code>, and I swap in a
+<code>try-completion</code> that refuses to merge. The <code>completion--adjust-metadata</code>
+property is what keeps <code>*Completions*</code> sorted by flex score rather than
+alphabetically.</p>
+<p>Then aim it at Eglot only:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token lisp-property property">:custom</span>
+<span class="token comment">;; ...</span>
+<span class="token punctuation">(</span><span class="token car">completion-category-overrides</span> <span class="token punctuation">'(</span><span class="token punctuation">(</span><span class="token car">eglot-capf</span> <span class="token punctuation">(</span><span class="token car">styles</span> flex-noinsert<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+<span class="token comment">;; ...</span>
+</code></pre></div>
+<p>Minibuffer completion keeps stock <code>flex</code>, where the merge behavior is
+fine because you can see what it did. Eglot's <code>eglot-capf</code> category
+gets the no-insert variant.</p>
+<p>Now in the same situation as before, trying to complete <code>faL</code> with
+<code>TAB</code>. The buffer keeps saying <code>faL</code>, and <code>*Completions*</code> opens
+instead.</p>
+<p>It opens with 2664 candidates, which sounds absurd until you look at
+what's on top: <code>faL</code> itself, then <code>faLeaf</code>, <code>faLess</code>, <code>faLine</code>. Flex
+matches loosely and scores tightly, so I get a huge tail under a head
+that's already correct. The trade only works if nothing gets typed into
+my buffer first.</p>
+<p>One more letter sharpens it. <code>faLi</code> cuts the list to 859, and the
+visible window holds the family I was after:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token comment">;; faLi + TAB</span>
+<span class="token comment">;;</span>
+<span class="token comment">;; *Completions*</span>
+<span class="token comment">;;   faLine    @fortawesome/free-brands-svg-icons</span>
+<span class="token comment">;;   faLink    @fortawesome/free-solid-svg-icons</span>
+<span class="token comment">;;   faList    @fortawesome/free-solid-svg-icons</span>
+<span class="token comment">;;   faLinux   @fortawesome/free-brands-svg-icons</span>
+</code></pre></div>
+<p>Each one appears twice, once for the package and once for the deep
+import path, and Eglot shows me which module it would pull from. <code>C-n</code>
+and <code>RET</code>, or keep typing. Unique completions still finish on the first
+<code>TAB</code>, because that's the one case where the merge can't be wrong.</p>
+<p>Here is <code>faL</code> with the fix in place. Emacs wrote nothing into the
+buffer, and the long tail sits under a head that starts where I was
+aiming:</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-04-02.png" alt="completions demo 04b"></p>
+<p>And <code>faLi</code>, where the whole visible window is the answer:</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-04-03.png" alt="completions demo 04c"></p>
+<h2>Living with it</h2>
+<p>A month in and:</p>
+<p>✔️ <strong>The minibuffer half is a straight swap.</strong> Take the drawing away
+and the functionality is exactly what I already had with
+<code>icomplete-vertical-mode</code>. <code>M-x</code>, <code>C-x b</code>, <code>C-x C-f</code>: same
+filtering, same narrowing as I type, same keys under the same
+fingers. My hands and eyes resynced in a day or two, which is the
+part nobody can argue you into. I'm not tolerating this until I go
+back to icomplete. It's an alternative with a different UI and the
+same behavior, and I'm running it. The list being a real buffer is a
+bonus on top.</p>
+<p>✔️ <strong>The in-buffer half surprised me.</strong> I assumed I'd miss a floating
+popup within a week. It took a couple of days to stop thinking about
+it, and splits are what sold me. Complete inside the left window of
+a <code>C-x 3</code> and <code>*Completions*</code> opens in that window, under the code
+I'm completing. The right split never moves. The list arrives where
+I'm already looking, and the rest of the frame stays where I left
+it.</p>
+<p>A two-window frame below, <code>avatar.tsx</code> on the left and <code>footer.tsx</code> on
+the right. I completed on the left, and that's the only half that
+changed:</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-05.png" alt="completions demo 05"></p>
+<p>✔️ <strong><code>flex-noinsert</code> is doing real work.</strong> Without it I'd have given up
+on the default and gone back inside a week.</p>
+<p>✔️ <strong>The scoring is where the defaults still trail.</strong> A dedicated fuzzy
+matcher does better when I type three letters from the middle of a
+name. <code>flex</code> gets close without getting there.</p>
+<p><strong>IMPORTANT</strong>: I haven't deleted icomplete from my config, and I'm not
+telling you to delete yours. And if you enjoy Vertico, Corfu, company
+or anything else in that family, please keep using it. Those are
+excellent projects, with real care put into how they look and feel,
+and which one you run is a personal preference, not a correctness
+contest. Nothing here is an argument against them.</p>
+<p>I wanted to show how good, and how complete, the default completion has
+become. That's all. It's really cool now, and it's sitting in the editor
+you already have.</p>
+<p>What changed for me is that I now know what the default does. When I go
+back to icomplete I'll be choosing it rather than inheriting it.</p>
+<p>If you run <a href="https://github.com/LionyxML/emacs-solo">Emacs Solo</a>, you
+don't have to take my word for any of it, because the switch is already
+wired up:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo-enable-icomplete <span class="token boolean">nil</span><span class="token punctuation">)</span>  <span class="token comment">; plain *Completions*</span>
+<span class="token punctuation">(</span><span class="token keyword">setq</span> emacs-solo-enable-icomplete <span class="token boolean">t</span><span class="token punctuation">)</span>    <span class="token comment">; icomplete, the default</span>
+</code></pre></div>
+<p>It's a <code>defcustom</code>, so <code>M-x customize-variable RET emacs-solo-enable-icomplete</code> works too. Flip it, restart, and live with
+the other side for a week. Emacs Solo adjusts the related settings for
+you: with icomplete off it sets <code>completion-eager-display</code> to <code>t</code> rather
+than <code>'auto</code>, which is the setting that makes <code>*Completions*</code> show up on
+its own.</p>
+<p>Give each side long enough that you stop noticing it. After one day
+you'll only know which one feels unfamiliar, and that's a different
+question from which one you want.</p>
+<h2>The full test.el</h2>
+<p>Save this, run <code>emacs -Q --load test.el</code>, and poke at it. Emacs 31 or
+newer, since <code>completion-eager-update</code>, <code>completion-eager-display</code> and
+<code>minibuffer-visible-completions-up-down-map</code> are all new here.</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token heading comment title">;;; test.el --- default completions playground -*- lexical-binding: t -*-</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/minibuffer-truncate-lines</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Keep minibuffer lines unwrapped."</span>
+  <span class="token punctuation">(</span><span class="token keyword">setq</span> truncate-lines <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">my/flex-noinsert-try-completion</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">string</span> <span class="token argument variable">table</span> <span class="token argument variable">pred</span> <span class="token argument variable">point</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Flex <span class="token symbol">`try-completion'</span> that never auto-extends the input on <span class="token argument">TAB</span>.
+
+Keeps flex's filtering and scoring but suppresses the merge:
+
+  <span class="token argument">-</span> no candidates           -> nil   (no match)
+  <span class="token argument">-</span> exactly one candidate   -> complete it fully
+  <span class="token argument">-</span> two or more candidates  -> return <span class="token argument">STRING</span> unchanged, so <span class="token argument">TAB</span> only
+							   pops the *Completions* list.
+
+<span class="token argument">STRING</span>, <span class="token argument">TABLE</span>, <span class="token argument">PRED</span> and <span class="token argument">POINT</span> are the usual <span class="token symbol">`try-completion'</span> args."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">all</span> <span class="token punctuation">(</span><span class="token car">completion-flex-all-completions</span> string table pred point<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">cond</span>
+	 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token keyword">null</span> all<span class="token punctuation">)</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+	 <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">=</span> <span class="token punctuation">(</span><span class="token car">safe-length</span> all<span class="token punctuation">)</span> <span class="token number">1</span><span class="token punctuation">)</span>
+	  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">sole</span> <span class="token punctuation">(</span><span class="token car">car</span> all<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+		<span class="token punctuation">(</span><span class="token keyword">if</span> <span class="token punctuation">(</span><span class="token car">string=</span> sole string<span class="token punctuation">)</span> <span class="token boolean">t</span> <span class="token punctuation">(</span><span class="token keyword">cons</span> sole <span class="token punctuation">(</span><span class="token car">length</span> sole<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	 <span class="token punctuation">(</span><span class="token boolean">t</span> <span class="token punctuation">(</span><span class="token keyword">cons</span> string point<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">use-package</span> minibuffer
+  <span class="token lisp-property property">:ensure</span> <span class="token boolean">nil</span>
+  <span class="token lisp-property property">:bind</span> <span class="token punctuation">(</span> <span class="token lisp-property property">:map</span> minibuffer-visible-completions-up-down-map
+		  <span class="token punctuation">(</span><span class="token string">"C-n"</span> <span class="token punctuation">.</span> minibuffer-next-completion<span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token string">"C-p"</span> <span class="token punctuation">.</span> minibuffer-previous-completion<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:hook</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">minibuffer-setup</span> <span class="token punctuation">.</span> cursor-intangible-mode<span class="token punctuation">)</span>
+		 <span class="token punctuation">(</span><span class="token car">minibuffer-setup</span> <span class="token punctuation">.</span> my/minibuffer-truncate-lines<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:custom</span>
+  <span class="token punctuation">(</span><span class="token car">tab-always-indent</span> <span class="token quoted-symbol variable symbol">'complete</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-auto-help</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-auto-select</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-eager-update</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-eager-display</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-visible-completions</span> <span class="token quoted-symbol variable symbol">'up-down</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-show-help</span> <span class="token boolean">nil</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-styles</span> <span class="token punctuation">'(</span><span class="token car">partial-completion</span> flex initials<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completion-category-overrides</span> <span class="token punctuation">'(</span><span class="token punctuation">(</span><span class="token car">eglot-capf</span> <span class="token punctuation">(</span><span class="token car">styles</span> flex-noinsert<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-format</span> <span class="token quoted-symbol variable symbol">'one-column</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-max-height</span> <span class="token number">10</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">completions-sort</span> <span class="token quoted-symbol variable symbol">'historical</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">enable-recursive-minibuffers</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">read-buffer-completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">read-file-name-completion-ignore-case</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-prompt-properties</span>
+   <span class="token punctuation">'(</span><span class="token car">read-only</span> <span class="token boolean">t</span> intangible <span class="token boolean">t</span> cursor-intangible <span class="token boolean">t</span> face minibuffer-prompt<span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-depth-indicate-mode</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">minibuffer-electric-default-mode</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+  <span class="token lisp-property property">:config</span>
+  <span class="token punctuation">(</span><span class="token car">add-to-list</span> <span class="token quoted-symbol variable symbol">'completion-styles-alist</span>
+			   <span class="token punctuation">'(</span><span class="token car">flex-noinsert</span>
+				 my/flex-noinsert-try-completion
+				 completion-flex-all-completions
+				 <span class="token string">"Flex matching that never extends input on <span class="token argument">TAB</span>."</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">put</span> <span class="token quoted-symbol variable symbol">'flex-noinsert</span> <span class="token quoted-symbol variable symbol">'completion--adjust-metadata</span>
+	   <span class="token quoted-symbol variable symbol">'completion--flex-adjust-metadata</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token heading comment title">;;; test.el ends here</span>
+</code></pre></div>
+<p>Things to try once it's loaded:</p>
+<p>✔️ <code>M-x</code> and type a few letters, then <code>C-n</code> and <code>C-p</code> through the list.</p>
+<p>✔️ <code>C-x C-f</code> and walk a directory tree with the same keys.</p>
+<p>✔️ In <code>*scratch*</code>, type <code>(window-lay</code> and hit <code>TAB</code> twice.</p>
+<p>✔️ <code>C-x C-f</code> into a project with an LSP server, <code>M-x eglot</code>, and type a
+partial method name followed by <code>TAB</code> to watch <code>flex-noinsert</code> behave.</p>
+<p>And <code>C-x C-f</code> doing the same job on a directory, below:</p>
+<p><img src="https://rahuljuliato.com/cdn-cgi/image/format=auto,width=1280,quality=75/assets/blog/posts/completions-06.png" alt="completions demo 06"></p>
+<p>All of it lives in <a href="https://github.com/LionyxML/emacs-solo">Emacs Solo</a>
+too, my no-external-packages config, if you'd rather read it in
+context.</p>
+<p>Now, go watch <a href="https://www.youtube.com/watch?v=yH0Gan6xMTo">Prot's take</a> after this one.</p>
+<p>Happy hacking!</p>

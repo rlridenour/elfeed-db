@@ -1,0 +1,47 @@
+<p>My newsletter has no subscription form, no double opt-in with a magic link, and it doesn't live in a third-party service with its tracking pixel. And yet, any reader can subscribe, receive the bulletin and unsubscribe whenever they want. The trick is the same one I already used with comments: email as the user interface.</p>
+<p>This article is the natural continuation of <a href="/blog/ad250446/my-comment-box-is-your-email-client/">My comment box is your email client</a>. There I turned a mailbox into a comment system; today we'll turn it into a newsletter. My goal isn't to teach you code, but to give you a design guide: the pieces, the decisions and their whys.</p>
+<h2 id="blog-single-content__title--subscription" class="blog-single__content-title">Subscription</h2>
+<p>The instruction a reader sees on my site fits in one sentence:</p>
+<blockquote>
+<p>Send an email to newsletter@andros.dev with the subject SUBSCRIBE and you're in.</p>
+</blockquote>
+<p>No text boxes, no captchas, no confirmation pages. A <code>mailto:</code> with the subject already filled in, and their email client does the rest.</p>
+<p>Behind the scenes, the pieces will already sound familiar:</p>
+<ol>
+<li>A filter at the email provider moves everything arriving at <code>newsletter@</code> from the inbox to the <code>website/newsletter</code> folder. My personal inbox stays clean and the folder works as a work queue.</li>
+<li>A scheduled task reads that folder over IMAP at whatever interval you like: this isn't a chat.</li>
+<li>Each email becomes a new subscriber in the database and is then deleted from the mailbox.</li>
+</ol>
+<p>It also has a hidden advantage: I don't need to send a confirmation email, nor keep a "pending confirmation" state in the database. The sign-up email is itself the confirmation. An elegant, simple solution that avoids the complexity of a double opt-in and the frustration of a link that expires.</p>
+<h2 id="blog-single-content__title--unsubscription" class="blog-single__content-title">Unsubscription</h2>
+<p>Unsubscribing is symmetric to subscribing:</p>
+<blockquote>
+<p>To unsubscribe, send UNSUBSCRIBE to the same address.</p>
+</blockquote>
+<p>This mechanism is stated in the footer of every bulletin.</p>
+<p>The same filter moves the email to the same folder, and the same task processes it: if the subject is <code>UNSUBSCRIBE</code>, it removes the address from the database and deletes the email.</p>
+<p>There's a design decision hidden in the previous logic: any subject that isn't exactly <code>UNSUBSCRIBE</code> is treated as a subscription. It may seem cavalier, but it's deliberate. The alternative would be to leave in the folder the emails with unexpected subjects ("subscribe", "Please subscribe me", the empty subject of someone who hit send too fast), piling up unprocessed messages that I'd have to review by hand. With this rule, the folder always ends up empty, the most likely intention wins, and the worst-case cost is minimal: anyone subscribed by mistake has unsubscribing one email away, explained in the footer of the first bulletin they receive.</p>
+<h2 id="blog-single-content__title--sending-the-bulletin" class="blog-single__content-title">Sending the bulletin</h2>
+<p>Before handing anything out, the bulletin has to be written and its send time decided. I do it by writing an email to myself. I send an email to my own address with the subject <code>NEWSLETTER</code>, and a scheduled task picks it up at the set time each day, takes its body and hands it out to the subscribers. The first line is the bulletin's subject; the rest, the content. Then it deletes the email, just as it does with sign-ups. There's no admin panel, no editor, no form to paste the text into: if I can write an email, I can publish a newsletter. What's more, if I change my mind, I just delete the email and the bulletin doesn't go out.</p>
+<p>So I reuse the mailbox and the task I already had. The only truly new piece is the sending service, and with it an important warning: don't send the bulletin from your personal email account. Conventional providers forbid bulk sending in their terms of use, and rightly so: their delivery reputation is shared among all their users. Before you know it your account will be limited or suspended. That's what bulk or transactional sending services are for; any of them will do.</p>
+<p>And precisely because any of them will do, the key to the design isn't which one you pick, but that picking doesn't matter. The sending provider is an infrastructure detail, and infrastructure details are isolated behind a minimal interface. If tomorrow the provider raises prices, its delivery gets worse or you simply stop liking it, you write another twenty-line class and the rest of the system doesn't even notice.</p>
+<p>As for which option to use to send, whether the provider's SMTP or its API, my recommendation is the API. Not only is it simpler to use, but it also tends to offer more precise delivery and error metrics than SMTP. And on top of that it lets you send batches of emails in parallel (for example, you can send to 100 subscribers at once), whereas SMTP is sequential.</p>
+<h2 id="blog-single-content__title--the-content" class="blog-single__content-title">The content</h2>
+<p>My bulletin is plain text. It's not a technical limitation, it's a considered preference:</p>
+<ul>
+<li>Plain text is cheap on design: there are no HTML templates to maintain, no hours fighting each email client's rendering engine.</li>
+<li>There are no images or resources to attach or store externally: the bulletin is self-contained and weighs nothing.</li>
+<li>It reads just as well in any client: webmail, mobile or terminal. And with no tracking pixels, because there's nowhere to hide them.</li>
+</ul>
+<p>And although content isn't the topic of this article, three tips that have worked for me:</p>
+<ul>
+<li><strong>Offer exclusive content</strong>: extensions of your articles, ideas that never made it to a post, new material. A newsletter that only repeats what's already in the RSS gives no reason to follow it.</li>
+<li><strong>Make unsubscribing easy</strong>: the instructions in the footer of every send, always. A subscriber who wants to leave and can't is worse than one subscriber fewer.</li>
+<li><strong>Don't number your bulletins</strong>: without "Issue #47" you gain the freedom to create drafts, discard them or reorder your sends without it showing, and without having to keep some absurd bookkeeping.</li>
+</ul>
+<h2 id="blog-single-content__title--if-it-ever-goes-paid" class="blog-single__content-title">If it ever goes paid</h2>
+<p>A piece of advice in case you decide to monetize your newsletter, something I have no plans for right now: use a specialized provider where your readers can subscribe and pay, and let their addresses be stored there. I won't name names, they're easy to find. Charging money means payment gateways, invoices, taxes and disputes, and that's a business you don't want to be in alone with a script and a cron.</p>
+<p>That provider becomes your source of truth, and thanks to the earlier abstraction the technical change is small: the subscriber list stops being read from your database and starts being read from their API. The rest of the system survives intact.</p>
+<h2 id="blog-single-content__title--conclusion" class="blog-single__content-title">Conclusion</h2>
+<p>A complete newsletter: subscriptions, unsubscriptions and sends, built with a mailbox, a filter, a cron and a table in the database. The subscribers live on your domain and not in a third party's silo, each reader's address arrives verified by construction, and the only external piece, the sending service, is isolated behind an interface that makes it replaceable. Email has been the most universal subscription system there is for fifty years; all I've done is stop getting in its way.</p>
+<p>If you build something similar, I'd love to hear about it. And if you want to see it work from the reader's side, you know what to do: SUBSCRIBE.</p><hr><p>Will you buy me a coffee? This is how I keep writing without ads or paywalls. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-685eb16f@andros.dev" class="link">comment+article-685eb16f@andros.dev</a> to leave a comment. The subject will be ignored.</p>

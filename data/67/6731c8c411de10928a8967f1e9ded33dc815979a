@@ -1,0 +1,76 @@
+<p>I wanted to implement 2FA as per RFC 6238.  This is the Time-based
+One-Time Password (TOTP) algorithm that is used by Google
+Authenticator and other 2FA apps.  This was originally `vibe coded`.
+The vibe coding got me 80% of the way there, and I made a manual pass
+to turn it into a more functional style.</p>
+
+<p>Feel free to use this under an MIT license.</p>
+
+<pre>
+;;; -*- mode: lisp; coding: utf-8-unix; -*-
+
+;;; RFC 6238: TOTP (Time-Based One-Time Password Algorithm) implementation in Common Lisp
+;;;   This implementation provides functions to generate a
+;;;   base32-encoded secret, create a QR code URI for authenticator
+;;;   apps, and verify TOTP codes based on the current time. It
+;;;   adheres to the specifications outlined in RFC 6238 and RFC 4226.
+
+;;; Dependencies: cl-base32, ironclad
+
+(in-package "TOTP")
+
+(defun generate-secret (&amp;optional (length 10))
+  (cl-base32:bytes-to-base32 (ironclad:random-data length)))
+
+(defun generate-qr-uri (secret email &amp;key (issuer "JRM-Code"))
+  (format nil "otpauth://totp/~A:~A?secret=~A&amp;issuer=~A" issuer email secret issuer))
+
+(defun pack-time (time-step)
+  "Converts an integer time-step into an 8-byte, big-endian array as required by RFC 4226 (HOTP). 
+ Used to construct the message payload for the HMAC-SHA1 operation."
+  (let ((arr (make-array 8 :element-type '(unsigned-byte 8))))
+    (dotimes (i 8 arr)
+      (setf (aref arr (- 7 i)) (ldb (byte 8 (* i 8)) time-step)))))
+
+(defun universal-time-&gt;unix-time (universal-time)
+  (- universal-time 2208988800))
+
+(defun universal-time-&gt;time-step (universal-time)
+  (floor (universal-time-&gt;unix-time universal-time) 30))
+
+(defun mac-&gt;hash (mac)
+  "Extracts a 6-digit TOTP code from a 20-byte HMAC-SHA1 result using dynamic truncation (RFC 4226).
+ Takes the lower 4 bits of the final byte as an offset, extracts a 31-bit slice starting at that offset, 
+ and returns the value modulo 1,000,000 to produce the final 6-digit integer."
+  (let ((offset (logand (aref mac 19) #x0F)))
+    (mod (logand #x7FFFFFFF
+                 (logior (ash (aref mac offset) 24)
+                         (ash (aref mac (+ offset 1)) 16)
+                         (ash (aref mac (+ offset 2)) 8)
+                         (aref mac (+ offset 3))))
+         1000000)))
+
+(defun mac-&gt;hash-string (mac)
+  (format nil "~6,'0D" (mac-&gt;hash mac)))
+
+(defun generate-hash-string (secret-bytes time-step-bytes)
+  "Performs the HMAC-SHA1 cryptographic operation using the decoded secret and the packed time-step,
+ then dynamically truncates and formats the resulting MAC into a zero-padded 6-digit string."
+  (let ((hmac (ironclad:make-mac :hmac secret-bytes :sha1)))
+    (ironclad:update-mac hmac time-step-bytes)
+    (mac-&gt;hash-string (ironclad:produce-mac hmac))))
+
+(defun verify-totp (secret user-code &amp;key (time (get-universal-time)) (window 1))
+  "Verifies a user-provided 6-digit TOTP code against the base32 secret.
+ Defaults to the current universal time. The :window keyword determines the allowable drift in 30-second steps
+ (e.g., a window of 1 checks the previous, current, and next 30-second intervals).
+ Returns T if the code matches within the window, otherwise NIL."
+  (let ((secret-bytes (cl-base32:base32-to-bytes secret))
+        (user-string (format nil "~6,'0D" (parse-integer (string user-code) :junk-allowed t)))
+        (current-step (universal-time-&gt;time-step time)))
+    (do ((step (- current-step window) (1+ step))
+         (limit (+ current-step window)))
+        ((or (string= (generate-hash-string secret-bytes (pack-time step)) user-string)
+             (&gt; step limit))
+         (not (&gt; step limit))))))
+</pre>

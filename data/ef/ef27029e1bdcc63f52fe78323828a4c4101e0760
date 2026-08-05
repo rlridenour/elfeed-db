@@ -1,0 +1,603 @@
+
+<p class="wp-block-paragraph"><a href="https://tomsitcafe.com/2026/04/03/build-a-modular-irc-server-in-2026-inspircd-anope/">IRC with InspIRCd and Anope</a>&nbsp;works well as an internet-facing service.<br>Your domain name, the TLS certificates and SASL authentication make it secure.<br>Cloaking hides&nbsp;<strong>your address</strong>&nbsp;from other users.</p>
+
+
+
+<p class="wp-block-paragraph">But what about IRC Operators and Network Admins?<br>They can see the addresses/hosts the clients connect from.</p>
+
+
+
+<p class="wp-block-paragraph">As an IRC Operator you can&nbsp;<strong>increase the trust</strong>&nbsp;in your services.</p>
+
+
+
+<p class="wp-block-paragraph">You will learn now how to run&nbsp;<a href="https://www.inspircd.org/">InspIRCd</a>&nbsp;as a&nbsp;<a href="https://community.torproject.org/onion-services/setup/">Tor-only hidden service</a>.</p>
+
+
+
+<span id="more-9015"></span>
+
+
+
+<h3 class="wp-block-heading">Planned Features</h3>
+
+
+
+<ol class="wp-block-list">
+<li>IRC as Tor-only hidden service.</li>
+
+
+
+<li>Anope services.</li>
+
+
+
+<li>SASL authentication.</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Prerequisites</h3>
+
+
+
+<ol class="wp-block-list">
+<li>Debian or compatible system.</li>
+
+
+
+<li><code>root</code> or <code>sudo</code> permission.</li>
+
+
+
+<li><code>tor</code> daemon installed.</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Installation</h3>
+
+
+
+<p class="wp-block-paragraph">Install the packages using Debian&#8217;s&nbsp;<code>apt</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo apt update</div><div class="cm-line">sudo apt install -y inspircd anope</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Configuration</h3>
+
+
+
+<h4 class="wp-block-heading">Tor Configuration</h4>
+
+
+
+<p class="wp-block-paragraph">In the&nbsp;<code>/etc/tor/torrc</code>&nbsp;file configure your IRC hidden service and ports:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">HiddenServiceVersion 3</div><div class="cm-line"></div><div class="cm-line">HiddenServiceDir /var/lib/tor/irc_hidden_service/</div><div class="cm-line">HiddenServicePort 6667 127.0.0.1:6667</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Do&nbsp;<strong>not</strong>&nbsp;open the 6667 port on your firewall.<br>Tor maps the onion service to your local port.</p>
+
+
+
+<p class="wp-block-paragraph">Restart Tor:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo systemctl restart tor</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Your hidden service url is in&nbsp;<code>/var/lib/tor/irc_hidden_service/hostname</code>.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo cat /var/lib/tor/irc_hidden_service/hostname</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h4 class="wp-block-heading">InspIRCd Configuration</h4>
+
+
+
+<p class="wp-block-paragraph">Backup the original config.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mv /etc/inspircd/inspircd.conf /etc/inspircd/inspircd.conf.orig</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Add your IRC configuration &#8211;&nbsp;<code>sudo vim /etc/inspircd/inspircd.conf</code>:</p>
+
+
+
+<pre class="wp-block-syntaxhighlighter-code">&lt;server name="irc.your-hidden-service.onion"
+        description="Your IRC Server"
+        network="YourNetwork"&gt;
+
+&lt;admin name="YourName"
+       description="yournick"
+       email="your@mail.me"&gt;
+
+&lt;module name="hidechans"&gt;
+&lt;module name="spanningtree"&gt;
+&lt;module name="account"&gt;
+&lt;module name="services"&gt;
+&lt;module name="conn_umodes"&gt;
+&lt;module name="sha2"&gt;
+&lt;module name="cap"&gt;
+&lt;module name="sasl"&gt;
+&lt;module name="password_hash"&gt;
+&lt;module name="cloak"&gt;
+&lt;module name="cloak_user"&gt;
+
+&lt;cloak method="account"
+       case="preserve"
+       class=""
+       invalidchar="strip"
+       prefix="YourNetwork/"
+       suffix=""&gt;
+
+&lt;bind address="127.0.0.1" port="6667" type="clients"&gt;
+
+&lt;connect allow="*"
+         timeout="60"
+         threshold="10"
+         pingfreq="120"
+         hardsendq="262144"
+         softsendq="8192"
+         recvq="8192"
+         localmax="500"
+         globalmax="500"
+         maxchans="20"
+         resolvehostnames="no"
+         modes="+x"&gt;
+
+&lt;class name="Shutdown"
+       commands="DIE RESTART REHASH LOADMODULE UNLOADMODULE RELOADMODULE"&gt;
+&lt;class name="ServerLink"
+       commands="CONNECT SQUIT RCONNECT RSQUIT MKPASSWD"&gt;
+&lt;class name="BanControl"
+       commands="KILL GLINE KLINE ZLINE QLINE ELINE"&gt;
+&lt;class name="OperChat"
+       commands="WALLOPS GLOBOPS SETIDLE SPYLIST SPYNAMES"&gt;
+&lt;class name="HostCloak"
+       commands="SETHOST SETIDENT CHGNAME CHGHOST CHGIDENT"&gt;
+&lt;class name="ServerStats"
+       commands="STATS"
+       privs="users/auspex channels/auspex servers/auspex users/mass-message users/flood/no-throttle users/flood/increased-buffers"&gt;
+
+&lt;type name="NetAdmin"
+      classes="OperChat BanControl HostCloak Shutdown ServerLink ServerStats"
+      host="netadmin.your-hidden-service.onion"&gt;
+&lt;type name="GlobalOp"
+      classes="OperChat BanControl HostCloak"
+      host="ircop.your-hidden-service.onion"&gt;
+&lt;type name="Helper"
+      classes="HostCloak"
+      host="helper.your-hidden-service.onion"&gt;
+
+&lt;oper name="plainoper"
+      password="Your-Complex-PW"
+      host="*@your-hidden-service.onion"
+      type="NetAdmin"
+      maxchans="60"&gt;
+
+&lt;files motd="/etc/inspircd/inspircd.motd"&gt;
+
+&lt;dns timeout="0"&gt;
+
+&lt;options prefixquit="Quit: "
+         syntaxhints="no"
+         announcets="yes"
+         hostintopic="yes"
+         pingwarning="15"
+         splitwhois="no"
+         exemptchanops=""&gt;
+
+&lt;security hideserver=""
+          userstats="Pu"
+          customversion=""
+          flatlinks="no"
+          hidesplits="no"
+          hideulines="no"
+          hidebans="no"
+          maxtargets="20"&gt;
+
+&lt;performance quietbursts="yes"
+             softlimit="1024"
+             somaxconn="128"
+             netbuffersize="10240"&gt;
+
+&lt;whowas groupsize="10"
+        maxgroups="100000"
+        maxkeep="3d"&gt;
+
+&lt;badnick nick="ChanServ" reason="Reserved For Services"&gt;
+&lt;badnick nick="NickServ" reason="Reserved For Services"&gt;
+&lt;badnick nick="OperServ" reason="Reserved For Services"&gt;
+&lt;badnick nick="MemoServ" reason="Reserved For Services"&gt;
+&lt;badnick nick="HostServ" reason="Reserved For Services"&gt;
+&lt;badnick nick="Global" reason="Reserved For Services"&gt;
+
+&lt;link name="services.your-hidden-service.onion"
+      ipaddr="127.0.0.1"
+      port="7000"
+      allowmask="127.0.0.0/8"
+      sendpass="Password-For-Services"
+      recvpass="Password-For-Services"&gt;
+
+&lt;uline server="services.your-hidden-service.onion" silent="yes"&gt;
+&lt;bind address="127.0.0.1" port="7000" type="servers"&gt;
+&lt;sasl target="services.your-hidden-service.onion" requiressl="no"&gt;
+</pre>
+
+
+
+<p class="wp-block-paragraph">Notes:</p>
+
+
+
+<ol class="wp-block-list">
+<li>Rewrite/change the network info in the <code>server</code> settings.</li>
+
+
+
+<li>Change the <code>admin</code> setting, but consider your privacy.</li>
+
+
+
+<li>In the cloak config change the <code>YourNetwork/</code> prefix.</li>
+
+
+
+<li>In the <code>oper</code> config set up an oper nick and a <strong>strong password</strong>. Later you add a hashed one and this can be removed.</li>
+
+
+
+<li>DNS is disabled because all clients connect via Tor onion addresses.</li>
+
+
+
+<li>Running without TLS is acceptable over Tor-only networks, but TLS (e.g., port 6697) can still be enabled for layered security.</li>
+
+
+
+<li>This is a minimal functional configuration. Depending on your InspIRCd version, additional defaults may be required.</li>
+</ol>
+
+
+
+<h4 class="wp-block-heading">Anope Configuration</h4>
+
+
+
+<p class="wp-block-paragraph">Backup the original config.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mv /etc/anope/services.conf /etc/anope/services.conf.orig</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Edit:&nbsp;<code>sudo vim /etc/anope/services.conf</code></p>
+
+
+
+<pre class="wp-block-syntaxhighlighter-code">uplink
+{
+        host = "127.0.0.1"
+        ipv6 = no
+        ssl = no
+        port = 7000
+        password = "Password-For-Services"
+}
+
+serverinfo
+{
+        name = "services.your-hidden-service.onion"
+        description = "Your Network Services"
+        pid = "/run/anope/anope.pid"
+        motd = "services.motd"
+}
+
+module
+{
+        name = "inspircd3"
+        use_server_side_mlock = yes
+        use_server_side_topiclock = yes
+}
+
+networkinfo
+{
+        networkname = "YourNetwork"
+        nicklen = 31
+        userlen = 10
+        hostlen = 64
+        chanlen = 32
+        modelistsize = 100
+        vhost_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-"
+        allow_undotted_vhosts = false
+        disallow_start_or_end = ".-"
+}
+
+options
+{
+        casemap = "ascii"
+        strictpasswords = yes
+        badpasslimit = 5
+        badpasstimeout = 1h
+        updatetimeout = 5m
+        expiretimeout = 30m
+        readtimeout = 5s
+        timeoutcheck = 3s
+        retrywait = 60s
+        hideprivilegedcommands = yes
+        hideregisteredcommands = yes
+        languages = "ca_ES.UTF-8 de_DE.UTF-8 el_GR.UTF-8 es_ES.UTF-8 fr_FR.UTF-8 hu_HU.UTF-8 it_IT.UTF-8 nl_NL.UTF-8 pl_PL.UTF-8 pt_PT.UTF-8 ru_RU.UTF-8 tr_TR.UTF-8"
+}
+
+module { name = "enc_sha256" }
+
+module {
+        name = "db_flatfile"
+        database = "anope.db"
+        keepbackups = 10
+}
+
+include {
+    type = "file"
+    name = "nickserv.conf"
+}
+
+include {
+    type = "file"
+    name = "chanserv.conf"
+}
+
+include {
+    type = "file"
+    name = "operserv.conf"
+}
+
+include {
+    type = "file"
+    name = "hostserv.conf"
+}
+
+include {
+    type = "file"
+    name = "memoserv.conf"
+}
+
+include {
+    type = "file"
+    name = "global.conf"
+}
+
+log
+{
+        target = "services.log"
+        bot = "Global"
+        logage = 1
+        users = "connect disconnect nick"
+        rawio = no
+        debug = no
+}
+
+module { name = "help" }
+module { name = "m_sasl" }
+
+opertype {
+    name = "ServicesRoot"
+    commands = "*"
+    privileges = "*"
+}
+
+oper {
+    name = "youropernick"
+    type = "ServicesRoot"
+}
+</pre>
+
+
+
+<p class="wp-block-paragraph">Configure the services files for your requirements:</p>
+
+
+
+<ul class="wp-block-list">
+<li>nickserv.conf</li>
+
+
+
+<li>chanserv.conf</li>
+
+
+
+<li>operserv.conf</li>
+
+
+
+<li>hostserv.conf</li>
+
+
+
+<li>memoserv.conf</li>
+
+
+
+<li>global.conf</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Start And Enable The Services</h3>
+
+
+
+<p class="wp-block-paragraph">Start InspIRCd:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo systemctl enable inspircd.service</div><div class="cm-line">sudo systemctl start inspircd.service</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Start Anope:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo systemctl enable anope.service</div><div class="cm-line">sudo systemctl start anope.service</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Check logs if necessary:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">journalctl -u inspircd</div><div class="cm-line">journalctl -u anope</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Add An IRC Network Operator</h3>
+
+
+
+<p class="wp-block-paragraph">When the&nbsp;<code>password_hash</code>&nbsp;module enabled in InspIRCd, you can generate passwords in your client, for example:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">/MKPASSWD sha256 &lt;pass&gt;</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Then add the hashed password to your InspIRCd configuration:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">&lt;oper</div><div class="cm-line">      name=&quot;hashedopername&quot;</div><div class="cm-line">      hash=&quot;sha256&quot;</div><div class="cm-line">      password=&quot;1234abc1234hash&quot;</div><div class="cm-line">      host=&quot;*@your-hidden-service.onion&quot;</div><div class="cm-line">      type=&quot;NetAdmin&quot;&gt;</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">After modifying the configuration file, log in as the oper (<em>plainoper</em>) you configured earlier and load the new config:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">/rehash</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">If you&nbsp;<strong>can log in</strong>&nbsp;with the new operator/password (<em>hashedopername</em>):</p>
+
+
+
+<ol class="wp-block-list">
+<li>Remove the plain text one from your configuration.</li>
+
+
+
+<li>Rehash it again with <code>/rehash</code>.</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">Tor hides the client IP, but does not provide complete anonymity against global correlation attacks.</p>
+
+
+
+<p class="wp-block-paragraph">Join our discussions:</p>
+
+
+
+<ul class="wp-block-list">
+<li><strong>IRC</strong>: irc.silentarchitect.org:6697</li>
+
+
+
+<li><strong>Discord</strong>: <a href="https://discord.gg/nxvna45STM">https://discord.gg/nxvna45STM</a></li>
+</ul>

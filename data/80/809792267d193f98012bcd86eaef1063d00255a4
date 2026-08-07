@@ -1,0 +1,159 @@
+<div id="outline-container-org11c1948" class="outline-2">
+<h2 id="org11c1948">Unexpected (to me) behaviour in Lisp sub-typing</h2>
+<div class="outline-text-2" id="text-org11c1948">
+<p>
+I just encountered some unexpected behaviour in how Common Lisp (or
+at least <a href="https://sbcl.org">SBCL</a>) handles array sub-typing.
+</p>
+
+<p>
+Suppose you have a structure declaration like this:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">defstruct</span><span class="w"> </span><span class="nv">A</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">a</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">()</span><span class="w"> </span><span class="ss">:type</span><span class="w"> </span><span class="p">(</span><span class="kt">simple-array</span><span class="w"> </span><span class="nc">integer</span><span class="p">)))</span>
+</pre></div>
+
+<p>
+We can create instances of this struct by providing an initial
+value, and it will be type-checked.
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nv">make-a</span><span class="w"> </span><span class="ss">:a</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="p">))</span>
+</pre></div>
+
+<pre class="example">
+#S(A :A #(1 2 3))
+</pre>
+
+
+<p>
+We can also omit the argument and get the default specified in the
+declaration:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nv">make-a</span><span class="p">)</span>
+</pre></div>
+
+<pre class="example">
+#S(A :A #())
+</pre>
+
+
+<p>
+So far so good. But suppose we now specialise the <code>simple-array</code> type
+against a type such as <code>(unsigned-byte 16)</code> (the type of unsigned
+16-bit integers).
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">defstruct</span><span class="w"> </span><span class="nv">B</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">b</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">()</span><span class="w"> </span><span class="ss">:type</span><span class="w"> </span><span class="p">(</span><span class="kt">simple-array</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">))))</span>
+
+<span class="w">  </span><span class="p">(</span><span class="nv">make-b</span><span class="w"> </span><span class="ss">:b</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="p">))</span>
+</pre></div>
+
+<p>
+This generates an error, as does using the default value.
+</p>
+
+<p>
+Why is this? I eventually tracked the problem down to the fact that
+the expression <code>#1A()</code> is given type <code>(simple-vector 0)</code> while the
+expression <code>#1A(1 2 3)</code> is given type <code>(simple-vector 3)</code>, and neither
+of these are sub-types of <code>(simple-array (unsigned-byte 16))</code>:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">type-of</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">())</span>
+</pre></div>
+
+<pre class="example">
+(SIMPLE-VECTOR 0)
+</pre>
+
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">type-of</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="p">))</span>
+</pre></div>
+
+<pre class="example">
+(SIMPLE-VECTOR 3)
+</pre>
+
+
+<div class="highlight"><pre><span></span><span class="p">(</span><span class="nb">typep</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="kt">simple-vector</span><span class="w"> </span><span class="mi">3</span><span class="p">))</span>
+</pre></div>
+
+<pre class="example">
+T
+</pre>
+
+
+<div class="highlight"><pre><span></span><span class="p">(</span><span class="nb">typep</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">(</span><span class="mi">1</span><span class="w"> </span><span class="mi">2</span><span class="w"> </span><span class="mi">3</span><span class="p">)</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="kt">simple-array</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">)))</span>
+</pre></div>
+
+<pre class="example">
+NIL
+</pre>
+
+
+<p>
+So the typing works for <code>integer</code> (and indeed for <code>number</code> and <code>float</code>)
+but not for the constrained types like <code>(unsigned-byte 16)</code> –
+although it <i>does</i> work for <code>unsigned-byte</code> (with no width).
+</p>
+
+<p>
+Interestingly the tests fail for empty arrays as well:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">typep</span><span class="w"> </span><span class="l l-Other">#1A</span><span class="p">()</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="kt">simple-array</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">)))</span>
+</pre></div>
+
+<pre class="example">
+NIL
+</pre>
+
+
+<p>
+I assume that the behaviour is because the compiler is at liberty to
+optimise the storage of arrays with specific types, and doing so
+makes it awkward to compare against types like <code>simple-vector</code> that
+don't contain their element type. This would also explain why the
+check succeeds for types like <code>integer</code>, whose values are stored
+boxed and so can represented uniformly.
+</p>
+
+<p>
+There's a simple way around this, of course, once you know what the
+problem is: make the type of the value explicit rather than relying
+on the reader macro. For example:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nb">defstruct</span><span class="w"> </span><span class="nv">C</span>
+<span class="w">    </span><span class="p">(</span><span class="nv">c</span><span class="w"> </span><span class="p">(</span><span class="nb">make-array</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="w"> </span><span class="ss">:element-type</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">))</span><span class="w"> </span><span class="ss">:type</span><span class="w"> </span><span class="p">(</span><span class="kt">simple-array</span><span class="w"> </span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">))))</span>
+
+<span class="w">  </span><span class="p">(</span><span class="nv">make-c</span><span class="p">)</span>
+</pre></div>
+
+<pre class="example">
+#S(C :C #())
+</pre>
+
+
+<p>
+and also:
+</p>
+
+<div class="highlight"><pre><span></span><span class="w">  </span><span class="p">(</span><span class="nv">make-c</span><span class="w"> </span><span class="ss">:c</span><span class="w"> </span><span class="p">(</span><span class="nb">make-array</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span><span class="w"> </span><span class="ss">:element-type</span><span class="w"> </span><span class="o">'</span><span class="p">(</span><span class="kt">unsigned-byte</span><span class="w"> </span><span class="mi">16</span><span class="p">)</span><span class="w"> </span><span class="ss">:initial-contents</span><span class="w"> </span><span class="p">(</span><span class="nv">alexandria:iota</span><span class="w"> </span><span class="mi">3</span><span class="p">)))</span>
+</pre></div>
+
+<pre class="example">
+#S(C :C #(0 1 2))
+</pre>
+
+
+<p>
+I can't find this behaviour detailed in the manuals (or anywhere
+else) though. Perhaps it's only an artefact of optimisation.
+</p>
+</div>
+</div>

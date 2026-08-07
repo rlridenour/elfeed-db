@@ -1,0 +1,521 @@
+
+<p class="wp-block-paragraph">If you run any general Linux system &#8211; you likely run <code>systemd</code>.</p>
+
+
+
+<ul class="wp-block-list">
+<li>It is your init system.</li>
+
+
+
+<li>It is where you set your timers.</li>
+
+
+
+<li>It manages your network configuration and devices.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">What do you install when you need an OS container?</p>
+
+
+
+<p class="wp-block-paragraph">The answer can be: &#8220;<em>nothing</em>&#8220;.</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">There is a container engine under the hood.<br>In systemd.</p>
+</blockquote>
+
+
+
+<p class="wp-block-paragraph">Its features are:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Command or OS containers.</li>
+
+
+
+<li>Namespaces.</li>
+
+
+
+<li>IPC isolation.</li>
+
+
+
+<li>Own hostname.</li>
+
+
+
+<li>Own networking.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph"><code>systemd-nspawn</code> is a light-weight, easy-to-configure container engine.<br>Ready to use. You just don&#8217;t know about it.</p>
+
+
+
+<h3 class="wp-block-heading">The Tool: systemd-nspawn</h3>
+
+
+
+<p class="wp-block-paragraph"><code>systemd-nspawn</code> is part of the <code>systemd</code> ecosystem.</p>
+
+
+
+<p class="wp-block-paragraph">On Debian, the tools are provided by <code>systemd-container</code>.</p>
+
+
+
+<p class="wp-block-paragraph">One of the useful tools inside it is <code>machinectl</code>.</p>
+
+
+
+<p class="wp-block-paragraph">Install it with <code>apt</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo apt install systemd-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">On Debian, to run Debian containers, install <code>debootstrap</code>:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo apt install debootstrap</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a configuration directory for the future containers:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo mkdir -p /etc/systemd/nspawn</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Architecture</h3>
+
+
+
+<p class="wp-block-paragraph">Stop for a moment.<br>Let&#8217;s see what architecture will be created here.</p>
+
+
+
+<p class="wp-block-paragraph">On the host:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Debian Trixie.</li>
+
+
+
+<li>Bridge interface (<code>bridge0</code>).</li>
+
+
+
+<li>Btrfs.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">On the containers:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Fixed IP address.</li>
+
+
+
+<li>Hostname.</li>
+
+
+
+<li>Snapshots.</li>
+
+
+
+<li>Deployment from templates.</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Bootstrap A Container</h3>
+
+
+
+<p class="wp-block-paragraph">You want to create a Debian 13 container.</p>
+
+
+
+<p class="wp-block-paragraph">Issue the following commands:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo btrfs subvolume create /var/lib/machines/debian-container</div><div class="cm-line">sudo debootstrap --include=systemd,dbus trixie /var/lib/machines/debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<ol class="wp-block-list">
+<li>The first command creates a subvolume for the container.</li>
+
+
+
+<li>The second bootstraps the machine.</li>
+</ol>
+
+
+
+<h3 class="wp-block-heading">Network Configuration</h3>
+
+
+
+<p class="wp-block-paragraph">Remember: a bridge interface is configured on the host.</p>
+
+
+
+<p class="wp-block-paragraph">The container requires a fixed IP address.</p>
+
+
+
+<p class="wp-block-paragraph">The address below is only an example. Replace it with an address from your network.</p>
+
+
+
+<p class="wp-block-paragraph">Create the <code>/etc/systemd/nspawn/debian-container.nspawn</code> file.</p>
+
+
+
+<p class="wp-block-paragraph">Add this content to it:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">[Exec]</div><div class="cm-line">Boot=yes</div><div class="cm-line">Hostname=debian-container</div><div class="cm-line"></div><div class="cm-line">[Network]</div><div class="cm-line">Bridge=bridge0</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">For the container&#8217;s networking edit the<br><code>/var/lib/machines/debian-container/etc/systemd/network/20-host0.network</code><br>file:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">[Match]</div><div class="cm-line">Name=host0</div><div class="cm-line"></div><div class="cm-line">[Network]</div><div class="cm-line">Address=192.168.1.40/24</div><div class="cm-line">Gateway=192.168.1.1</div><div class="cm-line">DNS=1.1.1.1</div><div class="cm-line">DNS=8.8.8.8</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Edit the IP addresses matching to your system.</p>
+
+
+
+<p class="wp-block-paragraph">The <code>systemd-networkd</code> must be enabled <strong>in the container</strong> to apply this configuration:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo systemctl enable --now systemd-networkd</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">The host systemd manages the container.<br>The container&#8217;s own systemd manages the services inside it.</p>
+
+
+
+<h3 class="wp-block-heading">Container Lifecycle Management</h3>
+
+
+
+<p class="wp-block-paragraph">Start:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl start debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Enter:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl shell debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Check the container status:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl status debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">List running containers:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl list</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">List available container images:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl list-images</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Reboot:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl reboot debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Stop:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl stop debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Remove the container image:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl remove debian-container</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Templates</h3>
+
+
+
+<p class="wp-block-paragraph">For fast deployment, some architects prefer to use machine templates.<br>It&#8217;s a read-only machine that you clone with <code>machinectl</code>.</p>
+
+
+
+<p class="wp-block-paragraph">If you use Btrfs you have the advantages of</p>
+
+
+
+<ul class="wp-block-list">
+<li>copy-on-write</li>
+
+
+
+<li>cloning</li>
+
+
+
+<li>snapshots.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">With Btrfs, the filesystem becomes part of the container architecture.</p>
+
+
+
+<p class="wp-block-paragraph">With ordinary ext4 directories you can imitate some of these actions.<br>You lose the native filesystem-level advantages of Btrfs snapshots and CoW cloning.</p>
+
+
+
+<p class="wp-block-paragraph">Bootstrap a machine that you will use as a template:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo btrfs subvolume create /var/lib/machines/debian-13-template</div><div class="cm-line">sudo debootstrap --include=systemd,dbus trixie /var/lib/machines/debian-13-template</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<ol class="wp-block-list">
+<li>Set up the networking for the container.</li>
+
+
+
+<li>Start it.</li>
+
+
+
+<li>Make your changes, install your software.</li>
+
+
+
+<li>Clean up history and cache.</li>
+
+
+
+<li>Stop the container.</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">Make it read-only:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl read-only debian-13-template yes</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Now you can clone it for new containers:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl clone debian-13-template newcontainer</div><div class="cm-line"></div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph"><code>systemd-nspawn</code> doesn&#8217;t compete with other similar technologies.<br>It sits there.<br>Silently.</p>
+
+
+
+<p class="wp-block-paragraph">It has its place in the architecture.</p>
+
+
+
+<p class="wp-block-paragraph">For example:</p>
+
+
+
+<pre class="wp-block-code"><code>            &#91;host]
+              |
+  |-----------|-------------|
+  |           |             |
+&#91;KVM]      &#91;nspawn]      &#91;podman]
+  |           |             |
+&#91;VMs]     &#91;OS containers] &#91;apps]
+
+
+</code></pre>
+
+
+
+<p class="wp-block-paragraph">Always remember:</p>
+
+
+
+<blockquote class="wp-block-quote is-layout-flow wp-block-quote-is-layout-flow">
+<p class="wp-block-paragraph">A container is not a virtual machine. The kernel is still shared with the host.</p>
+</blockquote>

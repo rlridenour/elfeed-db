@@ -1,0 +1,135 @@
+<p>The word <i>Gantt</i> tends to evoke project-management software with bars you can drag and a hefty license fee. The underlying idea, tasks arranged on a horizontal timeline, with owners and effort estimates, is much older and much simpler than the software around it. It is basically a chart. You can draw one with a pencil and a string for a plumb line.</p>
+<p>Org mode already stores everything you need for a Gantt chart: a hierarchy of tasks, <code>SCHEDULED</code> and <code>DEADLINE</code> timestamps, properties for <code>Effort</code> and assignments to various agents. What’s missing is the picture. But org can draw the picture too. Let’s take a look and, one hopes, save you a subscription fee.</p>
+<div id="outline-container-org989109d" class="outline-2">
+<h2 id="org989109d">The minimum data model</h2>
+<div id="text-org989109d" class="outline-text-2">
+<p>For each task you want to track on the chart, add three things:</p>
+<div class="org-src-container">
+<pre class="src src-org">* Draft chapter 5
+SCHEDULED: &lt;2026-02-12 Thu&gt; DEADLINE: &lt;2026-02-26 Thu&gt;
+:PROPERTIES:
+:AGENT:    Chris
+:Effort:   10
+:END:
+
+* Edit chapter 4
+SCHEDULED: &lt;2026-02-10 Tue&gt; DEADLINE: &lt;2026-02-20 Fri&gt;
+:PROPERTIES:
+:AGENT:    Chris
+:Effort:   6
+:END:
+
+* Design cover art
+SCHEDULED: &lt;2026-02-15 Sun&gt; DEADLINE: &lt;2026-03-01 Sun&gt;
+:PROPERTIES:
+:AGENT:    Maya
+:Effort:   8
+:END:
+</pre>
+</div>
+<p>That is enough for a starting point. <code>SCHEDULED</code> is the start of the bar, <code>DEADLINE</code> is the end, <code>:AGENT:</code> is the swimlane, <code>:Effort:</code> is the height of the bar (or just a hover tooltip). Everything else is presentation.</p>
+</div>
+</div>
+<div id="outline-container-orgddea3af" class="outline-2">
+<h2 id="orgddea3af">Rendering the chart</h2>
+<div id="text-orgddea3af" class="outline-text-2">
+<p>I&#8217;ve included an example implementation below on how I render a nice view from this. Here’s the whole renderer, about sixty lines of elisp. Saved as <code>gantt-render.el</code> somewhere on my load path, I can open the project file, and run <code>M-x org-fas-gantt-render-to-html</code>. It walks every heading that has both a <code>SCHEDULED</code> start and a <code>DEADLINE</code> end, lays each one out as a bar scaled to the project’s overall span, and groups the bars into swimlanes by <code>:AGENT:</code>.</p>
+<pre id="orgcca8957" class="example">(require 'org)
+(require 'ox-html)   ; for org-html-encode-plain-text
+
+(defun org-fas-gantt--collect ()
+  "Return a list of task plists from the current Org buffer.
+Only headings with both a SCHEDULED and a DEADLINE timestamp
+are included.  :start and :end are absolute day numbers so
+they are cheap to subtract."
+  (delq nil
+        (org-map-entries
+         (lambda ()
+           (let ((start (org-get-scheduled-time (point)))
+                 (end   (org-get-deadline-time (point))))
+             (when (and start end)
+               (list :title  (org-get-heading t t t t)
+                     :agent  (or (org-entry-get (point) "AGENT") "Unassigned")
+                     :effort (org-entry-get (point) "Effort")
+                     :start  (time-to-days start)
+                     :end    (time-to-days end))))))))
+
+(defun org-fas-gantt--bar (task day0 span)
+  "Return one HTML row for TASK, scaled against DAY0 across SPAN days."
+  (let* ((left  (* 100.0 (/ (float (- (plist-get task :start) day0)) span)))
+         (width (max 1.0 (* 100.0 (/ (float (- (plist-get task :end)
+                                               (plist-get task :start)))
+                                     span))))
+         (effort (plist-get task :effort)))
+    (format (concat "&lt;div class=\"row\"&gt;&lt;span class=\"label\"&gt;%s&lt;/span&gt;"
+                    "&lt;span class=\"track\"&gt;&lt;span class=\"bar\" "
+                    "style=\"left:%.1f%%;width:%.1f%%\" title=\"%s\"&gt;&lt;/span&gt;"
+                    "&lt;/span&gt;&lt;/div&gt;")
+            (org-html-encode-plain-text (plist-get task :title))
+            left width
+            (if effort (format "Effort: %s" effort) ""))))
+
+(defun org-fas-gantt-render-to-html (&amp;optional file)
+  "Render the current buffer's Gantt tasks to FILE as HTML.
+Interactively prompts for the output file.  Returns the file name."
+  (interactive)
+  (let* ((tasks (org-fas-gantt--collect))
+         (file  (or file (read-file-name "Write Gantt HTML to: " nil "gantt.html"))))
+    (unless tasks
+      (user-error "No tasks with both SCHEDULED and DEADLINE found"))
+    (let* ((day0 (apply #'min (mapcar (lambda (tk) (plist-get tk :start)) tasks)))
+           (dayN (apply #'max (mapcar (lambda (tk) (plist-get tk :end)) tasks)))
+           (span (max 1 (- dayN day0)))
+           (agents (cl-remove-duplicates
+                    (mapcar (lambda (tk) (plist-get tk :agent)) tasks)
+                    :test #'equal :from-end t)))
+      (with-temp-file file
+        (insert "&lt;!DOCTYPE html&gt;&lt;html&gt;&lt;head&gt;&lt;meta charset=\"utf-8\"&gt;\n"
+                "&lt;style&gt;\n"
+                "body{font-family:sans-serif;margin:2rem;color:#222;}\n"
+                "h2{border-bottom:1px solid #ccc;margin-top:1.5rem;}\n"
+                ".row{display:flex;align-items:center;margin:.25rem 0;}\n"
+                ".label{width:16rem;font-size:.9rem;padding-right:.5rem;}\n"
+                ".track{position:relative;flex:1;height:1.2rem;background:#f0f0f0;border-radius:3px;}\n"
+                ".bar{position:absolute;top:0;height:100%;background:#4a7;border-radius:3px;}\n"
+                "&lt;/style&gt;&lt;/head&gt;&lt;body&gt;\n"
+                "&lt;h1&gt;Project timeline&lt;/h1&gt;\n")
+        (dolist (agent agents)
+          (insert (format "&lt;h2&gt;%s&lt;/h2&gt;\n" (org-html-encode-plain-text agent)))
+          (dolist (task tasks)
+            (when (equal (plist-get task :agent) agent)
+              (insert (org-fas-gantt--bar task day0 span) "\n"))))
+        (insert "&lt;/body&gt;&lt;/html&gt;\n"))
+      (message "Wrote %s (%d task%s)" file (length tasks)
+               (if (= (length tasks) 1) "" "s"))
+      file)))
+</pre>
+<p>It reads your timestamps, does a little arithmetic to turn dates into percentages, and writes plain HTML and CSS. You could extend it to color bars by status or add a “today” line in an afternoon.</p>
+<p>You might be wondering why HTML. I love HTML and CSS. It’s simple, and anyone can read it. You can easily throw it up to a server and share it with anyone capable of opening a web browser.</p>
+<p>You may prefer a different delivery format. Or, importantly, your stakeholders and team might prefer a different format. That’s fine. The point here is that from org mode you can generate any format you want.</p>
+<p>The renderer doesn’t matter as much; the point is that the source of truth is still the .org file. You can change the renderer next year and your project data is pristine.</p>
+<p>Here’s a picture of my Gantt chart for a fake video game release. This was totally built from org mode and then exported to HTML. What you see is the browser rendering:</p>
+<p><img fetchpriority="high" decoding="async" class="aligncenter wp-image-1437 size-full" src="https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant.png" alt="" width="1885" height="895" srcset="https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant.png 1885w, https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant-300x142.png 300w, https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant-1024x486.png 1024w, https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant-768x365.png 768w, https://chrismaiorana.com/wp-content/uploads/2026/07/org-ggant-1536x729.png 1536w" sizes="(max-width: 1885px) 100vw, 1885px" /></p>
+<p>Now that’s a nice visual indicator of progress that costs you and your team nothing, but looks really fancy.</p>
+</div>
+</div>
+<div id="outline-container-orgf536cd9" class="outline-2">
+<h2 id="orgf536cd9">Keeping the team on schedule</h2>
+<div id="text-orgf536cd9" class="outline-text-2">
+<p>If you are coordinating with people who don’t use Emacs, which is almost everyone, the workflow is:</p>
+<ol class="org-ol">
+<li>You maintain the org file as the planning document.</li>
+<li>You export to HTML (or PDF, or a quick PNG) and share it to a central location.</li>
+<li>Updates come back as comments or from a meeting; you transcribe them into the org file.</li>
+</ol>
+<p>It may sound inefficient, but in practice it’s the same number of steps as maintaining a separate Asana board, minus the SaaS subscription, plus the fact that your project plan now lives next to your notes and your agenda, and you’re not locked into a proprietary format.</p>
+</div>
+</div>
+<p>If this post saved you a SaaS subscription or two, consider tossing a few dollars in the <a href="https://chris-maiorana.kit.com/products/jar">tip jar</a>. It goes straight back into writing more of these.</p>
+<p>Thanks, as always, for reading. If you liked this post you may also like:</p>
+<ul>
+<li>My open source handbooks: <a href="https://chris-maiorana.kit.com/products/emacs-for-writers">Emacs For Writers</a> and <a href="https://chris-maiorana.kit.com/products/git-for-writers">Git For Writers</a></li>
+<li>I&#8217;m also looking for beta readers for my <a href="https://chrismaiorana.com/hard-pass-beta-readers/">hacker novel, <em>Hard Pass</em></a></li>
+<li>You can also <a href="https://chris-maiorana.kit.com/f9e94a7435">subscribe for occasional email updates</a> on similar topics</li>
+</ul>
+<p>The post <a href="https://chrismaiorana.com/org-gantt/">Org mode as a gantt chart generator</a> appeared first on <a href="https://chrismaiorana.com">Chris Maiorana</a>.</p>

@@ -1,0 +1,83 @@
+<p>A few days ago, I posted this image <a href="https://fosstodon.org/@drdrang/117021219801155387">on Mastodon</a>:</p>
+<p><img alt="Two-month calendar in TerminalWidget" class="ss" src="https://leancrew.com/all-this/images2026/20260805-Two-month%20calendar%20in%20TerminalWidget.png" title="Two-month calendar in TerminalWidget" width="70%"/></p>
+<p>The code I ran to get this two-month calendar on my Desktop was</p>
+<pre><code>bash:
+if [ $(date +"%-d") -gt 15 ]; then
+  cal -A 1
+else
+  cal -B 1
+fi |\
+terminal-widget --target cal --font Menlo --bg "#eeeeee" --text -
+</code></pre>
+<p>I have since updated a couple of things and need more room to talk about it all.</p>
+<p>First, the app that put that widget on my Desktop is Brett Terpstra’s <a href="https://terminalwidget.app/">TerminalWidget</a>, which he <a href="https://brettterpstra.com/2026/08/01/introducing-terminalwidget/">just released</a>. As a one-time user of <a href="https://leancrew.com/all-this/2007/06/album-art-with-geektool/">GeekTool</a>, I’ve been waiting for TerminalWidget since Brett first began talking about it. While GeekTool and the similar <a href="https://leancrew.com/all-this/2011/03/nerdtool-picts-and-buddhism/">NerdTool</a> might still work, I wanted an app that worked with macOS’s modern widget system. TerminalWidget does.</p>
+<p>I put a medium-sized widget in the upper-left corner of my Desktop by dragging one out from the widget editor window. If you’ve never done this before (I hadn’t), read <a href="https://support.apple.com/guide/mac-help/add-and-customize-widgets-mchl52be5da5/mac">Apple’s instructions</a>.</p>
+<p><img alt="Widget editor window" class="ss" src="https://leancrew.com/all-this/images2026/20260805-Widget%20editor%20window.png" title="Widget editor window" width="100%"/></p>
+<p>I then right-clicked on the widget and renamed it <code>cal</code>. Now it’s ready for me to run the command that puts the calendar into the widget.</p>
+<p>The command is a pipeline, and the executable after the pipe is <code>terminal-widget</code>. This is a symbolic link to the command that’s buried in the TerminalWidget app package. I created the link with</p>
+<pre><code>ln -s /Applications/TerminalWidget.app/Contents/MacOS/TerminalWidget ~/bin/terminal-widget
+</code></pre>
+<p>where <code>~/bin</code> is a directory in my <code>$PATH</code>.</p>
+<p>I won’t go through the options given to <code>terminal-widget</code>; they’re explained in <a href="https://terminalwidget.app/cli">TerminalWidget’s CLI page</a>. Suffice it to say that the options put whatever is sent to <code>terminal-widget</code> into the <code>cal</code> widget and format it the way I want.</p>
+<p>Instead, let’s talk about the command that comes before the pipe:</p>
+<pre><code>bash:
+if [ $(date +"%-d") -gt 15 ]; then
+  cal -A 1
+else
+  cal -B 1
+fi
+</code></pre>
+<p>I think this will run in any Bourne-like shell. I know it runs in zsh and bash.</p>
+<p>The idea is to run the <a href="https://leancrew.com/all-this/man/man1/cal.html"><code>cal</code> command</a>, displaying the current month and either the month before or the month after. Which other month to show is determined by the <code>if</code> statement at the top. It runs the <a href="https://leancrew.com/all-this/man/man1/date.html"><code>date</code> command</a> and formats the output as just the day of the month with no leading zero. If this is greater than 15, <code>cal</code> is passed the option to show one month after the current month. Otherwise, <code>cal</code> is passed the option to show one month before the current month.</p>
+<p>(Brett uses <code>cal</code> as one of his <a href="https://terminalwidget.app/widgets">example widgets</a>, but his command doesn’t include an <code>if</code>. It always displays the current month and the month after.)</p>
+<p>By the way, if you run the above command in the Terminal, you’ll notice its output is slightly different from what’s shown in the widget:</p>
+<p><img alt="Output from cal in Terminal" class="ss" src="https://leancrew.com/all-this/images2026/20260805-Output%20from%20cal%20in%20Terminal.png" title="Output from cal in Terminal" width="70%"/></p>
+<p>The current date is highlighted. I think this is because <code>cal</code> is written to format its output as plain text when it’s being saved to a file or piped to another command but jumps back to invert today’s date when it’s being run in a terminal. It’s similar to the way <a href="https://leancrew.com/all-this/man/man1/ls.html"><code>ls</code></a> lists files one per line when being piped but formats them in columns when its output goes to a terminal.</p>
+<p>OK, this is nice for testing out TerminalWidget, but running this command once won’t get it to change when we get past the 15th of the month. It needs to be run every day, preferably in the morning.</p>
+<p>The classic Unix way to schedule tasks is <a href="https://leancrew.com/all-this/man/man8/cron.html"><code>cron</code></a>, but <a href="https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html#//apple_ref/doc/uid/10000172i-CH1-SW2">according to Apple</a> your Mac must be awake when a <code>cron</code> job is scheduled. If it isn’t, the job runs the next time the job is scheduled <em>and</em> the Mac is awake. Because I don’t know when my MacBook Pro will be awake, <code>cron</code> is not a good option for scheduling this task. I need to use <a href="https://leancrew.com/all-this/man/man8/launchd.html"><code>launchd</code></a>, which will run the specified command at the scheduled time <em>or</em> the next time the Mac wakes up.</p>
+<p>The easiest way to set up <code>launchd</code> agents is to use <a href="https://www.soma-zone.com/LaunchControl/">LaunchControl</a> and let its GUI handle the tricky bits, but you can do it by hand if you must. First, make a plist file that describes what command is to be run and when and save it in your <code>~/Library/LaunchAgents</code> folder. Here’s the file, named <code>com.leancrew.calwidget.plist</code>, that LaunchControl built for me:</p>
+<pre><code>xml:
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;
+&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;
+  &lt;string&gt;com.leancrew.calwidget&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;
+  &lt;array&gt;
+    &lt;string&gt;/bin/zsh&lt;/string&gt;
+    &lt;string&gt;/Users/drang/bin/calwidget.sh&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;StartCalendarInterval&lt;/key&gt;
+  &lt;array&gt;
+   &lt;dict&gt;
+    &lt;key&gt;Hour&lt;/key&gt;
+    &lt;integer&gt;6&lt;/integer&gt;
+    &lt;key&gt;Minute&lt;/key&gt;
+    &lt;integer&gt;30&lt;/integer&gt;
+   &lt;/dict&gt;
+  &lt;/array&gt;
+&lt;/dict&gt;
+&lt;/plist&gt;
+</code></pre>
+<p>The <code>ProgramArguments</code> section tells <code>launchd</code> to run my <code>calwidget.sh</code> script via zsh. Because <code>launchd</code> commands aren’t run under my usual environment, I give full file paths to both zsh and my script. The <code>StartCalendarInterval</code> section tells <code>launchd</code> to run the job every day at 6:30 AM.</p>
+<p>The <code>calwidget.sh</code> script is basically what we’ve seen before, but with a couple of small changes:</p>
+<pre><code>bash:
+if [ $(date +"%-d") -gt 7 ]; then
+  cal -A 1
+else
+  cal -B 1
+fi |\
+/Applications/TerminalWidget.app/Contents/MacOS/TerminalWidget \
+  --target cal --font Menlo --fg "000000" --bg "eeeeee" --text -
+</code></pre>
+<p>I decided I’d prefer to see the month before the current month only if we’re a week or less into the current month. Hence the change from <code>15</code> to <code>7</code> in the <code>if</code> statement. Also, I changed the <code>terminal-widget</code> command to the full path of the executable it’s linked to because <code>launchd</code> doesn’t know my usual <code>$PATH</code>. And finally, I added a <code>--fg</code> option to ensure that both the foreground and background colors are what I want—I decided not to rely on defaults.</p>
+<p>I loaded this job into <code>launchd</code> via LaunchControl, but I also tested doing it with <a href="https://leancrew.com/all-this/man/man1/launchctl.html"><code>launchctl</code></a>:</p>
+<pre><code>launchctl load -w ~/Library/LaunchAgents/com.leancrew.calwidget.plist
+</code></pre>
+<p>The <code>launchctl</code> man page calls <code>load</code> a “legacy subcommand,” suggesting that I should learn the newer way of doing things, but I find the descriptions of the recommended subcommands incomprehensible. And I haven’t found a good tutorial for them. Again, LaunchControl just does what I want it to do.</p>
+<div class="update">
+<p><strong>Update 5 Aug 2026 10:36 PM</strong><br/>
+Eric Hemmeter <a href="https://fosstodon.org/@ehemmete@mastodon.social/117045209633791732">sent me a link on Mastodon</a> to <a href="https://babodee.wordpress.com/2016/04/09/launchctl-2-0-syntax/">this 2016 article</a> by Babo D, which does a much better job of explaining <code>launchctl</code>’s “new” syntax than Apple does anywhere that I’ve seen. While I don’t think this will take the place of LaunchControl for me, I certainly understand the recommended subcommands better now than I ever have. I’ve saved a web archive version of the page in case it disappears. Thanks, Eric!</p>
+</div>
+<p>While this exercise was mostly a proof of concept, I do like having quick access to a two-month calendar and will probably keep this widget. Now I need to think about what other information I want immediate access to.</p>

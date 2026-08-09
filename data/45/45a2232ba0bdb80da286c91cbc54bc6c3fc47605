@@ -1,0 +1,108 @@
+<p>
+I want to be able to easily update YouTube captions from my VTT files. Adding a comment like this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-subed-vtt"><code><span class="org-comment">NOTE</span>
+<span class="org-comment">#+YOUTUBE_URL: https://youtu.be/sxqsIgXYkVw</span>
+<span class="org-comment">#+LANGUAGE: en</span>
+</code></pre>
+</div>
+
+
+<p>
+to the first subtitle in my VTT file lets me programmatically replace the captions for the specified language without needing to click through the YouTube interface, saving me at least 9 clicks, a slight delay, and the selection of the file. Now I can just bind it to <code>C-c C-c</code> when I'm working on correcting or translating captions.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code><span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-youtube-replace-captions</span> (url language vtt-file)
+  <span class="org-doc">"Replace captions for URL in LANGUAGE with VTT-FILE."</span>
+  (<span class="org-keyword">interactive</span>
+   (<span class="org-keyword">let</span> ((params (<span class="org-keyword">and</span> (derived-mode-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">subed-vtt-mode</span>)
+                      (sacha-subed-record-youtube-params))))
+     (list
+      (<span class="org-keyword">or</span> (plist-get params <span class="org-builtin">:url</span>)
+          (read-string <span class="org-string">"YouTube URL: "</span>))
+      (<span class="org-keyword">or</span> (plist-get params <span class="org-builtin">:language</span>)
+          (read-string <span class="org-string">"Language (ex: fr): "</span>))
+      (<span class="org-keyword">if</span> (derived-mode-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">subed-vtt-mode</span>)
+          (buffer-file-name)
+        (read-file-name <span class="org-string">"VTT file: "</span>)))))
+  (<span class="org-keyword">let*</span> ((video-id (sacha-org-yt-id url))
+         (existing-captions (sacha-youtube-get-captions video-id))
+         (boundary <span class="org-string">"&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;&#45;-sacha_yt_caption_boundary"</span>))
+    (<span class="org-keyword">dolist</span> (item existing-captions)
+      (<span class="org-keyword">let</span> ((snippet (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">snippet</span> item)))
+        (<span class="org-keyword">when</span> (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">language</span> snippet) language)
+          (sacha-youtube-delete-caption (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">id</span> item)))))
+    (<span class="org-keyword">let*</span> ((metadata (json-encode <span class="org-highlight-quoted-quote">`</span>((snippet . ((videoId . ,video-id)
+                                                (language . ,language)
+                                                (name . ,language))))))
+           (text (<span class="org-keyword">with-temp-buffer</span>
+                   (insert-file-contents vtt-file)
+                   (buffer-string)))
+           (body (concat <span class="org-string">"&#45;&#45;"</span> boundary <span class="org-string">"\r\n"</span>
+                         <span class="org-string">"Content-Type: application/json; charset=UTF-8\r\n\r\n"</span>
+                         metadata <span class="org-string">"\r\n"</span>
+                         <span class="org-string">"&#45;&#45;"</span> boundary <span class="org-string">"\r\n"</span>
+                         <span class="org-string">"Content-Type: text/vtt\r\n\r\n"</span>
+                         (encode-coding-string text <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">utf-8</span>) <span class="org-string">"\r\n"</span>
+                         <span class="org-string">"&#45;&#45;"</span> boundary <span class="org-string">"&#45;&#45;\r\n"</span>))
+           (response (request-response-data
+                      (request <span class="org-string">"https://www.googleapis.com/upload/youtube/v3/captions?uploadType=multipart&amp;part=snippet"</span>
+                        <span class="org-builtin">:type</span> <span class="org-string">"POST"</span>
+                        <span class="org-builtin">:headers</span> <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"Authorization"</span> . ,(format <span class="org-string">"Bearer %s"</span> (sacha-google-access-token)))
+                                   (<span class="org-string">"Content-Type"</span> . ,(format <span class="org-string">"multipart/related; boundary=%s"</span> boundary))
+                                   (<span class="org-string">"Accept"</span> . <span class="org-string">"application/json"</span>))
+                        <span class="org-builtin">:data</span> body
+                        <span class="org-builtin">:sync</span> t
+                        <span class="org-builtin">:parser</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>))))
+      (message <span class="org-string">"Uploaded."</span>)
+      response)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-youtube-get-captions</span> (video-id)
+  <span class="org-doc">"Return the list of existing caption tracks for VIDEO-ID."</span>
+  (<span class="org-keyword">let</span> ((response (request-response-data
+                   (request (format <span class="org-string">"https://www.googleapis.com/youtube/v3/captions?part=snippet&amp;videoId=%s"</span> video-id)
+                            <span class="org-builtin">:headers</span> <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"Authorization"</span> . ,(format <span class="org-string">"Bearer %s"</span> (sacha-google-access-token))))
+                            <span class="org-builtin">:sync</span> t
+                            <span class="org-builtin">:parser</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">json-read</span>))))
+    (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">items</span> response)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-youtube-delete-caption</span> (caption-id)
+  <span class="org-doc">"Delete the caption track identified by CAPTION-ID."</span>
+  (request (format <span class="org-string">"https://www.googleapis.com/youtube/v3/captions?id=%s"</span> caption-id)
+           <span class="org-builtin">:type</span> <span class="org-string">"DELETE"</span>
+           <span class="org-builtin">:headers</span> <span class="org-highlight-quoted-quote">`</span>((<span class="org-string">"Authorization"</span> . ,(format <span class="org-string">"Bearer %s"</span> (sacha-google-access-token))))
+           <span class="org-builtin">:sync</span> t))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-record-youtube-params</span> ()
+  <span class="org-doc">"Return directives related to YouTube."</span>
+  (<span class="org-keyword">save-excursion</span>
+    (goto-char (point-min))
+    (<span class="org-keyword">unless</span> (subed-subtitle-msecs-start) (subed-forward-subtitle-start-pos))
+    (list
+     <span class="org-builtin">:url</span> (subed-record-get-directive <span class="org-string">"#+YOUTUBE_URL"</span>)
+     <span class="org-builtin">:language</span> (<span class="org-keyword">or</span> (subed-record-get-directive <span class="org-string">"#+LANGUAGE"</span>)
+                   (<span class="org-keyword">progn</span> (goto-char (point-min))
+                          (<span class="org-keyword">when</span> (re-search-forward <span class="org-string">"^Language: </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">\n"</span> (<span class="org-keyword">or</span> (<span class="org-keyword">save-excursion</span> (re-search-forward <span class="org-string">"\n\n"</span> nil t))
+                                                                               (point-max)))
+                            (match-string 1)))))))
+</code></pre>
+</div>
+
+
+<p>
+The code uses some functions defined elsewhere in my configuration:
+</p>
+
+<ul class="org-ul">
+<li><a href="https://sachachua.com/dotemacs#streaming-make-chapter-markers-and-video-time-hyperlinks-easier-to-note-while-i-livestream-calculate-an-org-timestamp-s-offset-into-a-youtube-stream">Calculate an Org timestamp's offset into a YouTube stream</a>: <code>sacha-google-access-token</code> and the gcloud auth command-line to get the <code>https://www.googleapis.com/auth/youtube</code> and <code>https://www.googleapis.com/auth/youtube.force-ssl</code> scopes</li>
+<li><a href="https://sachachua.com/dotemacs#youtube">YouTube</a>: <code>sacha-org-yt-id</code></li>
+</ul>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#streaming-and-videos-replace-youtube-captions-from-emacs-lisp">Emacs configuration.</a></div><div><a href="https://sachachua.com/blog/2026/08/replace-youtube-captions-from-emacs-lisp/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F08%2Freplace-youtube-captions-from-emacs-lisp%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

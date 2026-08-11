@@ -1,0 +1,84 @@
+<p>Through an odd coincidence, I started writing this post when the Sun was in Cancer, but by the time I’m done and get it published, the Sun will be in Leo. Don’t worry, this isn’t an astrology post—I don’t want to <a href="https://daringfireball.net/2026/08/retraction_app_store_rejection_of_the_week">anger John Gruber</a>—but it is a further coincidence that I’ve been puttering around with observational astronomy calculations at a time when there’s been <a href="https://mjtsai.com/blog/2026/08/07/dark-hours-rejected-from-the-app-store/">some controversy in the Apple world</a> about astronomy vs. astrology.</p>
+<p>I’m often out walking at night, and a few months ago—when Mercury, Venus, and Jupiter were near each other and close to Castor and Pollux, the <a href="https://en.wikipedia.org/wiki/Gemini_(constellation)">Gemini twins</a>—I started thinking it would be nice to be able to write little scripts that would tell me where the planets were and when they’d be easily visible. One of the fun features would be including information on which constellation the planets were in.</p>
+<p>This led me on a fun journey of discovery, the sort of thing AI companies want us to forget how to do. I learned that <a href="https://www.iau.org/IAU/IAU/Astronomy-FAQs/Constellations.aspx">official boundaries</a> for the Western constellations were defined only about a century ago and that although they were defined in a very simple way, corresponding to lines of <a href="https://skyandtelescope.org/astronomy-resources/right-ascension-declination-celestial-coordinates/">right ascension and declination</a>, <a href="https://pwg.gsfc.nasa.gov/stargaze/Sprecess.htm">precession of the equinoxes</a> has since made those boundaries more complicated. They still look pretty well aligned, but they aren’t. Here’s the <a href="https://iauarchive.eso.org/static/public/constellations/gif/ARI.gif">IAU image of Aries</a>:</p>
+<p><img alt="IAU Aries boundaries" class="ss" src="https://leancrew.com/all-this/images2026/20260810-IAU%20Aries%20boundaries.gif" title="IAU Aries boundaries" width="100%"/></p>
+<p>If you look at <a href="https://iauarchive.eso.org/static/public/constellations/txt/ari.txt">the right ascension and declination coordinates</a> of the points on its boundary, you’ll see that successive points <em>don’t</em> have the same RA or Dec values. Close, but not the same.</p>
+<pre><code>02 06 39.6594| 10.5143948|ARI 
+01 46 37.3761| 10.5432396|ARI 
+01 46 58.7219| 25.6263351|ARI 
+02 02 03.2907| 25.6050701|ARI 
+02 02 07.3479| 27.8550186|ARI 
+02 32 16.8357| 27.8047638|ARI 
+02 32 24.7665| 31.2213154|ARI 
+02 50 30.8112| 31.1865025|ARI 
+03 29 42.4003| 31.1003609|ARI 
+03 29 09.7494| 19.4343338|ARI 
+03 24 08.9363| 19.4461136|ARI 
+03 23 47.1387| 10.3632069|ARI 
+</code></pre>
+<p>I also learned that there are <a href="https://coordswap.eukosmos.com/">a crapload of reference frames</a>, and you had better know which one is being used for the data you’re accessing.</p>
+<p>This is one of the things that led me to abandon Mathematica and the Wolfram Language for these calculations. Despite Wolfram’s <a href="https://www.wolfram.com/solutions/industry/astronomy/">promises</a> of great solutions for astronomy, my test notebook showed that the RA and Dec for the Sun, for example, aren’t reported in the same frame as the RA and Dec of stars. This isn’t necessarily bad—it could be more natural to use one frame for one sort of object and another frame for another sort—but the documentation needs to tell you what frames are being used and how to convert between them. I never found that explanation, so I started exploring Python solutions.</p>
+<p>There are two main Python modules for doing the kind of calculation I’m interested in: <a href="https://www.astropy.org/">Astropy</a> and <a href="https://rhodesmill.org/skyfield/">Skyfield</a>. Astropy is the standard Python module (or set of modules) for doing all sorts of astronomical calculations; Skyfield seems to be more focused on observational astronomy. That would suggest I should use Skyfield, but after looking through the documentation, I decided to get my feet wet with Astropy because it looked simpler. I can always switch to Skyfield if I find myself bumping up against some limitations in Astropy.</p>
+<p>(I should also mention <a href="https://naif.jpl.nasa.gov/naif/toolkit.html">SPICE</a>, which is NASA’s software toolkit for working with the positions of planets and other objects in space. It has a Python wrapper for its C version, and having the imprimatur of NASA certainly made it attractive. But it doesn’t have actual Python documentation; it wants users to refer to the C documentation to figure out how the Python functions work, and I’m not interested in that.)</p>
+<p>Having settled on Astropy, I wrote up a little script this afternoon to see if my brief review of the documentation was enough to do some of the calculations I was interested in. The script calculates the position of the Sun today at 2:00 PM CDT, and converts the result into a form that I can compare with the <a href="https://gml.noaa.gov/grad/solcalc/">NOAA Solar Calculator page</a>.</p>
+<p><img alt="NOAA Sun position page" class="ss" src="https://leancrew.com/all-this/images2026/20260810-NOAA%20Sun%20position%20page.png" title="NOAA Sun position page" width="100%"/></p>
+<p>I’ve set the observation point to the visitor center at the <a href="https://mortonarb.org/">Morton Arboretum</a>. The results of interest are the azimuth and altitude (or elevation) of the Sun at the appointed date and time. Here’s a zoomed-in view of the lower right corner:</p>
+<p><img alt="NOAA Sun azimuth and altitude" class="ss" src="https://leancrew.com/all-this/images2026/20260810-NOAA%20Sun%20azimuth%20and%20altitude.png" title="NOAA Sun azimuth and altitude" width="60%"/></p>
+<p>So a person at the Arboretum at 2:00 would see the Sun in the southwest, 211.59° from north, at 60.35° up from the horizon. NOAA’s altitude calculation includes an atmospheric correction, the formula for which is given on <a href="https://gml.noaa.gov/grad/solcalc/calcdetails.html">a linked page</a>.</p>
+<p>Here’s my little script:</p>
+<pre><code>python:
+ 1:  #!/usr/bin/env python3
+ 2:  
+ 3:  from astropy.coordinates import ICRS, AltAz, EarthLocation, get_sun
+ 4:  from astropy.time import Time
+ 5:  import astropy.units as u
+ 6:  from trigd import *
+ 7:  
+ 8:  # 2:00 PM Central Daylight Time on August 10, 2026.
+ 9:  utcoffset = -5*u.hour
+10:  time = Time('2026-8-10 14:00:00') - utcoffset
+11:  
+12:  # Location of Morton Arboretum visitor center.
+13:  morton = EarthLocation(lat=41.81433*u.deg, lon=-88.07093*u.deg, height=208*u.m)
+14:  
+15:  # Sun position in GCRS (default).
+16:  sun = get_sun(time)
+17:  
+18:  # The constellation it's in.
+19:  constellation = sun.get_constellation()
+20:  
+21:  # Sun position as azimuth and altitude
+22:  sun_altaz = sun.transform_to(AltAz(obstime=time, location=morton))
+23:  
+24:  # The default transformation to AltAz makes no adjustment for refraction.
+25:  # Use the NOAA refraction formula to adjust altitude for comparison
+26:  # with the NOAA value.
+27:  def noaa_refraction(alt):
+28:    t = tand(alt)
+29:    return (58.1/t - .007/t**3 + .000086/t**5)/3600
+30:  
+31:  # Print the results.
+32:  az = sun_altaz.az.value
+33:  alt = sun_altaz.alt.value
+34:  alt_adj = alt + noaa_refraction(alt)
+35:  print(f'      Azimuth: {az:-6.2f}°')
+36:  print(f'     Altitude: {alt:-6.2f}° (without refraction)')
+37:  print(f'     Altitude: {alt_adj:-6.2f}° (with NOAA refraction)')
+38:  print(f'Constellation: {constellation}')
+</code></pre>
+<p>The script starts by importing various Astropy submodules and <a href="https://leancrew.com/all-this/2024/12/calculators-and-jupyter/">my <code>trigd</code> module</a>, which calculates trigonometric functions for degrees instead of radians. We’ll use that to match NOAA’s atmospheric correction formula.</p>
+<p>Lines 9 and 10 set the date and time as an Astropy <code>Time</code> object. Line 13 sets the location to the visitor center. Line 16 <a href="https://docs.astropy.org/en/stable/api/astropy.coordinates.get_sun.html">gets the position of the Sun</a> at that time in the <a href="https://docs.astropy.org/en/latest/api/astropy.coordinates.GCRS.html">Geocentric Celestial Reference System (GCRS) frame</a>. Line 22 then <a href="https://docs.astropy.org/en/stable/api/astropy.coordinates.SkyCoord.html#astropy.coordinates.SkyCoord.transform_to">transforms the position</a> to <a href="https://docs.astropy.org/en/stable/api/astropy.coordinates.AltAz.html">azimuth and altitude</a> as viewed from the visitor center.</p>
+<p>Because I didn’t include any atmospheric information in the <code>AltAz</code> specification, it assumes a vacuum and does no refraction adjustment. I did it that way so I could use NOAA’s refraction formula instead of whatever Astropy does. That formula is defined in Lines 27–29 (which uses the <code>tand</code> function to calculate the tangent of an angle given in degrees), and the adjusted altitude is calculated in Line 34.</p>
+<p>Lines 35–38 print out the results, which look like this:</p>
+<pre><code>      Azimuth: 211.59°
+     Altitude:  60.34° (without refraction)
+     Altitude:  60.35° (with NOAA refraction)
+Constellation: Cancer
+</code></pre>
+<p>We’ll return to the constellation part later. As you can see, the azimuth and adjusted altitude match the NOAA values to two decimal places, which made me feel pretty good.</p>
+<p>As for the constellation the Sun was in at the specified time, that’s calculated by the aptly named <code>get_constellation</code> function on Line 19. The great thing about <code>get_constellation</code> is that it understands the reference frame of the object it’s called from and does whatever transformations are needed (in this case to <a href="https://docs.astropy.org/en/stable/api/astropy.coordinates.ICRS.html">ICRS</a>) to figure out which constellation that object is in. The answer was printed out by Line 38.</p>
+<p>To check on the constellation answer, I went to <a href="https://heavens-above.com">Heavens Above</a>, a site I’ve been using since the late 90s. I entered the Arboretum location and 2:00 PM today as the time, and HA told me the Sun was in Cancer, just like Astropy. It also showed me this sky chart:</p>
+<p><img alt="Heavens Above sky chart" class="ss" src="https://leancrew.com/all-this/images2026/20260810-Heavens%20Above%20sky%20chart.png" title="Heavens Above sky chart" width="80%"/></p>
+<p>The Sun was clearly near the end of its time in Cancer and would soon be in Leo. So I began a trial-and-error search at Heavens Above and with Astropy in an interactive Python session to find out when the Sun would move from Cancer to Leo.</p>
+<p>Heavens Above told me that the Sun would enter Leo at 8:00:15 PM today. Astropy said it would happen at 8:07:23 PM. I suspect Heavens Above is giving the better answer, as I’ve been using Astropy in its most basic configuration. There are ways to set up Astropy to use <a href="https://docs.astropy.org/en/stable/coordinates/solarsystem.html">ephemerides data</a>, which should give more accurate positions. That’ll be my next step.</p>
+<p>By the way, a 7-minute difference isn’t much. The Sun moves along the ecliptic at a rate of about 1° per day (roughly 360° in 365 days), and 7 minutes is about 0.005 of a day (7/1440). That means the difference between the Heavens Above Sun position and the Astropy Sun position is about 0.005°. Do I need the position of the Sun (or any of the planets) to a greater precision than that? No, but that won’t stop me from exploring ways to do so.</p>

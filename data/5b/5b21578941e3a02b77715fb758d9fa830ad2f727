@@ -1,0 +1,112 @@
+<p>Just recently I upgraded one of my Dell laptops to the latest Ubuntu
+26.04 LTS with a clean install. The installation process was smooth
+and enjoyable.</p>
+<p>Ubuntu 26.04 ships with Emacs 30.2, which made me happy, so I
+installed it immediately—more precisely, the <em>emacs-pgtk</em>
+Wayland-optimized package, since Wayland is the default windowing
+system on Ubuntu 26.04.</p>
+<h2 id="the-problem">The Problem</h2>
+<p>I started Emacs and, after a short time, ran into a problem: Dired
+(<code>C-x d</code>) did not work properly. It displayed a strange mess of
+unsorted, chaotic entries, as shown below. It was a big surprise.</p>
+<figure><a href="https://olddeuteronomy.github.io/img/dired-ls.png"><img src="https://olddeuteronomy.github.io/img/dired-ls.png"></a><figcaption>
+      <h4>Click or tap to view the full-size picture.</h4>
+    </figcaption>
+</figure>
+
+<p>I&rsquo;ve been using the same <code>.emacs</code> <a href="https://olddeuteronomy.github.io/post/multiplatform-emacs-config/">multi-platform config</a>
+file for Linux, macOS, and Windows for years and have never had any
+problems with Dired on different platforms, let alone across versions
+of the same OS.</p>
+<p>My Dired configuration is quite simple:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span><span style="color:#75715e">;;; `DIRED&#39;</span>
+</span></span><span style="display:flex;"><span>(require <span style="color:#e6db74">&#39;dired</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; Dired options for Windows and non-Windows (Linux, macOS) systems.</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; http://oremacs.com/2015/01/13/dired-options/</span>
+</span></span><span style="display:flex;"><span>(if (<span style="color:#a6e22e">string-equal</span> system-type <span style="color:#e6db74">&#34;windows-nt&#34;</span>)
+</span></span><span style="display:flex;"><span>    (setq dired-listing-switches <span style="color:#e6db74">&#34;/A:H /O:NG&#34;</span>)
+</span></span><span style="display:flex;"><span>  (setq dired-listing-switches <span style="color:#e6db74">&#34;-laGgh1v --group-directories-first --time-style=long-iso&#34;</span>))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; `dired-subtree&#39; (since 2022-10-18)</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; https://xenodium.com/drill-down-emacs-dired-with-dired-subtree/</span>
+</span></span><span style="display:flex;"><span>(use-package dired-subtree
+</span></span><span style="display:flex;"><span>  :ensure <span style="color:#66d9ef">t</span>
+</span></span><span style="display:flex;"><span>  :after dired
+</span></span><span style="display:flex;"><span>  :config
+</span></span><span style="display:flex;"><span>  (bind-key <span style="color:#e6db74">&#34;&lt;tab&gt;&#34;</span> <span style="color:#a6e22e">#&#39;</span>dired-subtree-toggle dired-mode-map)
+</span></span><span style="display:flex;"><span>  (bind-key <span style="color:#e6db74">&#34;&lt;backtab&gt;&#34;</span> <span style="color:#a6e22e">#&#39;</span>dired-subtree-cycle dired-mode-map))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; By default, Dired buffers will not update themselves</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e">;; unless you explicitly tell them to.</span>
+</span></span><span style="display:flex;"><span>(setq dired-auto-revert-buffer <span style="color:#66d9ef">t</span>)
+</span></span></code></pre></div><p>The <code>dired-listing-switches</code> variable defines the switches passed to
+<code>dir</code> or <code>ls</code> for Dired on Windows and Linux/macOS systems,
+respectively. I&rsquo;ve been using this configuration for years.</p>
+<p>On Ubuntu 24.04 everything looks fine. So, what&rsquo;s wrong with Emacs 30.2?</p>
+<p>I decided to test the <code>ls</code> switches in the console. Oops&mdash;the same
+result as in Dired under Emacs 30.2!</p>
+<figure><a href="https://olddeuteronomy.github.io/img/dired-ls-console.png"><img src="https://olddeuteronomy.github.io/img/dired-ls-console.png"></a><figcaption>
+      <h4>Click or tap to view the full-size picture.</h4>
+    </figcaption>
+</figure>
+
+<p>This means the problem is <em>not</em> with the new version of Emacs. After a
+short search, the answer was found.</p>
+<h2 id="the-bug-in-ubuntu-2604">The Bug in Ubuntu 26.04</h2>
+<p>It turns out the bug in Ubuntu 26.04 is real, documented, and already tracked in
+Ubuntu&rsquo;s <em>Rust-based</em> coreutils for Ubuntu 26.04. The issue
+specifically affects <code>ls</code> when using <code>--group-directories-first</code> and
+is tied to missing locale collation support in the Rust rewrite.</p>
+<h3 id="launchpad-bug-2154042--incorrect-alphabetical-sorting-with---group-directories-first">Launchpad Bug 2154042 — Incorrect alphabetical sorting with <code>--group-directories-first</code></h3>
+<p>This is the main <a href="https://lists.ubuntu.com/archives/foundations-bugs/2026-May/549080.html">bug report</a>
+affecting Ubuntu 26.04 users after the Rust coreutils transition.
+It explicitly states that:</p>
+<ol>
+<li><code>ls</code> from the Rust-based <em>coreutils</em> does not sort alphabetically when using <code>--group-directories-first</code>.</li>
+<li>The bug appears both when <code>LC_ALL</code> is set and when it is unset.</li>
+<li>GNU <code>ls</code> (<code>gnuls</code>) sorts correctly; Rust <code>ls</code> <strong>does not</strong>.</li>
+</ol>
+<h2 id="conclusion">Conclusion</h2>
+<p>Since Dired—and possibly other Emacs packages—uses <code>ls</code> to list
+directories and files, Dired <strong>will not</strong> work properly on Ubuntu
+26.04 regardless of the Emacs version.</p>
+<h2 id="solution">Solution</h2>
+<p>Luckily, the Ubuntu team has kept the old version of coreutils (GNU
+coreutils), written in good old C. The GNU version of <code>ls</code> is <code>gnuls</code>
+and is installed by default on Ubuntu 26.04. This means we can use
+<code>gnuls</code>—which works properly—for Dired instead of <code>ls</code> when running
+Ubuntu 26.04.</p>
+<p>To do this, we will use the <code>insert-directory-program</code> variable, which
+holds the absolute or relative name of the <code>ls</code>-like program. This
+variable is used by <code>insert-directory</code> and <code>dired-insert-directory</code>
+(and therefore by Dired). Its default value on Linux and macOS is
+<code>ls</code>.</p>
+<p>First we need to determine the name and version of the OS. The custom
+<code>ubuntu-version</code> function helps with that:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(defun ubuntu-version ()
+</span></span><span style="display:flex;"><span>  <span style="color:#e6db74">&#34;Return (MAJOR MINOR) as integers if running on Ubuntu, else nil.&#34;</span>
+</span></span><span style="display:flex;"><span>  (when (and (<span style="color:#a6e22e">eq</span> system-type <span style="color:#e6db74">&#39;gnu/linux</span>)
+</span></span><span style="display:flex;"><span>             (<span style="color:#a6e22e">file-readable-p</span> <span style="color:#e6db74">&#34;/etc/os-release&#34;</span>))
+</span></span><span style="display:flex;"><span>    (with-temp-buffer
+</span></span><span style="display:flex;"><span>      (<span style="color:#a6e22e">insert-file-contents</span> <span style="color:#e6db74">&#34;/etc/os-release&#34;</span>)
+</span></span><span style="display:flex;"><span>      (let* ((os-release (<span style="color:#a6e22e">buffer-string</span>))
+</span></span><span style="display:flex;"><span>             (is-ubuntu (string-match-p <span style="color:#e6db74">&#34;^ID=ubuntu&#34;</span> os-release))
+</span></span><span style="display:flex;"><span>             (version-id (and is-ubuntu
+</span></span><span style="display:flex;"><span>                              (when (<span style="color:#a6e22e">string-match</span> <span style="color:#e6db74">&#34;VERSION_ID=\&#34;\\([0-9]+\\)\\.\\([0-9]+\\)\&#34;&#34;</span> os-release)
+</span></span><span style="display:flex;"><span>                                (<span style="color:#a6e22e">list</span> (<span style="color:#a6e22e">string-to-number</span> (match-string <span style="color:#ae81ff">1</span> os-release))
+</span></span><span style="display:flex;"><span>                                      (<span style="color:#a6e22e">string-to-number</span> (match-string <span style="color:#ae81ff">2</span> os-release)))))))
+</span></span><span style="display:flex;"><span>        version-id))))
+</span></span></code></pre></div><p>On my machine <code>ubuntu-version</code> returns <code>(26 4)</code>.</p>
+<p>Now we can replace <code>ls</code> with <code>gnuls</code> if we are on Ubuntu 26.x:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-elisp" data-lang="elisp"><span style="display:flex;"><span>(when (<span style="color:#a6e22e">eq</span> (<span style="color:#a6e22e">car</span> (ubuntu-version)) <span style="color:#ae81ff">26</span>)
+</span></span><span style="display:flex;"><span>  (setq insert-directory-program <span style="color:#e6db74">&#34;gnuls&#34;</span>)
+</span></span><span style="display:flex;"><span>  (<span style="color:#a6e22e">message</span> <span style="color:#e6db74">&#34;</span><span style="color:#e6db74">`ls&#39;</span><span style="color:#e6db74"> is replaced with </span><span style="color:#e6db74">`gnuls&#39;</span><span style="color:#e6db74"> on Ubuntu 26.x.&#34;</span>))
+</span></span></code></pre></div><p>After that, Dired works as before.</p>
+<figure><a href="https://olddeuteronomy.github.io/img/dired-gnuls.png"><img src="https://olddeuteronomy.github.io/img/dired-gnuls.png"></a><figcaption>
+      <h4>Click or tap to view the full-size picture.</h4>
+    </figcaption>
+</figure>
+
+<p>Happy Emacsing on Ubuntu 26.04!</p>
+<p>&ndash; The Emacs Cat.</p>

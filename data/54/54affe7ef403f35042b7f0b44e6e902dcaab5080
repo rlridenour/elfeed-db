@@ -1,0 +1,66 @@
+<p>Yesterday I published <a href="/blog/ef4968f5/html-over-websockets-real-time-spas-with-barely-any-javascript/">HTML over WebSockets</a>. A reader from the Datastar community, who goes by drk, replied with <a href="https://yagni.club/3mstlyuxe5s26" rel="noopener noreferrer" target="_blank">HTML over the wire</a>, live demo included. Nicely done. He argues that to ship HTML, <strong>SSE + POST over HTTP/2</strong> beats WebSockets, and backs it with a few technical points. We actually agree on almost everything: SPAs carry too much complexity, and hypermedia is the way out. We disagree on the wire. And the more I look at his demo, the clearer it gets: we're fighting over the wrong wire.</p>
+<h2 id="blog-single-content__title--compression-with-a-catch" class="blog-single__content-title">Compression, with a catch</h2>
+<p>The centerpiece of the reply is a demo: a 66 KB HTML table re-rendered on every keystroke, sent over both transports at once. The WebSocket costs 3.4 KB per patch, SSE 23 bytes. 153 times apart. The number is real. But there's a catch.</p>
+<p>It re-renders, and measures, a huge blob on every keystroke (what the demo calls fat-morphing the whole log) and sends it whole every time. Which is exactly what HTML-over-WebSockets frameworks are built not to do.</p>
+<p>His demo has a toggle, "narrow", that sends just what changed instead of the whole document. Flip it: WebSocket 90 B, SSE 80 B. The gap vanishes. It isn't measuring WebSocket against SSE, it's measuring <strong>resending the whole document against sending only the change</strong>.</p>
+<p>drk sharpens this well: hypermedia re-renders instead of diffing, so each push looks almost like the last, which is exactly what compression loves, as long as it can still see the previous copy. His demo shows that with large documents DEFLATE's bounded window loses sight of the previous copy and Brotli's (up to 16 MB) does not. I concede it fully, it's true.</p>
+<p>But below that window, <code>permessage-deflate</code> already does the same trick the reply credits to Brotli. With <strong>context takeover</strong>, on by default (<a href="https://www.rfc-editor.org/rfc/rfc7692" rel="noopener noreferrer" target="_blank">RFC 7692</a>), the compressor keeps its window alive across messages and compresses each patch against the previous one. Send small patches and you stay in that sweet spot.</p>
+<p>And here is the deeper part the reply misses: <strong>a WebSocket isn't condemned to DEFLATE either</strong>. A frame is binary, it carries whatever you throw at it. You can Brotli-compress the HTML on the server and decode it on the client with <a href="https://developer.mozilla.org/en-US/docs/Web/API/DecompressionStream/DecompressionStream" rel="noopener noreferrer" target="_blank"><code>DecompressionStream</code></a>, which today ships <code>brotli</code> natively in Firefox 147 and Safari 18.4 (only Chromium still needs a polyfill). SSE gets Brotli automatically; a WebSocket gets it if you wire it up. The line was never "can or can't", it's "free or by hand".</p>
+<p>In short, it isn't a structural problem, it's a design one.</p>
+<h2 id="blog-single-content__title--the-real-argument-isnt-the-wire-its-the-architecture" class="blog-single__content-title">The real argument isn't the wire, it's the architecture</h2>
+<p>If the byte count ties as soon as you send patches, then let's talk about the architectures each wire imposes. That's where the real differences are:</p>
+<ul>
+<li><strong>A single, ordered, stateful channel</strong> on the server, which is the LiveView model over WebSocket.</li>
+<li><strong>A split CQRS</strong>: reads come down an SSE stream and writes go up as POST requests, each on its own path. That's CQRS (<em>Command Query Responsibility Segregation</em>): splitting queries from commands into two separate lanes. It's the reply's model.</li>
+</ul>
+<p>Look at the following diagram:</p>
+<pre class="mermaid">sequenceDiagram
+    participant C as Browser
+    participant S as Server
+    rect rgb(245, 238, 230)
+    note over C,S: SSE + POST, two channels you have to stitch
+    C->>S: GET /events (SSE stream, stays open)
+    C->>S: POST /command (another request, another stream)
+    S->>S: process, then find that session's SSE stream
+    S-->>C: push the HTML down the right SSE stream
+    end
+    rect rgb(230, 240, 245)
+    note over C,S: WebSocket, one ordered full-duplex channel
+    C->>S: command (frame, ~80 B)
+    S->>S: process
+    S-->>C: HTML back down the same channel, in order
+    end</pre>
+<p>drk points out that the SSE stream is one-way but your app isn't, and that every command over a POST gets authentication, rate limiting and logging for free, while a WebSocket forces you to reinvent all of that. It's his best argument. And he's partly right. But look at what the other side costs.</p>
+<p><strong>You don't reinvent authentication, you do it once.</strong> A WebSocket handshake is a normal HTTP request that carries your cookies through the same middleware. In Django Channels, <a href="https://channels.readthedocs.io/en/latest/topics/authentication.html" rel="noopener noreferrer" target="_blank"><code>AuthMiddlewareStack</code></a> reads the session cookie from the handshake and hands your consumer the same <code>scope["user"]</code> as always. You authenticate at the door and the identity rides the socket for its whole life. The SSE + POST model re-runs that middleware and re-sends those cookies on <strong>every</strong> command, the header overhead the reply told us to stop worrying about, now paid per keystroke.</p>
+<p><strong>Two channels carry a correlation cost.</strong> The POST arrives on one stream, and its result has to be pushed back down the right SSE stream for the right session. drk's demo needs "one session, one in-memory SQLite and one renderer" shared between the two precisely to stitch that together. A WebSocket is one ordered channel: the reply comes back where the request left, in order, with no correlation table.</p>
+<p><strong>For traffic that goes up small and often, the frame wins.</strong> Typing indicators, presence, validation on every keystroke, collaborative cursors. A WebSocket frame is <a href="https://websocket.org/comparisons/http/" rel="noopener noreferrer" target="_blank">2 to 14 bytes</a>. A POST is a whole request: headers, a new stream, the full round trip through the middleware. For a stream of tiny messages, the always-open channel is the light one.</p>
+<p><strong>And broadcast comes for free.</strong> As I said in the original article, one stateful process per client makes pushing to everyone at once trivial. A chat, a live dashboard, a game: the same model. SSE pushes too, sure, but the client's reply no longer lives in the same place.</p>
+<p>And this is neither fragile nor lab-only technology. Phoenix holds <a href="https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections" rel="noopener noreferrer" target="_blank">more than 2 million WebSocket connections on a single box</a>, one lightweight process per client, and Discord serves real-time to millions of people on the same model. Choosing this wire isn't a leap in the dark.</p>
+<p>So the question isn't "which wire compresses better?". It's "does your app push, or are both ends talking?". If it's a stateful conversation, the single channel is the one that fits. If it's a form that submits and renders, you don't need it.</p>
+<h2 id="blog-single-content__title--where-sse-genuinely-wins" class="blog-single__content-title">Where SSE genuinely wins</h2>
+<p>And that's exactly why I'm not here to bury SSE. For half the web, SSE is the right call, and I said so in the original article.</p>
+<ul>
+<li><strong>It's simpler and cheaper to operate.</strong> No stateful process per client, easier to load-balance and scale. If your flow is mostly server to client (notifications, a feed, a dashboard, the tokens of an AI response), SSE is plenty and saves money.</li>
+<li><strong>It gets Brotli for free and automatically.</strong> An SSE stream is an HTTP response, so it rides the browser's built-in content encoding without you doing anything. A WebSocket can carry Brotli, as we saw above, but you wire it up yourself; automatically it only has <code>permessage-deflate</code>, and nobody shipped a standard <code>permessage-brotli</code>. On convenience, point to SSE.</li>
+<li><strong>It rides the page's HTTP/2 connection.</strong> A WebSocket, unless the whole path speaks <a href="https://www.rfc-editor.org/rfc/rfc8441" rel="noopener noreferrer" target="_blank">RFC 8441</a> (or its HTTP/3 equivalent, <a href="https://www.rfc-editor.org/info/rfc9220/" rel="noopener noreferrer" target="_blank">RFC 9220</a>), opens its own. Though it's worth remembering the flip side: over HTTP/1.1, SSE spends one of the browser's six connections per origin and <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events" rel="noopener noreferrer" target="_blank">chokes with several tabs</a>; its free ride <strong>requires</strong> HTTP/2. Once you're on HTTP/2, the connection argument is close to a wash.</li>
+</ul>
+<p>It's well thought out, and if your app is pure push, SSE is the right choice. But if your app is a conversation, with state and collaboration, the right wire is WebSocket.</p>
+<h2 id="blog-single-content__title--so-which-wire" class="blog-single__content-title">So, which wire?</h2>
+<p>Back to the start, cards on the table. drk pushes SSE because he builds on SSE. I push WebSockets because I built Django LiveView on WebSockets. But when you get into the detail, the fight over the wire falls apart:</p>
+<ul>
+<li>Byte size doesn't separate WebSocket from SSE. It separates <strong>whole document</strong> from <strong>patch</strong>. Send the patch and they tie.</li>
+<li>What really separates the two models is the architecture: <strong>a single stateful channel</strong> against <strong>a split CQRS</strong>. And that's decided by your problem, not your framework.</li>
+</ul>
+<p>And if you still have doubts, go play with <a href="https://htmlwire.exe.xyz" rel="noopener noreferrer" target="_blank">drk's demo</a>. Flip on the "narrow" patch. Then decide.</p>
+<h2 id="blog-single-content__title--sources" class="blog-single__content-title">Sources</h2>
+<ul>
+<li><a href="https://htmlwire.exe.xyz" rel="noopener noreferrer" target="_blank">htmlwire.exe.xyz</a>, drk's demo, measured by hand: with the "narrow" patch on, 90 B (WebSocket) vs 80 B (SSE).</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc7692" rel="noopener noreferrer" target="_blank">RFC 7692</a>, Compression Extensions for WebSocket: <code>permessage-deflate</code> and context takeover.</li>
+<li><a href="https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.Engine.html" rel="noopener noreferrer" target="_blank">Phoenix.LiveView.Engine</a>: diffs carry only the changed dynamic values, no full HTML.</li>
+<li><a href="https://developer.mozilla.org/en-US/docs/Web/API/DecompressionStream/DecompressionStream" rel="noopener noreferrer" target="_blank">DecompressionStream</a>: native <code>brotli</code> decoding in Firefox 147 and Safari 18.4.</li>
+<li><a href="https://channels.readthedocs.io/en/latest/topics/authentication.html" rel="noopener noreferrer" target="_blank">Django Channels authentication</a>: <code>AuthMiddlewareStack</code> and <code>scope["user"]</code> from the handshake.</li>
+<li><a href="https://websocket.org/comparisons/http/" rel="noopener noreferrer" target="_blank">WebSocket vs HTTP</a>: 2 to 14 bytes of framing per message.</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc8441" rel="noopener noreferrer" target="_blank">RFC 8441</a> and <a href="https://www.rfc-editor.org/info/rfc9220/" rel="noopener noreferrer" target="_blank">RFC 9220</a>: bootstrapping WebSockets over HTTP/2 and HTTP/3 on the shared connection.</li>
+<li>MDN, <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events" rel="noopener noreferrer" target="_blank">Using server-sent events</a>: the six-connections-per-host limit on HTTP/1.1.</li>
+<li><a href="https://www.phoenixframework.org/blog/the-road-to-2-million-websocket-connections" rel="noopener noreferrer" target="_blank">The Road to 2 Million WebSocket Connections in Phoenix</a>: the scale of the one-process-per-connection model.</li>
+</ul><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-bd74e61a@andros.dev" class="link">comment+article-bd74e61a@andros.dev</a> to leave a comment. The subject will be ignored.</p>

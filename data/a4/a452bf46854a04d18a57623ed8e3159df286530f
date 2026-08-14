@@ -1,0 +1,189 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/07/terminalwidget-header-rb.7535.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+
+<p>I&rsquo;ve been using AI agents to scaffold little Mac automations for a while, but <a href="https://terminalwidget.app">TerminalWidget</a> is an especially good fit. The CLI is flag-heavy in a <em>good</em> way — once the model can see the real docs, it stops inventing fake options and starts writing scripts that actually update a widget.</p>
+
+<p>The trick is not &ldquo;ask ChatGPT to make a widget.&rdquo; The trick is: point the agent at the docs, give it a concrete outcome, and have it deliver the whole package — script, CSV history, chart update, launchd job, and install steps.</p>
+
+<h3 id="feed-the-agent-the-real-docs">Feed the agent the real docs</h3>
+
+<p>TerminalWidget publishes LLM-friendly Markdown at flat URLs (not nested under <code class="language-plaintext highlighter-rouge">/integrations/</code>):</p>
+
+<ul>
+  <li><a href="https://terminalwidget.app/cli.md">CLI reference</a> — every flag that matters</li>
+  <li><a href="https://terminalwidget.app/integrations.md">Getting Started</a> — add a widget and set <strong>Target name</strong></li>
+  <li><a href="https://terminalwidget.app/widgets.md">Widget modes</a> — chart formats like <code class="language-plaintext highlighter-rouge">waveform</code></li>
+  <li>Index of everything: <a href="https://terminalwidget.app/llms.txt">llms.txt</a> (or the concatenated dump at <a href="https://terminalwidget.app/llms-full.txt">llms-full.txt</a>)</li>
+</ul>
+
+<p>In Cursor / Claude Code / your agent of choice, paste something like:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>Read https://terminalwidget.app/cli.md and
+https://terminalwidget.app/integrations.md#getting-started
+before writing any terminal-widget commands.
+Do not invent flags. Prefer --chart-format waveform for history charts.</code></pre></div></div>
+
+<p>Substituing your preferred chart type, of course.</p>
+
+<p>That one instruction saves you from a surprising amount of creative fiction.</p>
+
+<h3 id="pick-a-concrete-widget-first">Pick a concrete widget first</h3>
+
+<p>Vague prompts produce vague scripts. I use Network Speeds as the demo because macOS already ships <code class="language-plaintext highlighter-rouge">networkQuality</code>, and a running history looks great as a waveform. I used to use the Ookla <code class="language-plaintext highlighter-rouge">speedtest</code> CLI, but <code class="language-plaintext highlighter-rouge">networkQuality</code> seems to be even more accurate, and faster. <em>Note that to make use of <code class="language-plaintext highlighter-rouge">networkQuality</code> in scripts, you need to use the <code class="language-plaintext highlighter-rouge">-s</code> flag to test each in serial, as shown in the example script.</em></p>
+
+<p>Goal for the agent:</p>
+
+<ol>
+  <li>Run <code class="language-plaintext highlighter-rouge">networkQuality -s</code> hourly</li>
+  <li>Append <code class="language-plaintext highlighter-rouge">timestamp,download,upload</code> to <code class="language-plaintext highlighter-rouge">~/logs/speed.csv</code></li>
+  <li>Keep the last ~100 rows</li>
+  <li>Push download (and upload) history into TerminalWidget as <code class="language-plaintext highlighter-rouge">--chart-format waveform</code></li>
+  <li>Install a user launchd job so it just keeps running</li>
+</ol>
+
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/08/network-widgets.jpg"></p>
+
+<p>Drop two Medium widgets on the desktop first. Set <strong>Edit Widget → Target name</strong> to <code class="language-plaintext highlighter-rouge">download</code> and <code class="language-plaintext highlighter-rouge">upload</code> (or whatever IDs you prefer). No target match = &ldquo;why isn&rsquo;t it updating?&rdquo;</p>
+
+<h3 id="the-prompt-that-gets-the-whole-package">The prompt that gets the whole package</h3>
+
+<p>Here&rsquo;s a prompt that tends to produce usable output on the first or second try:</p>
+
+<div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>Using https://terminalwidget.app/cli.md as the source of truth,
+create a bash script at ~/scripts/speed-widget.sh that:
+
+1. Runs `networkQuality -s` and parses Downlink/Uplink capacity as integers (Mbps).
+2. Appends a CSV line to ~/logs/speed.csv as:
+   ISO8601_timestamp,download_mbps,upload_mbps
+3. Trims the log to the last 100 lines.
+4. Supports `--background` which:
+   - runs the speed test silently
+   - then updates two TerminalWidget targets:
+     - download: last N download values as --chart - --chart-format waveform --base-zero
+     - upload: same for upload
+   - titles "Download Speeds" / "Upload Speeds"
+   - include --caption with --caption-left / --caption-right from first/last timestamps
+5. Default N=96 for chart history.
+6. Also write:
+   - ~/Library/LaunchAgents/com.example.speed-widget.plist
+     (StartInterval 3600, RunAtLoad true, calls the script with --background)
+   - a short install snippet using launchctl bootstrap/enable (or load -w on older macOS)
+7. Print exact commands to chmod +x, install the plist, and kick a first run.
+
+Assume `terminal-widget` is at /opt/homebrew/bin/terminal-widget, and use a full path. Do not invent CLI flags.</code></pre></div></div>
+
+<p>Ask for the files on disk, not a wall of chat. Agents are much better when the deliverable is &ldquo;write these paths.&rdquo;</p>
+
+<h3 id="what-the-script-should-look-like-core-idea">What the script should look like (core idea)</h3>
+
+<p>You don&rsquo;t need my full production <code class="language-plaintext highlighter-rouge">speed.sh</code> — the bones are simple. CSV first:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nv">LOGDIR</span><span class="o">=</span><span class="s2">"</span><span class="nv">$HOME</span><span class="s2">/logs"</span>
+<span class="nv">LOGFILE</span><span class="o">=</span><span class="s2">"</span><span class="nv">$LOGDIR</span><span class="s2">/speed.csv"</span>
+<span class="nb">mkdir</span> <span class="nt">-p</span> <span class="s2">"</span><span class="nv">$LOGDIR</span><span class="s2">"</span>
+
+<span class="nv">NQ_OUT</span><span class="o">=</span><span class="si">$(</span>networkQuality <span class="nt">-s</span> 2&gt;&amp;1<span class="si">)</span>
+<span class="nv">DOWNLOAD</span><span class="o">=</span><span class="si">$(</span><span class="nb">echo</span> <span class="s2">"</span><span class="nv">$NQ_OUT</span><span class="s2">"</span> | <span class="nb">awk</span> <span class="nt">-F</span>: <span class="s1">'/Downlink capacity/ {print int($2+0)}'</span><span class="si">)</span>
+<span class="nv">UPLOAD</span><span class="o">=</span><span class="si">$(</span><span class="nb">echo</span> <span class="s2">"</span><span class="nv">$NQ_OUT</span><span class="s2">"</span> | <span class="nb">awk</span> <span class="nt">-F</span>: <span class="s1">'/Uplink capacity/ {print int($2+0)}'</span><span class="si">)</span>
+<span class="nv">TIMESTAMP</span><span class="o">=</span><span class="si">$(</span><span class="nb">date</span> <span class="nt">-Iseconds</span><span class="si">)</span>
+
+<span class="nb">echo</span> <span class="s2">"</span><span class="nv">$TIMESTAMP</span><span class="s2">,</span><span class="nv">$DOWNLOAD</span><span class="s2">,</span><span class="nv">$UPLOAD</span><span class="s2">"</span> <span class="o">&gt;&gt;</span><span class="s2">"</span><span class="nv">$LOGFILE</span><span class="s2">"</span>
+<span class="nv">tmpfile</span><span class="o">=</span><span class="si">$(</span><span class="nb">mktemp</span><span class="si">)</span>
+<span class="nb">tail</span> <span class="nt">-n</span> 100 <span class="s2">"</span><span class="nv">$LOGFILE</span><span class="s2">"</span> <span class="o">&gt;</span><span class="s2">"</span><span class="nv">$tmpfile</span><span class="s2">"</span>
+<span class="nb">mv</span> <span class="s2">"</span><span class="nv">$tmpfile</span><span class="s2">"</span> <span class="s2">"</span><span class="nv">$LOGFILE</span><span class="s2">"</span></code></pre></div></div>
+
+<p>Then turn a column into chart input and pipe it:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="c"># column 2 = download, column 3 = upload</span>
+<span class="nb">tail</span> <span class="nt">-n</span> 96 <span class="s2">"</span><span class="nv">$LOGFILE</span><span class="s2">"</span> <span class="se">\</span>
+  | <span class="nb">awk</span> <span class="nt">-F</span>, <span class="s1">'$2 != "" { printf("%s ", int($2+0)) }'</span> <span class="se">\</span>
+  | terminal-widget <span class="se">\</span>
+      <span class="nt">--target</span> download <span class="se">\</span>
+      <span class="nt">--text</span> <span class="s2">"Download Speeds"</span> <span class="se">\</span>
+      <span class="nt">--chart</span> - <span class="se">\</span>
+      <span class="nt">--chart-format</span> waveform <span class="se">\</span>
+      <span class="nt">--base-zero</span> <span class="se">\</span>
+      <span class="nt">--caption</span> <span class="se">\</span>
+      <span class="nt">--fg</span> <span class="s2">"rgb(237, 78, 195)"</span> <span class="se">\</span>
+      <span class="nt">--bg</span> <span class="s2">"#ffffff"</span> <span class="se">\</span>
+      <span class="nt">--text-color</span> <span class="s2">"#222222"</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">--chart -</code> means &ldquo;read the series from stdin,&rdquo; which is perfect for <code class="language-plaintext highlighter-rouge">awk</code> pipelines. <code class="language-plaintext highlighter-rouge">--base-zero</code> keeps the waveform grounded so a calm network doesn&rsquo;t look like a heart monitor.</p>
+
+<p>Upload is the same pattern with column 3 and <code class="language-plaintext highlighter-rouge">--target upload</code>. Use different colors if you want to, specified as hex codes (which AI can easily convert from other formats for you).</p>
+
+<h3 id="launchd-is-the-boring-part-let-the-agent-do-it">launchd is the boring part (let the agent do it)</h3>
+
+<p>A minimal hourly agent looks like:</p>
+
+<div class="language-xml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="cp">&lt;?xml version="1.0" encoding="UTF-8"?&gt;</span>
+<span class="cp">&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;</span>
+<span class="nt">&lt;plist</span> <span class="na">version=</span><span class="s">"1.0"</span><span class="nt">&gt;</span>
+<span class="nt">&lt;dict&gt;</span>
+  <span class="nt">&lt;key&gt;</span>Label<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;string&gt;</span>com.example.speed-widget<span class="nt">&lt;/string&gt;</span>
+  <span class="nt">&lt;key&gt;</span>ProgramArguments<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;array&gt;</span>
+    <span class="nt">&lt;string&gt;</span>/bin/bash<span class="nt">&lt;/string&gt;</span>
+    <span class="nt">&lt;string&gt;</span>/Users/YOU/scripts/speed-widget.sh<span class="nt">&lt;/string&gt;</span>
+    <span class="nt">&lt;string&gt;</span>--background<span class="nt">&lt;/string&gt;</span>
+  <span class="nt">&lt;/array&gt;</span>
+  <span class="nt">&lt;key&gt;</span>RunAtLoad<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;true/&gt;</span>
+  <span class="nt">&lt;key&gt;</span>StartInterval<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;integer&gt;</span>3600<span class="nt">&lt;/integer&gt;</span>
+  <span class="nt">&lt;key&gt;</span>StandardOutPath<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;string&gt;</span>/Users/YOU/logs/speed-widget.out<span class="nt">&lt;/string&gt;</span>
+  <span class="nt">&lt;key&gt;</span>StandardErrorPath<span class="nt">&lt;/key&gt;</span>
+  <span class="nt">&lt;string&gt;</span>/Users/YOU/logs/speed-widget.err<span class="nt">&lt;/string&gt;</span>
+<span class="nt">&lt;/dict&gt;</span>
+<span class="nt">&lt;/plist&gt;</span></code></pre></div></div>
+
+<p>Have the agent emit install commands tailored to your username and path:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nb">chmod</span> +x ~/scripts/speed-widget.sh
+<span class="nb">cp </span>path/to/com.example.speed-widget.plist <span class="se">\</span>
+  ~/Library/LaunchAgents/  <span class="c"># if it wrote elsewhere first</span>
+
+launchctl bootout gui/<span class="si">$(</span><span class="nb">id</span> <span class="nt">-u</span><span class="si">)</span>/com.example.speed-widget 2&gt;/dev/null <span class="o">||</span> <span class="nb">true
+</span>launchctl bootstrap gui/<span class="si">$(</span><span class="nb">id</span> <span class="nt">-u</span><span class="si">)</span> ~/Library/LaunchAgents/com.example.speed-widget.plist
+launchctl <span class="nb">enable </span>gui/<span class="si">$(</span><span class="nb">id</span> <span class="nt">-u</span><span class="si">)</span>/com.example.speed-widget
+launchctl kickstart <span class="nt">-k</span> gui/<span class="si">$(</span><span class="nb">id</span> <span class="nt">-u</span><span class="si">)</span>/com.example.speed-widget</code></pre></div></div>
+
+<p>First run takes a bit — <code class="language-plaintext highlighter-rouge">networkQuality</code> is not instant. After that you should see history fill in on the waveform widgets as the CSV grows.</p>
+
+<h3 id="a-few-agent-pitfalls-worth-naming">A few agent pitfalls worth naming</h3>
+
+<ul>
+  <li><strong>Target names are case-sensitive.</strong> <code class="language-plaintext highlighter-rouge">Download</code> ≠ <code class="language-plaintext highlighter-rouge">download</code>.</li>
+  <li><strong>Widgets are not auto-created.</strong> The agent can&rsquo;t place them; you still add them once in Edit Widgets.</li>
+  <li><strong>Sandbox PATH.</strong> If launchd can&rsquo;t find <code class="language-plaintext highlighter-rouge">terminal-widget</code>, point ProgramArguments at the full binary under <code class="language-plaintext highlighter-rouge">/Applications/TerminalWidget.app/Contents/MacOS/TerminalWidget</code> or a symlink in a known path.</li>
+  <li><strong>Don&rsquo;t skip the docs URL.</strong> Without <a href="https://terminalwidget.app/cli.md">cli.md</a>, models invent charming nonsense like <code class="language-plaintext highlighter-rouge">--sparkline-history</code> and <code class="language-plaintext highlighter-rouge">--widget-theme neon</code>.</li>
+</ul>
+
+<h3 id="why-this-pattern-scales">Why this pattern scales</h3>
+
+<p>Once you&rsquo;ve done Network Speeds, the same prompt shape works for almost anything:</p>
+
+<ul>
+  <li>&ldquo;Read cli.md, write a script that logs X to CSV, charts the last N points as waveform/sparkline, and installs launchd.&rdquo;</li>
+</ul>
+
+<p>That&rsquo;s the real product: TerminalWidget as a tiny display surface, plus an agent that can own the plumbing. You keep the interesting part (what to measure), and let the model grind out the plist and the awk.</p>
+
+<p>If you want more examples and community scripts, the <a href="https://terminalwidget.app/recipes/">Recipes</a> section on the site is a good next stop — and if you&rsquo;re building prompts for agents, start every session with <a href="https://terminalwidget.app/cli.md">cli.md</a> open.</p>
+
+<p>If this sounds appealing, and maybe you initially skipped TerminalWidget
+because creating scripts seemed too complex, this route might open up
+some possibilities for some great widgets. Check out TerminalWidget at
+<a href="https://terminalwidget.app">terminalwidget.app</a>.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/117076963654957663">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Creating+TerminalWidgets+with+AI%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F08%2F11%2Fcreating-terminalwidgets-with-ai%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F08%2F11%2Fcreating-terminalwidgets-with-ai%2F&text=Creating+TerminalWidgets+with+AI&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F08%2F11%2Fcreating-terminalwidgets-with-ai%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17414798.gif" height="1" width="1"/>

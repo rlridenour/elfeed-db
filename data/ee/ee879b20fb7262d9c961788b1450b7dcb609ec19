@@ -1,0 +1,120 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/06/apex-grid-tables-header-rb.7533.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+<p>Apex 1.1.0 adds support for <strong>Pandoc-style grid tables</strong> &mdash; those ASCII-art tables built with <code class="language-plaintext highlighter-rouge">+</code>, <code class="language-plaintext highlighter-rouge">-</code>, <code class="language-plaintext highlighter-rouge">=</code>, and <code class="language-plaintext highlighter-rouge">|</code> instead of the usual pipe-table separators. If you have ever copied a grid table out of a Pandoc doc or academic paper and wished your Markdown processor would just deal with it, this one is for you.</p>
+
+<p>First, thanks to Andreas Kraft for some pointers that got me here.</p>
+
+<p>The implementation follows <a href="https://pandoc.org/MANUAL.html#extension-grid_tables">Pandoc&rsquo;s grid table extension</a>: border rows, header separators, alignment markers, multiline cells, colspan, and the weird in-row partial separators that make temperature tables possible. Apex preprocesses grid blocks into pipe or HTML tables before the rest of the pipeline runs, so you get normal <code class="language-plaintext highlighter-rouge">&lt;table&gt;</code> output at the end.</p>
+
+<h3 id="off-by-default-for-now">Off by default (for now)</h3>
+
+<p>Grid tables are <strong>not</strong> enabled in unified mode yet. You have to opt in:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex document.md <span class="nt">--grid-tables</span></code></pre></div></div>
+
+<p>Or in document metadata:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">grid-tables</span><span class="pi">:</span> <span class="kc">true</span></code></pre></div></div>
+
+<p>There is also <code class="language-plaintext highlighter-rouge">--no-grid-tables</code> if you need to override metadata and force them off. I left the feature off by default on purpose &mdash; grid table parsing touches a lot of edge cases, and I would rather ship something solid and let people turn it on when they need it than break documents that happen to start lines with <code class="language-plaintext highlighter-rouge">+</code> (though that case <em>should</em> be properly handled at this point).</p>
+
+<h3 id="get-apex-110-from-homebrew">Get Apex 1.1.0 from Homebrew</h3>
+
+<p>If you are on macOS or Linux with Homebrew:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>brew tap ttscoff/thelab
+brew <span class="nb">install </span>ttscoff/thelab/apex</code></pre></div></div>
+
+<p>Check your version:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex <span class="nt">--version</span></code></pre></div></div>
+
+<p>You should see 1.1.0 or newer. Then try a grid table:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex my-grid-doc.md <span class="nt">--grid-tables</span> <span class="nt">-o</span> my-grid-doc.html</code></pre></div></div>
+
+<h3 id="a-simple-grid-table">A simple grid table</h3>
+
+<p>This is the classic fruit-and-price example:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>+---------------+---------------+
+| Fruit         | Price         |
++:==============+==============:+
+| Bananas       | $1.34         |
+| Oranges       | $2.10         |
++---------------+---------------+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">+===+</code> row marks the header. Colons in the border row (<code class="language-plaintext highlighter-rouge">+:===+</code> and <code class="language-plaintext highlighter-rouge">+===:+</code>) control column alignment, same as Pandoc.</p>
+
+<h3 id="colspan-and-nested-grids">Colspan and nested grids</h3>
+
+<p>Grid tables really shine when a cell spans the full width or contains another table inside it:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>+-------------------+-------------------+
+| Grid Tables       | Are Beautiful     |
++===================+===================+
+|                   | In code and docs  |
+| Easy to read      |                   |
+|                   |                   |
++-------------------+-------------------+
+| Exceptionally flexible and powerful   |
++-------+-------+-------+-------+-------+
+| Col 1 | Col 2 | Col 3 | Col 4 | Col 5 |
++-------+-------+-------+-------+-------+</code></pre></div></div>
+
+<p>That last row is a single cell spanning all five columns, with a nested five-column grid tucked inside. Apex converts nested grids to HTML so they render correctly inside cells that support block markdown.</p>
+
+<h3 id="partial-separators-and-rowspan">Partial separators and rowspan</h3>
+
+<p>This is the layout that breaks most pipe-table parsers. Property and Earth in the header, then Temperature with min/mean/max rows where the label spans multiple lines:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>+---------------------+----------+
+| Property            | Earth    |
++=============+=======+==========+
+|             | min   | -89.2 °C |
+| Temperature +-------+----------+
+| 1961-1990   | mean  | 14 °C    |
+|             +-------+----------+
+|             | min   | 56.7 °C  |
++-------------+-------+----------+</code></pre></div></div>
+
+<p>The <code class="language-plaintext highlighter-rouge">+-------+</code> partial separator inside a row tells Apex that &ldquo;Temperature&rdquo; and &ldquo;1961-1990&rdquo; share a rowspan while the min/mean/min values sit in their own columns.</p>
+
+<h3 id="markdown-inside-cells">Markdown inside cells</h3>
+
+<p>Grid tables are not limited to plain text. Lists and other block markdown work in multiline cells:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>+---------------+---------------+--------------------+
+| Fruit         | Price         | Advantages         |
++===============+===============+====================+
+| Bananas       | $1.34         | - built-in wrapper |
+|               |               | - bright color     |
++---------------+---------------+--------------------+
+| Oranges       | $2.10         | - cures scurvy     |
+|               |               | - tasty            |
++---------------+---------------+--------------------+</code></pre></div></div>
+
+<p>Those advantage lists render as real <code class="language-plaintext highlighter-rouge">&lt;ul&gt;</code> items, not a pile of <code class="language-plaintext highlighter-rouge">&lt;br&gt;</code> tags.</p>
+
+<h3 id="please-test-it-and-tell-me-what-breaks">Please test it and tell me what breaks</h3>
+
+<p>I have regression tests for the cases above and a handful of hardening checks (plus-list lines starting with <code class="language-plaintext highlighter-rouge">+</code> are not mistaken for grids, invalid blocks fall back to the original text, and so on). But Pandoc grid tables are flexible in ways that are hard to exhaustively test.</p>
+
+<p>If you have documents with grid tables &ndash; especially weird ones from legacy Pandoc workflows &ndash; please run them through Apex with <code class="language-plaintext highlighter-rouge">--grid-tables</code> and <a href="https://github.com/ApexMarkdown/apex/issues">open an issue</a> if anything looks wrong. Include the source grid table<sup id="fnref:please"><a href="https://brettterpstra.com#fn:please" class="footnote" rel="footnote" role="doc-noteref">1</a></sup> and the HTML you got (or expected). Edge cases are exactly what I need before flipping this on by default in unified mode.</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:please">
+      <p>Please always use backtick code fences when posting code samples. So much easier to deal with without having to edit users&rsquo; comments.&nbsp;<a href="https://brettterpstra.com#fnref:please" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/116788823397815406">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Apex+and+Grid+Tables%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F06%2F21%2Fapex-and-grid-tables%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F06%2F21%2Fapex-and-grid-tables%2F&text=Apex+and+Grid+Tables&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F06%2F21%2Fapex-and-grid-tables%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17364843.gif" height="1" width="1"/>

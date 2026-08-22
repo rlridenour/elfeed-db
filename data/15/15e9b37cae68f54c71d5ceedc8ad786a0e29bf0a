@@ -1,0 +1,152 @@
+
+<p class="wp-block-paragraph">Every millisecond counts during Emacs initialization. A potential performance cost in modern Emacs configurations is defaulting to <code>setopt</code>, <code>customize-set-variable</code>, or the <code>use-package :custom</code> keyword when a direct assignment with <code>setq</code> is sufficient.</p>
+
+
+
+<h2 class="wp-block-heading">What is the difference between setq, setq-default, setopt, customize-set-variable, and use-package :custom?</h2>
+
+
+
+<h3 class="wp-block-heading">setq (and setq-default)</h3>
+
+
+
+<p class="wp-block-paragraph">The <code>setq</code> and <code>setq-default</code> functions directly assigns a value to a variable, making it the fastest way to set a variable. (FYI: This is one of the reasons why the author uses <code>setq</code> and <code>setq-default</code> in the <a href="https://github.com/jamescherti/minimal-emacs.d">minimal-emacs.d</a> project.)</p>
+
+
+
+<p class="has-small-font-size wp-block-paragraph"><em>(The <code>setq</code> function updates a variable's value within the current scope; if the target variable is buffer-local, the assignment only affects the current active buffer while the global state remains unchanged. Conversely, <code>setq-default</code> explicitly modifies the global default value of a variable. Although both functions produce the same result for purely global variables, <code>setq-default</code> must be used to apply system-wide changes to buffer-local variables like <code>tab-width</code> or <code>indent-tabs-mode</code>.)</em></p>
+
+
+
+<h3 class="wp-block-heading">setopt, customize-set-variable, and use-package :custom</h3>
+
+
+
+<p class="wp-block-paragraph">The <code>setopt</code>, <code>customize-set-variable</code>, and <code>use-package :custom</code> functions can be slower than <code>setq</code>. Depending on the variable, they can:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Call the variable's <code>defcustom</code> <code>:set</code> function.</li>
+
+
+
+<li>Validate the value against the variable's declared type.</li>
+
+
+
+<li>In some cases, load the library defining an autoloaded customizable variable, potentially causing a package to load earlier during startup.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph"><strong>Note:</strong> The article assumes that the reader has a certain level of comfort with Emacs Lisp. For users who prefer a hands-off experience, defaulting to setopt or the built-in customization interface is often the better choice for convenience, even though they are not the fastest.</p>
+
+
+
+<h2 class="wp-block-heading">Example of an expansive defcustom :set property</h2>
+
+
+
+<p class="wp-block-paragraph">To understand the latency penalty, look at how a package author might write a <code>defcustom</code> with an expensive <code>:set</code> property:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">defcustom</span> my-global-visual-indicator <span class="hljs-literal">t</span>
+  <span class="hljs-string">"Toggle a heavy visual indicator across all open buffers."</span>
+  <span class="hljs-symbol">:type</span> 'boolean
+  <span class="hljs-symbol">:group</span> 'my-ui-package
+  <span class="hljs-symbol">:set</span> (<span class="hljs-name">lambda</span> (<span class="hljs-name">symbol</span> value)
+         <span class="hljs-comment">;; Update the variable's value</span>
+         (<span class="hljs-name">set-default</span> symbol value)
+         
+         <span class="hljs-comment">;; The slow part: Iterate through every open buffer</span>
+         <span class="hljs-comment">;; and trigger a costly visual update or cache rebuild.</span>
+         (<span class="hljs-name">dolist</span> (<span class="hljs-name">buffer</span> (<span class="hljs-name">buffer-list</span>))
+           (<span class="hljs-name">with-current-buffer</span> buffer
+             <span class="hljs-comment">;; This simulated function might parse the buffer,</span>
+             <span class="hljs-comment">;; apply text properties, or query a language server.</span>
+             (<span class="hljs-name">my-heavy-visual-update-function</span> value)))
+             
+         <span class="hljs-comment">;; Force Emacs to immediately redraw all frames</span>
+         (<span class="hljs-name">redraw-display</span>)))
+</code></span></pre>
+
+
+<p class="wp-block-paragraph">Using <code>setopt</code>, <code>customize-set-variable</code>, or the <code>use-package</code> <code>:custom</code> to configure <code>my-global-visual-indicator</code> uses executes the associated <code>defcustom</code> <code>:set</code> function during startup:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Example 1: SLOW: This triggers the expensive :set function during startup</span>
+(<span class="hljs-name">setopt</span> my-global-visual-indicator <span class="hljs-literal">nil</span>)
+
+<span class="hljs-comment">;; Example 2: This triggers the expensive :set function</span>
+(<span class="hljs-name">use-package</span> my-ui-package
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">my-ai-package-cmd1</span> my-ai-package-cmd2) <span class="hljs-comment">; defer</span>
+  <span class="hljs-symbol">:custom</span>
+  (<span class="hljs-name">my-global-visual-indicator</span> <span class="hljs-literal">nil</span>))</code></span></pre>
+
+
+<p class="wp-block-paragraph">In many cases, the Emacs startup phase is simply not the appropriate time to execute those <code>:set</code> functions.</p>
+
+
+
+<p class="wp-block-paragraph">On the other hand, if the variable does not require its Custom setter to establish associated state, using <code>setq</code> inside a <code>use-package</code> <code>:init</code> block bypasses the Emacs Customization setter entirely:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Example 1: FAST: This bypasses the :set function for a faster startup</span>
+(<span class="hljs-name">setq</span> my-global-visual-indicator <span class="hljs-literal">nil</span>)
+
+<span class="hljs-comment">;; Example 2: FAST: This bypasses the :set function</span>
+(<span class="hljs-name">use-package</span> my-ui-package
+  <span class="hljs-symbol">:commands</span> (<span class="hljs-name">my-ai-package-cmd1</span> my-ai-package-cmd2) <span class="hljs-comment">; defer</span>
+  <span class="hljs-symbol">:init</span>
+  (<span class="hljs-name">setq</span> my-global-visual-indicator <span class="hljs-literal">nil</span>))</code></span></pre>
+
+
+<p class="wp-block-paragraph">Note: Code placed in the <code>:init</code> block executes before the package loads into memory. Setting variables here ensures your customized values are already established in the global environment before the package evaluates its internal definitions, bypassing the need for a <code>defcustom</code> setter to update its internal state.</p>
+
+
+
+<h3 class="wp-block-heading">Trade-offs when using setq</h3>
+
+
+
+<p class="wp-block-paragraph">Here are the trade-offs to consider when moving away from <code>setopt</code>, <code>customize-set-variable</code>, or the <code>use-package</code> <code>:custom</code> and using <code>setq</code> instead:</p>
+
+
+
+<ul class="wp-block-list">
+<li>During startup, a direct assignment can avoid UI updates or other side effects performed by a Custom setter. However, <code>setq</code> should only be used when the package does not require that setter to establish associated state.</li>
+
+
+
+<li><code>setq</code> does not validate types. If you pass a string where a boolean is expected, Emacs will not warn you at evaluation time.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">Rule of thumb</h2>
+
+
+
+<p class="wp-block-paragraph">Use <code>setq</code> by default.</p>
+
+
+
+<p class="wp-block-paragraph">Use <code>setopt</code>, <code>customize-set-variable</code>, or <code>use-package :custom</code> when a variable's Custom <code>:set</code> setter or type validation is required, or if you notice that the option is not being applied as intended.</p>
+
+
+
+<p class="has-small-font-size wp-block-paragraph"><em>(To determine whether a specific variable requires a custom <code>:set</code> setter for correct state initialization, inspect its properties directly within Emacs. Execute <code>M-x describe-variable</code> or <code>C-h v</code> and provide the variable's name to view its documentation. In the resulting help buffer, look for a <code>:set</code> attribute. While the presence of a <code>:set</code> function indicates that the package defines initialization logic for when the variable is modified, it does not necessarily mean that using <code>setopt</code> or <code>use-package :custom</code> is required. The necessity depends on the specific implementation, as the majority of major and minor modes automatically execute these initialization functions by default when the mode is activated.)</em></p>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/essential-emacs-packages/" rel="bookmark" title="Must-have Emacs Packages for Efficient Software Development and Text Editing">Must-have Emacs Packages for Efficient Software Development and Text Editing</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-quick-fasd/" rel="bookmark" title="quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs">quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/buffer-guardian-el-automatically-save-emacs-buffers/" rel="bookmark" title="buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)">buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)</a></li>
+<li><a href="https://www.jamescherti.com/emacs-native-compilation-config-jobs/" rel="bookmark" title="Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel">Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel</a></li>
+</ol>
+</div>

@@ -1,0 +1,129 @@
+<p>Before the internet, people could already chat. It is a topic that has always intrigued me: how was it possible? As a kid I had already heard about a command called <code>talk</code>, and the most impressive part is that you can still use it today, with no sign-ups and straight from the terminal, even in workplaces where I work over a VPN. It is not dead: it is just that few people know its potential.</p>
+<p>This article is to satisfy my own curiosity, and if someone learns something along the way: all the better. If you lived through the <code>talk</code> era and spot any inaccuracy, please write to me privately so I can fix it, since finding information has been hard.</p>
+<h2 id="blog-single-content__title--how-did-people-chat-back-then" class="blog-single__content-title">How did people chat back then?</h2>
+<p>The way people chatted in the 80s does not resemble the experience we have today.</p>
+<p>Two people shared the same screen and could watch each other type. I am not sure you realise what that means: in real time, letter by letter, each one saw how the other typed, deleted and hesitated. It was not a send-and-wait chat, but a living screen split in two.</p>
+<p>Here you can see how the conversation is simulated with two Docker containers.</p>
+<video src="/media/blog/2026/08/talk-demo.mp4" autoplay loop muted playsinline controls></video>
+
+<p>It all started by finding out whether the other person was available. For that you had the <code>finger</code> command, which told you if a user was connected and what they were doing. If you are interested, I have another article on <a href="/blog/54572bc7/finger-the-1971-social-network-that-never-died/">what <code>finger</code> was and how it worked</a>.</p>
+<p>Then, if they were available, you ran the <code>talk</code> command in the terminal, followed by the user and host you wanted to talk to.</p>
+<p>For example:</p>
+<pre class="highlight"><code class="language-sh">talk ana@library</code></pre>
+<p><code>ana</code> would get a message in her terminal letting her know that someone wanted to talk to her. If she accepted, the screen split in two and the conversation began.</p>
+<p>You were limited to talking with a single person at a time, and you needed an account on the same system as the other person, or on systems that could see each other: what you would call talking over a LAN today, a P2P communication with no central servers.</p>
+<p>There was also no conversation history, no way to send files, and no authentication or encryption (anyone who could see the traffic could read it). It was a very basic chat, but a functional one.</p>
+<p>The curious thing is that you can still do this today, and it works. The <code>talk</code> client ships out of the box on macOS and most Unix systems. On Debian or Ubuntu you install it with <code>apt install talk talkd</code>. Its daemon, <code>ntalkd</code>, is right there too.</p>
+<h2 id="blog-single-content__title--origin" class="blog-single__content-title">Origin</h2>
+<p>It all began with two people who wanted to talk to each other through a machine they shared.</p>
+<p>In 1965 MIT's CTSS had a <code>WRITE</code> command to send a line to another logged-in user, and systems like Multics, PLATO or NLS offered similar mechanisms.</p>
+<p>In the 70s, Unix inherited and polished it. You copied lines of text straight onto another user's terminal. And to decide whether you wanted to be interrupted or not, there was <code>mesg</code> (from <em>message</em>), dated 3 November 1971, attributed to Dennis Ritchie and Ken Thompson. A <code>mesg n</code> and you closed the door; a <code>mesg y</code> and you opened it. There was also <code>wall</code> (<em>write all</em>), which shouted a message to every terminal at once. All quite crude by our standards, but shaped for its time.</p>
+<p>The leap came in 1983 with <strong>4.2BSD</strong>. That is where <code>talk</code> appeared as I have described it: split screen, simultaneous typing and, most importantly, able to connect two people <strong>on different machines</strong> across the network. It was no longer about talking to whoever shared your computer, but with anyone on a connected machine. The credit goes to Kipp Hickman, Clem Cole and Peter Moore.</p>
+<h2 id="blog-single-content__title--the-protocol" class="blog-single__content-title">The protocol</h2>
+<p>For two strangers on different machines to end up with their screens linked takes some engineering. There is no central server where both register, which forces a dance of requests. You need a middleman on each side: the <code>talkd</code> (or <code>ntalkd</code>) daemon.</p>
+<p>Think of <code>talkd</code> as your machine's receptionist, with two jobs: it keeps the invitations you leave and notifies your users when someone from outside wants to talk to them:</p>
+<ul>
+<li><strong>Negotiation</strong> (finding each other and ringing the doorbell) goes over <strong>UDP</strong>.</li>
+<li>The <strong>conversation</strong> itself, the stream of letters, goes over a <strong>direct TCP connection</strong> between the two clients.</li>
+</ul>
+<p>To negotiate, clients and daemons send each other control messages:</p>
+<ul>
+<li><code>LEAVE_INVITE</code> (I leave an invitation)</li>
+<li><code>LOOK_UP</code> (I look for an invitation)</li>
+<li><code>DELETE</code> (I delete it)</li>
+<li><code>ANNOUNCE</code> (notify that person). With those four pieces the whole thing is built.</li>
+</ul>
+<p>The conversation between Bob and Ana looks like this:</p>
+<pre class="mermaid">sequenceDiagram
+    participant A as Ana's talk
+    participant DA as Ana's talkd (UDP)
+    participant DB as Bob's talkd (UDP)
+    participant B as Bob's talk
+    A->>DB: LOOK_UP (has Bob invited me yet?)
+    DB->>A: NOT_HERE (not yet)
+    A->>DA: LEAVE_INVITE (I'm listening on this TCP port)
+    A->>DB: ANNOUNCE (notify Bob)
+    DB->>B: "talk: connection requested by ana@host. Reply with: talk ana@host"
+    B->>DA: LOOK_UP (where is Ana listening?)
+    DA->>B: Ana's TCP address
+    B->>A: direct TCP connection
+    Note over A,B: From here on, live text over TCP</pre>
+<p>Step by step:</p>
+<ol>
+<li>Ana's <code>talk</code> first asks (<code>LOOK_UP</code>) <strong>Bob's</strong> <code>talkd</code> whether Bob had already invited her, in case both are calling at the same time. Since there is nothing (<code>NOT_HERE</code>), it continues.</li>
+<li>Ana's <code>talk</code> leaves an invitation on <strong>its own</strong> <code>talkd</code>, pointing to the TCP port where it will listen.</li>
+<li>Ana's <code>talk</code> sends an <code>ANNOUNCE</code> to <strong>Bob's</strong> <code>talkd</code>. That daemon writes the famous notice on Bob's terminal: <em>"talk: connection requested by ana@host"</em>.</li>
+<li>Bob types <code>talk ana@host</code>. His client asks (<code>LOOK_UP</code>) Ana's <code>talkd</code> where she is listening.</li>
+<li>Ana's <code>talkd</code> returns her TCP address. Bob connects directly to Ana, and the conversation begins.</li>
+</ol>
+<p>All the port exchange travels inside those control messages. The address where each client listens is placed in a field of the message (<code>addr</code>) and passed from hand to hand.</p>
+<p>Few more elegant solutions have been seen in the history of computing.</p>
+<h2 id="blog-single-content__title--ntalk-to-unite-them-all" class="blog-single__content-title">ntalk to unite them all</h2>
+<p>The control message carried the network address inside a C struct that was sent <strong>exactly as it sat in memory</strong>. And it turns out not all machines store bytes in the same order, what is called <em>endianness</em>.</p>
+<p><em>Endianness</em> is the way a computer stores the bytes of a number. A <em>little-endian</em> stores the least significant byte first, and a <em>big-endian</em> does the opposite. For example, the number 0x12345678 is stored like this:</p>
+<ul>
+<li>Little-endian: 78 56 34 12</li>
+<li>Big-endian: 12 34 56 78</li>
+</ul>
+<p>This made it impossible to talk between machines from different vendors. A <code>talk</code> between two machines of the same type worked without a hitch. But between a <em>little-endian</em> and a <em>big-endian</em>, each read the other's address as, well, a pile of meaningless bytes! <code>talk</code> depended on byte order.</p>
+<p>In short, you only talked to people with your same architecture. And you wanted to talk to everyone!</p>
+<p>The solution was <strong>ntalk</strong>, the new version of the protocol. It added a version field and ordered the bytes properly so any two architectures could understand each other. To avoid breaking the old one, each version stayed on its own port:</p>
+<ul>
+<li>The original <code>talk</code> (sometimes called <em>otalk</em>): <strong>UDP port 517</strong>.</li>
+<li>The new <code>ntalk</code>: <strong>UDP port 518</strong>.</li>
+</ul>
+<p>This caused other problems, like clients speaking 518 to a daemon that only understood 517, or the other way around. Typical were the endless hangs with <em>checking for invitation on caller's machine</em>, or the <em>your party is using an incompatible version of the talk program</em>.</p>
+<p>Variants came out to plug the gaps. <strong>ytalk</strong>, by Britt Yenne, was the first to allow more than two people at once (groups) and to talk between different architectures. <strong>utalk</strong> skipped TCP and sent even the conversation over UDP.</p>
+<p>Each one solved a shortcoming of the original, a step forward.</p>
+<p>So when someone mentions <code>talk</code>, they probably mean <code>ntalk</code>, which is what most modern Unix systems ship.</p>
+<p>By the way, there is not even an RFC for <code>talk</code>. It is Unix folklore, not a blessed specification.</p>
+<h2 id="blog-single-content__title--why-it-did-not-survive-the-modern-internet" class="blog-single__content-title">Why it did not survive the modern internet</h2>
+<p><code>talk</code> was designed for an internet that no longer exists: one where every machine had a public IP address, a name, and trusted the others. As soon as that world changed, the protocol lost the ground beneath its feet.</p>
+<p>The problems, one by one:</p>
+<ul>
+<li><strong>Only two at a time.</strong> Base <code>talk</code> connects exactly two people. No groups, no rooms.</li>
+<li><strong>NAT kills it.</strong> The protocol hands the other side a specific IP and port and expects you to connect <strong>directly</strong> to that address. Behind a home router, that address leads nowhere.</li>
+<li><strong>The firewall blocks it.</strong> It needs inbound UDP 517/518 and, on top of that, inbound TCP connections to high ports on both ends. Any reasonable firewall cuts it off.</li>
+<li><strong>Zero security.</strong> Plain text, no encryption and no authentication. Your identity was, literally, the username you were typing into the packet.</li>
+<li><strong>No history.</strong> If you disconnect, the conversation is lost. There is no record of what was said.</li>
+<li><strong>No nicknames.</strong> Only Unix accounts. If you do not have an account on your friend's machine, you cannot talk to them.</li>
+<li><strong>No servers.</strong> There is no central point to register at, nor to leave messages if you are offline. If your friend is not at their machine, there is no way to reach them.</li>
+</ul>
+<p>And forget about sending files, video calls or emojis.</p>
+<p>On the other hand, in 1988 Jarkko Oikarinen created <strong>IRC</strong>, which solved many of these problems: without depending on a specific machine and without the compatibility headaches. It quickly relegated <code>talk</code> to a corner of history.</p>
+<h2 id="blog-single-content__title--vpn-a-new-hope" class="blog-single__content-title">VPN, a new hope</h2>
+<p>The protocol works perfectly; what breaks it is the network around it: NAT, firewalls, the lack of reachable addresses... problems of <strong>who can reach whom</strong>.</p>
+<p>And what exactly does a modern mesh VPN do? WireGuard, <a href="https://tailscale.com/" rel="noopener noreferrer" target="_blank">Tailscale</a> or ZeroTier set up a private network where <strong>every machine has a stable, reachable address again</strong> for all the others, with a bonus it never had: the tunnel is encrypted!</p>
+<p>Over that overlay network, <code>ntalkd</code> on UDP 518 and the TCP connection back work again <strong>exactly like in 1983</strong>. The IP the daemon hands the other side is now routable. NAT and the firewall sit below the tunnel. <code>talk</code> has no idea forty years have gone by.</p>
+<p>Now you just need to find a friend curious or geeky enough. Fire up a VPN, start <code>ntalkd</code> and <code>talk</code> to them. You will rediscover how strange and beautiful it is to watch someone type live from the terminal.</p>
+<h2 id="blog-single-content__title--neotalk" class="blog-single__content-title">NeoTalk</h2>
+<p>Another approach: what if we adapt the idea to a modern setting, with a language like Python? I built a quick prototype to see if it was possible, and it is. You can find it in <a href="https://git.andros.dev/andros/neotalk">this repository</a>.</p>
+<p><img alt="Screenshot of NeoTalk, with the contact list and a conversation in bubbles" src="https://img.andros.dev/A_jg333ZJRSWgss3AKaGL_sS-38=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/08/neotalk.png" /></p>
+<p>It keeps the critical parts: <strong>negotiation over UDP</strong> and the <strong>conversation over a direct TCP connection</strong> between the two clients, just like in 1983. But it removes the thorns:</p>
+<ul>
+<li><strong>Graphical interface</strong> with the list of who is online and the conversation in bubbles.</li>
+<li><strong>End-to-end encryption</strong> (X25519 + AES-GCM). Privacy no longer depends on the network, though it pairs beautifully with a VPN.</li>
+<li><strong>Aliases instead of Unix accounts.</strong> Pick whatever name you like; you do not need an account on the other machine.</li>
+<li><strong>Message-based typing.</strong> With a "typing…" indicator, but without exposing every keystroke like the original did.</li>
+<li><strong>Automatic discovery</strong> on the local network and over a VPN (WireGuard, Tailscale…), announcing itself by unicast or by dialing the address directly.</li>
+</ul>
+<p>In the end it is just a very basic P2P chat over IP. It is not trying to compete with anything, but it is a proof of concept to show that the idea behind <code>talk</code> is still great nearly half a century later.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>I hope you have enjoyed this trip through the history of <code>talk</code>. It is still amazing that it stays installed by default on many systems and remains functional in certain setups.</p>
+<p>It is another example of how technology can be incredibly clever and, at the same time, fragile in the face of changes in its environment. But it is not dead for that reason: we have the tools to keep it working if you are interested.</p>
+<p>And if that sparked your curiosity, I ran an experiment: wiring <code>talk</code> to an AI so it answers by typing live. I tell it in <a href="/blog/09a21bdd/i-turned-unix-talk-from-1983-into-the-interface-for-my-ai/">this article</a>.</p>
+<h2 id="blog-single-content__title--sources" class="blog-single__content-title">Sources</h2>
+<p>Every fact in this article comes from these references:</p>
+<ul>
+<li><a href="https://en.wikipedia.org/wiki/Talk_(software)" rel="noopener noreferrer" target="_blank">talk (software)</a> on Wikipedia. History, the arrival in 4.2BSD, ntalk, ytalk and utalk.</li>
+<li><a href="https://man.freebsd.org/cgi/man.cgi?query=talk&amp;sektion=1" rel="noopener noreferrer" target="_blank"><code>talk(1)</code> man page</a> (FreeBSD) and the <a href="https://linux.die.net/man/8/talkd" rel="noopener noreferrer" target="_blank"><code>talkd(8)</code> one</a>. The split-screen behaviour and the daemon.</li>
+<li><a href="https://github.com/weiss/original-bsd/blob/master/share/man/man0/title.urm" rel="noopener noreferrer" target="_blank">BSD reference manual (<code>title.urm</code>)</a>, which credits <code>talk(1)</code> to Clem Cole, Kipp Hickman and Peter Moore.</li>
+<li><a href="https://web.mit.edu/freebsd/head/include/protocols/talkd.h" rel="noopener noreferrer" target="_blank"><code>protocols/talkd.h</code></a>, the BSD header with the <code>CTL_MSG</code> and <code>CTL_RESPONSE</code> structs, the message types and response codes.</li>
+<li><a href="https://cs.columbia.edu/~hgs/internet/talk.html" rel="noopener noreferrer" target="_blank">The talk protocol</a>, Henning Schulzrinne's notes on the rendezvous, the control messages and the byte-order dependency.</li>
+<li><a href="https://docstore.mik.ua/orelly/networking_2ndEd/fire/ch19_03.htm" rel="noopener noreferrer" target="_blank">Building Internet Firewalls</a> (O'Reilly). The UDP-to-negotiate, TCP-to-converse split, and ports 517 and 518.</li>
+<li><a href="https://en.wikipedia.org/wiki/Mesg" rel="noopener noreferrer" target="_blank"><code>mesg</code></a> and <a href="https://en.wikipedia.org/wiki/Wall_(Unix)" rel="noopener noreferrer" target="_blank"><code>wall</code></a> on Wikipedia, for the earlier family of commands.</li>
+<li><a href="https://www.multicians.org/thvv/anhc-34-1-anec.html" rel="noopener noreferrer" target="_blank">The IBM 7094 and CTSS</a>, by Tom Van Vleck, on the CTSS <code>WRITE</code> command in 1965.</li>
+<li><a href="https://en.wikipedia.org/wiki/Jarkko_Oikarinen" rel="noopener noreferrer" target="_blank">Jarkko Oikarinen</a> on Wikipedia and <a href="http://www.irc.org/history_docs/jarkko.html" rel="noopener noreferrer" target="_blank">his own account</a> of the birth of IRC in 1988.</li>
+<li><a href="https://datatracker.ietf.org/doc/html/draft-hunter-talk-00" rel="noopener noreferrer" target="_blank">draft-hunter-talk-00</a>, the (expired) IETF draft documenting the talk protocol.</li>
+<li><a href="https://tailscale.com/" rel="noopener noreferrer" target="_blank">Tailscale</a> and its <a href="https://tailscale.com/compare/zerotier" rel="noopener noreferrer" target="_blank">comparison with ZeroTier</a>, for the overlay, addressable network model that revives <code>talk</code>.</li>
+</ul><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-03a4ffb9@andros.dev" class="link">comment+article-03a4ffb9@andros.dev</a> to leave a comment. The subject will be ignored.</p>

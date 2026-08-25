@@ -1,0 +1,569 @@
+<p>This is an anecdote, not a data point, yet.</p>
+
+<p>I'm a firm believer in functional programming and I consider myself
+  a `mostly functional` programmer.  I use functional programming when
+  I can, but when a side effect is required, I'll use it.  I'm not a
+  purist.</p>
+
+<p>Functional programming is supposed to have a number of advantages
+  over imperative, procedural programming.  The primary advantage is
+  that there are provably no race conditions.  You can trivially scale
+  functional code to multiple threads and multiple processors.  In
+  theory, functional code is easier to reason about and easier to test
+  because each function can be reasoned about and tested in isolation.
+  In practice, functional code can become a maze of thunks and lambdas
+  that many find difficult to read.  Nonetheless, I prefer to reason
+  about tangled lambdas than to reason about tangled state.</p>
+
+<p>I believe that functional code is easier for an LLM to reason about
+  as well.  I haven't proven this, but anecdotally it seems to be the
+  case.  In theory, the LLM would gain all the usual benefits of
+  functional programming.  It would find the code easier to reason
+  about and easier to test.</p>
+
+<p>Unfortunately, the vast majority of code that the LLM has been
+  trained on is imperative, procedural code.  The LLM can write
+  functional code when specifically prompted, but it will default to
+  writing imperative, procedural code.</p>
+
+<p>If you start a vibe coding project <i>ab initio</i>, you'll get a
+  lot of imperative, procedural code, and the LLM will have more and
+  more difficulty reasoning about it as the project grows.  To stop
+  this from happening, I prompt the LLM to refactor the code to be
+  more functional.  I do this fairly early on in the project, once the
+  project starts to show signs of life.</p>
+
+<p>The functional refactoring is a multi-step process and the best way
+  to do it is to prompt the LLM to first create a plan for the
+  refactoring.  I use a prompt something like this:</p>
+
+<blockquote>
+  Make a plan.  We need the code to be refactored to be more
+  functional and to adhere to functional programming principles.
+  Take several steps to refactor the code so that the main interaction
+  path is functional and stateless.  Move the side effects to the
+  edges of the codebase.  Use functional programming techniques such
+  as monads and reactive programming to keep the core of the codebase
+  functional.  Make sure that utility functions are pure and
+  stateless.  Write the plan to a file
+  FUNCTIONAL_REFACTORING.md</blockquote>
+
+<p>The LLM will cogitate for a while and will write a multi-step plan
+  for the refactoring.  Here is the plan that the LLM generated for
+  the jrm-code-project.com web site.</p>
+
+<pre>
+# Functional Refactor Plan for `jrm-code-project`
+
+**Author's lens:** Senior Functional Programming Architect
+**Scope:** `package.lisp`, `csrf.lisp`, `server.lisp`, `auth.lisp`, `billing.lisp`,
+`admin.lisp`, `chef.lisp`, `db-auth.lisp`, `stripe.lisp`, `jwt.lisp`, `totp.lisp`, `ses.lisp`
+**Status:** Complete. Phases 1-8 below have all landed as separate,
+individually-tested commits; the codebase now reflects this plan. The
+phase write-ups are retained as historical design-rationale documentation
+-- comments elsewhere in the codebase that cite "FUNCTIONAL_REFACTOR.md
+Phase N" are pointing at finished work, not an in-progress migration.
+
+---
+
+## 0. Framing
+
+This codebase is a working, well-organized Hunchentoot application (the recent
+file split into `csrf`/`server`/`auth`/`billing`/`admin`/`chef` was a good move
+along the *separation-of-concerns* axis). But every one of those modules is
+written in a straight-line, **imperative-shell-with-no-functional-core** style:
+HTTP handling, session mutation, SQL, third-party HTTP calls, HTML rendering,
+and business rules are all fused into single `DEFUN`s that read the world,
+mutate the world, and print strings, in one undifferentiated breath.
+
+The project already imports `SERIES`, `FOLD`, `FUNCTION` (compose/inverse), and
+`NAMED-LET` &mdash; real functional-programming firepower &mdash; via shadowing imports in
+`package.lisp`. Almost none of it is actually used in the handler code; the
+shadowed `LET`/`DEFUN`/`LET*`/`MULTIPLE-VALUE-BIND` forms are used as drop-in
+replacements for their vanilla CL counterparts, not as a foundation for a
+different *style* of programming. That's the central irony this plan
+addresses: the tools for a functional architecture are already a dependency of
+the system; they're just not driving any design decisions yet.
+
+The plan below does **not** propose rewriting Hunchentoot, Postmodern, or
+Stripe's HTTP API into something pure &mdash; those are unavoidably effectful
+boundaries. It proposes pushing effects to the *edges* (a thin imperative
+shell) and pulling everything else &mdash; validation, view-model construction,
+tier/authorization logic, Stripe payload shaping, HTML rendering &mdash; into a
+**pure, immutable, composable core** that can be unit-tested without a
+database, without Hunchentoot, and without live Stripe credentials.
+
+---
+
+## 1. Anti-Pattern Catalog (current state)
+
+### 1.1 Global mutable state used as an implicit parameter-passing channel
+
+- `*acceptor*` (`server.lisp`) &mdash; mutated by `start-server`/`stop-server`.
+- `*stripe-tier-price-ids*`, `*stripe-tier-product-ids*`, `*stripe-price-id-tiers*`,
+  `*stripe-billing-portal-configuration-id*` (`stripe.lisp`) &mdash; four separate
+  `DEFVAR`s, populated by side-effecting `PUSH` inside `ensure-tier-product`
+  and `ensure-billing-portal-configuration`, and read by unrelated functions
+  (`tier-price-id`, `tier-from-price-id`, `create-billing-portal-session`)
+  scattered throughout the file. This is really *one* piece of "Stripe
+  catalog" data, represented as four uncoordinated globals that must be
+  mutated in lock-step (see `init-stripe-product`, which zeroes all four by
+  hand before repopulating them) &mdash; a classic sign that a single immutable
+  value is trying to escape.
+- Every handler reaches into `hunchentoot:session-value`/`hunchentoot:cookie-in`
+  as ambient dynamic state rather than being handed an explicit `Request`
+  value. E.g. `dashboard-page` (`auth.lisp`) pulls `:authenticated-user` from
+  the session, `challenge-2fa-page` reads/writes `:limbo-email` and
+  `:post-login-redirect` via `setf` in the middle of a rendering branch.
+
+### 1.2 God-functions that fuse I/O, business logic, and presentation
+
+Nearly every `hunchentoot:define-easy-handler` in `auth.lisp`, `billing.lisp`,
+and `admin.lisp` does all of the following in one function body:
+
+1. Read ambient state (session, cookies, POST params).
+2. Validate/branch on it.
+3. Call the database or an external HTTP API (side effect #1).
+4. Mutate session/cookie state (side effect #2).
+5. Build and return an HTML string via nested `FORMAT` calls (presentation).
+
+`dashboard-page` (`auth.lisp`) is the extreme case: ~250 lines mixing tier
+math, JWT issuance (a side effect), a conditional redirect, and a giant
+`FORMAT` template with 20+ interpolation arguments computed inline. There is
+no way to unit-test "what should the dashboard tier grid look like for a
+LAMBDA-tier user with a Stripe customer ID" without spinning up Hunchentoot,
+a session, and a database row.
+
+`stripe-webhook-handler` (`billing.lisp`) mixes signature verification,
+JSON parsing, event-type dispatch, and five different DB-mutation call sites
+in one `COND`, with logging `FORMAT` calls interleaved &mdash; untestable without a
+live (or heavily mocked) Postgres connection and a hand-built JSON fixture.
+
+### 1.3 Stringly-typed, un-composable HTML rendering
+
+Every page is a hand-written `FORMAT nil "&lt;html&gt;...~A...&lt;/html&gt;"` template.
+Consequences:
+
+- No composition: the "vault" card, the "tier grid", and the notification
+  banner in `dashboard-page` cannot be reused or tested independently &mdash; they
+  are inline slices of one giant format string.
+- No enforced escaping discipline: some interpolations go through
+  `hunchentoot:escape-for-html` (e.g. `(hunchentoot:escape-for-html user)`),
+  others don't (e.g. tier-derived CSS class strings, which happen to be safe
+  today only because they come from a fixed internal vocabulary) &mdash; the
+  safety property is not structurally guaranteed, only true by convention and
+  developer discipline.
+- Every handler re-embeds the same `&lt;style&gt;` block or repeats layout
+  boilerplate (`signup-page` and `setup-2fa-page` both hand-roll near-identical
+  `&lt;html&gt;&lt;head&gt;&lt;style&gt;...` wrappers).
+
+### 1.4 Alist-of-keywords as a poor man's record type
+
+`db-auth.lisp`'s `get-user`/`list-users`/`get-user-by-customer` all return
+`postmodern:query ... :alists` rows, and every caller repeats
+`(cdr (assoc :membership-tier user-data))`, `(cdr (assoc :wheel user-data))`,
+etc. &mdash; by grep, this exact shape appears **20+ times** across `auth.lisp`,
+`billing.lisp`, and `admin.lisp`. There is no `USER` type: the "schema" is an
+implicit contract enforced only by every call site independently getting the
+keyword spelling right (`:stripe-subscription-id` vs. a typo would fail
+silently, returning `NIL`, not a compile- or run-time error).
+
+### 1.5 Side-effecting, non-monadic error/control flow
+
+- `csrf.lisp`'s `WITH-CSRF-PROTECTION` macro is a control-flow combinator
+  wearing a syntactic disguise: it's really "if failure, mutate the HTTP
+  return code and short-circuit" &mdash; imperative branching hidden inside a
+  `DEFMACRO`, not a composable value.
+- `jwt.lisp`'s `require-membership-tier`/`require-wheel`/`require-membership-jwt`
+  each *either* return a value *or* perform a side-effecting `REDIRECT` and
+  return `NIL` &mdash; callers are contractually obligated to check for `NIL` and
+  "immediately stop processing" (a convention documented in a comment,
+  not enforced by the type/control-flow system). This is exactly the shape
+  `Either`/`Result`/`Maybe` monadic short-circuiting exists to replace.
+  Compare with e.g. `require-session-wheel` in `admin.lisp`, which duplicates
+  the same "return value or redirect-and-return-nil" shape independently for
+  session-based (not JWT-based) authorization &mdash; the same *pattern* implemented
+  twice, un-abstracted.
+- `stripe-webhook-handler` and `roast-code-with-gemini`/`chef-handler` use
+  `HANDLER-CASE` around large blocks and communicate failure by mutating
+  `hunchentoot:return-code*` and returning an ad hoc string &mdash; errors are
+  effectively `(values nil side-effect)`, not typed outcomes.
+
+### 1.6 Duplicated imperative HTTP-client boilerplate
+
+`stripe.lisp` rebuilds `(stripe-auth-headers secret-key)` and re-checks
+`(and secret-key (not (string= secret-key "")))` in nearly every function
+(`find-existing-tier-product`, `create-tier-product`,
+`ensure-billing-portal-configuration`, `create-stripe-checkout-session`,
+`create-billing-portal-session`, `get-stripe-subscription-tier`,
+`cancel-stripe-subscription-with-prorated-refund`) &mdash; eight independent,
+hand-written guard clauses for what is structurally one precondition
+("do we have Stripe configured") and one authenticated-GET/POST helper.
+Request payloads are built as raw `(cons "key[bracket][path]" "value")` lists
+by hand at each call site (see the billing-portal-configuration content-list
+construction) rather than through a small combinator/DSL that could be unit
+tested for correct shape independent of the network call.
+
+### 1.7 Unused functional idioms already in scope
+
+`package.lisp` imports `SERIES` (lazy, compiler-fused sequence pipelines) and
+`FOLD`, yet the codebase's list processing &mdash; `list-users` pagination,
+`mapcar #'render-member-row members`, `dolist` loops in `db-auth.lisp` and
+`stripe.lisp`, the `LOOP ... COLLECT` in `generate-recovery-codes` &mdash; is all
+plain `CL:LOOP`/`DOLIST`/`MAPCAR` with `SETF`-based accumulation
+(`random-string`'s `(setf (char res i) ...)` loop, `admin-members-page`'s
+imperative pagination math). None of it is wrong CL, but it means the
+project's own stated architectural direction (series/fold-based composition)
+isn't actually load-bearing anywhere yet.
+
+### 1.8 Testing is coupled to live, mutable external state
+
+`recovery-code-verification`, `stripe-database-and-routes`, and
+`user-membership-tiers` (per `tests/tests.lisp` and this repo's own
+documented conventions) require a live Postgres instance and mutate real
+rows. This is a direct consequence of Â§1.2/Â§1.4: because business logic is
+never separated from the DB/HTTP shell, there is no way to test "does
+`tier-meets-minimum-p` correctly rank CADR above CONS" or "does the webhook
+handler correctly map a `customer.subscription.deleted` event to a
+cancellation" without a database in the loop.
+
+---
+
+## 2. Target Architecture
+
+**Functional core, imperative shell**, applied consistently:
+
+```
+&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474; Imperative shell (thin, at the edges only)                   &#9474;
+&#9474;  - Hunchentoot handlers: parse Request, call pure core,      &#9474;
+&#9474;    interpret its pure Response/Effect value, perform I/O.    &#9474;
+&#9474;  - Postmodern calls: translate SQL rows &lt;-&gt; immutable domain &#9474;
+&#9474;    records at the boundary only.                             &#9474;
+&#9474;  - Stripe/Gemini HTTP calls: translate typed request records &#9474;
+&#9474;    &lt;-&gt; typed response records at the boundary only.          &#9474;
+&#9474;  - *ACCEPTOR*, *STRIPE-CATALOG*, cookie/session get/set.      &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+                            &#9474; immutable values only cross this line
+&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9660;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474; Pure functional core (the bulk of new/moved code)             &#9474;
+&#9474;  - Domain records: USER, MEMBERSHIP-CLAIMS, STRIPE-CATALOG,   &#9474;
+&#9474;    CHECKOUT-REQUEST, WEBHOOK-EVENT, VIEW-MODEL, RESULT.       &#9474;
+&#9474;  - Pure decision functions: tier-meets-minimum-p,              &#9474;
+&#9474;    dashboard-view-model, webhook-event-&gt;db-commands,          &#9474;
+&#9474;    checkout-request-&gt;stripe-params, csrf-check, auth-check.   &#9474;
+&#9474;  - Pure rendering functions: view-model -&gt; HTML string.       &#9474;
+&#9474;  - Composable middleware combinators over a Request-&gt;Result   &#9474;
+&#9474;    handler shape.                                              &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;
+```
+
+Key design commitments:
+
+1. **Immutable domain records, not alists-of-keywords.** Every "row" that
+   crosses the DB boundary becomes a `defstruct` (or `defclass` with
+   `:read-only` when the CLOS overhead-per-instance is not a concern) with
+   named, typed accessors &mdash; `user-membership-tier`, `user-wheel-p`, etc. &mdash;
+   constructed once at the DB boundary via a single `row-&gt;user` converter,
+   never re-derived by ad hoc `(cdr (assoc :x row))` at call sites.
+
+2. **Explicit `Result`/`Either`-style outcomes instead of "return NIL and
+   trust the caller to have already redirected."** A tiny `defstruct result`
+   (or reuse of `(values status payload)`, or a proper condition-based
+   approach &mdash; see Phase 6) makes success/failure a first-class value that
+   the *shell* interprets (issue a redirect, render an error page), rather
+   than a side effect the *core* performs mid-computation.
+
+3. **Middleware as composable functions, not macros with inline control
+   flow.** `WITH-CSRF-PROTECTION`, `require-membership-tier`,
+   `require-session-wheel` all collapse into one combinator shape:
+   `(defun wrap-with-csrf (handler) ...)`, `(defun wrap-with-tier (min-tier handler) ...)`,
+   composed via `FUNCTION:COMPOSE` (already a dependency!) at route-definition
+   time, e.g. `(compose (require-tier "CADR") require-login csrf-protected) #'chef-page-core)`.
+
+4. **Pure view-model construction, separated from HTML string rendering,
+   separated from the HTTP handler.** `dashboard-page` becomes: (a) a pure
+   `dashboard-view-model` function (user record + query params -&gt; an
+   immutable `DASHBOARD-VIEW-MODEL` struct), (b) a pure `render-dashboard`
+   function (view-model -&gt; HTML string, independently unit-testable with
+   hand-built view-models and no session/DB at all), and (c) a thin handler
+   that wires the two together and performs the one real side effect
+   (issuing the JWT cookie).
+
+5. **One immutable `Stripe` catalog value, not four mutable globals.**
+   `ensure-tier-product`/`ensure-billing-portal-configuration` become pure
+   functions that *return* an updated `STRIPE-CATALOG` record; `init-stripe-product`
+   becomes the one place that takes the pure result and stores it in a single
+   `*stripe-catalog*` global (still a necessary impurity &mdash; Stripe's actual
+   product IDs are genuinely mutable external state fetched once at startup &mdash;
+   but now it's *one* clearly-labeled impurity instead of four unsynchronized
+   ones).
+
+6. **Lean on `SERIES`/`FOLD` where they fit naturally** (pagination,
+   filtering, tier-ranking, recovery-code generation) so the project's own
+   declared functional dependencies start pulling their weight, without
+   forcing awkward `SERIES` usage onto genuinely imperative I/O loops (the
+   SMTP hand-rolled protocol in `ses.lisp`, for instance, is legitimately
+   sequential/stateful and is *not* a refactor target for series-ification).
+
+---
+
+## 3. Non-Goals
+
+- **Not** rewriting Hunchentoot request handling, Postmodern's connection
+  model, or the raw SMTP-over-TLS code in `ses.lisp` &mdash; these are genuine
+  imperative shells (sockets, connections, OS processes) and should stay
+  imperative, just kept as thin and as clearly bounded as possible.
+- **Not** introducing a heavyweight external templating engine or ORM as a
+  prerequisite &mdash; the plan below builds small in-house combinators sized to
+  this codebase, consistent with its existing dependency footprint
+  (`alexandria`, `fold`, `function`, `series`).
+- **Not** a big-bang rewrite. Every phase below ships independently, keeps
+  `(asdf:test-system :jrm-code-project)` green throughout, and preserves
+  every documented behavior (CSRF exemptions, the `next` breadcrumb, JWT
+  redirect-to-`/` semantics, wheel bootstrap, etc.) verbatim.
+
+---
+
+## 4. Incremental Migration Plan
+
+Each phase is scoped to be its own PR/commit, independently testable, and
+reversible. Phases are ordered so that later phases can build on the domain
+types and combinators introduced earlier ones.
+
+### Phase 1 &mdash; Immutable domain records at the database boundary
+**Files touched:** `db-auth.lisp`, call sites in `auth.lisp`, `billing.lisp`,
+`admin.lisp`.
+
+- Introduce `defstruct (user (:copier nil))` (email, password-hash,
+  totp-secret, auth-state, stripe-customer-id, stripe-subscription-id,
+  subscription-status, membership-tier, wheel-p) plus a single
+  `row-&gt;user` converter used by `get-user`, `get-user-by-customer`, and
+  `list-users`.
+- `get-user`, `list-users`, etc. keep their existing names/call signatures
+  (no handler changes yet) but return `USER` structs instead of alists.
+- Replace every `(cdr (assoc :membership-tier user-data))`-style call site
+  with `(user-membership-tier user-data)`.
+- **Payoff:** typos become compile-time `SLOT-UNBOUND`/undefined-function
+  errors instead of silent `NIL`; this is the least risky phase (pure
+  mechanical substitution) and unblocks everything else.
+- **Tests:** existing FiveAM DB tests continue to pass unchanged (they
+  already exercise these accessors indirectly); add direct unit tests for
+  `row-&gt;user` using a hand-built alist fixture, no DB required.
+
+### Phase 2 &mdash; Extract pure decision logic out of handlers
+**Files touched:** new `tier.lisp` (or fold into `jwt.lisp`), `auth.lisp`,
+`billing.lisp`.
+
+- Move `tier-rank`/`tier-meets-minimum-p` (already pure!) into a dedicated,
+  independently-tested module &mdash; they're the easiest possible first win.
+- Extract the *decision* half of `dashboard-page` into a pure
+  `dashboard-view-model` function: given a `USER`, a `checkout-status`, and a
+  `next` param, return an immutable `DASHBOARD-VIEW-MODEL` struct (tier
+  flags, badge/button HTML fragments *as data*, e.g.
+  `(:active-p t :badge :current :button :manage-subscription)` rather than
+  pre-rendered HTML &mdash; defer string rendering to Phase 5).
+- Extract the *decision* half of `stripe-webhook-handler`'s event dispatch
+  into a pure `webhook-event-&gt;db-commands` function: given the decoded JSON
+  alist, return a list of *data* describing what should happen (e.g.
+  `(:update-subscription :email ... :tier ...)`), with a thin imperative
+  loop in the handler that executes each command against `jrm-auth:*`.
+- **Payoff:** these pure functions get direct FiveAM unit tests with
+  hand-built fixtures &mdash; no Postgres, no Hunchentoot, no live Stripe webhook
+  payloads needed to verify "a `customer.subscription.deleted` event
+  produces a cancel command for the right user."
+
+### Phase 3 &mdash; Composable middleware combinators
+**Files touched:** `csrf.lisp`, `jwt.lisp`, `admin.lisp`.
+
+- Replace `WITH-CSRF-PROTECTION` (macro) with a higher-order function
+  `wrap-csrf-protected` that takes a zero-argument thunk (or, once Phase 4
+  handler shape lands, a `Request -&gt; Result` handler) and returns a value
+  representing either "proceed" or "403 forbidden" &mdash; usable both as today's
+  macro (thin `defmacro with-csrf-protection (&amp;body body) `(funcall
+  (wrap-csrf-protected (lambda () ,@body)))`, preserving all call sites) *and*
+  directly composable with `FUNCTION:COMPOSE` for new code.
+- Unify `require-membership-tier`, `require-wheel`, and `admin.lisp`'s
+  hand-rolled `require-session-wheel` behind one combinator shape:
+  `(defun require (predicate on-failure) ...)`, parameterized by *what* to
+  check (JWT tier, session wheel bit) and *what to do on failure*
+  (redirect-to-login vs. redirect-to-dashboard vs. redirect-to-upgrade),
+  eliminating the duplicated "return value or side-effecting-redirect-and-nil"
+  pattern called out in Â§1.5.
+- **Payoff:** one audited implementation of "check X, else redirect Y" instead
+  of three ad hoc ones; new protected routes become one line of composition
+  instead of copy-pasted boilerplate.
+
+### Phase 4 &mdash; Consolidate Stripe catalog state into one immutable value
+**Files touched:** `stripe.lisp`.
+
+- Introduce `(defstruct stripe-catalog tier-price-ids tier-product-ids
+  price-id-tiers billing-portal-configuration-id)`.
+- Rewrite `ensure-tier-product`, `ensure-billing-portal-configuration`, and
+  `init-stripe-product` as pure functions of `(catalog, ...) -&gt; new-catalog`
+  (the actual Stripe HTTP calls remain side effects, but the *bookkeeping*
+  that today happens via four `PUSH`es across two functions becomes one
+  `(defun catalog-with-tier (catalog tier price-id product-id) ...)`
+  returning a fresh struct).
+- `*stripe-tier-price-ids*` etc. collapse into a single `*stripe-catalog*`
+  global, set once by `init-stripe-product`, read via small accessor
+  functions (`tier-price-id`, `tier-from-price-id`) that close over it &mdash;
+  same call-site API, one source of truth underneath.
+- Extract the repeated `(and secret-key (not (string= secret-key "")))`
+  guard and `stripe-auth-headers` construction into a single
+  `with-stripe-credentials (headers) ...` macro/combinator so the eight
+  duplicated guard clauses in Â§1.6 collapse to one.
+- **Payoff:** `init-stripe-product`'s "zero all four, then repopulate" dance
+  disappears; the catalog can never be observed half-updated.
+
+### Phase 5 &mdash; Pure, composable HTML rendering
+**Files touched:** new `views.lisp`, `auth.lisp`, `billing.lisp`, `admin.lisp`.
+
+- Introduce small rendering combinators: `(html-page title body-html)`,
+  `(html-form action fields &amp;key csrf-token)`, `(html-notification kind text)`
+  &mdash; pure string -&gt; string functions, each independently testable.
+- Rewrite the Phase-2 `DASHBOARD-VIEW-MODEL` -&gt; HTML as a pure
+  `render-dashboard` function built from the above combinators; the
+  `dashboard-page` handler shrinks to "build view-model, issue JWT cookie,
+  call `render-dashboard`."
+- Apply the same pattern to `admin-members-page`/`render-member-row` (already
+  half-decomposed &mdash; `render-member-row` is already a pure function of a
+  `USER`; formalize it as `(user -&gt; html)` operating on the Phase-1 struct)
+  and to the repeated signup/2FA/login page chrome.
+- Standardize escaping: every interpolated *user-controlled* value flows
+  through one `(html-escape value)` combinator used *inside* the rendering
+  combinators themselves, so escaping is structurally guaranteed rather than
+  convention-dependent (closes the gap in Â§1.3).
+- **Payoff:** view logic becomes unit-testable ("does a LAMBDA-tier user
+  with no Stripe customer ID render a disabled CONS button and an active
+  LAMBDA badge?") without any I/O; duplicated page chrome collapses to one
+  `html-page` call per handler.
+
+### Phase 6 &mdash; Explicit outcome values for error handling
+**Files touched:** `billing.lisp` (webhook + checkout), `chef.lisp` (Gemini
+call), `stripe.lisp`.
+
+- Introduce a minimal `(defstruct (result (:constructor ok (value)))
+  value)` / `(defstruct (failure (:constructor err (reason))) reason)` pair
+  (or a tagged `(cons :ok value)` / `(cons :error reason)` if a full struct
+  is overkill) used by `roast-code-with-gemini`, `create-stripe-checkout-session`,
+  and the webhook command interpreter from Phase 2.
+- Handlers interpret the `RESULT`/`FAILURE` value at the shell boundary
+  (mutate `return-code*`, pick the right error string) &mdash; the pure/impure
+  split becomes: *pure code computes an outcome value; only the handler
+  performs the HTTP-visible side effect of reporting it.*
+- **Payoff:** `stripe-webhook-handler`'s `HANDLER-CASE`-wrapped cascade of
+  five DB mutations becomes: compute a list of typed commands (Phase 2),
+  execute them, collect any resulting `FAILURE`s, report once &mdash; testable end
+  to end by mocking the command-execution step.
+
+### Phase 7 &mdash; Lean on `SERIES`/`FOLD` for sequence-shaped logic
+**Files touched:** `db-auth.lisp`, `admin.lisp`, `stripe.lisp`.
+
+- `admin-members-page`'s pagination math (`offset`, `total-pages`,
+  `has-prev`/`has-next`) and `random-string`'s character-by-character
+  `SETF` loop are natural, low-risk candidates for `SERIES`-based rewrites
+  once the surrounding data is already immutable (Phases 1 and 5).
+- `generate-recovery-codes`'s `LOOP REPEAT 10 COLLECT ...` and the
+  `dolist`-based Stripe tier-plan initialization in `init-stripe-product`
+  are good `FOLD`/`SERIES` candidates once Phase 4 makes the underlying
+  state immutable.
+- Treat this phase as *opportunistic polish*, not a hard requirement &mdash; the
+  goal is internal consistency with the project's declared dependencies, not
+  a mandate to force every loop into `SERIES` syntax.
+
+### Phase 8 &mdash; Test suite rebalancing
+**Files touched:** `tests/tests.lisp`.
+
+- Once Phases 1-6 land, add a large batch of **pure unit tests** requiring no
+  Postgres/Stripe/Hunchentoot: `row-&gt;user`, `tier-meets-minimum-p`,
+  `dashboard-view-model`, `webhook-event-&gt;db-commands`, `render-dashboard`,
+  `catalog-with-tier`, the CSRF/tier middleware combinators.
+- Keep the existing live-Postgres tests (`recovery-code-verification`,
+  `stripe-database-and-routes`, `user-membership-tiers`) as the *thin*
+  integration-test layer that only needs to verify the imperative shell
+  correctly wires pure functions to real I/O &mdash; their scope should shrink
+  over time as more logic moves into directly-tested pure functions.
+- **Payoff:** CI/local runs that don't have Postgres available can still
+  exercise the majority of the codebase's actual logic; the live-DB tests
+  become a smaller, more focused confirmation layer instead of the primary
+  way anything gets tested.
+
+---
+
+## 5. Sequencing & Risk Notes
+
+- Phases are ordered by **increasing dependency on prior phases**, not by
+  file. Do not skip Phase 1 &mdash; every later phase assumes `USER` (and later
+  `STRIPE-CATALOG`) structs exist, so alist-accessor call sites should be
+  fully migrated before Phase 2 work begins on the same files.
+- Each phase should land as its own commit/PR with `(asdf:test-system
+  :jrm-code-project)` green before and after &mdash; this plan is explicitly
+  incremental so the app is deployable after every single phase.
+- No phase changes an HTTP-visible behavior (routes, redirects, cookie
+  names/lifetimes, CSRF exemption list, the `next` breadcrumb contract, or
+  JWT-missing-redirects-to-`/` semantics) &mdash; those are refactors of
+  *implementation*, not of *behavior*. Any phase whose diff would change
+  observable behavior should be split so the behavior change is its own,
+  separately-reviewed commit.
+- `ses.lisp`'s hand-rolled SMTP client is explicitly out of scope (Â§3) &mdash;
+  it's a sequential protocol state machine talking to a raw socket, not a
+  data-transformation pipeline, and forcing it into this plan's shape would
+  fight the grain of what it actually is.
+
+---
+
+## 6. Definition of Done
+
+The refactor is "complete" (per phase, and overall) when:
+
+1. No handler function directly calls Postmodern, Stripe's HTTP API, or
+   builds a final HTML response string in the same function body that also
+   makes the authorization/business decision &mdash; each of those three concerns
+   is a separately named, separately testable function.
+2. No `(cdr (assoc :keyword row))` pattern remains outside the Phase-1
+   `row-&gt;*` converter functions.
+3. Every cross-cutting concern (CSRF, session auth, JWT tier-gating,
+   wheel-gating) is expressed as a composable function over a handler, with
+   exactly one implementation per concern (no duplicated
+   `require-session-wheel`-style reimplementations).
+4. Stripe's in-memory catalog is one immutable value with one owning
+   global, not four independently-mutated globals.
+5. A newly-added contributor can run the pure-function unit tests (Phase 8)
+   with zero external services configured and still exercise the majority of
+   the application's actual decision logic.
+</pre>
+
+<p>As you can see, this is a very detailed and serious plan.  Come to
+think about it, I should have done the functional refactor sooner so
+that it would not have needed such an extensive plan.</p>
+
+<p>Once the plan is written, I prompt the LLM to implement each phase
+of the plan in turn.  The prompt is straightforward: <i>Read
+FUNCTIONAL_REFACTORING.md and implement the next phase of the
+Incremental Migration plan.</i>  I use this prompt over and over until
+all the phases have been implemented.  I monitor the progress of the
+LLM to make sure it is not getting lost in the weeds.</p>
+
+<p>Functional refactoring is expensive.  It chews through a ton of
+tokens, and it may seem like a waste because if it is done correctly,
+the code will behave exactly the same as it did before the
+refactoring.  I have done a functional refactoring on most of my vibe
+coding projects and I have been pleased with the results.  The
+generated code is surprisingly good, and subsequent `vibing` seems to
+be quite easy for the LLM.</p>
+
+<p>Once the functional refactoring is complete, the LLM will tend to
+write future code in a more functional style.  It is a pattern
+matcher, so if it sees functional patterns, it will tend to mimic
+them.  But imperative code will creep back in over time because the
+LLM is so heavily trained on imperative code.  I have found that
+occasionally prompting the LLM to refactor the code to be more
+functional is useful.  Subsequent functional refactorings are much
+easier than the first functional refactoring because the core code is
+already functional and large refactorings are not needed.</p>
+
+<p>If you are not a functional programmer, I expect that you will find
+this to be a massive waste of time with a lot of code churn.  But if
+you are a functional programmer, I bet you'll be pleased with the
+results - I have been.</p>

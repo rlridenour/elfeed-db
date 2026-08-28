@@ -1,0 +1,72 @@
+
+<p class="wp-block-paragraph">As an Emacs configuration grows, startup time can gradually increase. Measuring that increase accurately makes it easier to identify regressions. The majority of Emacs users use <code>emacs-init-time</code>. However, this built-in function does not measure all the work performed during startup.</p>
+
+
+
+<p class="wp-block-paragraph">Emacs startup proceeds through several stages: it loads the early init and regular init files, processes command-line options, sets <code>after-init-time</code>, runs <code>emacs-startup-hook</code>, performs additional initial-frame setup such as applying frame parameters from the configuration, and then runs <code>window-setup-hook</code> after the initial frame parameters have been configured. This makes <code>window-setup-hook</code> a useful place to record a broader startup-time measurement.</p>
+
+
+
+<p class="wp-block-paragraph">For a more accurate startup-time measurement, add the following Emacs Lisp code to <code>early-init.el</code> or <code>init.el</code>:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Emacs startup proceeds through several stages: it loads the early init and</span>
+<span class="hljs-comment">;; regular init files, processes command-line options, sets after-init-time,</span>
+<span class="hljs-comment">;; runs emacs-startup-hook, performs additional initial-frame setup such as</span>
+<span class="hljs-comment">;; applying frame parameters from the configuration, and then runs</span>
+<span class="hljs-comment">;; window-setup-hook after the initial frame parameters have been configured.</span>
+<span class="hljs-comment">;; This makes window-setup-hook a useful place to record a broader startup-time</span>
+<span class="hljs-comment">;; measurement.</span>
+<span class="hljs-comment">;;</span>
+<span class="hljs-comment">;; URL: https://www.jamescherti.com/measuring-emacs-startup-time/</span>
+(<span class="hljs-name">defvar</span> my-recorded-startup-time-message <span class="hljs-literal">nil</span>
+  <span class="hljs-string">"Stores the formatted string of the Emacs startup metrics."</span>)
+
+(<span class="hljs-name">defun</span> my-record-startup-time ()
+  <span class="hljs-string">"Calculate and record the elapsed startup time.
+This function records the time when `window-setup-hook' runs."</span>
+  (<span class="hljs-name">setq</span> my-recorded-startup-time-message
+        (<span class="hljs-name">format</span> <span class="hljs-string">"Emacs loaded in %.2f seconds (Init time: %.2fs) with %d garbage collections."</span>
+                (<span class="hljs-name">float-time</span> (<span class="hljs-name">time-since</span> before-init-time))
+                (<span class="hljs-name">float-time</span> (<span class="hljs-name">time-subtract</span> after-init-time before-init-time))
+                gcs-done))
+  <span class="hljs-comment">;; Output to the *Messages* buffer during the initial launch</span>
+  (<span class="hljs-name">message</span> <span class="hljs-string">"%s"</span> my-recorded-startup-time-message))
+
+(<span class="hljs-name">defun</span> my-display-startup-time ()
+  <span class="hljs-string">"Display the previously recorded Emacs startup time in the echo area."</span>
+  (<span class="hljs-name">interactive</span>)
+  (<span class="hljs-name">if</span> my-recorded-startup-time-message
+      (<span class="hljs-name">message</span> <span class="hljs-string">"%s"</span> my-recorded-startup-time-message)
+    (<span class="hljs-name">message</span> <span class="hljs-string">"Startup time was not recorded."</span>)))
+
+<span class="hljs-comment">;; Read startup summary:</span>
+<span class="hljs-comment">;; https://www.gnu.org/software/emacs/manual/html_node/elisp/Startup-Summary.html</span>
+(<span class="hljs-name">add-hook</span> 'window-setup-hook #'my-record-startup-time <span class="hljs-number">99</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">This provides a broader measurement than <code>M-x emacs-init-time</code> because it continues measuring after <code>after-init-time</code> has been set, including subsequent startup processing through <code>window-setup-hook</code>.</p>
+
+
+
+<p class="wp-block-paragraph">A depth of 99 places the function near the end of <code>window-setup-hook</code>. This makes the measurement less likely to omit work performed by other functions on the same hook.</p>
+
+
+
+<p class="wp-block-paragraph">The variable <code>gcs-done</code> tracks the total number of garbage collections during the session. Because this function formats and saves the message string during <code>window-setup-hook</code>, it locks in the exact number of garbage collections triggered during the startup phase, giving you a metric of memory allocation bottlenecks during initialization. Ideally, it should be 0 or 1.</p>
+
+
+
+<p class="wp-block-paragraph">Capturing the time the UI finishes rendering provides a reliable metric to track down performance regressions. Once Emacs has finished loading, you can retrieve the recorded startup time at any point during your session. Execute <code>M-x my-display-startup-time</code> to print the exact initialization metrics in the echo area. This interactive command ensures the startup data remains accessible even if the initial message is cleared from the screen by subsequent buffer activity.</p>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-evil-mode-restore-line-column-mark/" rel="bookmark" title="Emacs Evil Mode: How to restore both the line and column number of a mark, not just the line number">Emacs Evil Mode: How to restore both the line and column number of a mark, not just the line number</a></li>
+<li><a href="https://www.jamescherti.com/emacs-highlight-keywords-like-todo-fixme-note/" rel="bookmark" title="Emacs: Highlighting Codetags Like TODO, FIXME, BUG, NOTE...">Emacs: Highlighting Codetags Like TODO, FIXME, BUG, NOTE...</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/essential-emacs-packages/" rel="bookmark" title="Must-have Emacs Packages for Efficient Software Development and Text Editing">Must-have Emacs Packages for Efficient Software Development and Text Editing</a></li>
+<li><a href="https://www.jamescherti.com/emacs-quick-fasd/" rel="bookmark" title="quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs">quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs</a></li>
+</ol>
+</div>

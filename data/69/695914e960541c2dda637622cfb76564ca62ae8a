@@ -1,0 +1,296 @@
+<p>Let's do a software engineering exercise. Our goal is to build a bulletin board. A place where anyone can post an ad, a note, a message, with no account and no sign-up. Some old hands already know I mean a BBS without registration, others will picture something like X or Mastodon. It sits somewhere in between. Let's carry on.</p>
+<p>We add a new requirement: I don't want it to depend on a single server. Each person can run their own instance to publish, or publish on someone else's instance. It makes no difference to the end result. Every reader, no matter which server they check, will end up seeing the same notes in the same order. We just opened the box of decentralization.</p>
+<p>Now the servers have to coordinate. If every board is a copy of the whole list, and anyone can write on any board, theirs or someone else's, how on earth do they all agree on which ads exist? That is the heart of this article.</p>
+<p>Let me give you a spoiler: by the time we finish, we will have accidentally reinvented two technologies that already existed: FidoNet (1984) and Nostr, with its negentropy sync (2023). But let's not get ahead of ourselves.</p>
+<p>Let's set some limits to narrow the problem down and learn what interests us.</p>
+<h2 id="blog-single-content__title--the-rules-of-the-game" class="blog-single__content-title">The rules of the game</h2>
+<p>The features that define our board:</p>
+<ul>
+<li>There will be a single board shared across all servers: no topics, no sections.</li>
+<li>Each node keeps a full copy of the board.</li>
+<li>Everything is public: no login, no sign-up, no passwords, no authentication. You show up, you write, you pin your ad, done.</li>
+<li>A reply is just another ad: if Bob wants to answer Ana's ad, he posts a new ad that points to hers. Some hang off others, but deep down they are the same thing.</li>
+</ul>
+<p>So a board is a <strong>list of ads</strong>. And syncing two nodes means getting both to hold the same list.</p>
+<p>In maths that is called a set, and agreeing on a set is called <em>reconciliation</em>. Remember the terms, because I'll keep using them.</p>
+<h2 id="blog-single-content__title--first-attempt-send-me-everything" class="blog-single__content-title">First attempt: send me everything</h2>
+<p>Ana brings up her node. Bob brings up his. Each has their own ads. Let's sync them.</p>
+<p>The obvious approach would be this: Ana sends Bob her entire list of ads, Bob compares it with his own and keeps the ones he was missing. Then the other way around. And that's it. Solved. Believe it or not, this works. It is the simplest way to reconcile sets: exchange everything and drop the duplicates. However, it is extremely inefficient.</p>
+<p>Imagine the two of them have 1,000,000 ads and differ in only 3. With this method, Ana sends a million lines to find out that Bob already had 999,997 of them right. You moved an entire house to discover only three bricks were missing.</p>
+<p>Now picture doing this every few minutes to stay up to date. A million lines every time! It is unsustainable, slow and expensive.</p>
+<p>Let's change strategy: the cost of syncing should be proportional to <strong>how much the two boards differ</strong>, not to how big they are. In other words, if both nodes have 1,000,000 ads and differ in only 3, then only 3 ads should move.</p>
+<p>But first we need to solve a previous problem.</p>
+<h2 id="blog-single-content__title--how-do-we-know-we-already-have-the-same-ad" class="blog-single__content-title">How do we know we already have the same ad?</h2>
+<p>When Ana and Bob compare their ads, how do they know if two of them are the same? The first thing that comes to mind is to compare letter by letter. But that is fragile. A single extra space, a different line break, and the ad looks like another one.</p>
+<p>The solution is to give each ad an identifier that comes from its own content. You run the text through a hash function (a fixed-length summary, like SHA-256) and that summary <strong>is</strong> its identifier.</p>
+<p>For example, the ad:</p>
+<pre class="highlight"><code class="language-none">ad:  "Selling bike, reach me at Ana's node"
+id:  3f9a...c17</code></pre>
+<p>You can compute it with a simple terminal command:</p>
+<pre class="highlight"><code class="language-bash">echo -n "Selling bike, reach me at Ana's node" | sha256sum</code></pre>
+<p>And here is the good part. Two ads with the same content have the same identifier, always, on any node, without coordinating. And two different ads have different identifiers. The identifier is assigned by the content, not by some central authoritative node or anything like that.</p>
+<p>This is called <em>content addressing</em>.</p>
+<p>And that's not all. It has other useful properties:</p>
+<ul>
+<li><strong>Duplicate detection</strong>: if the same ad reaches Bob twice, along two different paths, both carry the same <code>id</code>. He keeps one and drops the other. Without thinking.</li>
+<li><strong>An order</strong>: a hash is really just a huge number. That <code>3f9a...c17</code> is in hexadecimal, but underneath it is a figure, so the <code>id</code>s can be sorted from smallest to largest.</li>
+</ul>
+<p>And a sorted set will come in very handy for reconciliation.</p>
+<h2 id="blog-single-content__title--telling-the-neighbors" class="blog-single__content-title">Telling the neighbors</h2>
+<p>Let's go back to syncing, but thinking in terms of a network, not two lone nodes.</p>
+<p>When someone pins an ad on Ana's node, the natural thing is for Ana to pass it to the nodes she knows. Those pass it to theirs. And so the ad spreads across the whole network, hopping from neighbor to neighbor, like a rumor. This technique is called <em>flood-fill</em>, flooding. Many peer-to-peer networks use it to spread information with no central node, but it has a design flaw: if the network grows a lot, the information can get stuck in a loop.</p>
+<p>For example, Ana tells Bob, Bob tells Carla, Carla tells Ana again... and the ad goes around forever.</p>
+<p>Here content addressing already saves us halfway: since the <code>id</code> is the same, when the ad comes back to Ana she recognizes it and does not resend it. But we can do better and not send things we know the other one already has.</p>
+<p>The classic trick is to write down, next to each ad, which nodes it has already passed through. A "seen by" list. Before sending an ad to Carla, I check whether Carla is already in its "seen by" list. If she is, I save myself the trouble. It is exactly what FidoNet did in the eighties with its <code>SEEN-BY</code> field, and Usenet with the <code>Path</code> and <code>Message-ID</code> headers.</p>
+<blockquote>
+<p>FidoNet is a network of BBSes from the 80s that synced in the middle of the night, when phone calls were cheap.</p>
+</blockquote>
+<p>Another technique, complementary or alternative, is to have a hop limit. If an ad has passed through N nodes, I stop resending it. For example, the Meshtastic network uses a hop limit, recommended at 3, together with the "seen by" list.</p>
+<p>Even so, flooding takes for granted something that is not realistic: that all nodes are connected and listening at the exact moment the ad goes by.</p>
+<h2 id="blog-single-content__title--if-you-werent-there-you-miss-it" class="blog-single__content-title">If you weren't there, you miss it</h2>
+<p>Flooding has a big flaw: it only works if you are listening at the right moment. What if your node was off when the rumor went by? Then you never find out. The ad passed by and nobody is going to offer it to you again.</p>
+<p>We need something more robust. Instead of living in the stream, we need a reconciliation mechanism: when two nodes meet, they compare what they have and catch up. Whenever that happens, no matter how old their ads are, even if you have been offline for a month.</p>
+<p>We are back to the first problem: how do we compare without sending each other the whole board?</p>
+<h2 id="blog-single-content__title--comparing-summaries-the-merkle-tree" class="blog-single__content-title">Comparing summaries: the Merkle tree</h2>
+<p>Let's bring back the hash function that told us whether two ads are equal.</p>
+<p>Instead of sending the ads, Ana and Bob send a <strong>summary</strong> of their ads. A single hash that represents <em>all</em> of their board. If both summaries match, they have exactly the same list. Done. That way only a single message is sent, one that says: "we have the same thing, nothing to do".</p>
+<p>And if they don't match... the rock and roll begins.</p>
+<p>The classic way to look without checking everything is a <em>Merkle tree</em>. You take your ads, group them, hash each group, then hash the hashes, and so on until you reach a single hash at the very top: the root. You compare roots. If they differ, you go down the branches whose hashes don't match, and ignore the ones that do. You corner the difference.</p>
+<p>For example, suppose Ana and Bob have these ads:</p>
+<pre class="highlight"><code class="language-none">Ana: {3, 8, 15, 16, 23, 42, 55, 60}
+Bob: {3, 8, 15, 16, 23, 42, 55, 99}</code></pre>
+<p>We group them in pairs, hash each group, then hash those hashes, and so on up to the root:</p>
+<pre class="mermaid">flowchart TD
+    Root["ROOT = hash(Left, Right)"] --> L["Left = hash(A, B)"]
+    Root --> R["Right = hash(C, D)"]
+    L --> A["A = hash(3, 8)"]
+    L --> B["B = hash(15, 16)"]
+    R --> C["C = hash(23, 42)"]
+    R --> D["D = hash(55, 60)"]</pre>
+<p>Ana and Bob have the same tree except at leaf D: Ana holds 60 and Bob holds 99. They agree like this:</p>
+<ol>
+<li>They compare roots. Different, there is a difference somewhere.</li>
+<li>They go down a level. The Left branch matches on both, so they prune it whole: half the list discarded in one shot.</li>
+<li>The Right branch does not match. They keep going down. Inside, C matches and D does not.</li>
+</ol>
+<p>In four comparisons they have cornered the difference down to group D, without looking at the rest of the board. Exactly what we wanted: compare summaries and go down only where things don't add up.</p>
+<p>Fun fact for the nerds: this is what Cassandra or Amazon's Dynamo use to keep their replicas in check.</p>
+<p>It is almost perfect. It just has 2 limitations:</p>
+<ul>
+<li>The tree has a fixed shape. To compare level with level, both nodes must have chopped up their ads exactly the same way, into the same groups. You don't decide on the fly where to look, the structure is decided in advance.</li>
+<li>The tree's leaves are fixed-size buckets. If a bucket doesn't match, they send you the whole bucket, even if only one ad inside it changed. The tree takes you to the box, not to the ad.</li>
+</ul>
+<p>These are subtle limitations, but they can turn huge under heavy traffic.</p>
+<p>Luckily, 2023 brought us a solution.</p>
+<h2 id="blog-single-content__title--the-evolution-range-based-reconciliation" class="blog-single__content-title">The evolution: range-based reconciliation</h2>
+<p>The idea is called <em>range-based set reconciliation</em>. You'll be surprised how simple and elegant it is.</p>
+<p>To start with, there is no tree. It is 2 ideas working together: fingerprints and binary search.</p>
+<p>First, a <strong>fingerprint</strong> is a hash that summarizes all the ads in a range. A range is a stretch of the sorted list, for example "all ads whose <code>id</code> runs from 3 to 60". If the fingerprint of a range matches on both nodes, that stretch is synced and there is no need to look inside.</p>
+<p>The simplest way to compute the fingerprint is to take the <code>id</code>s of all the ads in the range and combine them with an operation that does not depend on order, like adding them up or XOR-ing them.</p>
+<p>That has two advantages:</p>
+<ul>
+<li>Two nodes with the same ads get the same fingerprint even if they store them in a different order.</li>
+<li>It can be recomposed in chunks: the fingerprint of a big range comes from joining those of its halves, without recomputing anything.</li>
+</ul>
+<p>In a real system you use something more robust than a sum, so that nobody can craft two different sets with the same fingerprint, but the idea is exactly that.</p>
+<p>And second: if the fingerprints of a range don't match, <strong>I split the range in half</strong> and repeat on each half.</p>
+<p>That's it. It is a binary search over the difference.</p>
+<p>The whole algorithm fits in a handful of lines:</p>
+<pre class="highlight"><code class="language-python">def reconcile(range):
+    if my_fingerprint(range) == other_fingerprint(range):
+        return                        # equal: nothing to do
+    if few_items(range):
+        exchange_ads(range)           # cheap now: just send them
+        return
+    left, right = split(range)        # split the range in half
+    reconcile(left)                   # and repeat on each part
+    reconcile(right)</code></pre>
+<p>Three cases and no more. If the fingerprints match, you stay quiet. If the range is already small, you send the ads directly. And if not, you split in half and go down each side. The recursion switches itself off on the branches that match and only digs where there are real differences.</p>
+<p>Let's go with an example.</p>
+<p>Remember that an ad's <code>id</code> is a hash, that is, a huge number, so sorting the ads by their <code>id</code> makes total sense. Here I draw them as small numbers so it reads easily. Ana's board and Bob's are almost identical, they only differ in the last one:</p>
+<pre class="highlight"><code class="language-none">Ana: {3, 8, 15, 16, 23, 42, 55, 60}
+Bob: {3, 8, 15, 16, 23, 42, 55, 99}</code></pre>
+<p>Watch how they agree:</p>
+<pre class="mermaid">flowchart TD
+    R["Whole board<br/>Ana's fingerprint ≠ Bob's fingerprint"] --> L["Left half: {3,8,15,16}<br/>fingerprints MATCH, we stop here"]
+    R --> D["Right half: {23,42,55,...}<br/>fingerprints differ, we keep going"]
+    D --> DL["{23,42}<br/>fingerprints MATCH, we stop"]
+    D --> DR["{55, last}<br/>fingerprints differ, we keep going"]
+    DR --> DRL["{55}<br/>MATCH"]
+    DR --> DRR["{60} on Ana vs {99} on Bob<br/>tiny range: the ads are exchanged"]</pre>
+<ol>
+<li>Ana sends <strong>a single fingerprint</strong> of her whole board. Bob compares it with his. They don't match, there is a difference.</li>
+<li>They split in half. The left half, <code>{3,8,15,16}</code>, gives the same fingerprint on both. <strong>With a single comparison, half the list is discarded.</strong> Nothing more is looked at there.</li>
+<li>The right half doesn't match. It is split again. <code>{23,42}</code> matches, out. The other chunk doesn't.</li>
+<li>It keeps splitting until the range is so small that summarizing no longer pays off. Ana sends <code>60</code>, Bob sends <code>99</code>, and the two converge.</li>
+</ol>
+<p>Count the messages, it's a handful of fingerprints and two ads! Instead of the eight lines of the dumb method.</p>
+<p>With eight elements it is not impressive. But give it a million ads that differ in a single one. Range-based reconciliation finds it in about twenty comparisons, the logarithm of the size, instead of sending a million lines.</p>
+<p>This holds as long as the differences are few. The more there are, the more branches you have to open. But you never pay for what you already have in common. It is very efficient.</p>
+<p>Traffic stops depending on how big the board is and starts depending only on <strong>how much the two of them differ</strong>. We have already solved the syncing problem.</p>
+<p>And look at everything we have gained over the Merkle tree:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th></th>
+<th>Merkle tree</th>
+<th>Range-based reconciliation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Partition</td>
+<td>Fixed, identical on both nodes</td>
+<td>On the fly, where the differences are</td>
+</tr>
+<tr>
+<td>Summaries</td>
+<td>The tree, down to a certain depth</td>
+<td>On the fly, only in the ranges you visit</td>
+</tr>
+<tr>
+<td>What it ends up transferring</td>
+<td>The whole bucket that doesn't match</td>
+<td>The exact ad that differs</td>
+</tr>
+<tr>
+<td>What they must share</td>
+<td>The shape of the tree</td>
+<td>Only the order of the elements</td>
+</tr>
+</tbody>
+</table>
+</div><p>It is true that there are modern Merkle trees that dodge part of this: <em>Merkle Search Trees</em> and <em>Prolly Trees</em>. Their shape is derived from the content, so two replicas with the same ads reach the same tree no matter what order they received them in. They are great, and Bluesky actually uses them for its repositories. Still, they remain a tree you have to build and load. It is a design problem you can only ease, not remove.</p>
+<p>For the record, reconciling sets over a network was not invented yesterday, there is work going back to the 2000s (Minsky and company). What the range-based approach that Aljoscha Meyer formalized (2022-2023) brings is a generic version, practical and easy to implement. And it is not chalkboard theory: the <a href="https://willowprotocol.org/" rel="noopener noreferrer" target="_blank">Willow protocol</a> uses it to sync decentralized data, and <a href="https://www.iroh.computer/" rel="noopener noreferrer" target="_blank">Iroh</a> brings it to Rust in its documents layer, iroh-docs, to sync devices directly. It is some of the most interesting work being built in syncing today.</p>
+<h2 id="blog-single-content__title--wait-a-second-i-just-reinvented-fidonet" class="blog-single__content-title">Wait a second: I just reinvented FidoNet</h2>
+<p>Look back at what we have built. Many equal nodes. Each with its copy of the board. Ads identified by their content so they don't duplicate. A "seen by" field to avoid sending the same thing twice. Syncing every now and then to catch up.</p>
+<p>That is FidoNet, literally. The BBS network that Tom Jennings started in 1984 did exactly this. They solved the decentralized board problem forty years ago, with modems and in the dark.</p>
+<p>We have not invented anything new. We have polished something that was already good.</p>
+<h2 id="blog-single-content__title--prototyping-the-endpoints" class="blog-single__content-title">Prototyping the endpoints</h2>
+<p>Without writing the code, this is what the API would look like.</p>
+<p>For people, to publish and read:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/ads</code></td>
+<td>Publish: you send the text, the node returns its <code>id</code></td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/ads</code></td>
+<td>List the board</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/ads/{id}</code></td>
+<td>Read a single ad</td>
+</tr>
+</tbody>
+</table>
+</div><p>Publishing is sending the text and getting back the <code>id</code> the node computed:</p>
+<pre class="highlight"><code class="language-none">POST /ads
+Content-Type: text/plain
+
+Selling bike, reach me at Ana's node</code></pre>
+<pre class="highlight"><code class="language-json">{ "id": "3f9a...c17" }</code></pre>
+<p>And reading an ad returns its text along with the <code>id</code>:</p>
+<pre class="highlight"><code class="language-none">GET /ads/3f9a...c17</code></pre>
+<pre class="highlight"><code class="language-json">{ "id": "3f9a...c17", "text": "Selling bike, reach me at Ana's node" }</code></pre>
+<p>Between nodes, to sync:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Route</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/reconcile</code></td>
+<td>The core: you pass it a range and its fingerprint, and it answers whether it matches, whether it splits it, or whether it sends you its <code>id</code>s</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/ads/fetch</code></td>
+<td>Ask for the bodies of the <code>id</code>s that reconciliation revealed are missing</td>
+</tr>
+</tbody>
+</table>
+</div><p>To <code>/reconcile</code> you pass a range and its fingerprint:</p>
+<pre class="highlight"><code class="language-json">{ "range": { "from": "0000", "to": "ffff" }, "fingerprint": "a3f1b2..." }</code></pre>
+<p>And it answers with one of the three cases from the pseudocode:</p>
+<pre class="highlight"><code class="language-json">// 1. Match: nothing to do in this stretch
+{ "status": "equal" }
+
+// 2. Small range: here are my ids, compare them yourself
+{ "status": "ids", "ids": ["3f9a...c17", "8b21...0d4"] }
+
+// 3. They differ: I split it and give you each half's fingerprint
+{ "status": "partition", "subranges": [
+    { "from": "0000", "to": "8000", "fingerprint": "11aa..." },
+    { "from": "8000", "to": "ffff", "fingerprint": "cc44..." }
+]}</code></pre>
+<p>When reconciliation reveals which <code>id</code>s you are missing, you ask for their texts with <code>/ads/fetch</code>:</p>
+<pre class="highlight"><code class="language-none">POST /ads/fetch
+Content-Type: application/json
+
+{ "ids": ["8b21...0d4"] }</code></pre>
+<pre class="highlight"><code class="language-json">[ { "id": "8b21...0d4", "text": "Looking for a flat downtown" } ]</code></pre>
+<p>The node that syncs calls <code>/reconcile</code> in a loop, going down the subranges that differ (the three cases from the pseudocode above), and at the end asks with <code>/ads/fetch</code> only for the ads it didn't have. The hashes travel many times; the full text, only once and at the end.</p>
+<p>A reply needs no route of its own: it is another <code>POST /ads</code> whose text carries inside it the <code>id</code> of the ad it answers.</p>
+<h2 id="blog-single-content__title--this-is-nostr-piece-by-piece" class="blog-single__content-title">This is Nostr, piece by piece</h2>
+<p>Without meaning to, we have almost built <strong>Nostr</strong>:</p>
+<ul>
+<li>Every Nostr event is identified by the <strong>SHA-256 hash of its content</strong>. That is our content <code>id</code>, exactly.</li>
+<li>It is published on <strong>relays</strong>: open servers where you write without signing up, just with a key pair. That is our HTTP endpoint with no accounts.</li>
+<li>And to sync, the relays speak <strong>negentropy</strong>, which is nothing other than range-based reconciliation. The very same one we just derived by hand. Doug Hoyte wrote it for the <code>strfry</code> relay, and it lives in the spec as NIP-77.</li>
+</ul>
+<p>So our BBS is practically Nostr. The one deep difference is that Nostr events are <strong>signed</strong> with the author's key, so there is an identity behind them. We dropped it to keep things simple.</p>
+<p>Now we understand what is under the hood of Nostr and why it works.</p>
+<h2 id="blog-single-content__title--the-problems-we-havent-solved" class="blog-single__content-title">The problems we haven't solved</h2>
+<p>Our BBS works, but it has holes:</p>
+<ul>
+<li><strong>There is no identity, so there are no culprits.</strong> We dropped login and sign-up to keep it simple, and a network where publishing is free and anonymous is a network that fills up with spam within hours.</li>
+<li><strong>We can't moderate without authority.</strong> On a single server, the admin deletes and that's that. Here there is no admin. If Ana flags an ad as garbage, why would Bob's node listen to her? And what if the one flagging garbage is the spammer, to bury everyone else? A mess.</li>
+<li><strong>Without identity, voting is useless.</strong> The temptation is to let people flag spam and have an algorithm sink it. But with no accounts, I fabricate a thousand fake identities and vote whatever I like. It is the famous <em>Sybil attack</em>.</li>
+<li><strong>It grows forever.</strong> If nobody can really delete, and everything is replicated on every node, the board only gets fatter.</li>
+</ul>
+<p>None of these problems is about syncing, they are about <strong>trust</strong>.</p>
+<p>Every decentralized system fights with this, and each one solves it in its own way.</p>
+<ul>
+<li><strong>Mastodon and the Fediverse</strong> trust the admin of each instance. Each server moderates its own: it deletes, suspends users and can <em>defederate</em>, that is, block another whole instance. Shared block lists circulate among admins. You pick an instance and inherit its judgment. It works, but moderation ends up fragmented, and moving instances is costly.</li>
+<li><strong>Bluesky</strong> flips it around with <em>composable labels</em>. Anyone can run a service that labels accounts and posts ("spam", "nsfw"), and each user subscribes to the labelers they trust. Your client hides or warns based on those labels. Moderation stops being a single truth and becomes a service you sign up for.</li>
+<li><strong>The reputation route</strong>, the closest to our account-less BBS, weights each vote by how much those who are already trusted trust you (EigenTrust-style algorithms). A freshly fabricated fake identity has nobody vouching for it, so its vote carries no weight. That is the trick to dodge the Sybil attack fairly well.</li>
+</ul>
+<p>It is funny, because Bluesky does the same thing Usenet already did in the nineties with NoCeM: signed notices saying "this is spam" that each reader chose whether to apply or not.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>Syncing, which looked like the hard part, turned out to be a closed and even elegant problem. What has beaten us is trust: who you are, whether I believe you, how I kick out a spammer with no boss to press the button. Syncing is a maths problem. Trust is a political one.</p>
+<p>So next time you hear about Nostr, about Willow, about Iroh or about "local-first", you won't see magic anymore. You'll see a bulletin board with an <code>id</code> that is a hash and two nodes comparing fingerprints. And that is the beautiful part of deriving something from scratch.</p>
+<h2 id="blog-single-content__title--sources" class="blog-single__content-title">Sources</h2>
+<ul>
+<li><a href="https://arxiv.org/pdf/2212.13567" rel="noopener noreferrer" target="_blank">Range-Based Set Reconciliation</a>, by Aljoscha Meyer. The work that generalizes and analyzes the technique. Dense, but it is the source.</li>
+<li><a href="https://willowprotocol.org/specs/rbsr/index.html" rel="noopener noreferrer" target="_blank">3d Range-Based Set Reconciliation</a> in the Willow protocol specification. The applied version, with fingerprints and recursive partitioning.</li>
+<li><a href="https://logperiodic.com/rbsr.html" rel="noopener noreferrer" target="_blank">Range-Based Set Reconciliation</a> at Log Periodic, a more digestible explanation of the same idea.</li>
+<li><a href="https://www.iroh.computer/" rel="noopener noreferrer" target="_blank">Iroh</a> and Iroh-Docs, the Rust implementation that brings range-based reconciliation to real devices.</li>
+<li><a href="https://github.com/nostr-protocol/nips/blob/master/77.md" rel="noopener noreferrer" target="_blank">NIP-77: Negentropy Syncing</a>, range-based reconciliation as Nostr uses it, with Doug Hoyte's <a href="https://github.com/hoytech/strfry" rel="noopener noreferrer" target="_blank">strfry</a> relay as the reference implementation.</li>
+<li><a href="https://earthstar-project.org/" rel="noopener noreferrer" target="_blank">Earthstar</a>, a decentralized database with no traditional accounts that syncs by ranges, today on top of Willow.</li>
+<li><a href="http://ftsc.org/docs/fts-0004.001" rel="noopener noreferrer" target="_blank">FTS-0004 EchoMail Specification</a> from the FTSC, where FidoNet's <code>MSGID</code> and <code>SEEN-BY</code> live.</li>
+<li><a href="https://en.wikipedia.org/wiki/FidoNet" rel="noopener noreferrer" target="_blank">FidoNet</a> on Wikipedia, for the history of Tom Jennings' BBS network and its nightly sync model.</li>
+<li><a href="https://www.w3.org/TR/activitypub/" rel="noopener noreferrer" target="_blank">ActivityPub</a>, the W3C recommendation. The inbox-delivery model that dispatches instead of reconciling.</li>
+<li><a href="https://en.wikipedia.org/wiki/Merkle_tree" rel="noopener noreferrer" target="_blank">Merkle tree</a> and Apache Cassandra's <a href="https://cassandra.apache.org/doc/latest/cassandra/managing/operating/repair.html" rel="noopener noreferrer" target="_blank">anti-entropy</a>, for the step before range-based reconciliation.</li>
+<li><a href="https://bsky.social/about/blog/4-13-2023-moderation" rel="noopener noreferrer" target="_blank">Composable Moderation</a> on the Bluesky blog, the model of labelers you subscribe to.</li>
+<li><a href="https://nlp.stanford.edu/pubs/eigentrust.pdf" rel="noopener noreferrer" target="_blank">The EigenTrust Algorithm for Reputation Management in P2P Networks</a>, the transitive reputation that isolates the Sybil attack.</li>
+<li><a href="https://en.wikipedia.org/wiki/NoCeM" rel="noopener noreferrer" target="_blank">NoCeM</a>, the signed spam notices on Usenet in the nineties, ancestor of composable labels.</li>
+<li><a href="https://github.com/2color/awesome-prolly-tree" rel="noopener noreferrer" target="_blank">Prolly Trees</a> and Merkle Search Trees, variants of the Merkle tree whose shape is derived from the content and not from the insertion order.</li>
+<li><a href="https://blog.joinmastodon.org/2025/10/mastodon-4-5-for-devs/" rel="noopener noreferrer" target="_blank">Mastodon 4.5 for Developers</a>, which enables fetching a thread's missing replies by default.</li>
+</ul><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-4c4e1b40@andros.dev" class="link">comment+article-4c4e1b40@andros.dev</a> to leave a comment. The subject will be ignored.</p>

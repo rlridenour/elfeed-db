@@ -1,0 +1,29 @@
+<p>I spent several hours yesterday trying to get Wifi to remain up on the Framework after installing CachyOS. It was not easy. I had to drag Claude Code in to help. I'd have never been able to find and fix it, otherwise.</p>
+<!-- more -->
+<p>Flaky Wifi is a commonly-reported problem with the Framework 13. In my case it was related to the Orbi mesh, so I don't know if this helps anyone else, but I'll leave it here, just in case. It's working for me.</p>
+<p>TL;DR is pin wifi to a 5 GHz BSSID so the 6 GHz band doesn't get in the way.</p>
+<p><strong>Here's a slightly edited version of Claude Code's summary:</strong></p>
+<p><em>The fault.</em> The Framework connects, gets a DHCP lease, and stops passing
+traffic about two minutes later. The link never drops — =iw= says =Connected=
+throughout, the AP keeps acking frames, signal is fine. What dies is ARP:
+<code>ping</code> starts returning <em>Destination Host Unreachable from the machine's own
+address</em>, which is the kernel giving up after its ARP entry expires at ~60s and
+cannot be refreshed. The &quot;two minutes&quot; is the ARP cache lifetime, not a
+coincidence — and that is why every log looked healthy.</p>
+<p><em>The cause.</em> The Orbi's 6 GHz radio is the mesh backhaul. It accepts a client
+association and acknowledges frames but does not bridge that client to the LAN.
+The MT7925 is Wi-Fi 7 and can see 6 GHz, so it sometimes anchors there and is
+then deaf. Every Wi-Fi 5/6 device in the house is immune because it cannot see
+the band — which is exactly why this ThinkPad sat on the <em>same AP</em> all day
+without a hiccup, the comparison that finally cracked it.</p>
+<p><em>Measured, same machine, same AP, minutes apart:</em></p>
+<ul>
+<li>6 GHz primary — stalled in <em>21 seconds</em></li>
+<li>2.4 GHz — clean for 11 minutes</li>
+<li>5 GHz anchored — over an hour, and survived a suspend/resume, which had been a reliable trigger.</li>
+</ul>
+<p><em>The fix.</em> Pin <code>802-11-wireless.bssid</code> to a 5 GHz BSSID so it can never anchor
+on 6 GHz. MLO still attaches 6 GHz as link 2 and that is harmless; what matters
+is which band anchors the association. Costs roaming — the machine stays on one unit.</p>
+<p>Here's the <a href="https://gist.github.com/jackbaty/6b03995706e516fc9fadd7e9ff9d0b04">wifi-pin.sh script</a>.</p>
+<p><a href="mailto:jack@baty.net?subject=[Baty.net] Re: Fixing%20the%20Framework&#39;s%20Wifi%20on%20CachyOS%20and%20Orbi">✍️ Reply by email</a></p>

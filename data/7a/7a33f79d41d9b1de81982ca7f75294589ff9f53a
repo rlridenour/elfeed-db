@@ -1,0 +1,237 @@
+
+<p class="wp-block-paragraph">This article presents a set of <strong>Emacs Dired</strong> configuration changes to enhance file management. The configurations sort directories before files for easier navigation, hide dotfiles, reduce unnecessary confirmation prompts, prevent UI lockups caused by network latency, among other improvements. Each configuration explains the behavior of the relevant setting, its benefits, and its tradeoffs, making it easier to determine which changes are appropriate.</p>
+
+
+
+<h2 class="wp-block-heading">Keeping Dired clean by hiding dotfiles</h2>
+
+
+
+<p class="wp-block-paragraph">Using <code>dired-omit-mode</code> helps hide hidden files and directories, such as <code>.git</code> or <code>.DS_Store</code>, by applying a specific regular expression. The tradeoff is that required configuration files are hidden by default, forcing you to toggle <code>dired-omit-mode</code> off to see them. Disabling <code>dired-omit-verbose</code> prevents the mode from displaying status messages when omitting files.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-omit-verbose <span class="hljs-literal">nil</span>)
+(<span class="hljs-name">setq</span> dired-omit-files (<span class="hljs-name">concat</span> <span class="hljs-string">"\\`&#91;.]\\'"</span>
+                               <span class="hljs-string">"\\|\\.\\(?:elc\\|a\\|o\\|pyc\\|pyo\\|swp\\|class\\)\\'"</span>
+                               <span class="hljs-string">"\\|^\\.DS_Store\\'"</span>
+                               <span class="hljs-string">"\\|^\\.\\(?:svn\\|git\\)\\'"</span>
+                               <span class="hljs-string">"\\|^flycheck_.*"</span>
+                               <span class="hljs-string">"\\|^flymake_.*"</span>))
+
+(<span class="hljs-name">add-hook</span> 'dired-mode-hook #'dired-omit-mode)</code></span></pre>
+
+
+<p class="wp-block-paragraph">To hide all hidden files whose names begin with a dot, add the following regular expression to the <code>dired-omit-files</code> variable:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-javascript">(setq dired-omit-files (concat dired-omit-files <span class="hljs-string">"\\|^\\."</span>))</code></span></pre>
+
+
+<h2 class="wp-block-heading">Hiding details</h2>
+
+
+
+<p class="wp-block-paragraph">Enabling <code>dired-hide-details-mode</code> automatically hides file details such as permissions, size, and modification dates.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">add-hook</span> 'dired-mode-hook #'dired-hide-details-mode)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Sorting directories first</h2>
+
+
+
+<p class="wp-block-paragraph">The following code snippet configures Dired to sort directories before files. The benefit is improved navigation, as folders are grouped at the top of the buffer, matching standard file managers. The tradeoff is a deviation from strict alphabetical sorting, which can disorient users accustomed to raw UNIX or Linux <code>ls</code> output.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> ls-lisp-verbosity <span class="hljs-literal">nil</span>
+      ls-lisp-dirs-first <span class="hljs-literal">t</span>)
+
+(<span class="hljs-name">when</span> (<span class="hljs-name">eq</span> system-type 'darwin)
+  (<span class="hljs-name">setq</span> dired-use-ls-dired <span class="hljs-literal">nil</span>)) <span class="hljs-comment">; macOS/BSD ls</span>
+
+(<span class="hljs-name">let</span> ((<span class="hljs-name">args</span> <span class="hljs-string">"--group-directories-first -ahlv"</span>))
+  (<span class="hljs-name">when</span> (<span class="hljs-name">or</span> (<span class="hljs-name">eq</span> system-type 'darwin) (<span class="hljs-name">eq</span> system-type 'berkeley-unix))
+    (<span class="hljs-name">if-let*</span> ((<span class="hljs-name">gls</span> (<span class="hljs-name">executable-find</span> <span class="hljs-string">"gls"</span>)))
+        (<span class="hljs-name">setq</span> insert-directory-program gls)
+      (<span class="hljs-name">setq</span> args <span class="hljs-literal">nil</span>)))
+  (<span class="hljs-name">when</span> args
+    (<span class="hljs-name">setq</span> dired-listing-switches args)))</code></span></pre>
+
+
+<h2 class="wp-block-heading">Killing the current Dired buffer upon navigating into a different directory</h2>
+
+
+
+<p class="wp-block-paragraph">Setting <code>dired-kill-when-opening-new-dired-buffer</code> to <code>t</code> (Emacs &gt;= 28.1) causes Dired to automatically kill the current Dired buffer upon navigating into a different directory. The benefit is a cleaner buffer list, as it prevents leaving behind a trail of open buffers when traversing deep directory hierarchies. The tradeoff is the loss of buffer state. Navigating back to a parent directory requires generating a new buffer, which erases previous cursor positions, active file marks, and modified subdirectory visibility.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-kill-when-opening-new-dired-buffer <span class="hljs-literal">t</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Version control integration</h2>
+
+
+
+<p class="wp-block-paragraph">Enabling <code>dired-vc-rename-file</code> causes Dired to perform file renames through the underlying version control system when supported, using the <code>vc-rename-file</code> function. The benefit is accurate version control history during Dired rename operations. The tradeoff is that VC renames can introduce slight latency on very large repositories.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-vc-rename-file <span class="hljs-literal">t</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Simplifying deletion confirmations</h2>
+
+
+
+<p class="wp-block-paragraph">This configuration accelerates file cleanup by reducing the number of manual prompts required to delete files and directories.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-deletion-confirmer 'y-or-n-p
+      dired-recursive-deletes 'top
+      dired-clean-confirm-killing-deleted-buffers <span class="hljs-literal">nil</span>)</code></span></pre>
+
+
+<ul class="wp-block-list">
+<li>Setting <code>dired-deletion-confirmer</code> to <code>'y-or-n-p</code>: Changes the deletion prompt to accept a single 'y' or 'n' keypress instead of requiring you to type the full word 'yes'.</li>
+
+
+
+<li>Setting <code>dired-recursive-deletes</code> to <code>'top</code>: By default, deleting a non-empty directory in Dired can be a tedious process because Emacs will prompt you to confirm the deletion of every single nested subdirectory as it traverses down the tree. Setting this variable to <code>'top</code> establishes a practical balance between speed and safety. Emacs will ask for your confirmation exactly once for the top-level directory you have marked. Once you confirm that initial prompt, it silently and recursively deletes all nested files and folders inside that tree without any further interruptions.</li>
+
+
+
+<li>Setting <code>dired-clean-confirm-killing-deleted-buffers</code> to <code>nil</code>: Suppresses the prompt that asks for permission to close Dired buffers associated with directories you just deleted, closing them automatically instead. This makes sense because once a directory is removed from the disk, any open buffer pointing to it becomes orphaned and unusable. Automatically killing these dead buffers keeps your buffer list clean, as deleting the directory already establishes your intent to remove it from your workflow entirely.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">The benefit is faster file management and fewer repetitive keystrokes. The tradeoff is an elevated risk of accidental data loss, as the safety barrier to executing destructive operations is significantly lowered.</p>
+
+
+
+<h2 class="wp-block-heading">Removing disk space indicator</h2>
+
+
+
+<p class="wp-block-paragraph">Disabling <code>dired-free-space</code> (Emacs &gt;= 29.1) removes disk space indicator from Dired buffers. The tradeoff is that you lose quick visibility into remaining disk capacity.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-free-space <span class="hljs-literal">nil</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Restricting vertical cursor movement</h2>
+
+
+
+<p class="wp-block-paragraph">Setting <code>dired-movement-style</code> to <code>'bounded-files</code> (Emacs &gt;= 29.1) restricts vertical movement to file lines in the Dired buffer. When point reaches the first or last file line, further vertical movement stops instead of moving to other non-file lines. The benefit is increased navigation efficiency. When scrolling rapidly to the top or bottom of a directory, the cursor stops exactly on the first or last file or directory, avoiding empty space or metadata lines. The tradeoff is that placing the cursor on the directory header to copy its path requires alternative navigation commands, as standard vertical movement keys will no longer reach it.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-movement-style 'bounded-files)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Managing recursive copies and destination directories</h2>
+
+
+
+<p class="wp-block-paragraph">These variables force Dired to copy directories recursively by default without prompting, while explicitly asking for confirmation before creating new, non-existent destination directories. The benefit is bulk copying combined with a safety check against typos in destination paths. The tradeoff is that large, deeply nested directory structures might be copied unintentionally since the recursive copying happens automatically.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-recursive-copies 'always
+      dired-create-destination-dirs 'ask)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Efficient auto-reverting for dired buffers</h2>
+
+
+
+<p class="wp-block-paragraph">Configuring <code>dired-auto-revert-buffer</code> to use <code>dired-directory-changed-p</code> causes Dired to automatically revert the buffer when the listed directory has changed. The benefit is improved efficiency because Dired does not unconditionally rebuild the listing. The tradeoff is that changes that do not modify the directory itself, such as in-place edits to existing files, might not trigger an automatic refresh.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-auto-revert-buffer 'dired-directory-changed-p)</code></span></pre>
+
+
+<p class="wp-block-paragraph">Note: On Unix-like filesystems, a directory's mtime (modification time) is updated when its directory entries change. This occurs when a file or subdirectory is created, deleted, or renamed within the directory. Modifying the data inside an existing file updates the file's mtime, but does not update the mtime of its parent directory.</p>
+
+
+
+<h2 class="wp-block-heading">Reverting destination buffers after file operations</h2>
+
+
+
+<p class="wp-block-paragraph">This configuration automatically updates destination Dired buffers after file operations like copying or renaming, but uses a custom predicate to skip remote directories. The benefit is automatic synchronization of local Dired buffers without performing the same operation on remote directories, avoiding unnecessary TRAMP network activity and associated latency. The tradeoff is that remote directory buffers require a manual refresh to reflect recent file transfers.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-do-revert-buffer (<span class="hljs-name">lambda</span> (<span class="hljs-name">dir</span>)
+                               (<span class="hljs-name">not</span> (<span class="hljs-name">file-remote-p</span> dir))))</code></span></pre>
+
+
+<h2 class="wp-block-heading">Enabling mouse drag-and-drop</h2>
+
+
+
+<p class="wp-block-paragraph">Setting <code>dired-mouse-drag-files</code> to <code>t</code> (Emacs &gt;= 29.1) allows you to click and drag files directly from a Dired buffer into external desktop applications, such as graphical file managers or web browsers.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> dired-mouse-drag-files <span class="hljs-literal">t</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Cross-platform file associations</h2>
+
+
+
+<p class="wp-block-paragraph">The following snippet configures Dired to open specific file extensions using the default application handler of the host operating system. It identifies the environment (macOS, Linux, or Windows) and assigns the corresponding system command (<code>open</code>, <code>xdg-open</code>, or <code>start</code>) to the <code>dired-guess-shell-alist-user</code> variable for documents, images, and media files. The main benefit is that it delegates file association management to the operating system, removing the need to configure individual applications within Emacs for every file type.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">defvar</span> my-dired-xdg-open-cmd <span class="hljs-literal">nil</span>)
+(<span class="hljs-name">with-eval-after-load</span> 'dired
+  (<span class="hljs-name">when-let*</span> ((<span class="hljs-name">cmd</span> (<span class="hljs-name">cond</span>
+                    ((<span class="hljs-name">eq</span> system-type 'darwin)
+                     <span class="hljs-string">"open"</span>)
+                    ((<span class="hljs-name">memq</span> system-type '(gnu gnu/linux gnu/kfreebsd
+                                             berkeley-unix))
+                     <span class="hljs-string">"xdg-open"</span>)
+                    ((<span class="hljs-name">memq</span> system-type '(cygwin windows-nt ms-dos))
+                     <span class="hljs-string">"start"</span>))))
+    (<span class="hljs-name">setq</span> dired-guess-shell-alist-user
+          `((<span class="hljs-string">"\\.\\(?:docx\\|pdf\\|odt\\|odg\\|ods\\|djvu\\|eps\\)\\'"</span> ,cmd)
+            (<span class="hljs-string">"\\.\\(?:jpe?g\\|webp\\|png\\|gif\\|xpm\\)\\'"</span> ,cmd)
+            (<span class="hljs-string">"\\.\\(?:xcf\\)\\'"</span> ,cmd)
+            (<span class="hljs-string">"\\.tex\\'"</span> ,cmd)
+            (<span class="hljs-string">"\\.\\(?:mp4\\|mkv\\|m4a\\|avi\\|flv\\|rm\\|rmvb\\|ogv\\)\\(?:\\.part\\)?\\'"</span> ,cmd)
+            (<span class="hljs-string">"\\.\\(?:mp3\\|flac\\)\\'"</span> ,cmd)))
+    (<span class="hljs-name">when</span> cmd
+      (<span class="hljs-name">setq</span> my-dired-xdg-open-cmd cmd))))</code></span></pre>
+
+
+<p class="wp-block-paragraph"><strong>How to use it: </strong>To use this configuration in practice, navigate to a directory using Dired and place your cursor over a file. For example, if your cursor is on a video file, press <code>!</code> (which invokes <code>dired-do-shell-command</code>) or <code>&amp;</code> (for asynchronous execution). Dired will prompt you in the minibuffer with the appropriate system command already populated based on your operating system, such as <code>xdg-open</code>. Press <code>RET</code> to confirm, and the video will open in your operating system's default media player.</p>
+
+
+
+<p class="wp-block-paragraph">If you prefer forcing all file types to open asynchronously via the operating system handler (e.g., <code>xdg-open</code>), the following snippet routes every file through the system default application.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">defvar</span> my-dired-xdg-open-cmd <span class="hljs-literal">nil</span>)
+(<span class="hljs-name">with-eval-after-load</span> 'dired
+  (<span class="hljs-name">when-let*</span> ((<span class="hljs-name">cmd</span> (<span class="hljs-name">cond</span>
+                    ((<span class="hljs-name">eq</span> system-type 'darwin)
+                     <span class="hljs-string">"open"</span>)
+                    ((<span class="hljs-name">memq</span> system-type '(gnu gnu/linux gnu/kfreebsd
+                                             berkeley-unix))
+                     <span class="hljs-string">"xdg-open"</span>)
+                    ((<span class="hljs-name">memq</span> system-type '(cygwin windows-nt ms-dos))
+                     <span class="hljs-string">"start"</span>))))
+    (<span class="hljs-name">setq</span> dired-guess-shell-alist-user
+          `((<span class="hljs-string">".*"</span> ,cmd)))
+    (<span class="hljs-name">when</span> cmd
+      (<span class="hljs-name">setq</span> my-dired-xdg-open-cmd cmd))))</code></span></pre><div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/fold-outline-indentation-emacs-package/" rel="bookmark" title="outline-indent.el - A modern indentation-based folding mode for Emacs">outline-indent.el - A modern indentation-based folding mode for Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-persist-restore-text-scale/" rel="bookmark" title="persist-text-scale.el - Persist and Restore the Text Scale">persist-text-scale.el - Persist and Restore the Text Scale</a></li>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-the-definitive-guide-to-code-folding/" rel="bookmark" title="The Definitive Guide to Code Folding in Emacs">The Definitive Guide to Code Folding in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-native-compilation-config-jobs/" rel="bookmark" title="Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel">Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel</a></li>
+<li><a href="https://www.jamescherti.com/securing-emacs-dir-locals-el-local-variables/" rel="bookmark" title="Securing Emacs .dir-locals.el and local variables">Securing Emacs .dir-locals.el and local variables</a></li>
+<li><a href="https://www.jamescherti.com/emacs-security-settings/" rel="bookmark" title="The Emacs security settings that might silently compromise your system">The Emacs security settings that might silently compromise your system</a></li>
+</ol>
+</div>

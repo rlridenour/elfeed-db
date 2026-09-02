@@ -1,0 +1,116 @@
+
+<p class="wp-block-paragraph">Emacs automatically applies project-specific configurations through file-local and directory-local (<code>.dir-locals.el</code>) variables when opening a file or directory. While this feature ensures consistent settings across environments, it can cause security risks and persistent prompt fatigue when editing source code. Malicious <code>.dir-locals.el</code> files or file-local variables containing <code>eval</code> forms can execute arbitrary Lisp code if Emacs is configured to evaluate them, or if the user approves the relevant prompt by mistake.</p>
+
+
+
+<p class="wp-block-paragraph">This article outlines configurations for securing file-local and directory-local variables while reducing prompts.</p>
+
+
+
+<h2 class="wp-block-heading">Allowing safe local variables</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>enable-local-variables</code> variable controls how Emacs handles file-local variables. File-local variables are configurations embedded directly within a file. Here is an example of a file-local variables:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Local variables:</span>
+<span class="hljs-comment">;; fill-column: 100</span>
+<span class="hljs-comment">;; byte-compile-warnings: (not free-vars)</span>
+<span class="hljs-comment">;; End:</span></code></span></pre>
+
+
+<p class="wp-block-paragraph">To mitigate security risks and prevent interactive prompts, set <code>enable-local-variables</code> to <code>:safe</code> by adding the following to your init file:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> enable-local-variables <span class="hljs-symbol">:safe</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The benefit is that Emacs applies only verified safe values while silently dropping risky ones, reducing prompt fatigue without requiring manual confirmation. The tradeoff is that non-standard but safe project variables will be ignored unless their values are explicitly recognized as safe, for example through <code>safe-local-variable-values</code> or the <code>safe-local-variable</code> property.</p>
+
+
+
+<p class="wp-block-paragraph">Note: Setting <code>enable-local-variables</code> to <code>nil</code> disables normal processing of local variables entirely. (Specific settings, such as <code>lexical-binding</code>, remain active via the <code>permanently-enabled-local-variables</code> list.)</p>
+
+
+
+<h2 class="wp-block-heading">Whitelisting specific local variables</h2>
+
+
+
+<p class="wp-block-paragraph">When you set <code>enable-local-variables</code> to <code>:safe</code>, Emacs silently ignores unverified variables. To prevent custom project variables from being ignored, you can explicitly mark specific variable/value pairs as safe using <code>safe-local-variable-values</code>, or define a predicate with the <code>safe-local-variable</code> property:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Whitelist a specific variable and value: Add the pair directly to the list.</span>
+(<span class="hljs-name">add-to-list</span> 'safe-local-variable-values '(my-custom-variable . <span class="hljs-string">"expected-value"</span>))
+
+<span class="hljs-comment">;; Whitelist a variable based on a predicate type: Define a property that</span>
+<span class="hljs-comment">;; validates the variable type to accept any matching value.</span>
+(<span class="hljs-name">put</span> 'my-custom-variable 'safe-local-variable #'stringp)
+
+<span class="hljs-comment">;; Whitelist a variable with a predicate: Only allow "hello" or "world"</span>
+<span class="hljs-comment">;; as safe values.</span>
+(<span class="hljs-name">put</span> 'my-custom-variable 'safe-local-variable
+     (<span class="hljs-name">lambda</span> (<span class="hljs-name">val</span>)
+       <span class="hljs-string">"Return t if VAL is 'hello' or 'world'."</span>
+       (<span class="hljs-name">member</span> val '(<span class="hljs-string">"hello"</span> <span class="hljs-string">"world"</span>))))</code></span></pre>
+
+
+<h2 class="wp-block-heading">Whitelisting specific directories</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>safe-local-variable-directories</code> variable allows you to designate specific paths where all directory-local variables are automatically considered safe. When a directory is added to this list, Emacs trusts every variable defined in its <code>.dir-locals.el</code> file without prompting. Note that this setting applies exclusively to directory-local variables and completely ignores file-local variables.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">add-to-list</span> 'safe-local-variable-directories <span class="hljs-string">"/path/to/trusted/project/"</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Disabling Local Eval Forms</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>enable-local-eval</code> variable controls whether Emacs processes eval forms in file-local and directory-local variable definitions. Unlike ordinary local variable assignments, <code>eval</code> can cause Emacs to evaluate arbitrary Lisp code when processing the local variables.</p>
+
+
+
+<p class="wp-block-paragraph">If your workflow does not require dynamic project configurations, you should disable this feature by setting this variable to <code>nil</code>:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> enable-local-eval <span class="hljs-literal">nil</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The tradeoff is that useful evaluation forms, such as project-specific configurations dynamically generated through <code>eval</code>, will not execute.</p>
+
+
+
+<h2 class="wp-block-heading">Keeping default values for security</h2>
+
+
+
+<p class="wp-block-paragraph">Emacs comes with the following defaults for local environment handling. Sticking with these defaults is already a good choice:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> enable-dir-local-variables <span class="hljs-literal">t</span>)  <span class="hljs-comment">; Apply directory-local variables.</span>
+(<span class="hljs-name">setq</span> enable-remote-dir-locals <span class="hljs-literal">nil</span>)  <span class="hljs-comment">; Prevent loading dir-locals over TRAMP.</span></code></span></pre>
+
+
+<ul class="wp-block-list">
+<li><strong><code>enable-dir-local-variables</code></strong>: This enables the use of directory-local variables (<code>.dir-locals.el</code>). Note that Emacs also reads <code>.dir-locals-2.el</code> if present, and non-file buffers like Dired can inherit these settings.</li>
+
+
+
+<li><strong><code>enable-remote-dir-locals</code></strong>: Leaving this as <code>nil</code> prevents Emacs from loading directory-local variables from remote filesystems. This avoids applying potentially untrusted remote <code>.dir-locals.el</code> settings and avoids the additional work required to search for them.</li>
+</ul>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/minimal-emacs-d/" rel="bookmark" title="minimal-emacs.d - A Customizable Emacs init.el and early-init.el for Better Defaults and Optimized Startup">minimal-emacs.d - A Customizable Emacs init.el and early-init.el for Better Defaults and Optimized Startup</a></li>
+<li><a href="https://www.jamescherti.com/emacs-persist-restore-text-scale/" rel="bookmark" title="persist-text-scale.el - Persist and Restore the Text Scale">persist-text-scale.el - Persist and Restore the Text Scale</a></li>
+<li><a href="https://www.jamescherti.com/emacs-evil-mode-restore-line-column-mark/" rel="bookmark" title="Emacs Evil Mode: How to restore both the line and column number of a mark, not just the line number">Emacs Evil Mode: How to restore both the line and column number of a mark, not just the line number</a></li>
+<li><a href="https://www.jamescherti.com/emacs-security-settings/" rel="bookmark" title="The Emacs security settings that might silently compromise your system">The Emacs security settings that might silently compromise your system</a></li>
+<li><a href="https://www.jamescherti.com/git-smartmv-tool-decide-git-mv-or-mv/" rel="bookmark" title="A Git Tool that can decide whether to use &#039;git mv&#039; or &#039;mv&#039; to move files and/or directories">A Git Tool that can decide whether to use 'git mv' or 'mv' to move files and/or directories</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+</ol>
+</div>

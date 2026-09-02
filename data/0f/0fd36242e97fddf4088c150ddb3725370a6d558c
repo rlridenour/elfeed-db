@@ -1,0 +1,205 @@
+
+<p class="wp-block-paragraph">Emacs ships with default settings intended for backward compatibility and convenience over strict security. The following settings enforce TLS certificate verification, reduce unintended ffap network lookups, restrict the evaluation of potentially unsafe local file, and directory variables, automated package review system, and protect authentication credentials stored by Emacs.</p>
+
+
+
+<h2 class="wp-block-heading">Network and communication security</h2>
+
+
+
+<p class="wp-block-paragraph">By default, Emacs prompts the user interactively if a connection appears untrustworthy. You can additionally require certificate validation to fail at the TLS library level, causing invalid certificates to result in a connection error.</p>
+
+
+
+<p class="wp-block-paragraph">Requiring certificate validation at the TLS layer reduces the possibility of <strong>accidentally accepting an invalid certificate in response to an interactive warning</strong>.</p>
+
+
+
+<p class="wp-block-paragraph">Define these variables in your <code>early-init.el</code> to ensure the settings are established before startup code initiates network connections:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> gnutls-verify-error <span class="hljs-literal">t</span>)
+(<span class="hljs-name">setq</span> tls-checktrust <span class="hljs-literal">t</span>)
+(<span class="hljs-name">setq</span> gnutls-min-prime-bits <span class="hljs-number">3072</span>)</code></span></pre>
+
+
+<ul class="wp-block-list">
+<li><code>gnutls-verify-error</code>: Controls GnuTLS certificate verification. Setting this to <code>t</code> makes any certificate validation failure fatal.</li>
+
+
+
+<li><code>tls-checktrust</code>: Controls external TLS binaries. Setting this to <code>t</code> ensures certificate validation is enforced if Emacs falls back to using external tools.</li>
+
+
+
+<li><code>gnutls-min-prime-bits</code>: Defines the minimum acceptable size for Diffie-Hellman key exchange primes. Setting this to 3072 rejects handshakes using primes smaller than 3072 bits.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">The benefit of strictly enforcing connection security at the TLS layer is preventing the accidental acceptance of invalid certificates or weak cryptography.</p>
+
+
+
+<h2 class="wp-block-heading">Find file at point network requests</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>ffap</code> (Find File At Point) package scans text around point to identify file paths, URLs, and hostnames. This triggers when you invoke an <code>ffap</code> command, most commonly <code>find-file-at-point</code>, which replaces standard <code>C-x C-f</code> if you have <code>(ffap-bindings)</code> enabled, while your cursor is resting on or near a string of text that resembles a domain name.</p>
+
+
+
+<p class="wp-block-paragraph">Setting <code>ffap-machine-p-known</code> to <code>'reject</code> prevents FFAP from probing hostnames with known domains:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> ffap-machine-p-known 'reject)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The tradeoff is that <code>ffap</code> will no longer automatically recognize hostnames as remote connection targets, meaning you must enter remote host paths explicitly.</p>
+
+
+
+<h2 class="wp-block-heading">Encrypting auth sources</h2>
+
+
+
+<p class="wp-block-paragraph">Emacs' <code>auth-source</code> uses files such as <code>~/.authinfo</code> and <code>~/.netrc</code> to store authentication credentials that other Emacs packages can retrieve when connecting to remote services. For example:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Tramp: Passwords for remote server access.</li>
+
+
+
+<li>Gnus and Message: Credentials for mail retrieval (IMAP, POP3) and transmission (SMTP).</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">An auth-source entry can contain information such as a hostname, username, password, port, or protocol. Because these files may contain sensitive credentials, storing them as plain text exposes them to any process or user that can read the file.</p>
+
+
+
+<p class="wp-block-paragraph">To enforce the exclusive use of an encrypted file and prevent accidental plain-text credential storage, redefine the authentication sources list:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> auth-sources '(<span class="hljs-string">"~/.authinfo.gpg"</span>))</code></span></pre>
+
+
+<p class="wp-block-paragraph">Additional security configurations:</p>
+
+
+
+<ul class="wp-block-list">
+<li>To encrypt the file using specific GPG public keys, define the recipients using <code>auth-source-gpg-encrypt-to</code>:</li>
+</ul>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> auth-source-gpg-encrypt-to '(<span class="hljs-string">"your.email@example.com"</span>))</code></span></pre>
+
+
+<ul class="wp-block-list">
+<li>Emacs can cache passwords to minimize prompt interruptions. The cache expiration can be configured using <code>auth-source-cache-expiry</code>:</li>
+</ul>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> auth-source-cache-expiry <span class="hljs-number">3600</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Clear auth-source cache when the user is idle</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>auth-source</code> library uses password cache to store authentication data in memory. By default, <code>auth-source-do-cache</code> is enabled (<code>t</code>) and <code>auth-source-cache-expiry</code> is set to 7200 seconds (2 hours). You can restrict this credential exposure using idle timers, targeted cache clearing, or by disabling the cache entirely.</p>
+
+
+
+<p class="wp-block-paragraph">Use an idle timer to purge credentials after a period of inactivity instead of waiting for the absolute cache expiry limit:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">defun</span> my-security-clear-caches ()
+  <span class="hljs-string">"Clear all cached authentication data managed by auth-source."</span>
+  (<span class="hljs-name">when</span> (<span class="hljs-name">fboundp</span> 'auth-source-forget-all-cached)
+    (<span class="hljs-name">auth-source-forget-all-cached</span>)))
+
+(<span class="hljs-name">run-with-idle-timer</span> <span class="hljs-number">900</span> <span class="hljs-literal">t</span> #'my-security-clear-caches)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The benefit is that it limits memory exposure to 15 minutes of idle time. The tradeoff is that background operations requiring authentication may fail or block while awaiting a passphrase when returning to the editor.</p>
+
+
+
+<h2 class="wp-block-heading">Symbol shorthand code execution</h2>
+
+
+
+<p class="wp-block-paragraph">Emacs 28.1 added a feature called symbol shorthands (<code>read-symbol-shorthands</code>). A vulnerability exists in Emacs versions 28.1 through 31 pretest where this feature can be abused to trigger arbitrary code execution simply by opening a specially crafted file. The malicious execution occurs immediately, even before the file contents are displayed.</p>
+
+
+
+<p class="wp-block-paragraph">The exploit relies on Emacs evaluating symbol shorthands during unsafe <code>intern</code> calls in <code>vc-find-backend-function</code> and <code>c-compose-keywords-list</code>. Emacs 31.1 mitigates the vulnerability. Earlier versions, including affected Emacs 31 pretest versions, remain vulnerable unless the mitigation is applied manually.</p>
+
+
+
+<p class="wp-block-paragraph">For users on Emacs 31 pretest or older, you can implement a mitigation by defining an advice function that locally disables symbol shorthands and applying it around the vulnerable operations.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">defun</span> my-suppress-shorthands (<span class="hljs-name">orig</span> <span class="hljs-symbol">&amp;rest</span> args)
+  <span class="hljs-string">"Call ORIG function with ARGS while binding `read-symbol-shorthands' to nil.
+ORIG is the original function being advised.
+ARGS is the list of arguments passed to the original function.
+This acts as advice to prevent arbitrary code execution via symbol shorthands
+during unsafe operations like interning symbols on file open."</span>
+  (<span class="hljs-name">let</span> (<span class="hljs-name">read-symbol-shorthands</span>)
+    (<span class="hljs-name">apply</span> orig args)))
+
+<span class="hljs-comment">;; A workaround patch (Commit 8466eb44) was applied to the emacs-31 release</span>
+<span class="hljs-comment">;; branch on August 5, 2026. Early pretest versions of Emacs 31 do not</span>
+<span class="hljs-comment">;; include this mitigation.</span>
+(<span class="hljs-name">when</span> (<span class="hljs-name">&lt;</span> emacs-major-version <span class="hljs-number">32</span>)
+  (<span class="hljs-name">advice-add</span> 'vc-find-backend-function <span class="hljs-symbol">:around</span> #'my-suppress-shorthands)
+
+  (<span class="hljs-name">with-eval-after-load</span> 'cc-fonts
+    (<span class="hljs-name">advice-add</span> 'c-compose-keywords-list <span class="hljs-symbol">:around</span> #'my-suppress-shorthands)))</code></span></pre>
+
+
+<p class="wp-block-paragraph">This protects the editor from silent code execution attacks embedded in untrusted source files without requiring an upgrade to an unreleased Emacs version. The tradeoff is that it modifies core function behavior via advice, though the impact on version control and C/C++ fontification performance is negligible.</p>
+
+
+
+<h2 class="wp-block-heading">Package Management</h2>
+
+
+
+<p class="wp-block-paragraph">Emacs 31.1 added <code>package-review-policy</code>, an automated package review system, allowing inspection of upstream code changes before installation:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> package-review-policy <span class="hljs-literal">t</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">Setting <code>package-review-policy</code> to <code>t</code> causes Emacs to require a review of packages before installation or upgrade. The package is unpacked into a temporary review directory, where the source can be compared with the previous installation (diff), and reviewed. The package is installed only if the review succeeds.</p>
+
+
+
+<p class="wp-block-paragraph">The main downside is that updates can no longer run in the background. Having to review diffs by hand gets tedious when upgrading multiple packages at once.</p>
+
+
+
+<h2 class="wp-block-heading">Securing .dir-locals.el and local variables</h2>
+
+
+
+<p class="wp-block-paragraph">Emacs automatically applies project-specific configurations through file-local and directory-local (<code>.dir-locals.el</code>) variables when opening a file or directory. While this feature ensures consistent settings across environments, it can cause security risks and persistent prompt fatigue when editing source code. Malicious <code>.dir-locals.el</code> files or file-local variables containing <code>eval</code> forms can execute arbitrary Lisp code if Emacs is configured to evaluate them, or if the user explicitly approves the relevant prompt. This article outlines configurations for securing file-local and <code>.dir-locals.el</code> variables:<br><a href="https://www.jamescherti.com/securing-emacs-dir-locals-el-local-variables/"><strong>Emacs .dir-locals.el and Local Variables - Securing and Reducing Prompts</strong></a>.</p>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/compiling-emacs/" rel="bookmark" title="A Technical Guide to Compiling Emacs for Performance on Linux and Unix systems">A Technical Guide to Compiling Emacs for Performance on Linux and Unix systems</a></li>
+<li><a href="https://www.jamescherti.com/measuring-emacs-startup-time/" rel="bookmark" title="Measuring Emacs startup time more accurately than the built-in emacs-init-time">Measuring Emacs startup time more accurately than the built-in emacs-init-time</a></li>
+<li><a href="https://www.jamescherti.com/securing-emacs-dir-locals-el-local-variables/" rel="bookmark" title="Securing Emacs .dir-locals.el and local variables">Securing Emacs .dir-locals.el and local variables</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-python-dev-using-eglot-pylsp-ruff-pylint-flake8/" rel="bookmark" title="Configuring Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters">Configuring Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters</a></li>
+</ol>
+</div>

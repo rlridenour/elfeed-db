@@ -1,0 +1,289 @@
+<p>I was talking with Amit Patel
+  of <a href="http://www.redblobgames.com/">Red Blob Games</a> the
+  other day and he mentioned that he had been participating in a
+  programming endeavor where people were creating variations of
+  rogue-like games based on
+  a <a href="https://rogueliketutorials.com/">tutorial</a>.  He had
+  just begun experimenting with vibe coding and figuring out how to do
+  it and what works for him.  This sounded like an interesting idea,
+  so I decided to try it out myself.  I began with the basic tutorial,
+  but since I'm a Lisp programmer, I decided to vibe code the game in
+  Common Lisp.  I had a few goals in mind:</p>
+<ul>
+  <li>I wanted to see if I (actually the LLM) could code up a
+    rogue-like game in the browser</li>
+  <li>I wanted to see what sort of interesting code the LLM would
+  produce:  Would it be a good design?  Would it use macros? Would it
+    use CLOS?  Would it get overly complex and "hit the wall" at some
+  point?</li> 
+  <li>How would it handle being told to work with functional
+  programming style given that this sort of game is traditionally
+    written in stateful, object-encapsulated style?</li>
+</ul>
+
+<p>I mostly vibe coded this, but I did step in and make adjustments
+  here and there.  For example, I specifically requested that the LLM
+  use a functional programming style, and I asked it to refactor large
+  files into smaller ones.</p>
+
+<h2>Beginning</h2>
+
+<p>Getting started was tricky.  I basically wanted a simple terminal
+  emulator in the browser that would would display a fixed-width grid
+  of characters that the back end could update.  I wanted to be able
+  to send keypresses to the back end and have it update the display.
+  I didn't have a clear idea about how to do this, so I experimented a
+  bit and came up with something relatively easy.  The front end is a
+  simple HTML page with a <code>&lt;div&gt;</code> is expected to contain the
+  grid of characters.  The front-end runs some JavaScript opens a
+  WebSocket connection to the back end and sits in a loop waiting for
+  messages.  The back end sends messages to the front end that contain
+  a block of html that the front end just inserts into
+  the <code>&lt;div&gt;</code>.  The front end also listens for keypresses and
+  sends them to the back end.  I didn't expect that this would be a
+  very efficient way to do it, but I figured that a modern browser and
+  reasonably good internet connection would be able to handle a modest
+  refresh rate.</p>
+
+<p>As coding progressed, the LLM extended the front end to include
+  multiple <code>&lt;div&gt;</code>s, including pop-up modals.  The
+  LLM also augmented the front end to reconnect to the back end if the
+  connection was lost, and direct focus to the playing area with the
+  page was displayed.  Othewise, the front end is a relatively thin
+  client that mostly displays exactly what the back end sends it.</p>
+
+<h2>Real time back end</h2>
+
+<p>I started out with the standard rogue-like game loop, which is a
+  synchronous, turn-based loop.  The back end would wait for a
+  keypress, then update the game state and send the new display to the
+  front end.  This works, but I remembered how the developers of
+  Diablo said that when they decided to make it real-time it
+  completely changed the game.  I decided to make the back end
+  real-time, but with a slow enough tick rate that I wasn't
+  overwhelming the connection or the browser.  Eventually I decided
+  on a tick rate of 20Hz.  Most of the effects in the game are timed
+  around a 0.1 second interval (the rate at which the keyboard repeats
+  when you hold down a key) and 20Hz is the Nyquist frequency to avoid
+  aliasing (which would make the game stutter weirdly if you tried to
+  run by holding down an arrow key).  This makes the game feel
+  responsive enough without it needing to refresh at CRT rates.  Since
+  the game is based on a grid of ascii characters rather than a
+  bitmap, I guessed that the bandwidth requirements would be modest
+  enough that this would work.</p>
+
+<p>The first few hours vibe coding were spent getting a player
+  character to run around a procedurally generated dungeon.  Once I
+  had that working, I asked the LLM to refactor the back end into a
+  functional core with a stateful wrapper.  The functional core is a
+  pure function that takes the current game state and a message from
+  the front end (typically a keypress) and returns the new game state.
+  The stateful wrapper manages the WebSocket connection and the game
+  loop.  Once the back-end had been refactored into a functional core,
+  the LLM generally continued to keep side effects out of the code,
+  although it did introduce some reasonable side effects to manage a
+  LRU cache of game state in order to save on recalculations.</p>
+
+<p>  Every action in the game is modeled as a pure
+reducer
+  function. <code>`MOVE-PLAYER`</code>, <code>`DRINK-POTION`</code>, <code>`PROCESS-ENEMY-TURNS`</code>,
+  etc. all follow the same signature: they take the
+  current <code>`GAME-STATE`</code> plus some inputs, and return a
+  freshly allocated <code>`GAME-STATE`</code> representing the world
+  one tick later.</p>
+
+<p>To achieve this without writing thousands of lines of boilerplate copy
+constructors, the engine heavily leverages Common Lisp's Meta-Object Protocol
+(MOP). The <code>`copy-instance`</code>
+  and <code>`update-entity`</code> helpers dynamically iterate over a
+  class's slots at runtime. When an Orc takes 5 damage, the engine
+  doesn't mutate the Orc; it uses the MOP to spin up a brand new Orc
+  with identical properties, except for a modified HP slot, and
+  substitutes it into the new <code>`GAME-STATE`</code>'s entity list.</p>
+
+<h2>Decoupled I/O State</h2>
+
+<p>To avoid locking as much as possible, the engine decouples the I/O
+  state from the game state.  When the Hunchensocket WebSocket read-thread receives a JSON packet from a
+client, it does exactly two things: it parses the JSON into an immutable
+<code>RDESCENT-COMMAND</code> CLOS object
+(like <code>move-command</code> or <code>drink-command</code>), and it 
+dumps that command into a thread-safe <code>SB-CONCURRENCY:QUEUE</code>. It never touches
+the game state.</p>
+
+<p>  Meanwhile, a single, dedicated game-loop thread acts as the heartbeat. Once
+every 50ms, the <code>TICK-ALL-CLIENTS</code> function wakes up, drains the input queues
+for every connected client, and folds those commands over that client's
+<code>GAME-STATE</code> using the pure <code>ADVANCE-GAME-STATE</code> reducer. This means a player
+mashing the keyboard at 100 APM can never cause a race condition or force the
+engine to lock the state tree. The I/O is asynchronous, but the game
+logic is predictably synchronous.</p>
+
+<p>Because the game runs in real-time, it
+needs a way to blend the fast-paced player inputs with slower,
+methodical monster AI. This is handled via an Energy accrual
+  system.</p>
+
+<p>  Every tick, every entity (players and monsters alike) accrues `ENERGY` equal
+to their `SPEED` stat. Actions have flat energy
+costs. The game loop refuses to process an action for an entity until its
+energy balance can afford it. This allows the engine to support
+speed-altering buffs and debuffs simply by tweaking the energy
+  thresholds or accrual rates, without needing a bespoke
+  cooldown-timer subsystem.</p>
+
+<h2>Procedural Dungeon Caching</h2>
+
+<p>Dungeon generation in `Recursive Descent` is
+deterministic, seeded by a hash of the dungeon level. This means
+<code>GENERATE-DUNGEON</code> will always carve the exact same rooms and corridors for
+Level 5, every time. The engine doesn't need to store the entire
+dungeon in memory for every player; it can simply regenerate the same
+layout on demand.</p>
+
+<p>Because the generation is deterministic, and the <code>GAME-MAP</code> geometry (the
+<code>TILE</code> array) is strictly immutable, the architecture introduces a
+<code>*DUNGEON-CACHE*</code>. When a player drops down to Level 5, the engine checks the
+cache. If the geometry is already there, it just hands a pointer to the existing
+immutable map to the player's <code>GAME-STATE</code>. Multiple players on the same tier
+and level share the same physical memory space for the dungeon walls
+and floors, reducing the memory footprint of the server.</p>
+
+<h2>Save Games Stored on the Client</h2>
+
+<p>Instead of maintaining a massive, clustered database to store player
+progression, the server is entirely stateless across sessions. When a player
+hits the <code>Save</code> button, the Lisp server serializes their entire immutable
+<code>GAME-STATE</code> (including all visited levels, dropped items, and explored
+fog-of-war bit-vectors) into an association list. It then zlib-compresses it,
+signs it with an HMAC-SHA256 hash using a server-side secret key, base64 encodes
+it, and sends it back to the client over the WebSocket.</p>
+
+<p>The client's browser stores the save blob in localStorage. When the player
+reconnects, they hand the blob back. The server verifies the
+  signature, decompresses it, and resurrects the CLOS objects. Thus we
+  offloaded the database hosting to the user's hard drive.</p>
+
+<h2>Client Registry</h2>
+
+<p>Tracking connected users in a multithreaded web
+server usually involves wrapping a global list in a heavy mutex, which creates a
+bottleneck every time the game loop iterates over it.</p>
+
+<p>To solve this, <code>server.lisp</code> isolates the <code>*RDESCENT-CLIENTS*</code> list inside a
+dedicated background actor thread (<code>RDESCENT-CLIENTS-REGISTRY-LOOP</code>). No other
+thread is allowed to touch it. When Hunchensocket receives a new connection or a
+disconnect, it drops a simple <code>(:CONNECT client)</code> or <code>(:DISCONNECT client)</code>
+message into the actor's mailbox. When the game loop needs the list of players
+for the next tick, it sends a <code>(:SNAPSHOT)</code> message and waits for the actor to
+reply with the current list. This guarantees that the client roster is never
+mutated out from under an active iteration, cleanly sidestepping deadlocks.</p>
+
+<h2>Fat Base Class</h2>
+
+<p>Modern game development typically uses
+Entity-Component-System (ECS) architectures to avoid massive inheritance trees.
+`Recursive Descent` ignores this trend. The base <code>ENTITY</code> class is
+deliberately "fat." It holds everything: spatial coordinates (<code>X</code>, <code>Y</code>),
+rendering data (<code>CHAR</code>, <code>RENDER-ORDER</code>), combat stats (<code>HP</code>, <code>POWER</code>,
+<code>DEFENSE</code>), inventory, equipment, and all seven RPG Stats
+(Strength, Dexterity, Charisma, etc.).</p>
+
+<p>In a mutable OOP design, a fat base class is a maintenance nightmare. In a
+purely functional CLOS architecture, it is an advantage. Because state
+mutation is handled entirely by a Meta-Object Protocol (MOP) helper
+(<code>COPY-INSTANCE</code> / <code>UPDATE-ENTITY</code>) that dynamically walks the class slots to
+clone the object, having a wide, flat property list is functionally cheap. You
+don't need complex component-querying logic; you just ask the entity for its
+  <code>DOMAIN-KNOWLEDGE</code> and move on.</p>
+
+<p>Interestingly, there is no <code>PLAYER</code> class. The player is simply a baseline
+<code>ENTITY</code> instance that happens to be bound to the <code>PLAYER</code> slot of the
+<code>GAME-STATE</code>. It uses the exact same combat resolution, inventory handling, and
+stat scaling as any monster.</p>
+
+<h2>Entity Subclasses</h2>
+
+<p>Instead of overriding
+methods to change behavior, the <code>ENTITY</code> subclasses primarily exist to provide
+specific <code>:DEFAULT-INITARGS</code> and to act as dispatch targets for generic
+  functions.</p>
+
+<ul>
+  <li><code>ENEMY</code> &mdash; Adds no new slots. It simply provides an <code>:AFTER</code> initialization method to guarantee an enemy defaults to a <code>:HOSTILE</code> disposition and derives its XP value from its HP. </li>
+  <li><code>AUTO-PICKUP-ITEM</code> &mdash; Represents a scavenger hunt collectible. It defaults <code>IS-ALIVE</code> to <code>NIL</code> and <code>BLOCKS-MOVEMENT</code> to <code>NIL</code>, keeping it out of the AI processing loop and allowing the player to freely walk over it.</li>
+</ul>
+
+<h2>Fixture Hierarchy</h2>
+
+<p>Fixtures represent stationary, non-hostile map
+objects (shrines, vendors, NPCs) that the player interacts with via a dedicated
+command rather than by bumping into them. The base <code>FIXTURE</code> class defaults
+<code>IS-ALIVE</code> to <code>NIL</code> (excluding it from the enemy AI turn loop) and
+<code>BLOCKS-MOVEMENT</code> to <code>NIL</code> (allowing the player
+to stand on it).</p>
+
+<p>The hierarchy branches out based on internal state
+  requirements:</p>
+<ul>
+  <li><code>SHRINE-FIXTURE</code> &mdash; Adds a `USE-COUNT` slot to
+  track finite activations.</li>
+<li><code>VENDOR-FIXTURE</code> &mdash; Stateless beyond its base properties. Its "stock" is derived globally, and it requires no mutable inventory of its own.</li>
+<li><code>NPC-FIXTURE</code> &mdash; Likewise stateless.  Quest progress is stored in the player's <code>GAME-STATE</code> flags rather than on the NPC, ensuring the NPC remains purely shared, immutable geometry.</li>
+<li><code>TRAP-FIXTURE</code> &mdash; Adds a <code>HIDDEN-P</code>
+  slot to dictate rendering visibility, flipping to <code>NIL</code>
+  once triggered or spotted.</li></ul>
+
+<h2>Command Pattern</h2>
+
+<p><code>RDESCENT-COMMAND</code> input handling relies on a
+polymorphic Command Pattern. The WebSocket read thread parses raw JSON
+into a concrete subclass of <code>RDESCENT-COMMAND</code> (<code>MOVE-COMMAND</code>,
+  <code>USE-ITEM-COMMAND</code>, <code>EQUIP-COMMAND</code>, etc.).</p>
+
+<p>Instead of a massive <code>COND</code> statement checking command types, the engine uses
+CLOS generic functions (<code>EXECUTE-QUEUED-COMMAND</code>). Each command class has a
+specific method that invokes the appropriate state reducer (e.g., the
+<code>DRINK-COMMAND</code> method calls <code>DRINK-POTION</code>). This makes extending the engine's
+vocabulary trivial: adding a new command means defining a tiny data class and
+writing exactly one generic method for it.</p>
+
+<h2>State Containers</h2>
+
+<p><code>GAME-MAP</code>: Holds the <code>TILES</code> array. A <code>TILE</code> contains purely static, shared geometry (walls, floors, room-type tags). Because this never mutates based on player action, a <code>GAME-MAP</code> can be safely memoized and shared across multiple players on the same depth via the <code>*DUNGEON-CACHE*</code>.
+<code>GAME-STATE</code>: The server-authoritative snapshot for a specific player. It holds the <code>PLAYER</code> entity, the list of other <code>ENTITIES</code> on the floor, the field-of-view <code>EXPLORED</code> bit-vector, and the <code>LEVELS</code> FSET map (which archives <code>DUNGEON-LEVEL-SNAPSHOT</code>s of previously visited floors). 
+
+<p>The Imperative Shell: <code>RDESCENT-CLIENT</code> Sitting at the very top of the
+stack is <code>RDESCENT-CLIENT</code>, a subclass of Hunchensocket's <code>WEBSOCKET-CLIENT</code>.
+This is the only place where mutability is permitted. It acts as the anchor,
+holding the connection's thread-safe <code>INPUT-QUEUE</code> for
+incoming commands, and the mutable pointer to the current immutable
+<code>GAME-STATE</code>.  This is where the game state is updated with
+the new game state.</p>
+
+<h2>Conclusion</h2>
+
+<p>The LLM did a good job of vibe coding a rogue-like game in the
+  browser.  At one point I simply sat down and brainstormed a list of
+  features that I wanted to add to the game.  Then I told the LLM to
+  design an architecture that would be amenable to adding those
+  features.  Then I told the LLM to implement the architecture.  When
+  it was done, I told the LLM to prioritize the features I wanted to
+  add suggest an implementation order.  Then I told the LLM to
+  implement each feature in turn.</p>
+
+<p>At a couple of points, the LLM was letting a monolithic file get
+  out of hand, so I explicitly told it to refactor the code into
+  smaller files   I also made an explicit pass to make sure that the
+  compile was giving no warnings.  The LLM had a tendency to use large
+  etypecase statements to dispatch on the type of an object.  I 
+  explicitly told it to use CLOS generic functions instead, and it did
+  so.  OTher than that, I basically left the LLM to generate code how
+  it saw fit.</p>
+
+<p>If you want to try out the game, you can run it in your browser at
+  <a href="https://jrm-code-project.com/rdescent.html">https://jrm-code-project.com/rdescent.html</a>.  If you just
+  want to peruse the source code, you can find it
+  at <a href="https://github.com/jrm-code-project/jrm-code-public/tree/main/rdescent">https://github.com/jrm-code-project/jrm-code-public/tree/main/rdescent</a>,
+  but try the game before you look at the code because the code
+  contains spoilers.  No guarantees it will work on your browser.  Mine has a fairly big display and a reasonably high bandwidth connection, but I don't know about yours.  No way this would work on a phone.</p>

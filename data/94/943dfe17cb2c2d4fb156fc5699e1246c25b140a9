@@ -1,0 +1,192 @@
+<p>Why write boilerplate code when you can ask an LLM can do it for
+  you?  But even LLMs will avoid boilerplate if they can.  I recently
+  vibe coded a rogue-like game in Common Lisp.  While I gave the model
+  specific directions at certain points, I mostly let the model
+  generate the code as it saw fit.  I found some interesting suprises
+  in the generated code.</p>
+
+<p>One feature of these sorts of games is that there is a lot of
+  varied `stuff` you can encounter.  This keeps the game interesting
+  and maintains the novelty and sense of discovery as it takes a long
+  time for the player to discover everything about the game.  While it
+  is fun to think of all of the different things to put in the game,
+  it is a bit tedious to actually implement them all.  You want a
+  large variety of things, they should all be different in more than
+  just their description, and the effect of encountering and using an
+  item should be appropriate to the kind of item it is.  It would be
+  boring if every food item simply retored 5 health, but much more
+  entertaining if some food restored health, some restored stamina,
+  some made the player stronger, etc., and even better if it were
+  spinach that restored strength, an elixir that restored health, and
+  an energy drink that restored stamina.</p>
+
+<p>So I prompted the model with a few examples of the kinds of things
+  I wanted to see in the game and told it to extend my list with its
+  own ideas, and to implement them in the game.</p>
+
+<p>Typically, this is where the tedium sets in because you need to
+  write a lot of boilerplate code that just has subtle variations.
+  LLMs are good at boilerplate, so I expected to find that.  But an
+  experienced Common Lisp programmer would write a macro to generate
+  the boilerplate based on a few customization parameters.  I was
+  pleasently surprised to see that the model did exactly this.</p>
+
+<pre>
+(defmacro define-armory-equippable-item (class-name display-name equip-slot stat-bonuses documentation
+                                          &amp;key (weapon-reach 1) (weapon-hits-per-turn 1) on-hit-effect)
+  "Define a stateless EQUIPPABLE-ITEM subclass CLASS-NAME and its
+matching MAKE-CLASS-NAME factory. The repetitive Â§13 armory content is
+all fixed-data leaf classes like STACK-OF-UNREAD-MEMOS, so a single
+macro keeps their definitions uniform without introducing any runtime
+registry or mutable catalog layer. The generated factory accepts a
+&amp;KEY MODIFIER (default :NORMAL), passed straight through as the new
+instance's own ITEM-MODIFIER -- see EQUIPPABLE-ITEM's own docstring
+for what :CURSED/:BLESSED do -- and &amp;KEY CLOAKED (default T), passed
+straight through as the new instance's own ITEM-CLOAKED-P (see
+EQUIPPABLE-ITEM's own docstring for what cloaking hides)."
+  (let ((factory-name (intern (format nil "MAKE-~A" (symbol-name class-name)) (symbol-package class-name))))
+    `(progn
+       (defclass ,class-name (equippable-item)
+         ()
+         (:default-initargs :name ,display-name
+                            :equip-slot ,equip-slot
+                            :stat-bonuses ,stat-bonuses
+                            :weapon-reach ,weapon-reach
+                            :weapon-hits-per-turn ,weapon-hits-per-turn
+                            :on-hit-effect ,on-hit-effect)
+         (:documentation ,documentation))
+       (defun ,factory-name (&amp;key (modifier :normal) max-durability durability (cloaked t))
+         ,(format nil "Pure factory: return a fresh ~A. MODIFIER (default :NORMAL) is passed
+straight through as the new instance's own ITEM-MODIFIER. CLOAKED
+(default T) is passed straight through as the new instance's own
+ITEM-CLOAKED-P (see EQUIPPABLE-ITEM's own class
+docstring). MAX-DURABILITY/DURABILITY (default NIL, meaning \"use
+EQUIPPABLE-ITEM's own class default/derive from MAX-DURABILITY\" --
+see its class docstring) are only forwarded to MAKE-INSTANCE when
+explicitly supplied, so a direct/test call keeps this item's usual
+deterministic *RDESCENT-DEFAULT-ITEM-DURABILITY*." display-name)
+         (apply #'make-instance ',class-name :modifier modifier :cloaked cloaked
+                (append (when max-durability (list :max-durability max-durability))
+                        (when durability (list :durability durability))))))))
+</pre>
+
+<p>This macro generates the class definition for the item and a
+  factory function to create instances of the item.  The required
+  arguments are common to all equippable items, and the optional
+  arguments are modifiers that are only relevant to certain items.
+  This macro is used to define each item that can be equipped by the
+  player.</p>
+
+<pre>
+(define-armory-equippable-item branded-corporate-yeti-mug
+  "Branded Corporate Yeti Mug"
+  :off-hand
+  (list :caffeine-tolerance 3)
+  "Off-hand mug granting +3 :CAFFEINE-TOLERANCE, which today feeds the
+already-wired kombucha healing formula through EFFECTIVE-CAFFEINE-
+TOLERANCE. Its planned refill/drain-rate behavior is deliberately
+deferred because no passive CAFFEINE-TOLERANCE depletion system exists
+yet."
+  )
+
+(define-armory-equippable-item lanyard-of-the-vip
+  "Lanyard of the VIP"
+  :head
+  (list :seniority 2)
+  "Neck-flavored accessory implemented in the shared :HEAD slot, with a
+real +2 :SENIORITY bonus feeding deflection/detection formulas. Its
+planned \"SecOps Auditor aggro radius to zero\" behavior is deliberately
+deferred because that monster/archetype-specific aggro mechanic does
+not exist yet."
+  )
+</pre>
+
+<p>Simple uses of the macro are straightforward you specify class
+  name, the location in which it can be equipped, what stats are
+  modified by equipping the item, and a docstring.</p>
+
+<pre>
+ (define-armory-equippable-item red-swingline-stapler
+  "Red Swingline Stapler"
+  :weapon
+  (list :power 2)
+  "Low-damage weapon with a 10% on-hit :BLEED effect. :BLEED is wired
+for real as a small damage-over-time effect via STATUS-EFFECT's own
+MAGNITUDE slot; the plan text's additional \"panic the target\" rider
+is deliberately deferred because the current AI has no temporary panic
+status that can cleanly override disposition/pathing."
+  :on-hit-effect (list :kind :bleed :turns *rdescent-bleed-ticks*
+                       :magnitude *rdescent-bleed-damage-per-tick* :chance 0.10))
+</pre>
+
+<p>This item has a special effect that is applied when it hits an
+  enemy.  The optional argument to the macro allows you to specify the
+  effect.  Note that the model understood the semantic context of the
+  weapon (staples puncture, punctures bleed) and it invented the
+  `:bleed` effect on its own and implemented the mechanics of it within the game.</p>
+
+<pre>
+(define-armory-equippable-item three-foot-ethernet-cable
+  "3-Foot Ethernet Cable (Cat 6)"
+  :weapon
+  (list :power 2)
+  "Fast whip-style weapon: low damage, two hits per attack action, and
+real reach 2 through WEAPON-REACH/WEAPON-HITS-PER-TURN. The plan text's
+crowd-control flavor is therefore approximated through the existing
+combat scheduler rather than a new knockback or entangling subsystem."
+  :weapon-reach 2
+  :weapon-hits-per-turn 2)
+</pre>
+
+<p>This weapon uses the optional arguments to specify a longer reach
+  and faster attack speed than standard weapons.  Again, note that
+  this is appropriate for the item.</p>
+
+<p>The model generated twenty-eight different equippable items of
+  various types with varying bonuses and effects.  This illustrates
+  the model's ability to effectively use macros to reduce the
+  boilerplate code that would otherwise be necessary to implement
+  items.  It also illustrates that the model understands both the
+  theme of the game and the nature of the items being implemented.</p>
+
+<p>Most items in the game can be discovered just sitting around on the
+  ground, so most items have `ground` wrapper that provides an object
+  that occupies a tile on the map.</p>
+
+<pre>
+(defmacro define-ground-armory-item (name item-factory char color)
+  "Define the MAKE-GROUND-* wrapper corresponding to ITEM-FACTORY for a
+Â§13 equippable item."
+  (let* ((item-name (symbol-name item-factory))
+         (prefix-length (length "MAKE-"))
+         (suffix (subseq item-name prefix-length))
+         (ground-name (intern (format nil "MAKE-GROUND-~A" suffix) (symbol-package item-factory))))
+    `(defun ,ground-name (x y level)
+       ,(format nil "Pure factory: return a fresh GROUND-ITEM wrapping ~A." name)
+       (make-ground-equippable-item x y level ,char ,name ,color (,item-factory)))))
+
+(define-ground-armory-item "Red Swingline Stapler" make-red-swingline-stapler #\) "#d08770")
+(define-ground-armory-item "3-Foot Ethernet Cable (Cat 6)" make-three-foot-ethernet-cable #\) "#d08770")
+(define-ground-armory-item "Lanyard of the VIP" make-lanyard-of-the-vip #\] "#b48ead")
+(define-ground-armory-item "Branded Corporate Yeti Mug" make-branded-corporate-yeti-mug
+  *rdescent-corporate-trinket-char* "#8fbcbb")
+</pre>
+
+<p>This macro generates the function name for the ground item based on
+  the name of the factory function for the item.  So if
+  `make-red-swingline-stapler` is the factory for the stapler, then
+  `make-ground-red-swingline-stapler` is the factory for the ground
+  item that wraps the stapler.  The macro also generates a docstring
+  for the function.</p> 
+
+<p>I told the model that it was allowed to use the Latin-1 character
+  set so that it would have a larger set of characters to choose from
+  when selecting a character to represent the item on the map.  In
+  the case of the Branded Corporate Yeti Mug, it chose the
+  *rdescent-corporate-trinket-char*, which is, quite appropriately,
+  the registered trademark symbol Â®.  Again this indicates that the
+  model understood the theme of the game.</p>
+
+<p>The model of course saved hours of tedious typing, but by
+  generating macros to define items, it reduced the actual boilerplate
+  and increased the maintainability of the code.</p>

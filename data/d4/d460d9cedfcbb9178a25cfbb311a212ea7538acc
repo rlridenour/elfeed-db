@@ -1,0 +1,354 @@
+<p>
+More <code>vc</code> stuff, and this week's rabbit hole was git worktrees (Bozhidar Batsov's <a href="https://emacsredux.com/blog/2026/09/02/working-with-git-worktrees-in-magit/">Working with Git Worktrees in Magit</a> is what sent me down this particular rabbit hole!).  It was an itch that manifested itself while reading this blog and mainly seeing that worktrees seemed to make a good deal of sense to me (especially as I am quite a subversion veteran). I have always felt uncomfortable with the default git in-situ branch switching and prefer to branch develop away from the mainline in a physical separate directory and this is just what worktrees facilitate.  So how to do this with built-in vc-mode tools?, well as always this requires a little work and yes, I could use Magit, but I'm seeing how far I can push the built in vc.
+</p>
+
+
+<div id="org418079b" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20260905090959-emacs--Git-Worktrees-and-Branch-Surgery-in-Built-in-VC.jpg" alt="20260905090959-emacs--Git-Worktrees-and-Branch-Surgery-in-Built-in-VC.jpg" width="100%" />
+</p>
+</div>
+
+
+<p>
+The funny thing is that <code>vc</code> already understands worktrees perfectly well: a worktree is just a directory holding a <code>.git</code> pointer file instead of a <code>.git</code> folder, <code>vc-git</code> resolves that transparently, and diffs, commits and <code>vc-dir</code> all quietly do the right thing per worktree. What <code>vc</code> cannot do is actually seemingly <i>manage</i> them. There is no command to create one, switch between them, move one, list them, or throw one away, and the branch side is nearly as thin. Magit does all of this beautifully, of course - but I am stubborn about staying inside core Emacs where I can, so I spent an evening teaching <code>vc-dir</code> some new tricks.  And yes, I do understand that vc in Emacs is in fact a generic abstraction and works well across all different types of version control, hence the reduction to a core subset of general source code commands, with a few extra added on of course for those obvious missing pieces, but I want to add the less obvious pieces, and certainly for git, worktrees is probably going to be one of them.  Right lets get on with this and write some code!
+</p>
+
+<p>
+Everything funnels through one small worker that shells out via <code>vc-git-command</code> and then drops you straight into <code>vc-dir</code> in the new tree:
+</p>
+
+<p>
+Here is what I implemented:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><span style="color: #6272a4;">;;</span><span style="color: #6272a4;">
+</span><span style="color: #6272a4;">;; </span><span style="color: #6272a4;">-&gt; vc-git-worktree-core
+</span><span style="color: #6272a4;">;;</span><span style="color: #6272a4;">
+</span>(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-branches</span> ()
+  <span style="color: #8995ba;">"Return a list of local branch names in the current git repository."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((root (vc-git-root default-directory)))
+    (<span style="color: #ff79c6; font-weight: bold;">when</span> root
+      (<span style="color: #ff79c6; font-weight: bold;">with-temp-buffer</span>
+        (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+          (vc-git-command (current-buffer) 0 nil
+                          <span style="color: #f1fa8c;">"branch"</span> <span style="color: #f1fa8c;">"--format=%(refname:short)"</span>))
+        (split-string (buffer-string) <span style="color: #f1fa8c;">"\n"</span> t)))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git--worktree-root</span> ()
+  <span style="color: #8995ba;">"Return the git worktree root for `</span><span style="color: #8be9fd;">default-directory</span><span style="color: #8995ba;">'.
+Signal a `</span><span style="color: #8be9fd;">user-error</span><span style="color: #8995ba;">' when not inside a Git repository."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">or</span> (vc-git-root default-directory)
+      (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"Not in a Git repository"</span>)))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-entries</span> ()
+  <span style="color: #8995ba;">"Return the worktrees of the current repository as a list of plists.
+Each plist has keys :path, :head, :branch, :detached, :bare,
+:locked and :prunable, parsed from `git worktree list --porcelain'."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((root (my/vc-git--worktree-root))
+        entries current)
+    (<span style="color: #ff79c6; font-weight: bold;">with-temp-buffer</span>
+      (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+        (vc-git-command (current-buffer) 0 nil
+                        <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"list"</span> <span style="color: #f1fa8c;">"--porcelain"</span>))
+      (goto-char (point-min))
+      (<span style="color: #ff79c6; font-weight: bold;">while</span> (not (eobp))
+        (<span style="color: #ff79c6; font-weight: bold;">let</span> ((line (buffer-substring-no-properties
+                     (line-beginning-position) (line-end-position))))
+          (<span style="color: #ff79c6; font-weight: bold;">cond</span>
+           ((string-prefix-p <span style="color: #f1fa8c;">"worktree "</span> line)
+            (<span style="color: #ff79c6; font-weight: bold;">when</span> current (<span style="color: #ff79c6; font-weight: bold;">push</span> current entries))
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current (list <span style="color: #ffb86c;">:path</span> (substring line 9))))
+           ((string-prefix-p <span style="color: #f1fa8c;">"HEAD "</span> line)
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current (plist-put current <span style="color: #ffb86c;">:head</span> (substring line 5))))
+           ((string-prefix-p <span style="color: #f1fa8c;">"branch "</span> line)
+            (<span style="color: #ff79c6; font-weight: bold;">let</span> ((ref (substring line 7)))
+              (<span style="color: #ff79c6; font-weight: bold;">setq</span> current
+                    (plist-put current <span style="color: #ffb86c;">:branch</span>
+                               (<span style="color: #ff79c6; font-weight: bold;">if</span> (string-prefix-p <span style="color: #f1fa8c;">"refs/heads/"</span> ref)
+                                   (substring ref 11)
+                                 ref)))))
+           ((string= line <span style="color: #f1fa8c;">"detached"</span>)
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current (plist-put current <span style="color: #ffb86c;">:detached</span> t)))
+           ((string= line <span style="color: #f1fa8c;">"bare"</span>)
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current (plist-put current <span style="color: #ffb86c;">:bare</span> t)))
+           ((string-prefix-p <span style="color: #f1fa8c;">"locked"</span> line)
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current
+                  (plist-put current <span style="color: #ffb86c;">:locked</span>
+                               (<span style="color: #ff79c6; font-weight: bold;">if</span> (&gt; (length line) 6)
+                                   (substring line 7)
+                                 t))))
+           ((string-prefix-p <span style="color: #f1fa8c;">"prunable"</span> line)
+            (<span style="color: #ff79c6; font-weight: bold;">setq</span> current
+                  (plist-put current <span style="color: #ffb86c;">:prunable</span>
+                               (<span style="color: #ff79c6; font-weight: bold;">if</span> (&gt; (length line) 8)
+                                   (substring line 9)
+                                 t))))))
+        (forward-line 1)))
+    (<span style="color: #ff79c6; font-weight: bold;">when</span> current (<span style="color: #ff79c6; font-weight: bold;">push</span> current entries))
+    (nreverse entries)))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git--default-worktree-path</span> (root branch)
+  <span style="color: #8995ba;">"Return a default new-worktree path for BRANCH next to ROOT.
+The default is a sibling directory of ROOT prefixed with the project
+name, e.g. &lt;parent&gt;/myproj-feature for branch feature of myproj.
+Slashes in BRANCH become dashes so hierarchical branches cannot
+collide; an empty BRANCH falls back to &lt;project&gt;-worktree."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((project (file-name-nondirectory
+                  (directory-file-name (expand-file-name root)))))
+    (expand-file-name
+     (concat project <span style="color: #f1fa8c;">"-"</span>
+             (<span style="color: #ff79c6; font-weight: bold;">if</span> (string-empty-p branch)
+                 <span style="color: #f1fa8c;">"worktree"</span>
+               (replace-regexp-in-string <span style="color: #f1fa8c;">"/"</span> <span style="color: #f1fa8c;">"-"</span> branch)))
+     (file-name-directory (directory-file-name (expand-file-name root))))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-add</span> (path branch <span style="color: #bd93f9;">&amp;optional</span> new-branch start-point)
+  <span style="color: #8995ba;">"Create a Git worktree at PATH checking out BRANCH, then open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">'.
+An empty BRANCH checks out HEAD.  With prefix argument NEW-BRANCH,
+create BRANCH as a new branch from START-POINT (defaulting to HEAD)
+instead of checking out an existing branch or revision."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (my/vc-git--worktree-root))
+          (branches (<span style="color: #ff79c6; font-weight: bold;">or</span> (my/vc-git-branches) '()))
+          (make-new (<span style="color: #ff79c6; font-weight: bold;">if</span> current-prefix-arg t nil))
+          (branch (<span style="color: #ff79c6; font-weight: bold;">if</span> make-new
+                      (read-string <span style="color: #f1fa8c;">"New branch name: "</span>)
+                    (completing-read <span style="color: #f1fa8c;">"Checkout branch (empty = HEAD): "</span>
+                                     branches nil nil)))
+          (default-path (my/vc-git--default-worktree-path root branch))
+          (path (read-file-name <span style="color: #f1fa8c;">"Worktree location: "</span>
+                                (file-name-directory default-path)
+                                nil nil
+                                (file-name-nondirectory default-path)))
+          (start (<span style="color: #ff79c6; font-weight: bold;">and</span> make-new
+                      (completing-read <span style="color: #f1fa8c;">"Start point: "</span>
+                                       (delete-dups
+                                        (append (list <span style="color: #f1fa8c;">"HEAD"</span>) branches
+                                                (my/vc-git-tags)))
+                                       nil nil nil nil <span style="color: #f1fa8c;">"HEAD"</span>))))
+     (list (expand-file-name path) branch make-new start)))
+  (my/vc-git-worktree--create path branch new-branch start-point))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree--create</span> (path branch new-branch start-point)
+  <span style="color: #8995ba;">"Create a Git worktree at PATH and open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">' there.
+BRANCH names an existing branch or revision, unless NEW-BRANCH is
+non-nil, in which case BRANCH is created from START-POINT first."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((root (my/vc-git--worktree-root))
+        (expanded (expand-file-name path)))
+    (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+      (<span style="color: #ff79c6; font-weight: bold;">cond</span>
+       (new-branch
+        (<span style="color: #ff79c6; font-weight: bold;">when</span> (string-empty-p branch)
+          (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"New branch name must not be empty"</span>))
+        (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"add"</span> <span style="color: #f1fa8c;">"-b"</span> branch expanded
+                        (<span style="color: #ff79c6; font-weight: bold;">if</span> (string-empty-p start-point) <span style="color: #f1fa8c;">"HEAD"</span> start-point)))
+       ((string-empty-p branch)
+        (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"add"</span> expanded))
+       (t
+        (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"add"</span> expanded branch))))
+    (message <span style="color: #f1fa8c;">"Created worktree %s"</span> expanded)
+    (vc-dir expanded)))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-checkout</span> (path branch)
+  <span style="color: #8995ba;">"Check out existing BRANCH in a new worktree at PATH, then open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">'.
+The Magit-style `</span><span style="color: #8be9fd;">magit-worktree-checkout</span><span style="color: #8995ba;">' first action: the location
+defaults to a sibling directory named &lt;project&gt;-&lt;branch&gt;."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (my/vc-git--worktree-root))
+          (branches (<span style="color: #ff79c6; font-weight: bold;">or</span> (my/vc-git-branches) '()))
+          (branch (completing-read <span style="color: #f1fa8c;">"Checkout branch in new worktree: "</span>
+                                   branches nil nil))
+          (default-path (my/vc-git--default-worktree-path root branch))
+          (path (read-file-name <span style="color: #f1fa8c;">"Worktree location: "</span>
+                                (file-name-directory default-path)
+                                nil nil
+                                (file-name-nondirectory default-path))))
+     (list (expand-file-name path) branch)))
+  (<span style="color: #ff79c6; font-weight: bold;">when</span> (string-empty-p branch)
+    (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"Branch must not be empty"</span>))
+  (my/vc-git-worktree--create path branch nil nil))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-branch</span> (path branch start-point)
+  <span style="color: #8995ba;">"Create new BRANCH from START-POINT in a new worktree at PATH.
+Then open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">'.  The Magit-style `</span><span style="color: #8be9fd;">magit-worktree-branch</span><span style="color: #8995ba;">' first
+action: the location defaults to a sibling directory named &lt;project&gt;-&lt;branch&gt;."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (my/vc-git--worktree-root))
+          (branches (<span style="color: #ff79c6; font-weight: bold;">or</span> (my/vc-git-branches) '()))
+          (branch (read-string <span style="color: #f1fa8c;">"New branch name: "</span>))
+          (start (completing-read <span style="color: #f1fa8c;">"Start point: "</span>
+                                  (delete-dups
+                                   (append (list <span style="color: #f1fa8c;">"HEAD"</span>) branches
+                                           (my/vc-git-tags)))
+                                  nil nil nil nil <span style="color: #f1fa8c;">"HEAD"</span>))
+          (default-path (my/vc-git--default-worktree-path root branch))
+          (path (read-file-name <span style="color: #f1fa8c;">"Worktree location: "</span>
+                                (file-name-directory default-path)
+                                nil nil
+                                (file-name-nondirectory default-path))))
+     (list (expand-file-name path) branch start)))
+  (my/vc-git-worktree--create path branch t start-point))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-move</span> (path new-path)
+  <span style="color: #8995ba;">"Move the Git worktree at PATH to NEW-PATH (`git worktree move').
+Interactively, prompt for a worktree, defaulting to the current one."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((entries (my/vc-git-worktree-entries))
+          (paths (mapcar (<span style="color: #ff79c6; font-weight: bold;">lambda</span> (e) (plist-get e <span style="color: #ffb86c;">:path</span>)) entries))
+          (current (my/vc-git--worktree-root)))
+     (<span style="color: #ff79c6; font-weight: bold;">unless</span> paths (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"No Git worktrees found"</span>))
+     (<span style="color: #ff79c6; font-weight: bold;">let</span> ((path (completing-read <span style="color: #f1fa8c;">"Move worktree: "</span> paths
+                                  nil t nil nil current)))
+       (list path (read-file-name
+                   <span style="color: #f1fa8c;">"Move to: "</span>
+                   (file-name-directory
+                    (directory-file-name (expand-file-name path)))
+                   nil nil)))))
+  (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (my/vc-git--worktree-root))
+         (expanded (expand-file-name path))
+         (target (expand-file-name new-path)))
+    (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+      (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"move"</span> expanded target))
+    (message <span style="color: #f1fa8c;">"Moved worktree %s to %s"</span> expanded target)
+    (<span style="color: #ff79c6; font-weight: bold;">when</span> (derived-mode-p 'vc-dir-mode) (vc-dir-refresh))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-switch</span> (path)
+  <span style="color: #8995ba;">"Interactively select an existing Git worktree and open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">' in it."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((entries (my/vc-git-worktree-entries))
+          (table (mapcar (<span style="color: #ff79c6; font-weight: bold;">lambda</span> (e)
+                           (cons (plist-get e <span style="color: #ffb86c;">:path</span>) e))
+                         entries))
+          (current (my/vc-git--worktree-root)))
+     (<span style="color: #ff79c6; font-weight: bold;">unless</span> table (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"No Git worktrees found"</span>))
+     (<span style="color: #ff79c6; font-weight: bold;">let</span> ((completion-extra-properties
+            (list <span style="color: #ffb86c;">:annotation-function</span>
+                  (<span style="color: #ff79c6; font-weight: bold;">lambda</span> (cand)
+                    (<span style="color: #ff79c6; font-weight: bold;">let</span> ((e (cdr (assoc cand table))))
+                      (<span style="color: #ff79c6; font-weight: bold;">when</span> e
+                        (concat <span style="color: #f1fa8c;">"  ["</span>
+                                (<span style="color: #ff79c6; font-weight: bold;">or</span> (plist-get e <span style="color: #ffb86c;">:branch</span>)
+                                    (<span style="color: #ff79c6; font-weight: bold;">and</span> (plist-get e <span style="color: #ffb86c;">:detached</span>)
+                                         <span style="color: #f1fa8c;">"detached"</span>)
+                                    <span style="color: #f1fa8c;">"?"</span>)
+                                (<span style="color: #ff79c6; font-weight: bold;">when</span> (plist-get e <span style="color: #ffb86c;">:bare</span>) <span style="color: #f1fa8c;">", bare"</span>)
+                                <span style="color: #f1fa8c;">"]"</span>)))))))
+       (list (completing-read <span style="color: #f1fa8c;">"Switch to worktree: "</span> table
+                              nil t nil nil current)))))
+  (vc-dir path))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-remove</span> (path <span style="color: #bd93f9;">&amp;optional</span> force)
+  <span style="color: #8995ba;">"Remove the Git worktree at PATH, prompting first for confirmation.
+With prefix argument FORCE, pass --force to git.
+Interactively, prompt for a worktree, defaulting to the current one."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>
+   (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((entries (my/vc-git-worktree-entries))
+          (paths (mapcar (<span style="color: #ff79c6; font-weight: bold;">lambda</span> (e) (plist-get e <span style="color: #ffb86c;">:path</span>)) entries))
+          (current (my/vc-git--worktree-root)))
+     (<span style="color: #ff79c6; font-weight: bold;">unless</span> paths (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"No Git worktrees found"</span>))
+     (list (completing-read <span style="color: #f1fa8c;">"Remove worktree: "</span> paths
+                            nil t nil nil current)
+           (<span style="color: #ff79c6; font-weight: bold;">if</span> current-prefix-arg t nil))))
+  (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (my/vc-git--worktree-root))
+         (expanded (expand-file-name path))
+         (main-root (plist-get (car (my/vc-git-worktree-entries)) <span style="color: #ffb86c;">:path</span>))
+         (here (file-truename default-directory))
+         (gone (file-truename expanded)))
+    (<span style="color: #ff79c6; font-weight: bold;">when</span> (yes-or-no-p (format <span style="color: #f1fa8c;">"Remove worktree %s%s? "</span>
+                               expanded (<span style="color: #ff79c6; font-weight: bold;">if</span> force <span style="color: #f1fa8c;">" (forced)"</span> <span style="color: #f1fa8c;">""</span>)))
+      (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+        (<span style="color: #ff79c6; font-weight: bold;">if</span> force
+            (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"remove"</span> <span style="color: #f1fa8c;">"--force"</span> expanded)
+          (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"remove"</span> expanded)))
+      (message <span style="color: #f1fa8c;">"Removed worktree %s"</span> expanded)
+      (<span style="color: #ff79c6; font-weight: bold;">when</span> (derived-mode-p 'vc-dir-mode)
+        (<span style="color: #ff79c6; font-weight: bold;">if</span> (string-prefix-p gone here)
+            (vc-dir (<span style="color: #ff79c6; font-weight: bold;">or</span> main-root root))
+          (vc-dir-refresh))))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-prune</span> ()
+  <span style="color: #8995ba;">"Prune stale Git worktree metadata (`git worktree prune')."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>)
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((root (my/vc-git--worktree-root)))
+    (<span style="color: #ff79c6; font-weight: bold;">let</span> ((default-directory root))
+      (vc-git-command nil 0 nil <span style="color: #f1fa8c;">"worktree"</span> <span style="color: #f1fa8c;">"prune"</span>))
+    (message <span style="color: #f1fa8c;">"Pruned worktrees in %s"</span> root)
+    (<span style="color: #ff79c6; font-weight: bold;">when</span> (derived-mode-p 'vc-dir-mode) (vc-dir-refresh))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defvar-local</span> <span style="color: #ffc9e8;">my/vc-git-worktree-list--root</span> nil
+  <span style="color: #8995ba;">"Repository root shown in the current worktree list buffer."</span>)<br>
+(<span style="color: #ff79c6; font-weight: bold;">defvar</span> <span style="color: #ffc9e8;">my/vc-git-worktree-list-mode-map</span>
+  (<span style="color: #ff79c6; font-weight: bold;">let</span> ((map (make-sparse-keymap)))
+    (define-key map (kbd <span style="color: #f1fa8c;">"RET"</span>) #'my/vc-git-worktree-list-visit)
+    (define-key map (kbd <span style="color: #f1fa8c;">"g"</span>) #'my/vc-git-worktree-list)
+    (define-key map (kbd <span style="color: #f1fa8c;">"q"</span>) #'quit-window)
+    map)
+  <span style="color: #8995ba;">"Keymap for `</span><span style="color: #8be9fd;">my/vc-git-worktree-list-mode</span><span style="color: #8995ba;">'."</span>)<br>
+(<span style="color: #ff79c6; font-weight: bold;">define-derived-mode</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-list-mode</span> special-mode <span style="color: #f1fa8c;">"Worktrees"</span>
+  <span style="color: #8995ba;">"Major mode for listing Git worktrees.
+\\{</span><span style="color: #ffc9e8;">my/vc-git-worktree-list-mode-map</span><span style="color: #8995ba;">}"</span>)<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-list-visit</span> ()
+  <span style="color: #8995ba;">"Open `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">' for the worktree on the current line."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>)
+  (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((here (line-number-at-pos))
+         (btn (<span style="color: #ff79c6; font-weight: bold;">or</span> (button-at (point))
+                  (<span style="color: #ff79c6; font-weight: bold;">save-excursion</span>
+                    (beginning-of-line)
+                    (next-button (point) t))))
+         (ok (<span style="color: #ff79c6; font-weight: bold;">and</span> btn (= here (line-number-at-pos (button-start btn))))))
+    (<span style="color: #ff79c6; font-weight: bold;">if</span> ok
+        (vc-dir (button-label btn))
+      (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"No worktree on this line"</span>))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">defun</span> <span style="color: #50fa7b; font-weight: bold;">my/vc-git-worktree-list</span> ()
+  <span style="color: #8995ba;">"List Git worktrees of the current repository in a dedicated buffer.
+RET on a path opens `</span><span style="color: #8be9fd;">vc-dir</span><span style="color: #8995ba;">' there; `</span><span style="color: #8be9fd;">g</span><span style="color: #8995ba;">' refreshes the list, `</span><span style="color: #8be9fd;">q</span><span style="color: #8995ba;">' quits."</span>
+  (<span style="color: #ff79c6; font-weight: bold;">interactive</span>)
+  (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((root (<span style="color: #ff79c6; font-weight: bold;">if</span> (derived-mode-p 'my/vc-git-worktree-list-mode)
+                   (<span style="color: #ff79c6; font-weight: bold;">or</span> my/vc-git-worktree-list--root
+                       (my/vc-git--worktree-root))
+                 (my/vc-git--worktree-root)))
+         (default-directory root)
+         (entries (my/vc-git-worktree-entries)))
+    (<span style="color: #ff79c6; font-weight: bold;">unless</span> entries (<span style="color: #930000; font-weight: bold;">user-error</span> <span style="color: #f1fa8c;">"No Git worktrees found"</span>))
+    (<span style="color: #ff79c6; font-weight: bold;">with-current-buffer</span> (get-buffer-create <span style="color: #f1fa8c;">"*vc-git worktrees*"</span>)
+      (<span style="color: #ff79c6; font-weight: bold;">let</span> ((inhibit-read-only t))
+        (erase-buffer)
+        (my/vc-git-worktree-list-mode)
+        (<span style="color: #ff79c6; font-weight: bold;">setq</span> my/vc-git-worktree-list--root root)
+        (<span style="color: #ff79c6; font-weight: bold;">setq</span> default-directory root)
+        (insert (format <span style="color: #f1fa8c;">"Worktrees for %s\n\n"</span> root))
+        (<span style="color: #ff79c6; font-weight: bold;">dolist</span> (e entries)
+          (<span style="color: #ff79c6; font-weight: bold;">let*</span> ((path (plist-get e <span style="color: #ffb86c;">:path</span>))
+                 (head (<span style="color: #ff79c6; font-weight: bold;">or</span> (plist-get e <span style="color: #ffb86c;">:head</span>) <span style="color: #f1fa8c;">""</span>))
+                 (short (<span style="color: #ff79c6; font-weight: bold;">if</span> (&gt; (length head) 7) (substring head 0 7) head))
+                 (flags (string-join
+                         (delq nil
+                               (list (<span style="color: #ff79c6; font-weight: bold;">when</span> (plist-get e <span style="color: #ffb86c;">:bare</span>) <span style="color: #f1fa8c;">"bare"</span>)
+                                     (<span style="color: #ff79c6; font-weight: bold;">when</span> (plist-get e <span style="color: #ffb86c;">:detached</span>) <span style="color: #f1fa8c;">"detached"</span>)
+                                     (<span style="color: #ff79c6; font-weight: bold;">when</span> (plist-get e <span style="color: #ffb86c;">:locked</span>) <span style="color: #f1fa8c;">"locked"</span>)
+                                     (<span style="color: #ff79c6; font-weight: bold;">when</span> (plist-get e <span style="color: #ffb86c;">:prunable</span>)
+                                       <span style="color: #f1fa8c;">"prunable"</span>)))
+                         <span style="color: #f1fa8c;">","</span>)))
+            (insert-button path
+                           'action (<span style="color: #ff79c6; font-weight: bold;">lambda</span> (btn)
+                                      (vc-dir (button-label btn)))
+                           'follow-link t)
+            (insert (format <span style="color: #f1fa8c;">"  [%s] %s%s\n"</span>
+                            (<span style="color: #ff79c6; font-weight: bold;">or</span> (plist-get e <span style="color: #ffb86c;">:branch</span>) <span style="color: #f1fa8c;">"HEAD"</span>)
+                            short
+                            (<span style="color: #ff79c6; font-weight: bold;">if</span> (string-empty-p flags)
+                                <span style="color: #f1fa8c;">""</span>
+                              (concat <span style="color: #f1fa8c;">" ("</span> flags <span style="color: #f1fa8c;">")"</span>)))))))
+      (goto-char (point-min))
+      (pop-to-buffer (current-buffer)))))<br>
+(<span style="color: #ff79c6; font-weight: bold;">with-eval-after-load</span> 'vc-dir
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z a"</span>) #'my/vc-git-worktree-add)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z b"</span>) #'my/vc-git-worktree-checkout)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z c"</span>) #'my/vc-git-worktree-branch)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z g"</span>) #'my/vc-git-worktree-switch)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z k"</span>) #'my/vc-git-worktree-remove)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z l"</span>) #'my/vc-git-worktree-list)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z m"</span>) #'my/vc-git-worktree-move)
+  (define-key vc-dir-mode-map (kbd <span style="color: #f1fa8c;">"Z p"</span>) #'my/vc-git-worktree-prune))
+</pre>
+</div><br>
+<p>
+Some interactive commands: <code>Z a</code> for the general case, <code>Z b</code> for checking out an existing branch, <code>Z c</code> for a new branch from a start point, plus <code>Z m</code> to move a tree, <code>Z g</code> to switch between them with branch annotations in the completion, <code>Z k</code> to remove one (prefix forces, and a <code>vc-dir</code> sitting inside the removed tree falls back to the main root rather than dying), <code>Z p</code> to prune stale metadata, and <code>Z l</code> for a listing buffer where <code>RET</code> jumps to <code>vc-dir</code>. The letters deliberately mirror Magit's own worktree map, so <code>Z b</code>, <code>Z c</code>, <code>Z g</code>, <code>Z m</code> and <code>Z k</code> all do what a Magit user's fingers expect; <code>Z a</code>, <code>Z p</code> and <code>Z l</code> are extras with no Magit equivalent. The same set hangs off <code>C-x v z …</code> globally.
+</p>
+
+<p>
+So the whole loop, start to finish, never leaves <code>vc</code>: <code>Z c</code> to spin up the worktree, hack away, <code>C-x v v</code> to commit, <code>Z g</code> back to main, merge the branch, and <code>Z k</code> to remove the worktree.
+</p>
+
+<p>
+If any of this sounds useful, the pattern to steal is a small one: <code>vc-git-command</code> with <code>default-directory</code> bound to the worktree root does almost all of the heavy lifting, and <code>vc-dir</code> on the resulting path gives you the status buffer for free. The rest is just prompts and keybindings.
+</p>

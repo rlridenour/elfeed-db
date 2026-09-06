@@ -1,0 +1,53 @@
+<p>
+I work on an air-gapped VM, which is to say, a virtual machine with no network access at all.  You copy code in via USB or a shared folder, develop, and then you need to get that code back out to the host machine.  Git is running inside the VM, of course, it's the sensible thing to do for version control, but git push wants a remote, and there is no remote.  What you actually need is a file copy operation that shuttles the repo data to a shared folder, where the host can pick it up.
+</p>
+<p>
+So I have a pair of bash scripts, unimaginatively called <code>in</code> and <code>out</code>.  <code>out</code> copies the source tree to the shared folder so the host sees my commits, and <code>in</code> pulls changes back from the host into the VM.  Works fine from the terminal, but I live in Emacs, and I want to trigger this from within Emacs rather than jumping to a shell.
+The obvious answer is to bind a key to <code>async-shell-command</code> and call it done.  But then I remembered, Emacs already has this infrastructure - the VC mode's push command.  When you press <code>P</code> in a <code>vc-dir</code> buffer, or invoke <code>vc-push</code> from the mode-line popup, Emacs runs <code>vc-git-push</code> which calls <code>git push</code>.  I don't want that, I want my <code>out</code> script.  The pull side is the same problem.  So the question becomes: can I make Emacs's VC commands do something else?
+Yes, obviously, this is Emacs.  <code>advice-add</code> lets you replace any function, and <code>vc-git-push</code> is just a function.  The <code>:override</code> strategy means my function runs entirely in place of the original, which is what I want - there's no useful fallback to <code>git push</code> on this machine, it would just fail.
+These two functions live in my <code>coding.el</code> starter snippet, here's the push side:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/vc-git-push-shuttle</span> (_file-list <span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">&amp;rest</span> _args)
+  <span style="color: #6a9955; font-style: italic;">"Override vc-push to run a local sync script instead of git push."</span>
+  (<span style="color: #569cd6; font-weight: bold;">interactive</span>)
+  (<span style="color: #569cd6; font-weight: bold;">let</span> ((script-path <span style="color: #ce9178; font-style: italic;">"/home/jdyer/bin/out"</span>))
+    (<span style="color: #569cd6; font-weight: bold;">if</span> (file-executable-p script-path)
+        (<span style="color: #569cd6; font-weight: bold;">progn</span>
+          (message <span style="color: #ce9178; font-style: italic;">"Syncing source TO shared folder..."</span>)
+          (async-shell-command script-path <span style="color: #ce9178; font-style: italic;">"*out*"</span>))
+      (<span style="color: #f44747; font-weight: bold;">error</span> <span style="color: #ce9178; font-style: italic;">"Sync script not found or not executable at %s"</span>
+             script-path))))
+</pre>
+</div>
+
+<p>
+The <code>_file-list</code> and <code>_rest _args</code> soak up whatever VC passes to the push function, I don't care about the arguments since my script doesn't need them.  The function checks the script is executable, shows a message, and runs it asynchronously into the <code>*out*</code> buffer so I can inspect the output if something goes wrong.  Pull is the same thing pointing at <code>/home/jdyer/bin/in</code> into <code>*in*</code>, so:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/vc-git-pull-shuttle</span> (_file-list <span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">&amp;rest</span> _args)
+  <span style="color: #6a9955; font-style: italic;">"Override vc-pull to run a local sync script instead of git pull."</span>
+  (<span style="color: #569cd6; font-weight: bold;">interactive</span>)
+  (<span style="color: #569cd6; font-weight: bold;">let</span> ((script-path <span style="color: #ce9178; font-style: italic;">"/home/jdyer/bin/in"</span>))
+    (<span style="color: #569cd6; font-weight: bold;">if</span> (file-executable-p script-path)
+        (<span style="color: #569cd6; font-weight: bold;">progn</span>
+          (message <span style="color: #ce9178; font-style: italic;">"Syncing source FROM shared folder..."</span>)
+          (async-shell-command script-path <span style="color: #ce9178; font-style: italic;">"*in*"</span>))
+      (<span style="color: #f44747; font-weight: bold;">error</span> <span style="color: #ce9178; font-style: italic;">"Sync script not found or not executable at %s"</span>
+             script-path))))
+</pre>
+</div>
+
+<p>
+Then the advice:
+</p>
+<div class="org-src-container">
+<pre class="src src-elisp">(advice-add 'vc-git-push <span style="color: #c586c0; font-weight: bold;">:override</span> #'my/vc-git-push-shuttle)
+(advice-add 'vc-git-pull <span style="color: #c586c0; font-weight: bold;">:override</span> #'my/vc-git-pull-shuttle)
+</pre>
+</div>
+
+<p>
+And that's it.  Now every Emacs command that would have called <code>git push</code> or <code>git pull</code> runs my shuttle scripts instead.  When I press <code>P</code> in <code>vc-dir</code> the code ends up in the shared folder ready for the host to collect.  No context switch to a terminal.
+The same pattern would work for any situation where you want VC's push/pull to do something domain-specific - copying to a local archive, rsyncing to a staging server, or in my case, bridging an air gap.
+</p>

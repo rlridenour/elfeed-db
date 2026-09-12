@@ -1,0 +1,423 @@
+<p>When I did interviews for Google, one of my go-to interview
+  questions was to ask the candidate to determine if someone had won a
+  game of tic-tac-toe.  The candidate could choose the board
+  representation and the language to use; I just wanted to see them
+  write the code that checked for a winner.  Inevitably, the candidate
+  would choose a 2D array to represent the board.  They might use an
+  enum to represent the X and O pieces or they might use literal `X'
+  and `O` characters, but they would always use a 2d array.</p>
+
+<p>Then they'd write the code to check for a winner.  Almost every
+  time they would write a doubly nested loop to check each row and
+  column for a winner.  This has a hidden trap.  The inner loop, which
+  checks if all the pieces in a row or column are the same, will break
+  out of the loop as soon as it finds a piece that is different.  But
+  the outer loop will break out of the loop as soon as the inner loop
+  finds that all pieces are the same.  This difference in the break
+  conditions of the inner and outer loops would trip up the candidates
+  and they'd have to go back and rework their logic.  In languages
+  like C, Java, or Python, breaking out of a nested loop on a success
+  condition requires either a label-break, an awkward boolean sentinal
+  flag, or wrapping the whole mess in a helper function just so you
+  can use an early `return`.</p>
+
+<p>It generally would take a candidate the entire interview to get the
+  code right.  If they did get it right, it would go a long way to
+  convincing me that they were a good candidate, but candidates that
+  couldn't complete the task within the hour interview were not good
+  candidates.  It was surprising at how many failed to complete the
+  task.</p>
+
+<p>If you naively vibe code a tic-tac-toe game, the model will choose
+  either a 2-d array or a 1-d row-major array to hold the game.  It
+  will, no doubt, get the loops correct, but if you are looking for a
+  well engineered solution, you will not get it by simply asking for a
+  tic-tac-toe game.  When I vibe code, I don't ask the model to just
+  throw together a solution.  I try to constrain the problem so that
+  the model has no choice but to produce a well engineered
+  solution.</p>
+
+<p>Let's start with the board/game representation.  A 2-d or 1-d array
+  is obvious, but what are some other options.   I posed this question
+  to the model:</p>
+
+<blockquote><strong>Prompt:</strong> I am creating a tic-tac-toe game.  Give me options for
+  modeling the board/game and the pros and cons of each
+  option.</blockquote>
+
+<pre>
+  Here are the primary ways to model it, along with the real engineering pros
+and cons:
+
+  ---
+
+  ### 1. The Naive 2D Array / Matrix (`board[3][3]`) The textbook, beginner
+approach. A 3x3 grid of characters, enums, or `nil`/`:x`/`:o`.
+
+* **Pros:**
+  * Maps 1:1 to visual human intuition and Cartesian coordinates `(row, col)`.
+  * Trivial to render in a terminal or UI without index math.
+* **Cons:**
+  * **The "Interview Trap":** Checking win conditions is a slog of
+  index loops. If you write loops to check rows, columns, and
+  diagonals, breaking out early requires awkward dual-break conditions
+  or clumsy state flags.
+  * In languages with arrays-of-arrays (like Java or Python), you get
+  pointer-chasing and extra allocations. 
+  * Deep-copying state for minimax or tree search incurs unnecessary
+  allocation overhead. 
+
+  ---
+
+  ### 2. The Flat 1D Vector / Array of 9 Elements (`board[0..8]`) A contiguous
+9-element array where `index = row * 3 + col`.
+
+* **Pros:**
+  * Single contiguous memory block. Cheap shallow copies/clones.
+  * Win conditions stop being dynamic loops and become a static list
+  of 8 index triples: 
+
+    ```lisp
+    '((0 1 2) (3 4 5) (6 7 8)   ; rows
+      (0 3 6) (1 4 7) (2 5 8)   ; cols
+      (0 4 8) (2 4 6))          ; diags
+    ```
+
+    Win checking is just an `any?` over those 8 triples.
+  * Trivial iteration for move generation (`position = 0..8` where
+  value is empty). 
+* **Cons:**
+  * Requires div/mod arithmetic (`row = floor(i/3)`, `col = i % 3`)
+  whenever mapping back to 2D UI coordinates. 
+  * Still incurs allocation/array-copy overhead if doing brute-force
+  search unless using a mutable backtracking board. 
+
+  ---
+
+  ### 3. Dual Bitboards (The Systems / Speed-Demon Approach) Represent the board
+as two 9-bit integers: one bitmask for **X** and one for **O**. (Fits inside a
+single 16- or 32-bit register). Bit $k$ is `1` if the player occupies cell $k$.
+
+* **Pros:**
+  * **Blistering fast:** Win-checking is pure bitwise arithmetic. You
+  have a constant mask for each win line (e.g., top row is `7`
+  (`#b000000111`)): 
+
+    ```lisp
+    (some (lambda (mask) (= (logand player-bits mask) mask)) *win-masks*)
+    ```
+
+  * Available moves is a single instruction: `empty = (lognot (logior
+  x-bits o-bits)) &amp; #x1FF`. 
+  * Zero memory allocation, zero GC pressure. State is a tiny
+  primitive integer passed in a register. 
+  * Instant hashing/memoization for minimax or transposition tables.
+* **Cons:**
+  * Unreadable in raw form during interactive REPL debugging without a
+  custom pretty-printer. 
+  * Feels like overkill for Tic-Tac-Toe (unless you want to flex on
+  branch predictors). 
+
+  ---
+
+  ### 4. The 3x3 Magic Square (The Pure Math / Lo Shu Trick) Map the 9 cells of
+the board to the numbers 1 through 9 arranged in a Lo Shu Magic Square:
+
+```text
+ 8 | 1 | 6
+---+---+---
+ 3 | 5 | 7
+---+---+---
+ 4 | 9 | 2
+```
+
+  In a magic square, **every row, column, and diagonal sums to exactly 15**, and
+*no other combination of three cells does*.
+
+  Each player simply holds a set/list of the numbers they've claimed.
+
+* **Pros:**
+  * **Board geometry completely disappears!** There is no grid, no
+  coordinates, and no win-mask table. 
+  * Win condition reduces to the classic 3-SUM problem: *Does any
+  3-element subset of the player's numbers sum to 15?* 
+  * Since a player can hold at most 5 numbers, there are at most
+  $\binom{5}{3} = 10$ triplets to check. 
+* **Cons:**
+  * Translating between user input (e.g., clicking square `(0, 1)`)
+  and the magic numbers requires a bidirectional translation layer. 
+  * Move generation requires set difference (`available = {1..9} - (X &#8746; O)`). 
+
+  ---
+
+  ### 5. Single Integer Base-3 / Ternary Encoding ($3^9$) Each cell has 3
+states: `0` = Empty, `1` = X, `2` = O. The entire game state is a single integer
+from $0$ to $3^9 - 1 = 19,682$.
+
+* **Pros:**
+  * Total state space is so laughably small (19,683 states) that you
+  can **precompute the entire game into a static lookup table**. 
+  * Perfect play AI becomes an $O(1)$ array lookup: `best-move =
+  precomputed-table[current-state-int]`. 
+* **Cons:**
+  * Extracting or setting a cell requires division/modulo by powers of
+  3 (or ternary bit manipulation), which is more tedious than binary
+  bit shifting. 
+
+  ---
+
+  ### 6. Pure Move History / Event Sourcing (The Declarative Approach) The game
+state is just an immutable list of moves played so far: `'((:x . 4) (:o . 0) (:x
+. 8) ...)`
+
+* **Pros:**
+  * Instant, zero-cost **undo/redo** (just `cdr` the list).
+  * Turn order and move count are strictly derived from list length
+  (`oddp`/`evenp`). 
+  * Pure functional semantics; zero mutable state. Perfect for
+  serialization, replays, and network protocols. 
+* **Cons:**
+  * Querying "who owns cell 4?" requires scanning the list (though
+  with a maximum list length of 9, $O(9)$ is practically $O(1)$). 
+
+  ---
+
+### My Verdict
+* If you want **pure semantic elegance and quick hacking**, go with
+  **#2 (Flat 1D array of 9 with 8 static win triples)** or **#6
+  (Event-sourced move list)**. 
+* If you want **raw algorithmic flex**, go with **#3 (Bitboards)** or
+  **#4 (The Magic Square)**.  
+</pre>
+
+<p>The model is obviously capable of `thinking` up representations other than
+  the obvious 2-d or 1-d array.  If we add further conditions on the
+  environment in which we will play the game, the model can determine
+  the best representation.</p>
+
+<blockquote><strong>Prompt:</strong> I am running a tic-tac-toe tournament on a web server with
+  a massive number of simultaneous players.  Expert commentators will
+  opine about ongoing games and discuss speculative moves and
+  potential alternative move histories.  Games will be stored and
+  played back.  Choose a representation suitable for this use case.</blockquote>
+
+<pre>  For this scenario, there is only one representation that doesn't collapse
+under its own weight: **Event Sourcing via an Immutable Singly-Linked List (or
+Tree/DAG) of Moves.**
+
+  A game state is not a grid; **a game state is a historical fact.**
+Specifically, a game is simply an immutable sequence of moves:
+
+```lisp
+;; A move is just a cell index (0..8) and a player.
+;; A game is a persistent list of moves:
+(cons current-move parent-history)
+```
+
+  Here is why this completely blows every grid- or array-based model out of the
+water for your exact requirements:
+
+  ---
+
+  ### 1. Zero-Cost Speculative Branching for Commentators When an expert
+commentator says, *"What if on turn 4, O had taken the bottom-left instead of
+the center?"*, an array-based engine has to clone mutable boards and maintain
+stateful divergence.
+
+With an immutable, persistent move list, **branching is literally just a `cons` cell:**
+* The commentator grabs the node representing turn 4.
+* They append their speculative move: `(cons alternative-move turn-4-node)`.
+* **Zero copy. Instant branch.** 
+* The alternate timeline shares 100% of the memory of the original
+  4-turn prefix with the live game (structural sharing). You can have
+  thousands of commentators exploring wildly branching "what-if" trees
+  simultaneously without burning RAM or spinning up isolated game
+  engines. 
+
+### 2. Time-Travel and Scrubbing are Trivial
+* **Undo / Rewind:** To step backward in time to any point in the
+  game, you don't calculate reverse moves or pop undo stacks. You
+  simply take the `cdr` (parent pointer) of the current state. 
+* **Playback:** Storing a replay is just storing the list of moves. A
+  full game is at most 9 moves long. Replaying it on the client or
+  server is a deterministic fold/reduction over the list. 
+
+  ### 3. Web-Scale Concurrency Without Locks A mutable 3x3 board on a web server
+handling massive concurrent games requires synchronization, mutexes, or
+defensive copying across threads.
+
+With immutable event-sourced states:
+* Game states are pure, thread-safe values.
+* Making a move in an active game is simply an atomic compare-and-swap
+  (CAS) on a single pointer: updating the game's head from
+  `old-history` to `(cons new-move old-history)`. 
+* Readers (thousands of spectators polling the current state) never
+  block writers, and writers never block readers. 
+
+### 4. Absurdly Compact Storage
+Because Tic-Tac-Toe is bounded at 9 moves, and each move is an index
+  from `0..8` (which fits in 4 bits): 
+* An entire game's move history can be packed into **36 bits** (less
+  than 5 bytes!). 
+* Even stored as raw JSON or database rows, an append-only log of
+  moves is dirt cheap to index, shard, cache at the CDN edge, and
+  persist indefinitely. 
+
+  ### 5. But what about rendering and win-checking? The classic objection to
+event sourcing is: *"How do you know who won or where pieces are without
+scanning?"*
+
+  In Tic-Tac-Toe, the maximum history length is **9**. Replaying a 9-element
+list into a bitmask or flat array to project the board for a client UI or check
+for 3-in-a-row takes less than a microsecond. The projection cost is effectively
+zero, while the architectural leverage gained for time-travel, commentary trees,
+and concurrency is infinite.
+
+  ---
+
+  ### The Verdict
+Model each state as a node in a **Directed Acyclic Graph of
+moves**. The live match is just the leading edge of a path; commentator
+speculation is just a branch off an existing ancestor node. It turns your game
+server into a Git-like tree of move hashes.
+</pre>
+
+<p>With the representation nailed down, we can now get to the task of
+  coding.</p>
+
+<blockquote><strong>Prompt:</strong>Code up methods to test if a move is legal, to make a
+  move, and to test if a player has won the game.</blockquote>
+
+<pre>  Here is the pure, immutable event-sourced implementation in Common Lisp.
+
+A game state is modeled as a persistent list of integer moves `(0..8)`.
+* Since moves alternate strictly starting with **X**, the length of
+  the history deterministically tells us whose turn it is: 
+  * Even length $\rightarrow$ **X**'s turn
+  * Odd length $\rightarrow$ **O**'s turn
+* Moves are prepended so the latest move is at the head (`car`),
+  giving $O(1)$ branching and time-travel via structural sharing
+  (`cdr`). 
+
+```lisp
+;;;; tic-tac-toe.lisp &mdash; Event-Sourced Immutable Engine
+
+(defpackage :ttt
+  (:use :cl)
+  (:export :make-initial-game
+           :legal-move-p
+           :make-move
+           :current-player
+           :winner
+           :game-over-p))
+
+(in-package :ttt)
+
+;;; Board representation:
+;;;
+;;;  0 | 1 | 2
+;;; ---+---+---
+;;;  3 | 4 | 5
+;;; ---+---+---
+;;;  6 | 7 | 8
+;;;
+;;; Precomputed win masks (9-bit integers):
+(defparameter *win-masks*
+  (list #b000000111   ; row 0: (0 1 2)
+        #b000111000   ; row 1: (3 4 5)
+        #b111000000   ; row 2: (6 7 8)
+        #b001001001   ; col 0: (0 3 6)
+        #b010010010   ; col 1: (1 4 7)
+        #b100100100   ; col 2: (2 5 8)
+        #b100010001   ; diag:  (0 4 8)
+        #b001010100)) ; diag:  (2 4 6)
+
+(defun make-initial-game ()
+  "An empty game history."
+  nil)
+
+(defun current-player (history)
+  "Returns :X if an even number of moves have been played, otherwise :O."
+  (if (evenp (length history)) :x :o))
+
+(defun player-bitmask (history player)
+  "Projects the move history into a 9-bit bitmask for the specified player.
+   X moved on turns 0, 2, 4... (from the start), O on turns 1, 3, 5..."
+  (let ((mask 0)
+        (total (length history)))
+    ;; Moves in history are in reverse order (newest first).
+    ;; The move at index i from the start was played on turn (- total i 1).
+    (loop for move in history
+          for turn from (1- total) downto 0
+          when (eq player (if (evenp turn) :x :o))
+            do (setf mask (logior mask (ash 1 move))))
+    mask))
+
+(defun winner (history)
+  "Returns :X or :O if that player has completed a winning line, or NIL."
+  (flet ((wins-p (player)
+           (let ((pmask (player-bitmask history player)))
+             (some (lambda (wmask)
+                     (= (logand pmask wmask) wmask))
+                   *win-masks*))))
+    (cond ((wins-p :x) :x)
+          ((wins-p :o) :o)
+          (t nil))))
+
+(defun game-over-p (history)
+  "A game is over if someone won, or all 9 squares are occupied."
+  (or (winner history)
+      (&gt;= (length history) 9)))
+
+(defun legal-move-p (history move)
+  "A move is legal if:
+   1. It is an integer in the range 0..8.
+   2. The square has not been occupied in this timeline.
+   3. The game is not already won or full."
+  (and (integerp move)
+       (&lt;= 0 move 8)
+       (not (member move history))
+       (not (game-over-p history))))
+
+(defun make-move (history move)
+  "Returns a new game state branch with the move prepended.
+   Signals an error if the move is illegal."
+  (unless (legal-move-p history move)
+    (error "Illegal move ~A for state ~A (Current player: ~A)"
+           move history (current-player history)))
+  (cons move history))
+```
+
+  ---
+
+  ### Why this shines for the Commentators &amp; Speculation
+
+1. **Branching / What-If Scenarios:**
+
+   ```lisp
+   ;; Live game after 3 moves: X played 4, O played 0, X played 8
+   (defvar *live-game* &quot;(8 0 4))
+
+   ;; Commentator A wonders: &amp;dquoWhat if O had picked 2 on turn 1 instead of 0?&amp;dquo
+   ;; We rewind to turn 0 (cdr *live-game*) and branch:
+   (defvar *speculation* (make-move (cdr *live-game*) 2))
+   ;; =&gt; (2 4)
+   ```
+
+   Zero cloning of boards. Both timelines structurally share the root `(4)`.
+
+2. **Playback and Time Travel:**
+   * Stepping back one turn is simply `(cdr history)`.
+   * Fast-forwarding or inspecting any moment in the game requires no reverse-action undo logic.
+</pre>
+
+<p>Naive vibe coding leads to AI slop: the statistical average of all
+  the code that the model has been trained upon.  Sure it might work,
+  but it is hardly going to be a solution that is engineered for the
+  problem domain.  Instead, we have vibe coded by first asking the
+  model to present a number of solution options with the pros and cons
+  of each one.  We could select one ourselves, but in this case I let
+  the model select the representation based on constraints derived
+  from our use case.  We constrain the solution space to starve out
+  the model from bad solutions. The model has no choice but to output
+  code tailored for our use case.</p>

@@ -1,0 +1,112 @@
+
+<p class="wp-block-paragraph">The <code>display-line-numbers-mode</code> and <code>global-display-line-numbers-mode</code> modes render line numbers in the margin of an Emacs window. Line-number display is implemented in the core C display engine, avoiding the performance cost of legacy Elisp overlays like <code>linum-mode</code>. Despite the native C implementation, and even after <a href="https://www.jamescherti.com/emacs-scrolling-better-performance-usability/">configuring Emacs scrolling for better usability</a>, specific configurations can still trigger expensive Lisp evaluations during the interactive command loop, vertical scrolling, and buffer initialization.</p>
+
+
+
+<p class="wp-block-paragraph">These settings avoid unnecessary width calculations and initialization scans.</p>
+
+
+
+<h2 class="wp-block-heading">Speed comparison across line-number types</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>display-line-numbers-type</code> variable specifies the type of line numbers activated by <code>display-line-numbers-mode</code> and <code>global-display-line-numbers-mode</code>. It accepts three values:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Fastest: <code>t</code> (Absolute): Displays the absolute line number corresponding to the physical buffer line. This is the fastest rendering method because the values are static and do not require recalculation when the cursor moves.</li>
+
+
+
+<li>Fast: <code>'relative</code>: Displays the line number relative to the current cursor position (point). This is slightly slower than absolute line numbering because the display engine must recalculate the distance for every visible line on each vertical cursor movement.</li>
+
+
+
+<li>Slow: <code>'visual</code>: Displays relative numbers based on visual screen lines, accounting for wrapped text. This is the slowest rendering method because it forces the display engine to compute line wrapping layout before assigning numbers.</li>
+</ul>
+
+
+
+<p class="wp-block-paragraph">Performance also depends on the buffer contents and display configuration. For example, using <code>'visual</code> numbering can degrade scrolling performance in buffers with long logical lines and word wrapping enabled (when <code>truncate-lines</code> is set to nil), because the display engine must calculate layout metrics to determine screen-line boundaries.</p>
+
+
+
+<p class="wp-block-paragraph">I recommend choosing the numbering type based primarily on the desired behavior, not just performance. For instance, even though absolute line numbering is the fastest, I prefer <code>'relative</code> numbering. Relative numbers show the distance from the current line, which can make vertical navigation easier, especially with numeric prefixes such as <code>C-u 15 C-n</code> in vanilla Emacs or <code>15j</code> in Evil mode.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Enable relative line numbers globally</span>
+(<span class="hljs-name">setq</span> display-line-numbers-type 'relative)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Disabling display-line-numbers-grow-only</h2>
+
+
+
+<p class="wp-block-paragraph">Avoid setting <code>display-line-numbers-grow-only</code> to a non-nil value, as doing so adds <code>display-line-numbers-update-width</code> to the buffer-local <code>pre-command-hook</code>. (The <code>display-line-numbers-update-width</code> function checks the required line number width before each command and increases the <code>display-line-numbers-width</code> variable when necessary.)</p>
+
+
+
+<p class="wp-block-paragraph">Leaving this variable nil avoids that additional Lisp function call before each command:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Do not attach the line number width update function to pre-command-hook</span>
+(<span class="hljs-name">setq-default</span> display-line-numbers-grow-only <span class="hljs-literal">nil</span>)</code></span></pre>
+
+
+<h2 class="wp-block-heading">Adjusting the display line numbers width</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>display-line-numbers-width</code> variable specifies the minimum width of the line-number area. If the required width exceeds the specified value, Emacs can allocate more space.</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq-default</span> display-line-numbers-width <span class="hljs-number">3</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">This sets a minimum width for the line-number area. Without a predefined width, the display engine can adjust the margin width as line numbers grow during vertical scrolling, such as when the line number changes from 99 to 100.</p>
+
+
+
+<h2 class="wp-block-heading">Disabling the initial line-count scan</h2>
+
+
+
+<p class="wp-block-paragraph">The <code>display-line-numbers-width-start</code> variable controls whether Emacs calculates an initial width based on the number of lines in the buffer.</p>
+
+
+
+<p class="wp-block-paragraph">Avoid setting <code>display-line-numbers-width-start</code> to a non-nil value because Emacs then scans the entire buffer when initializing the mode.. When enabled, this setting calls a synchronous <code>(count-lines (point-min) (point-max))</code> evaluation to compute the total line count before establishing the initial margin width.</p>
+
+
+
+<p class="wp-block-paragraph">For large buffers, keeping this disabled avoids that initialization-time <code>count-lines</code> operation:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Do not calculate the initial line number width from the buffer's line count</span>
+(<span class="hljs-name">setq-default</span> display-line-numbers-width-start <span class="hljs-literal">nil</span>)</code></span></pre><div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/emacs-striking-through-org-mode-done-tasks/" rel="bookmark" title="Emacs: Striking through Org Mode DONE tasks">Emacs: Striking through Org Mode DONE tasks</a></li>
+<li><a href="https://www.jamescherti.com/emacs-eglot-performance/" rel="bookmark" title="Configuring Emacs Eglot for Better Performance and Latency">Configuring Emacs Eglot for Better Performance and Latency</a></li>
+<li><a href="https://www.jamescherti.com/emacs-startup-defer-use-package-performance/" rel="bookmark" title="Optimizing Emacs Startup - Guide to Deferred Package Loading with use-package">Optimizing Emacs Startup - Guide to Deferred Package Loading with use-package</a></li>
+<li><a href="https://www.jamescherti.com/emacs-consult-speed-async-searche-grep-ripgrep-fd-find/" rel="bookmark" title="Why Emacs Consult Async Searches Feel slow and How to Speed Them Up? (consult-fd, consult-find, consult-grep, consult-ripgrep...)">Why Emacs Consult Async Searches Feel slow and How to Speed Them Up? (consult-fd, consult-find, consult-grep, consult-ripgrep...)</a></li>
+<li><a href="https://www.jamescherti.com/measuring-emacs-startup-time/" rel="bookmark" title="Measuring Emacs startup time more accurately than the built-in emacs-init-time">Measuring Emacs startup time more accurately than the built-in emacs-init-time</a></li>
+<li><a href="https://www.jamescherti.com/emacs-customize-ellipsis-outline-minor-mode/" rel="bookmark" title="Emacs: Customizing the Ellipsis &quot;…&quot; in outline-mode and outline-minor-mode to Use a More Visually Appealing Indicator for Folded Sections, Such as &quot; ▼&quot;">Emacs: Customizing the Ellipsis "…" in outline-mode and outline-minor-mode to Use a More Visually Appealing Indicator for Folded Sections, Such as " ▼"</a></li>
+<li><a href="https://www.jamescherti.com/emacs-spell-checker-flyspell-ispell-aspell/" rel="bookmark" title="Configuring Emacs Spell Checking with Flyspell, Ispell, and Aspell to Minimize False Positives in Source Code and Prose">Configuring Emacs Spell Checking with Flyspell, Ispell, and Aspell to Minimize False Positives in Source Code and Prose</a></li>
+<li><a href="https://www.jamescherti.com/emacs-evil-disable-automatic-removal-of-spaces-after-leaving-insert-mode/" rel="bookmark" title="Emacs Evil Mode: Disabling the automatic removal of spaces after leaving Insert mode">Emacs Evil Mode: Disabling the automatic removal of spaces after leaving Insert mode</a></li>
+<li><a href="https://www.jamescherti.com/outline-yaml-el-code-folding-outlining-yaml-files/" rel="bookmark" title="Emacs: YAML file code Folding and Outlining">Emacs: YAML file code Folding and Outlining</a></li>
+<li><a href="https://www.jamescherti.com/emacs-the-definitive-guide-to-code-folding/" rel="bookmark" title="The Definitive Guide to Code Folding in Emacs">The Definitive Guide to Code Folding in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/elispcomp-elisp-compilation-from-command-line/" rel="bookmark" title="elispcomp - Compile Emacs Lisp code from the command-line">elispcomp - Compile Emacs Lisp code from the command-line</a></li>
+<li><a href="https://www.jamescherti.com/emacs-kirigami-code-text-folding/" rel="bookmark" title="kirigami.el - A Unified Method to Fold and Unfold Text in Emacs Across a Diverse Set of Modes">kirigami.el - A Unified Method to Fold and Unfold Text in Emacs Across a Diverse Set of Modes</a></li>
+<li><a href="https://www.jamescherti.com/emacs-add-todo-keyword-to-new-org-mode-headings/" rel="bookmark" title="Configure Emacs org-mode to automatically add the TODO keyword to new Org Mode headings">Configure Emacs org-mode to automatically add the TODO keyword to new Org Mode headings</a></li>
+<li><a href="https://www.jamescherti.com/emacs-flymake-ansible-lint/" rel="bookmark" title="flymake-ansible-lint.el - An Emacs Emacs Flymake backend for ansible-lint">flymake-ansible-lint.el - An Emacs Emacs Flymake backend for ansible-lint</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-python-dev-using-eglot-pylsp-ruff-pylint-flake8/" rel="bookmark" title="Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters">Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters</a></li>
+<li><a href="https://www.jamescherti.com/essential-emacs-packages/" rel="bookmark" title="Must-have Emacs Packages for Efficient Software Development and Text Editing">Must-have Emacs Packages for Efficient Software Development and Text Editing</a></li>
+<li><a href="https://www.jamescherti.com/emacs-quick-fasd/" rel="bookmark" title="quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs">quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs</a></li>
+</ol>
+</div>

@@ -1,0 +1,123 @@
+
+<p class="wp-block-paragraph">The <a href="https://github.com/minad/consult">consult</a> Emacs package provides asynchronous search commands such as <code>consult-fd</code>, <code>consult-find</code>, <code>consult-grep</code>, <code>consult-git-grep</code>, and <code>consult-ripgrep</code>. For these commands, Consult does not necessarily start a new search for every change to the minibuffer input. Instead, it uses configurable debounce and throttle delays to control when asynchronous processes start, while a separate refresh delay controls how frequently asynchronous results are pushed to the completion UI.</p>
+
+
+
+<p class="wp-block-paragraph">The first time I tried Consult, I thought to myself: this feels slow compared to Counsel (I had a similar feeling about Emacs settings such as <code>show-paren-delay</code>). With Counsel, results updated immediately on every keystroke, while Consult seemed to hesitate for a fraction of a second before updating the list.</p>
+
+
+
+<p class="wp-block-paragraph">As it turns out, this behavior is entirely intentional. The current Consult defaults are conservative by design.</p>
+
+
+
+<h2 class="wp-block-heading">Aggressive asynchronous search</h2>
+
+
+
+<p class="wp-block-paragraph">If you prefer lower latency and speed, these variables can be made more aggressive:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> consult-async-input-debounce <span class="hljs-number">0.05</span>
+      consult-async-input-throttle <span class="hljs-number">0.1</span>
+      consult-async-refresh-delay <span class="hljs-number">0.05</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">These values reduce the amount of time Consult waits before starting another asynchronous search and allow the completion UI to refresh much more frequently.</p>
+
+
+
+<p class="wp-block-paragraph">These values do not make the underlying search programs execute faster. External tools like <code>ripgrep</code> already use highly optimized, multi-threaded algorithms to scan files across multiple CPU cores. Instead, these variables speed up the feedback loop inside Emacs itself. They reduce the waiting period before Consult spawns the external process, and causing the Emacs UI to pull in new asynchronous data and redraw the screen at a much faster rate.</p>
+
+
+
+<h3 class="wp-block-heading">Variable: consult-async-input-debounce</h3>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> consult-async-input-debounce <span class="hljs-number">0.05</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">This setting forces Consult to wait 0.05 seconds after your last keystroke before launching an asynchronous process. Because this acts as a debounce delay rather than a fixed polling interval, every new input resets the timer. The search only executes once the full quiet period elapses.</p>
+
+
+
+<p class="wp-block-paragraph">This prevents Emacs from spinning up redundant background tasks for every intermediate character you type, which minimizes CPU overhead and keeps the UI responsive.</p>
+
+
+
+<h3 class="wp-block-heading">Variable: consult-async-input-throttle</h3>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> consult-async-input-throttle <span class="hljs-number">0.1</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The <code>consult-async-input-throttle</code> variable acts as a hard rate limit for how often Consult starts asynchronous processes. With this value, a new process starts at most once every 0.1 seconds, regardless of how fast you type.</p>
+
+
+
+<p class="wp-block-paragraph">To break down the difference between the two concepts:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Debouncing is an idle timer. It waits for you to stop typing. If you keep hitting keys, the timer keeps resetting, and the search will not run until you stop typing.</li>
+
+
+
+<li>Throttling is a strict speed limit. It enforces a maximum execution rate. Even if you pause just long enough between words to constantly trigger the debounce timer, the throttle ensures the system will not exceed the permitted rate.</li>
+</ul>
+
+
+
+<h3 class="wp-block-heading">Variable: consult-async-refresh-delay</h3>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp">(<span class="hljs-name">setq</span> consult-async-refresh-delay <span class="hljs-number">0.05</span>)</code></span></pre>
+
+
+<p class="wp-block-paragraph">The <code>consult-async-refresh-delay</code> variable controls how frequently Consult updates the completion UI with results from asynchronous commands. This value makes Consult refresh at intervals as short as 0.05 seconds when new results require an update. It does not cause Emacs to redraw continuously when there is nothing new to display.</p>
+
+
+
+<p class="wp-block-paragraph">A low refresh delay can make search results appear faster, but redisplay itself has a cost. Emacs redisplay is expensive enough that highly frequent updates can increase CPU and garbage-collection activity.</p>
+
+
+
+<h2 class="wp-block-heading">Choosing values</h2>
+
+
+
+<p class="wp-block-paragraph">If you prefer asynchronous searches to feel as responsive as possible, these values offer a good balance between low input latency and resource usage. Consult responds quickly to minibuffer changes and updates the completion UI with minimal delay.</p>
+
+
+
+<p class="wp-block-paragraph">These settings are well suited to fast computers plugged into a power source. On a laptop, the aggressive process creation and continuous UI updates will keep the CPU active and drain your battery much faster than the conservative defaults. On slower computers or when searching very large projects, the default values may provide a better balance by avoiding unnecessary searches while input is still changing.</p>
+
+
+
+<p class="wp-block-paragraph">The optimal values depend on typing speed, project size, search-tool performance, power constraints, and the cost of processing and redisplaying asynchronous results in Emacs. Lowering the delays is therefore best viewed as an explicit trade-off: less input latency in exchange for more frequent asynchronous work.</p>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/emacs-startup-defer-use-package-performance/" rel="bookmark" title="Optimizing Emacs Startup - Guide to Deferred Package Loading with use-package">Optimizing Emacs Startup - Guide to Deferred Package Loading with use-package</a></li>
+<li><a href="https://www.jamescherti.com/emacs-display-line-numbers-mode-performance/" rel="bookmark" title="Fixing Slow Scrolling in Emacs display-line-numbers-mode">Fixing Slow Scrolling in Emacs display-line-numbers-mode</a></li>
+<li><a href="https://www.jamescherti.com/prevent-emacs-enter-debug-on-error-specific-error/" rel="bookmark" title="Preventing Emacs from entering the debugger when a specific error occurs">Preventing Emacs from entering the debugger when a specific error occurs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-python-dev-using-eglot-pylsp-ruff-pylint-flake8/" rel="bookmark" title="Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters">Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters</a></li>
+<li><a href="https://www.jamescherti.com/essential-emacs-packages/" rel="bookmark" title="Must-have Emacs Packages for Efficient Software Development and Text Editing">Must-have Emacs Packages for Efficient Software Development and Text Editing</a></li>
+<li><a href="https://www.jamescherti.com/emacs-quick-fasd/" rel="bookmark" title="quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs">quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-eglot-performance/" rel="bookmark" title="Configuring Emacs Eglot for Better Performance and Latency">Configuring Emacs Eglot for Better Performance and Latency</a></li>
+<li><a href="https://www.jamescherti.com/buffer-guardian-el-automatically-save-emacs-buffers/" rel="bookmark" title="buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)">buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)</a></li>
+<li><a href="https://www.jamescherti.com/emacs-fix-org-mode-copy-paste-yank-bleed/" rel="bookmark" title="Copy-paste without Emacs org-mode or markdown-mode Formatting Bleeding Into Other Buffers">Copy-paste without Emacs org-mode or markdown-mode Formatting Bleeding Into Other Buffers</a></li>
+<li><a href="https://www.jamescherti.com/emacs-native-compilation-config-jobs/" rel="bookmark" title="Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel">Enabling Emacs Native Compilation and Dynamically Adjusting the Number of Elisp Files Compiled in Parallel</a></li>
+<li><a href="https://www.jamescherti.com/emacs-dired-configuration/" rel="bookmark" title="Fixing Emacs Dired defaults - Settings for better file management">Fixing Emacs Dired defaults - Settings for better file management</a></li>
+<li><a href="https://www.jamescherti.com/securing-emacs-dir-locals-el-local-variables/" rel="bookmark" title="Securing Emacs .dir-locals.el and local variables">Securing Emacs .dir-locals.el and local variables</a></li>
+<li><a href="https://www.jamescherti.com/emacs-evil-disable-automatic-removal-of-spaces-after-leaving-insert-mode/" rel="bookmark" title="Emacs Evil Mode: Disabling the automatic removal of spaces after leaving Insert mode">Emacs Evil Mode: Disabling the automatic removal of spaces after leaving Insert mode</a></li>
+<li><a href="https://www.jamescherti.com/measuring-emacs-startup-time/" rel="bookmark" title="Measuring Emacs startup time more accurately than the built-in emacs-init-time">Measuring Emacs startup time more accurately than the built-in emacs-init-time</a></li>
+<li><a href="https://www.jamescherti.com/emacs-maintaining-proper-indentation/" rel="bookmark" title="Emacs: Maintaining proper indentation in indentation-sensitive programming languages">Emacs: Maintaining proper indentation in indentation-sensitive programming languages</a></li>
+<li><a href="https://www.jamescherti.com/emacs-toggle-a-shell-window-shell-pop/" rel="bookmark" title="Easily Toggle an Emacs Terminal with a Single Keystroke using shell-pop (Recently Refactored)">Easily Toggle an Emacs Terminal with a Single Keystroke using shell-pop (Recently Refactored)</a></li>
+<li><a href="https://www.jamescherti.com/emacs-add-todo-keyword-to-new-org-mode-headings/" rel="bookmark" title="Configure Emacs org-mode to automatically add the TODO keyword to new Org Mode headings">Configure Emacs org-mode to automatically add the TODO keyword to new Org Mode headings</a></li>
+</ol>
+</div>

@@ -1,0 +1,47 @@
+<p>
+Well this is awkward timing. No sooner had I finished bolting worktree management onto built-in <code>vc</code> than I installed the bleeding edge and found Emacs 31 went and did it properly. Right there in the 31 NEWS: a whole <code>C-x v w</code> working-tree map. So before I get too attached to my own code I thought I had better do an honest head-to-head. Verdict up front: I am keeping mine, with one key moved. Here is why.
+</p>
+
+
+<div id="org4c87542" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20260907140012-emacs--Emacs-31-Native-Git-Worktrees-vs-My-vc-Setup.jpg" alt="20260907140012-emacs--Emacs-31-Native-Git-Worktrees-vs-My-vc-Setup.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+First, what 31 actually ships under <code>C-x v w</code>:
+</p>
+
+<ul class="org-ul">
+<li><code>w c</code> (<code>vc-add-working-tree</code>) prompts for a directory, then a branch, but you have to create a branch for yourself, where as my version and also Magit ask for the name of the branch to create, as when creating a new worktree, wouldn't you always want to create a branch?  Also with the built-in there is no placeholder initial name, with something involving the branch name, so this command currently feels a little disjointed.</li>
+<li><code>w w</code> (<code>vc-switch-working-tree</code>) jumps to the <i>same file</i> in another tree. Lovely idea, completely different from my switch-to-<code>vc-dir</code> and I'm not quite sure if I really care about switching file contexts, I think I just really want to jump to the top level <code>vc-dir</code></li>
+<li><code>w k</code> (<code>vc-kill-other-working-tree-buffers</code>) kills buffers visiting this file elsewhere. Read that twice: it does <i>not</i> delete the tree, despite the letter.  So these commands are really very much file-centric.  Again I would rather this delete the worktree.</li>
+<li><code>w s</code> (<code>vc-working-tree-switch-project</code>) is <code>project-switch-project</code> limited to trees sharing the same backing repo, with a matching <code>project-find-matching-buffer</code> helper for hopping between same-named files, for this I would probably generally be more specific.</li>
+<li><code>w a</code> and <code>w A</code> (<code>vc-apply-to-other-working-tree</code> and <code>vc-apply-root-to-other-working-tree</code>) copy a fileset's changes - or the whole tree's - into another tree, and with a prefix argument <i>move</i> them. This is the Transplant mechanic and it is genuinely something mine cannot do, do I need it, not sure, but I have logged it into my noggin.</li>
+<li><code>w x</code> (<code>vc-delete-working-tree</code>) deletes the directory outright (to trash) and prunes. No <code>--force</code> dance because there is no <code>git worktree remove</code> involved at all, which also means it works on ancient gits.</li>
+<li><code>w R</code> (<code>vc-move-working-tree</code>) relocates, and the implementation is cleverer than mine: on recent git it renames the directory and runs <code>worktree repair</code>, which means it can even move the <i>main</i> tree, something plain <code>git worktree move</code> flatly refuses. Older gits fall back through <code>worktree move</code> to a clean version error.  A little on <code>git worktree repair</code>, the .git file contains a repo reference and is backtraced through the original repo, the repair just reset both aspects which is very useful when moving worktrees around and also in that small case where you are running a shared folder repo over SMB, to get the worktree to work in both linux and maybe a host on windows!!</li>
+</ul>
+
+<p>
+Now the head-to-head, feature by feature. Creating: theirs prompts bare directory then branch to use, but the branch must already be created, mine offers a <code>project-branch</code> sibling default and lands you in <code>vc-dir</code>.
+</p>
+
+<p>
+Switching: theirs is file-grained, mine is status-buffer-grained - complementary, not competing. Listing: theirs has no list command at all beyond completion prompts (though the backend exposes <code>vc-git-known-other-working-trees</code> for lisp), while my <code>Z l</code> buffer stays.
+</p>
+
+<p>
+Pruning: no built-in command, mine stays. Moving: theirs is strictly better, full stop.
+</p>
+
+<p>
+Deleting: theirs is safer on old gits and trashes instead of destroying; mine understands <code>--force</code> and rescues a <code>vc-dir</code> sitting inside the dead tree.
+</p>
+
+<p>
+So much for behaviour; now keys, because this is where it bit me. My maps live on <code>Z</code> (worktrees, Magit-style). Against 31's <code>C-x v w</code> map: <code>w k</code> kills buffers where mine removes trees, and <code>w s</code> switches projects where mine opens <code>vc-dir</code> - same letters, different continents. That settled it: the <code>Z</code> prefix stays, precisely <i>because</i> <code>w</code> is now taken with conflicting semantics, and note <code>vc-dir</code> itself has no built-in worktree keys at all, so <code>Z</code> there is uncontested territory.
+</p>
+
+<p>
+What I am stealing, or at least circling: the prune-before-listing habit is obviously right, the trash-first delete is kinder than <code>--force</code> bravado, and the repair-based move handling the main tree is something <code>git worktree move</code> simply cannot do. The changeset transplant (<code>w a</code>) is the one I may just use as-is rather than reimplement - some things are better borrowed than rebuilt. What I am not giving up: the <code>vc-dir</code>-first workflow, the sibling defaults, the list buffer.
+</p>

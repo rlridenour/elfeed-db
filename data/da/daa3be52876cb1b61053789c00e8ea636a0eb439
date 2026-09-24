@@ -1,0 +1,359 @@
+<p>Recently, I needed to test a full build of my C networking library
+together with the C build toolchain under NetBSD. Everything is fine
+on GNU/Linux (Ubuntu) and macOS&mdash;I just want to confirm it works on
+NetBSD as well.</p>
+<p>Why NetBSD? NetBSD is an open-source Unix-like operating system famous for
+its outstanding portability. It runs on an exceptionally wide range of
+hardware&mdash;from modern x86-64/aarch64 servers and desktops to embedded systems,
+handheld devices, vintage machines (such as VAX and m68k), and even
+some game consoles (see <a href="https://wiki.netbsd.org/ports/">Platforms supported by NetBSD</a>).
+Its long-standing motto is <em>&ldquo;Of course it runs NetBSD&rdquo;</em>.
+This makes sense if you want maximum portability.</p>
+<p>After all, it&rsquo;s essentially good old 4.3BSD, which adds a nice touch of nostalgia.</p>
+<p>My home <em>data center</em>, as I call it, does not have a dedicated NetBSD
+machine so I settled on using a virtual machine, or rather, the
+<a href="https://smolbsd.org/">smolBSD</a> microVM, a minimal NetBSD-based <em>BSD UNIX</em> virtual
+machine that boots and starts a service in a few milliseconds.</p>
+<h2 id="my-requirements">My requirements</h2>
+<p>My requirements to the microVM are simple.</p>
+<ol>
+<li>I need to login to the interactive shell (<code>ksh</code> in NetBSD, by default).</li>
+<li>I need the compiler toolchain and related development files
+(headers, libraries, build tools such as <code>gcc</code>, <code>make</code>, <code>ld</code>, etc.)
+because I will compile software inside the microVM.</li>
+<li>And, of course, I need <strong>Emacs</strong> for editing, navigating directories,
+compiling source code, debugging, and many other things that any developer
+needs.</li>
+</ol>
+<p>(Yes, NetBSD comes with <em>vi</em>&mdash;not <em>vim</em>!&mdash;version
+1.81.6-2013-11-20nb4 pre-installed, but&hellip; but I just need Emacs.)</p>
+<h2 id="creating-the-netbsd-microvm-from-ubuntu">Creating the NetBSD microVM from Ubuntu</h2>
+<h3 id="installing-smolbsd">Installing smolBSD</h3>
+<p>A detailed description of the smolBSD installation process on
+Debian-based and macOS systems can be found on
+the <a href="https://github.com/NetBSDfr/smolBSD#requirements">smolBSD GitHub page</a>.</p>
+<h3 id="building-a-raw-microvm-image-img">Building a raw microVM image (<code>.img</code>)</h3>
+<p>To build a raw NetBSD image we will use <em>SMOLerfile</em>, smolBSD&rsquo;s
+configuration file for defining a minimal NetBSD-based microVM
+service. It supports the well-known <em>Dockerfile</em> verbs&mdash;like <code>FROM</code>,
+<code>RUN</code>, <code>CMD</code> etc.&mdash;but does not implement the full Dockerfile
+reference. This is sufficient for our purposes.</p>
+<p>My <code>Dockerfile.devsh</code> SMOLerfile that installs and configures Emacs is shown
+below. I put it in the <code>$NETBSD_ROOT/smolerfiles</code> directory on the host;
+the <code>NETBSD_ROOT</code> envvar points to the smolBSD installation directory on the host.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-dockerfile" data-lang="dockerfile"><span style="display:flex;"><span><span style="color:#75715e"># ----------------------------------------------------------</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># NetBSD development shell with Emacs included.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Time-stamp: &lt;Last changed 2026-09-19 16:59:22 by magnolia&gt;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># ----------------------------------------------------------</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Disable: unusual &#34;FROM&#34; naming, multiple RUN don&#39;t matter, and non-JSON CMD</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># hadolint global ignore=DL3006,DL3025,DL3059</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># `base&#39; -- The core system. Contains the essential binaries, shared libraries,</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># and utilities required for a minimally functional NetBSD system.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># This set is mandatory.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># `etc&#39; -- System configuration files (primarily under /etc and a few other places).</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Needed for a complete install from scratch;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># provides the default configuration skeleton.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># `comp&#39; -- Compiler/toolchain set. Includes compilers (C/C++),</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># header files (/usr/include), static libraries, linker, make,</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># and related development tools.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">FROM</span> <span style="color:#e6db74">base,etc,comp</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Mandatory -- a name of the service</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">LABEL</span> smolbsd.service<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;devsh&#34;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Shrink the final image to only needed content + extra NNN MB</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">LABEL</span> smolbsd.minimize<span style="color:#f92672">=</span>+512<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Extra packages</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">LABEL</span> smolbsd.addpkgs<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;pkgin pkg_tarup pkg_install sqlite3 rsync curl&#34;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Microvm will use a `pty&#39; as console</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">LABEL</span> smolbsd.use_pty<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;y&#34;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># 2G disk initially; it will be truncated to minimum + extra NNN MB</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">LABEL</span> smolbsd.imgsize<span style="color:#f92672">=</span><span style="color:#ae81ff">2048</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">ARG</span> HOSTNAME<span style="color:#f92672">=</span>bsd
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">ARG</span> USERSHELL<span style="color:#f92672">=</span>/bin/ksh<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">ENV</span> USERNAME<span style="color:#f92672">=</span>magnolia
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># Note: INCLUDE is SMOLerfile extension!</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># For interactive shell; provided by smolBSD distribution.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>INCLUDE smolerfiles/usershell.inc<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># ====================================</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e">#               EMACS</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># ====================================</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Create ~/.emacs with minimal tuning.</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">RUN</span> &lt;&lt;EOF<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>cat &gt; <span style="color:#e6db74">${</span>HOMEDIR<span style="color:#e6db74">}</span>/.emacs &lt;&lt; <span style="color:#e6db74">&#39;EMACS&#39;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;;; Minimal Emacs config <span style="color:#66d9ef">for</span> NetBSD<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; Basic settings<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  column-number-mode t<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  ring-bell-function <span style="color:#960050;background-color:#1e0010">&#39;</span>ignore<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  scroll-step <span style="color:#ae81ff">1</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  scroll-conservatively <span style="color:#ae81ff">100000</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  scroll-preserve-screen-position <span style="color:#ae81ff">1</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  scroll-margin <span style="color:#ae81ff">0</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  mouse-wheel-scroll-amount <span style="color:#960050;background-color:#1e0010">&#39;</span><span style="color:#f92672">(</span>1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  mouse-wheel-progressive-speed nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  global-visual-line-mode nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  show-paren-mode t<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  tab-always-indent <span style="color:#960050;background-color:#1e0010">&#39;</span>indent<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  tab-width <span style="color:#ae81ff">4</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  tool-bar-mode nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  truncate-lines nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  word-wrap t<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  make-backup-files nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>  auto-save-default nil<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; No line numbers <span style="color:#f92672">(</span>can be toggled by <span style="color:#e6db74">&#34;C-c l&#34;</span><span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-display-line-numbers-mode -1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq-default indent-tabs-mode nil<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-hl-line-mode 1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>delete-selection-mode t<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>desktop-save-mode 1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>savehist-mode 1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; No menu<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>menu-bar-mode -1<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; Killing the current Dired buffer upon navigating into a different directory.<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq dired-kill-when-opening-new-dired-buffer t<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; Basic C settings<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq c-default-style <span style="color:#e6db74">&#34;stroustrup&#34;</span><span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq c-basic-indent 4<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>setq c-basic-offset 4<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>c-set-offset <span style="color:#960050;background-color:#1e0010">&#39;</span>innamespace 0<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>c-set-offset <span style="color:#960050;background-color:#1e0010">&#39;</span>inextern-lang 0<span style="color:#f92672">)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>;; Some useful keybindings<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>define-key global-map <span style="color:#f92672">(</span>kbd <span style="color:#e6db74">&#34;RET&#34;</span><span style="color:#f92672">)</span> <span style="color:#75715e">#&#39;newline-and-indent)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-set-key <span style="color:#f92672">(</span>kbd <span style="color:#e6db74">&#34;M-o&#34;</span><span style="color:#f92672">)</span> <span style="color:#75715e">#&#39;other-window)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-set-key <span style="color:#f92672">(</span>kbd <span style="color:#e6db74">&#34;M-a&#34;</span><span style="color:#f92672">)</span> <span style="color:#75715e">#&#39;beginning-of-line) ; QEMU intercepts &#34;C-a&#34;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-set-key <span style="color:#f92672">(</span>kbd <span style="color:#e6db74">&#34;M-e&#34;</span><span style="color:#f92672">)</span> <span style="color:#75715e">#&#39;end-of-line) ; For consistency</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#f92672">(</span>global-set-key <span style="color:#f92672">(</span>kbd <span style="color:#e6db74">&#34;C-c l&#34;</span><span style="color:#f92672">)</span> <span style="color:#75715e">#&#39;display-line-numbers-mode)</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>EMACS<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>chown <span style="color:#e6db74">${</span>USERNAME<span style="color:#e6db74">}</span> <span style="color:#e6db74">${</span>HOMEDIR<span style="color:#e6db74">}</span>/.emacs<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>chmod <span style="color:#ae81ff">600</span> <span style="color:#e6db74">${</span>HOMEDIR<span style="color:#e6db74">}</span>/.emacs<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span>EOF<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># To use Emacs keys in the shell</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">RUN</span> echo <span style="color:#e6db74">&#39;set -o emacs&#39;</span> &gt; /etc/shrc<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">RUN</span> echo <span style="color:#e6db74">&#39;alias ll=&#34;ls -la&#34;&#39;</span> &gt;&gt; /etc/shrc<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Install Emacs</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">RUN</span> pkgin up <span style="color:#f92672">&amp;&amp;</span> pkgin -y in emacs-nox11<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Install GNU make; we will use it instead of default `bsdmake&#39;</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">RUN</span> pkgin -y in gmake<span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#75715e"># Login to `ksh&#39;, the default shell on NetBSD</span><span style="color:#960050;background-color:#1e0010">
+</span></span></span><span style="display:flex;"><span><span style="color:#66d9ef">CMD</span> login -f -p $USERNAME<span style="color:#960050;background-color:#1e0010">
+</span></span></span></code></pre></div><style type="text/css">
+     
+    .notice {
+        --title-color: #fff;
+        --title-background-color: #6be;
+        --content-color: #444;
+        --content-background-color: #e7f2fa;
+    }
+
+    .notice.info {
+        --title-background-color: #fb7;
+        --content-background-color: #fec;
+    }
+
+    .notice.tip {
+        --title-background-color: #5a5;
+        --content-background-color: #efe;
+    }
+
+    .notice.warning {
+        --title-background-color: #c33;
+        --content-background-color: #fee;
+    }
+
+     
+    @media (prefers-color-scheme:dark) {
+        .notice {
+            --title-color: #fff;
+            --title-background-color: #069;
+            --content-color: #ddd;
+            --content-background-color: #023;
+        }
+
+        .notice.info {
+            --title-background-color: #a50;
+            --content-background-color: #420;
+        }
+
+        .notice.tip {
+            --title-background-color: #363;
+            --content-background-color: #121;
+        }
+
+        .notice.warning {
+            --title-background-color: #800;
+            --content-background-color: #400;
+        }
+    }
+
+    body.dark .notice {
+        --title-color: #fff;
+        --title-background-color: #069;
+        --content-color: #ddd;
+        --content-background-color: #023;
+    }
+
+    body.dark .notice.info {
+        --title-background-color: #a50;
+        --content-background-color: #420;
+    }
+
+    body.dark .notice.tip {
+        --title-background-color: #363;
+        --content-background-color: #121;
+    }
+
+    body.dark .notice.warning {
+        --title-background-color: #800;
+        --content-background-color: #400;
+    }
+
+     
+    .notice {
+        padding: 18px;
+        line-height: 24px;
+        margin-bottom: 24px;
+        border-radius: 4px;
+        color: var(--content-color);
+        background: var(--content-background-color);
+    }
+
+    .notice p:last-child {
+        margin-bottom: 0
+    }
+
+     
+    .notice-title {
+        margin: -18px -18px 12px;
+        padding: 4px 18px;
+        border-radius: 4px 4px 0 0;
+        font-weight: 700;
+        color: var(--title-color);
+        background: var(--title-background-color);
+    }
+
+     
+    .icon-notice {
+        display: inline-flex;
+        align-self: center;
+        margin-right: 8px;
+    }
+
+    .icon-notice img,
+    .icon-notice svg {
+        height: 1em;
+        width: 1em;
+        fill: currentColor;
+    }
+
+    .icon-notice img,
+    .icon-notice.baseline svg {
+        top: .125em;
+        position: relative;
+    }
+</style><div class="notice info" >
+    <p class="notice-title">
+        <span class="icon-notice baseline">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="92 59.5 300 300">
+  <path d="M292 303.25V272c0-3.516-2.734-6.25-6.25-6.25H267v-100c0-3.516-2.734-6.25-6.25-6.25h-62.5c-3.516 0-6.25 2.734-6.25 6.25V197c0 3.516 2.734 6.25 6.25 6.25H217v62.5h-18.75c-3.516 0-6.25 2.734-6.25 6.25v31.25c0 3.516 2.734 6.25 6.25 6.25h87.5c3.516 0 6.25-2.734 6.25-6.25Zm-25-175V97c0-3.516-2.734-6.25-6.25-6.25h-37.5c-3.516 0-6.25 2.734-6.25 6.25v31.25c0 3.516 2.734 6.25 6.25 6.25h37.5c3.516 0 6.25-2.734 6.25-6.25Zm125 81.25c0 82.813-67.188 150-150 150-82.813 0-150-67.188-150-150 0-82.813 67.188-150 150-150 82.813 0 150 67.188 150 150Z"/>
+</svg>
+
+        </span></p><p>As you can see, I added a new key binding&mdash;<code>M-a</code> for <code>beginning-of-line</code>.</p>
+<p>The point is that <em>QEMU</em>&mdash;an open-source machine emulator
+and virtualizer available on essentially all major desktop and server
+operating systems (Linux, macOS, Windows, BSDs) and the most common
+CPU architectures&mdash;uses <code>Ctrl-A</code> as its special <em>escape key</em> for the
+character-backend multiplexer. That is why pressing <code>Ctrl-A</code> aborts or
+interferes with the VM instead of being passed to Emacs.</p>
+<p>A quick workaround is to send a real <code>C-a</code> to Emacs by pressing <code>Ctrl-A</code>
+twice (<code>Ctrl-A Ctrl-A</code>)&mdash;the first <code>Ctrl-A</code> is eaten by QEMU;
+the second one is delivered to the guest.</p>
+<p>My muscle memory resists using double-pressing <code>C-a</code> so I added <code>M-a</code>,
+although it&rsquo;s not that easy to remember either. <code>M-e</code> is added for consistency.</p></div>
+
+<p>To simplify the build process, I’ve created a simple script:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span><span style="color:#75715e">#!/bin/bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># `smolbsd-build.sh SERVICE&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># ==========================</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># NETBSD_ROOT envvar should point to the smolBSD directory on the host.</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#f92672">[</span> -z <span style="color:#e6db74">&#34;</span>$NETBSD_ROOT<span style="color:#e6db74">&#34;</span> <span style="color:#f92672">]</span>; <span style="color:#66d9ef">then</span>
+</span></span><span style="display:flex;"><span>    echo <span style="color:#e6db74">&#34;Error: NETBSD_ROOT envvar not defined.&#34;</span>
+</span></span><span style="display:flex;"><span>    exit <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">fi</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#f92672">[</span> -z <span style="color:#e6db74">&#34;</span>$1<span style="color:#e6db74">&#34;</span> <span style="color:#f92672">]</span>; <span style="color:#66d9ef">then</span>
+</span></span><span style="display:flex;"><span>    echo <span style="color:#e6db74">&#34;Usage: smolbsd-build.sh SERVICE&#34;</span>
+</span></span><span style="display:flex;"><span>    exit <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">fi</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>pushd .
+</span></span><span style="display:flex;"><span>IMAGE<span style="color:#f92672">=</span><span style="color:#e6db74">&#34;smolerfiles/Dockerfile.</span>$1<span style="color:#e6db74">&#34;</span>
+</span></span><span style="display:flex;"><span>cd $NETBSD_ROOT
+</span></span><span style="display:flex;"><span>echo <span style="color:#e6db74">&#34;Building </span>$IMAGE<span style="color:#e6db74"> ...&#34;</span>
+</span></span><span style="display:flex;"><span>./smoler.sh build $IMAGE
+</span></span><span style="display:flex;"><span>popd
+</span></span></code></pre></div><h2 id="running-emacs-in-the-netbsd-microvm">Running Emacs in the NetBSD microVM</h2>
+<p>Here is my script to run the NetBSD microVM:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span><span style="color:#75715e">#!/bin/bash
+</span></span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># `smolbsd-run.sh SERVICE&#39;</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># ========================</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># NETBSD_ROOT envvar should point to the smolBSD directory on the host.</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#f92672">[</span> -z <span style="color:#e6db74">&#34;</span>$NETBSD_ROOT<span style="color:#e6db74">&#34;</span> <span style="color:#f92672">]</span>; <span style="color:#66d9ef">then</span>
+</span></span><span style="display:flex;"><span>    echo <span style="color:#e6db74">&#34;Error: NETBSD_ROOT envvar not defined.&#34;</span>
+</span></span><span style="display:flex;"><span>    exit <span style="color:#ae81ff">2</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">fi</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">if</span> <span style="color:#f92672">[</span> -z <span style="color:#e6db74">&#34;</span>$1<span style="color:#e6db74">&#34;</span> <span style="color:#f92672">]</span>; <span style="color:#66d9ef">then</span>
+</span></span><span style="display:flex;"><span>    echo <span style="color:#e6db74">&#34;Usage: smolbsd-run.sh SERVICE&#34;</span>
+</span></span><span style="display:flex;"><span>    exit <span style="color:#ae81ff">1</span>
+</span></span><span style="display:flex;"><span><span style="color:#66d9ef">fi</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>pushd .
+</span></span><span style="display:flex;"><span>cd $NETBSD_ROOT
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># 1) -f CONFIG      VM configuration file; it&#39;s created automatically during the build stage.</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># 2) -P             use PTY terminal</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># 3) -n 2           enable stopping VM from ksh (as `su&#39;): . /etc/include/shutdown</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># 4) -w PATH        mount host&#39;s PATH to guest&#39;s /mnt/</span>
+</span></span><span style="display:flex;"><span>./startnb.sh -f <span style="color:#e6db74">&#34;etc/</span>$1<span style="color:#e6db74">.conf&#34;</span> -P -n <span style="color:#ae81ff">2</span> -w <span style="color:#e6db74">${</span>HOME<span style="color:#e6db74">}</span>/workspace/devel
+</span></span><span style="display:flex;"><span>popd
+</span></span></code></pre></div><p>Now we can run the <code>devsh</code> microVM (<strong>bsd</strong>) on the host (<strong>foxtrot</strong>):</p>
+<figure><a href="https://olddeuteronomy.github.io/img/smolbsd-run.png"><img src="https://olddeuteronomy.github.io/img/smolbsd-run.png"></a><figcaption>
+      <h4>Click or tap to view the full-size picture.</h4>
+    </figcaption>
+</figure>
+
+<p>As you can see, the NetBSD kernel starts in 26 ms on my old Dell Latitude 7400 laptop.
+The entire VM initially occupies 180 MB of host memory. Not a bad result.</p>
+<p>And then we can run Emacs:</p>
+<figure><a href="https://olddeuteronomy.github.io/img/smolbsd-emacs.png"><img src="https://olddeuteronomy.github.io/img/smolbsd-emacs.png"></a><figcaption>
+      <h4>Click or tap to view the full-size picture.</h4>
+    </figcaption>
+</figure>
+
+<p>Happy emacsing in VM!</p>
+<p>&mdash; The Emacs Cat.</p>

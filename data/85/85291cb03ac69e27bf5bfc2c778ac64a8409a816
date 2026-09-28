@@ -1,0 +1,155 @@
+
+<p><a href="https://brettterpstra.com//projects/howzit">Howzit</a> has always split build notes into topics using Markdown headers. What it didn&rsquo;t do was care <em>which</em> header level you used. A level 2 and level 3 header were both just &ldquo;a topic,&rdquo; and they all got flattened into one long list. As of version 2.1.46, that&rsquo;s changed: deeper headers now nest under the header above them, and that nesting affects both how notes display and what happens when you run them.</p>
+
+<p>In case you&rsquo;ve missed it, Howzit is a command-line tool for keeping Markdown notes about a project, things like how to build it, deploy it, or remember that one weird flag you always forget. The notes live in a <code class="language-plaintext highlighter-rouge">buildnotes.md</code> file in your project, split into topics by headers. Type <code class="language-plaintext highlighter-rouge">howzit build</code> and you get just the &ldquo;Build&rdquo; section, paged and highlighted in your terminal. Where it really earns its keep is as a task runner. Drop <code class="language-plaintext highlighter-rouge">@run(...)</code> directives or fenced <code class="language-plaintext highlighter-rouge">run</code> blocks into a topic, and <code class="language-plaintext highlighter-rouge">howzit -r build</code> executes them. It&rsquo;s documentation first, automation second, and I use it in pretty much every project I touch.</p>
+
+<h3 id="the-short-version">The short version</h3>
+
+<p>A <code class="language-plaintext highlighter-rouge">###</code> following a <code class="language-plaintext highlighter-rouge">##</code> is now a subtopic of that <code class="language-plaintext highlighter-rouge">##</code>. A <code class="language-plaintext highlighter-rouge">####</code> under the <code class="language-plaintext highlighter-rouge">###</code> is a subtopic of the <code class="language-plaintext highlighter-rouge">###</code>, and so on down. The next header at the same level (or shallower) closes out the parent.</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gu">## Deploy</span>
+
+@run(./scripts/preflight.sh) Preflight checks
+
+<span class="gu">### Build assets</span>
+
+@run(gulp) Build
+
+<span class="gu">### Upload</span>
+
+@run(gulp sync) Sync to server
+
+<span class="gu">## Package management</span></code></pre></div></div>
+
+<p>Here &ldquo;Build assets&rdquo; and &ldquo;Upload&rdquo; belong to &ldquo;Deploy.&rdquo; &ldquo;Package management&rdquo; is back at the top level.</p>
+
+<h3 id="viewing-a-parent-topic">Viewing a parent topic</h3>
+
+<p>When you pull up a parent topic, you now get the whole thing: the parent, followed by all of its subtopics.</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gp">$</span><span class="w"> </span>howzit deploy</code></pre></div></div>
+
+<p>Subtopic headers get a slightly lighter treatment (a dotted rule and a cyan title) so you can see where the nesting happens without it getting noisy. You can still ask for a subtopic directly:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gp">$</span><span class="w"> </span>howzit upload</code></pre></div></div>
+
+<p>&hellip;and you&rsquo;ll get just that section.</p>
+
+<h3 id="running-a-parent-topic">Running a parent topic</h3>
+
+<p>This is the part I actually wanted. Running a parent now runs everything under it:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gp">$</span><span class="w"> </span>howzit <span class="nt">-r</span> deploy</code></pre></div></div>
+
+<p>That runs Deploy&rsquo;s own tasks first, then each subtopic&rsquo;s tasks in order, depth-first. So the example above runs preflight, then the build, then the sync. You get one combined summary at the end instead of a &ldquo;Ran 1 task&rdquo; line for every section.</p>
+
+<p>A few details worth knowing:</p>
+
+<ul>
+  <li><strong>Errors stop the run.</strong> If a task fails, the remaining subtopics are skipped. Add <code class="language-plaintext highlighter-rouge">--force</code> if you want it to push through anyway.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">@before</code> and <code class="language-plaintext highlighter-rouge">@after</code> still work per topic.</strong> Each topic shows its prerequisites before its own tasks run. A parent&rsquo;s <code class="language-plaintext highlighter-rouge">@after</code> block shows up once the parent <em>and</em> all of its subtopics are done, which is usually where you want that &ldquo;don&rsquo;t forget to&hellip;&rdquo; reminder.</li>
+  <li><strong>Parents don&rsquo;t need tasks of their own.</strong> A parent that&rsquo;s just an umbrella for a few subtopics runs fine, and it won&rsquo;t complain about &ldquo;No @directive found.&rdquo;</li>
+  <li><strong>Subtopics still run on their own.</strong> <code class="language-plaintext highlighter-rouge">howzit -r upload</code> runs just the upload step.</li>
+</ul>
+
+<h3 id="includes-get-the-whole-tree-too">Includes get the whole tree too</h3>
+
+<p>If another topic does <code class="language-plaintext highlighter-rouge">@include(Deploy)</code>, it now runs Deploy and all of its subtopics, same as running it directly. Task counts in include notes and menus reflect the full tree, so you&rsquo;re not surprised by how much is about to happen.</p>
+
+<h3 id="listing-and-show-everything">Listing and &ldquo;show everything&rdquo;</h3>
+
+<p>Running <code class="language-plaintext highlighter-rouge">howzit</code> with no arguments shows every topic. It now only prints top-level topics, since subtopics come along with their parents. No more seeing the same section twice.</p>
+
+<p><code class="language-plaintext highlighter-rouge">howzit -l</code> indents subtopics under their parents, so the list reflects the structure of your note:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gp">$</span><span class="w"> </span>howzit <span class="nt">-l</span>
+<span class="go">Topics:
+
+- Deploy
+  - Build assets
+  - Upload
+- Package management
+</span></code></pre></div></div>
+
+<p>Shell completions stay flat, so you can still tab-complete straight to a subtopic.</p>
+
+<h3 id="one-thing-to-check-in-your-notes">One thing to check in your notes</h3>
+
+<p>If you&rsquo;ve been using <code class="language-plaintext highlighter-rouge">###</code> headers under <code class="language-plaintext highlighter-rouge">##</code> purely as visual formatting, those are now real subtopics. Viewing the parent will include them (probably what you wanted anyway), and running the parent will run their tasks too. If you had a <code class="language-plaintext highlighter-rouge">###</code> section with tasks you <em>don&rsquo;t</em> want run as part of its parent, bump it up to <code class="language-plaintext highlighter-rouge">##</code>.</p>
+
+<h3 id="other-notes">Other notes</h3>
+
+<p>While I was in there, I noticed the report at the end of a run could lie to me. A topic would error out, and the summary would still be a column of green checkmarks. Two bugs were teaming up on that:</p>
+
+<ul>
+  <li><strong>The failed task never made it into the report.</strong> Howzit stopped running when a task failed, but it bailed out <em>before</em> logging the failure. You&rsquo;d only see the tasks that passed.</li>
+  <li><strong><code class="language-plaintext highlighter-rouge">@include</code> always counted as a success.</strong> If a task inside an included topic failed, the including topic shrugged and kept going. That&rsquo;s how my own release topic happily published the wiki after the gem build fell over.</li>
+</ul>
+
+<p>Both are fixed. The report now shows the failure with its exit code, and anything that didn&rsquo;t get to run is marked as skipped:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="go">✅ Build: Compile
+❌ Build: Package  (exit code 1)
+⏭️ Test: Run specs (skipped)
+⏭️ Deploy: Push (skipped)
+</span></code></pre></div></div>
+
+<p>Skipped includes are expanded into the included topic&rsquo;s individual tasks, so you can see exactly what didn&rsquo;t happen. (In topics with <code class="language-plaintext highlighter-rouge">@if</code> blocks, tasks inside conditions that never got evaluated are left out, since there&rsquo;s no way to know if they would have run.)</p>
+
+<p>Stopping on failure now applies everywhere, too. Howzit already stopped within a topic, and nested topics skip their remaining subtopics. Now multi-topic runs stop as well, whether you ran <code class="language-plaintext highlighter-rouge">howzit -r build,test,deploy</code> or used a <code class="language-plaintext highlighter-rouge">default:</code> metadata list. If <code class="language-plaintext highlighter-rouge">build</code> fails, <code class="language-plaintext highlighter-rouge">test</code> and <code class="language-plaintext highlighter-rouge">deploy</code> don&rsquo;t run.</p>
+
+<p>If you&rsquo;d rather push through, <code class="language-plaintext highlighter-rouge">-f</code> (<code class="language-plaintext highlighter-rouge">--force</code>) still does that. Every task runs, and the report still tells you which ones failed.</p>
+
+<p>One gotcha worth knowing: a fenced <code class="language-plaintext highlighter-rouge">run</code> block counts as a single task, and only its final exit status matters. If a command in the middle of a Bash block fails, the block keeps going unless you&rsquo;ve got <code class="language-plaintext highlighter-rouge">set -e</code> at the top.</p>
+
+<p>The wiki has the full rundown under <a href="https://github.com/ttscoff/howzit/wiki/@commands#failures-and-the-run-report">Failures and the run report</a>.</p>
+
+<h3 id="your-shell-variables-are-yours-again">Your shell variables are yours again</h3>
+
+<p>This one&rsquo;s been bugging me for a while. Howzit uses <code class="language-plaintext highlighter-rouge">${VAR}</code> for its own variables, and so does every shell script ever written. Howzit did its replacements on the script text before the shell ever saw it, so the two stepped on each other constantly:</p>
+
+<ul>
+  <li>A loop like <code class="language-plaintext highlighter-rouge">for file in *.rb; do echo "${file}"; done</code> would print Howzit&rsquo;s <code class="language-plaintext highlighter-rouge">file</code> variable if you happened to have one.</li>
+  <li><code class="language-plaintext highlighter-rouge">${OUT_DIR:-/tmp/build}</code> got mangled into <code class="language-plaintext highlighter-rouge">-/tmp/build</code>, because Howzit thought <code class="language-plaintext highlighter-rouge">:-/tmp/build</code> was one of its defaults.</li>
+  <li>Worse, <code class="language-plaintext highlighter-rouge">$1</code> inside a shell function, or in <code class="language-plaintext highlighter-rouge">awk '{print $1}'</code>, got replaced with an empty string when you hadn&rsquo;t passed any arguments. That one was just a bug.</li>
+</ul>
+
+<p>Now shell run blocks (<code class="language-plaintext highlighter-rouge">sh</code>, <code class="language-plaintext highlighter-rouge">bash</code>, <code class="language-plaintext highlighter-rouge">zsh</code>, or no hashbang at all) get Howzit&rsquo;s variables as environment variables instead. Howzit leaves the script text alone and lets the shell do the expanding:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gu">## Deploy (target:staging)</span>
+
+<span class="p">```</span><span class="nl">run
+</span><span class="sb">#!/bin/bash
+for file in dist/*; do
+  echo "Uploading ${file} to ${target}"
+done
+echo "Using ${API_KEY:-no key}"</span>
+<span class="p">```</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">${target}</code> comes from Howzit, <code class="language-plaintext highlighter-rouge">${file}</code> is the script&rsquo;s own variable, and <code class="language-plaintext highlighter-rouge">${API_KEY:-no key}</code> is plain old shell. If your script sets a variable with the same name as a Howzit variable, the script wins, which is how it should have worked all along. Arguments you pass after <code class="language-plaintext highlighter-rouge">--</code> show up as the script&rsquo;s <code class="language-plaintext highlighter-rouge">$1</code>, <code class="language-plaintext highlighter-rouge">$2</code>, and <code class="language-plaintext highlighter-rouge">"$@"</code>.</p>
+
+<p>Howzit&rsquo;s own <code class="language-plaintext highlighter-rouge">${name:default}</code> syntax still works in shell blocks, since it gets converted to the shell&rsquo;s <code class="language-plaintext highlighter-rouge">${name:-default}</code> before the script runs. Ruby, Python, and other non-shell blocks still get text replacement like before.</p>
+
+<p>For <code class="language-plaintext highlighter-rouge">@run</code> lines, which still use text replacement, there&rsquo;s a new escape. <code class="language-plaintext highlighter-rouge">$${VAR}</code> passes <code class="language-plaintext highlighter-rouge">${VAR}</code> straight through to the shell, for the rare case where a Howzit variable and a shell variable share a name:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>@run(echo "Howzit's ${file}, the shell's $${file}")</code></pre></div></div>
+
+<p>A couple of things behave differently now. In a bash block, <code class="language-plaintext highlighter-rouge">'${target}'</code> in single quotes is literal text, the same as in any shell script, so use double quotes if you want the value. And if you really want the old behavior, set <code class="language-plaintext highlighter-rouge">:shell_variables: substitute</code> in your config. The <a href="https://github.com/ttscoff/howzit/wiki/Variables#shell-run-blocks">Variables page</a> on the wiki has the details.</p>
+
+<h3 id="grab-it">Grab it</h3>
+
+<p>Everything in this post is in 2.1.46:</p>
+
+<div class="language-console highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="gp">$</span><span class="w"> </span>gem <span class="nb">install </span>howzit</code></pre></div></div>
+
+<p>The details are in the <a href="https://github.com/ttscoff/howzit/wiki/Anatomy-of-a-build-notes-file#subtopics">build notes anatomy page</a> on the wiki. I&rsquo;ve already started restructuring a few of my own notes around this. Having a single &ldquo;Release&rdquo; topic that fans out into build, test, and publish steps is a lot nicer than keeping them all at the same level and chaining them together with <code class="language-plaintext highlighter-rouge">@include</code>.</p>
+
+<p>Like or share this post <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F09%2F27%2Fnested-topics-for-howzit%2F&text=Nested+topics+for+Howzit&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F09%2F27%2Fnested-topics-for-howzit%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17475537.gif" height="1" width="1"/>

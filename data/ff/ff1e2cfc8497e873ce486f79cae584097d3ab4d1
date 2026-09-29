@@ -1,0 +1,154 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/09/foldersync-rb.7537.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+<p><a href="https://share.markedapp.com">Marked Share</a> just took another big step toward full folder sync. The API can now take a folder full of Markdown in bulk, process it in the background, and keep it in step with your local copy in both directions.</p>
+
+<p>What that means in practice: apps like <a href="https://nvultra.com">nvUltra</a>, The Archive, and FSNotes can build an online index of your notes, one folder at a time. Each synced folder stays its own little library, subfolders included, and you can sync as many of them as you like. Work notes in one, a Zettelkasten in another, recipes in a third.</p>
+
+<p>This update also brings a couple of web UI niceties: rename a folder by double-clicking it, and scope a search to a single folder.</p>
+
+<h3 id="batch-uploads">Batch uploads</h3>
+
+<p>Seeding a folder used to mean one request per note, with a rate limit that would have taken hours for a decent-sized notes collection. Now there&rsquo;s a batch endpoint that takes up to 200 notes per request:</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>curl https://share.markedapp.com/api/v1/documents/import <span class="se">\</span>
+  <span class="nt">--header</span> <span class="s2">"Authorization: Bearer </span><span class="nv">$MARKED_SHARE_TOKEN</span><span class="s2">"</span> <span class="se">\</span>
+  <span class="nt">--header</span> <span class="s2">"X-Device-Key: </span><span class="nv">$MARKED_SHARE_DEVICE_KEY</span><span class="s2">"</span> <span class="se">\</span>
+  <span class="nt">--header</span> <span class="s2">"Content-Type: application/json"</span> <span class="se">\</span>
+  <span class="nt">--data</span> <span class="s1">'{"documents":[{"title":"Meeting notes","body_markdown":"# Meeting notes","library_path":"Work"}]}'</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">library_path</code> is the folder (subfolders like <code class="language-plaintext highlighter-rouge">Work/Clients</code> are fine, and they&rsquo;re created if they don&rsquo;t exist). Every note comes back with an <code class="language-plaintext highlighter-rouge">id</code> and a <code class="language-plaintext highlighter-rouge">content_hash</code>, which is all a sync client needs to remember. Imported notes are private by default.</p>
+
+<h3 id="background-processing">Background processing</h3>
+
+<p>To keep imports fast, Share stores the Markdown right away and renders the HTML in a background job. If you open a note before the job gets to it, it renders on the spot, so you&rsquo;ll never see a blank page. Big imports spend their time on the network instead of waiting for rendering.</p>
+
+<h3 id="how-two-way-sync-works">How two-way sync works</h3>
+
+<p>The whole loop runs on a handful of endpoints:</p>
+
+<ol>
+  <li><code class="language-plaintext highlighter-rouge">GET /documents?view=index&amp;folder=Work</code> returns a lean snapshot of the folder: every note&rsquo;s id, path, and content hash, plus &ldquo;tombstones&rdquo; for notes that were deleted.</li>
+  <li>New local files go up with the batch import.</li>
+  <li>Local edits go up with <code class="language-plaintext highlighter-rouge">PATCH</code>, sending the last hash you saw in an <code class="language-plaintext highlighter-rouge">If-Match</code> header. If the note changed on Share since then, you get a <code class="language-plaintext highlighter-rouge">409</code> instead of silently clobbering it.</li>
+  <li>Notes that are new or changed on Share come down with <code class="language-plaintext highlighter-rouge">GET /documents/:id</code>.</li>
+  <li>Local deletes use <code class="language-plaintext highlighter-rouge">DELETE</code>, also with <code class="language-plaintext highlighter-rouge">If-Match</code>.</li>
+</ol>
+
+<p>One detail that tripped me up while writing the example client: only a tombstone means &ldquo;deleted.&rdquo; If a note you know about isn&rsquo;t in the index <em>and</em> isn&rsquo;t a tombstone, it was moved to another folder on Share. It&rsquo;s still there.</p>
+
+<p>Conflicts are left to the client. The approach I recommend (and the example script uses) is to keep the Share version at the original path and upload your local edits as a new note with &ldquo;(conflicted)&rdquo; in the title. Nothing gets lost, and you can merge at your leisure.</p>
+
+<p>The full details are in the <a href="https://share.markedapp.com/docs/api">API docs</a>.</p>
+
+<h3 id="rename-folders-with-a-double-click">Rename folders with a double click</h3>
+
+<p>In the library sidebar, double-click any folder name and it turns into a text field. Hit Enter to rename, Escape to back out. Everything inside comes along for the ride, subfolders included.</p>
+
+<p>If you rename a folder you&rsquo;re syncing, just point your sync client at the new name. With the example script, delete the state file and run it with the new <code class="language-plaintext highlighter-rouge">--folder</code>. It&rsquo;ll match your local files to the notes on Share by path and content without uploading anything again.</p>
+
+<h3 id="search-a-single-folder">Search a single folder</h3>
+
+<p>When you&rsquo;re browsing a folder, there&rsquo;s now a &ldquo;Current folder only&rdquo; checkbox under the search bar. Check it and search only looks in that folder and its subfolders. It remembers your choice, so if you mostly work in one folder you can leave it on.</p>
+
+<h3 id="try-it-with-the-example-script">Try it with the example script</h3>
+
+<p>I wrote a sync client while building all this, and I&rsquo;ve cleaned it up into a working example of the whole procedure. It&rsquo;s a single Ruby file with no dependencies beyond the standard library:</p>
+
+<p><strong><a href="https://gist.github.com/ttscoff/3117fe69e3b42ac4e1ec7da0f5eecb8c">share_sync on GitHub Gist</a></strong></p>
+
+<p>It pushes new and edited files, pulls edits and new notes from Share, follows renames and moves in both directions, and makes &ldquo;(conflicted)&rdquo; copies when both sides changed. Deletes only happen if you ask for them.</p>
+
+<p>To try it:</p>
+
+<ol>
+  <li>
+    <p>Download the script and make it executable:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nb">chmod</span> +x share_sync</code></pre></div>    </div>
+  </li>
+  <li>
+    <p>In Marked Share, go to <strong>Settings &gt; Connect an app</strong> to get an API token and a device key, then export them:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nb">export </span><span class="nv">MARKED_SHARE_TOKEN</span><span class="o">=</span><span class="s2">"your-token"</span>
+<span class="nb">export </span><span class="nv">MARKED_SHARE_DEVICE_KEY</span><span class="o">=</span><span class="s2">"your-device-key"</span></code></pre></div>    </div>
+  </li>
+  <li>
+    <p>Generate some sample notes to play with (or point it at a copy of real notes):</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./share_sync generate ~/Desktop/sync-test 50</code></pre></div>    </div>
+  </li>
+  <li>
+    <p>Preview what it&rsquo;ll do, then run it for real:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./share_sync <span class="nb">sync</span> ~/Desktop/sync-test <span class="nt">--folder</span> <span class="s2">"Sync Test"</span> <span class="nt">--dry-run</span> <span class="nt">--verbose</span>
+./share_sync <span class="nb">sync</span> ~/Desktop/sync-test <span class="nt">--folder</span> <span class="s2">"Sync Test"</span></code></pre></div>    </div>
+  </li>
+  <li>
+    <p>Now mess with it. Edit a note on the web, add a new one to the folder, rename one, move one to a subfolder. Then sync again and watch the changes land locally:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./share_sync <span class="nb">sync</span> ~/Desktop/sync-test <span class="nt">--folder</span> <span class="s2">"Sync Test"</span> <span class="nt">--verbose</span></code></pre></div>    </div>
+  </li>
+  <li>
+    <p>To test pushes, append a line to a few random local files and sync:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./share_sync mutate ~/Desktop/sync-test 5
+./share_sync <span class="nb">sync</span> ~/Desktop/sync-test <span class="nt">--folder</span> <span class="s2">"Sync Test"</span> <span class="nt">--verbose</span></code></pre></div>    </div>
+  </li>
+</ol>
+
+<p>A few flags worth knowing:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">--delete</code> applies deletes in both directions. Even then, a file with local edits that haven&rsquo;t synced yet is uploaded again instead of being deleted.</li>
+  <li><code class="language-plaintext highlighter-rouge">--restore</code> uploads a local file again if its note was deleted on Share.</li>
+  <li><code class="language-plaintext highlighter-rouge">--no-pull</code> is push-only and never touches your local files.</li>
+  <li><code class="language-plaintext highlighter-rouge">--dry-run</code> reports everything it would do without doing it.</li>
+</ul>
+
+<p>The script keeps its state in a hidden <code class="language-plaintext highlighter-rouge">.marked-share-sync.json</code> file inside the synced folder. One quirk to know about: moving or deleting notes leaves empty folders behind locally, because the script doesn&rsquo;t sync empty folders. Clean them up by hand if they bug you.</p>
+
+<p>Limits for now: 200 notes per import request, 500 KB per note, and 5,000 notes per synced folder. If you have more than that, split them across folders (which is probably a good idea for organization anyway).</p>
+
+<h3 id="what-about-security">What about security?</h3>
+
+<p>Here&rsquo;s where things stand. All traffic between your apps and Marked Share is encrypted with HTTPS. Notes are private by default, which means they&rsquo;re only visible to you when you&rsquo;re signed in. That includes anything that comes in through the API. When you do share a note, you can put a password and an expiration date on the link.</p>
+
+<p>What it&rsquo;s <em>not</em> is end-to-end encrypted. Share has to read your Markdown to render it and search it, so your notes are stored on the server in a form the server can read. That&rsquo;s the same deal you get with most cloud notes services, and it&rsquo;s fine for most purposes. It&rsquo;s not where I&rsquo;d keep passwords, keys, or anything you&rsquo;d be in real trouble over if it leaked.</p>
+
+<p>For personal stuff like journals, family notes, or private project plans, there&rsquo;s a new safety net: <strong>locked folders</strong>. Select a folder in the library sidebar and click the padlock. Everything in that folder and its subfolders is forced private and can&rsquo;t be shared until you unlock it. That covers publishing to Micro.blog too. It doesn&rsquo;t matter how a note gets there, whether you move it on the web, a sync client uploads it, or an app tries to set it to public through the API. It&rsquo;s private, period. If the folder already has shared notes, Share tells you how many and makes them private when you confirm.</p>
+
+<p>So a reasonable setup for syncing a folder of personal notes looks like this:</p>
+
+<ol>
+  <li>Create the folder on Share and lock it <em>before</em> syncing anything into it.</li>
+  <li>Create a separate token and device key for each app that syncs, under <strong>Settings &gt; Connect an app</strong>. If a machine is lost or you stop using an app, revoke its token in Settings and that app loses access immediately.</li>
+  <li>
+    <p>Point your sync client at the locked folder:</p>
+
+    <div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>./share_sync <span class="nb">sync</span> ~/Journal <span class="nt">--folder</span> <span class="s2">"Personal/Journal"</span></code></pre></div>    </div>
+  </li>
+</ol>
+
+<p>Here&rsquo;s what happens technically:</p>
+
+<ul>
+  <li>Your notes travel as JSON over HTTPS.</li>
+  <li>They&rsquo;re stored as Markdown on the server, marked private and locked.</li>
+  <li>Reading them requires your login, either a web session or an API token.</li>
+  <li>Every change is recorded in the note&rsquo;s version history, along with the name of the device that made it.</li>
+</ul>
+
+<p>A locked folder isn&rsquo;t a vault. It&rsquo;s a guardrail against the &ldquo;oops, I shared my journal&rdquo; click. For most personal notes, that&rsquo;s the level of protection that actually matters.</p>
+
+<h3 id="whats-next">What&rsquo;s next</h3>
+
+<p>The pieces for full folder sync are mostly in place now. Next up is getting it into apps. If you build a notes app and want to hook into this, the <a href="https://share.markedapp.com/docs/api">API docs</a> have everything, and the example script shows the whole loop end to end. I&rsquo;d love to hear what you build with it.</p>
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/117354491922881366">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Folder+sync+for+Marked+Share%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F09%2F29%2Ffolder-sync-for-marked-share%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F09%2F29%2Ffolder-sync-for-marked-share%2F&text=Folder+sync+for+Marked+Share&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F09%2F29%2Ffolder-sync-for-marked-share%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17477406.gif" height="1" width="1"/>

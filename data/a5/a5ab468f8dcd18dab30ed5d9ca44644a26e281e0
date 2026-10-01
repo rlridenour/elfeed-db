@@ -1,0 +1,60 @@
+<p>One of the most fun things you can do with Emacs is to build an interface for another piece of software. It is the Lisp version of running Doom on any device. It is also quite useful, because you can connect it to other tools in the gnu's editor and build more pleasant workflows.</p>
+<p>The big question: can I chat on WhatsApp from Emacs? Spoiler: I made it, with some limitations.</p>
+<h2 id="blog-single-content__title--no-way-in" class="blog-single__content-title">No way in</h2>
+<p>Context: I work on macOS. It matters, because the solution depends on it.</p>
+<p>Meta offers no API for this, and the macOS desktop app has no bridge at all: no open ports, no gRPC, no AppleScript dictionary. Nothing.</p>
+<p>There are unofficial clients, like whatsmeow, that talk directly to WhatsApp's servers by pretending to be a device. They work, but your account ends up depending on software Meta does not authorize, and it is one more process to maintain. On top of that, Meta can detect them and ban your number. I am not going to risk my account just to chat from Emacs.</p>
+<p>So how do you talk to an app that does not want to talk to you? By reading the same thing it reads.</p>
+<h2 id="blog-single-content__title--reading-the-database" class="blog-single__content-title">Reading: the database</h2>
+<p>The WhatsApp app stores every chat in a local SQLite file:</p>
+<pre class="highlight"><code class="language-none">~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared/ChatStorage.sqlite</code></pre>
+<p>Emacs 29 ships with SQLite built in, no external libraries. Opening it read-only takes one line:</p>
+<pre class="highlight"><code class="language-elisp">(sqlite-open file t)</code></pre>
+<p>The schema is undocumented, so I had to explore it by hand. Chats live in <code>ZWACHATSESSION</code>, messages in <code>ZWAMESSAGE</code>, and group member names in <code>ZWAGROUPMEMBER</code> and <code>ZWAPROFILEPUSHNAME</code>. That <code>Z</code> at the start of every name gives it away: it is a Core Data database.</p>
+<p>And Core Data has a surprise. Dates do not count from 1970, but from <strong>January 1, 2001</strong>. My first messages showed up dated 1995. The fix: a constant.</p>
+<pre class="highlight"><code class="language-elisp">(defconst whatsapp--epoch-offset 978307200
+  "Seconds between the Unix epoch and the Core Data epoch (2001-01-01).")</code></pre>
+<p>There were more traps. Pinned chats store a date in the future so they stay on top, and the text of the session's last message is encoded. Better to read both from the message itself.</p>
+<p>One more detail: macOS protects that directory. You have to give Emacs <strong>Full Disk Access</strong> in the privacy settings. I would hand Emacs the keys to my house if it asked.</p>
+<h2 id="blog-single-content__title--sending-the-shortcuts-trick" class="blog-single__content-title">Sending: the Shortcuts trick</h2>
+<p>Reading is easy. What about writing? Editing the database is pointless: the app would not notice and nothing would go out over the network.</p>
+<p>Then I remembered that the WhatsApp app provides an action in macOS <strong>Shortcuts</strong>: "Send Message". And Shortcuts can be run from the terminal:</p>
+<pre class="highlight"><code class="language-sh">shortcuts run "Send WhatsApp" --input-path message.json</code></pre>
+<p>The problem is that the action expects a contact from your address book, not a number. The trick: build a <strong>vCard on the fly</strong> with the chat's phone number, which the shortcut turns into a temporary contact. Nothing is saved in your address book.</p>
+<p><img alt="Screenshot of the Send WhatsApp shortcut in the macOS Shortcuts app: it receives a JSON, turns the vCard into a contact and sends the text with the WhatsApp Send Message action" src="https://img.andros.dev/RbrmDAcSSEU-_d1lspC-c9Zl30M=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/whatsapp-shortcut.png" /></p>
+<p>Emacs writes a JSON file with the vCard and the text, starts the process and waits:</p>
+<pre class="highlight"><code class="language-elisp">(json-encode
+ `((vcard . ,(whatsapp--vcard name phone))
+   (text . ,text)))</code></pre>
+<p>The full flow looks like this:</p>
+<pre class="mermaid">flowchart LR
+    E[Emacs] -- reads --> DB[(ChatStorage.sqlite)]
+    E -- JSON with vCard --> S[Send WhatsApp shortcut]
+    S -- Send Message --> W[Official WhatsApp app]
+    W -- stores --> DB</pre>
+<p>I like one detail. While the shortcut runs, the message shows as <code>(sending...)</code>. When WhatsApp stores it in its database, Emacs replaces it with the real one. <strong>What you see is what WhatsApp actually sent</strong>, not what Emacs thinks it sent.</p>
+<h2 id="blog-single-content__title--the-result" class="blog-single__content-title">The result</h2>
+<p>An ERC or rcirc style interface, with a chat list and one buffer per conversation:</p>
+<pre class="highlight"><code class="language-none">--- Wednesday  1 October 2026 ---
+[08:15] &lt;Alice&gt; Good morning!
+[08:16] &lt;Me&gt; Morning! Are we still on for today?
+[08:20] &lt;Alice&gt; Yes, 10:00 at the station
+[08:21] &lt;Alice&gt; [image] This is the entrance
+Alice&gt; _</code></pre>
+<p>This is the most trivial part of the whole thing. Emacs solved this problem decades ago.</p>
+<p>The whole client fits in a few lines of Elisp, with no dependencies.</p>
+<p>It has its limits, of course.</p>
+<ul>
+<li>It only works on macOS.</li>
+<li>You cannot write to groups, because the Shortcuts action only accepts people.</li>
+<li>Some chats do not store the phone number locally and stay read-only.</li>
+<li>And there are no notifications: you press <code>C-c C-u</code> to fetch new messages.</li>
+</ul>
+<p>But now I can talk to my family without leaving Emacs. What more could you ask for?</p>
+<h2 id="blog-single-content__title--sources" class="blog-single__content-title">Sources</h2>
+<ul>
+<li><a href="https://git.andros.dev/andros/whatsapp.el">whatsapp.el</a>, the code and the instructions to create the shortcut.</li>
+<li><a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Database.html" rel="noopener noreferrer" target="_blank">SQLite in Emacs</a>, native support since Emacs 29.</li>
+<li><a href="https://support.apple.com/guide/shortcuts-mac/run-shortcuts-from-the-command-line-apd455c82f02/mac" rel="noopener noreferrer" target="_blank">Shortcuts from the command line</a>, Apple's documentation for the <code>shortcuts</code> command.</li>
+<li><a href="https://www.rfc-editor.org/rfc/rfc2426" rel="noopener noreferrer" target="_blank">vCard 3.0 (RFC 2426)</a>, the contact format the trick relies on.</li>
+</ul><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-782e8f3b@andros.dev" class="link">comment+article-782e8f3b@andros.dev</a> to leave a comment. The subject will be ignored.</p>

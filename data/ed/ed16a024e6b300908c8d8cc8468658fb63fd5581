@@ -1,0 +1,164 @@
+
+<p class="wp-block-paragraph">You&#8217;ve already seen that <a href="https://tomsitcafe.com/2026/08/07/a-container-engine-under-the-hood/">Systemd has an entire container engine</a> under the hood.<br>You may created a fully functional Debian container in it.</p>
+
+
+
+<p class="wp-block-paragraph">But what can you do when you need a different distribution?</p>
+
+
+
+<p class="wp-block-paragraph">You can convert a Docker image to an Nspawn container.</p>
+
+
+
+<span id="more-9437"></span>
+
+
+
+<h3 class="wp-block-heading">Objective</h3>
+
+
+
+<ol class="wp-block-list">
+<li>Use <code>podman</code> as the container engine to manage the Docker images.</li>
+
+
+
+<li>Create suitable containers for Nspawn.</li>
+
+
+
+<li>Use Btrfs for Nspawn templates.</li>
+</ol>
+
+
+
+<p class="wp-block-paragraph">In the example I will use a Rocky Linux image.<br>You can choose any other Linux image from your trusted Docker source.</p>
+
+
+
+<h3 class="wp-block-heading">Rocky Linux Image Example</h3>
+
+
+
+<p class="wp-block-paragraph">Pull the official Rocky Linux image from the Docker Hub with <code>podman</code>.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">podman pull docker.io/rockylinux/rockylinux:10</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Start a container from the downloaded image.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">podman run --name rocky-template -it docker.io/rockylinux/rockylinux:10 /bin/bash</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Install the necessary tools and set up the system.</p>
+
+
+<div style="--line-number-gutter-width: 1ch" class="show-line-numbers wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">dnf update -y</div><div class="cm-line">dnf install -y dbus NetworkManager</div><div class="cm-line"></div><div class="cm-line">systemctl enable NetworkManager</div><div class="cm-line">systemctl enable dbus</div><div class="cm-line"></div><div class="cm-line">exit</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Now you can export the container as a tar archive.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">podman export rocky-template -o rocky-10-template.tar</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Create a Btrfs subvolume for this template and move the base there.</p>
+
+
+<div style="--line-number-gutter-width: 1ch" class="show-line-numbers wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo btrfs subvolume create /var/lib/machines/rocky-10-template</div><div class="cm-line">sudo tar -xf rocky-10-template.tar -C /var/lib/machines/rocky-10-template</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Remove the <code>machine-id</code> and <code>hostname</code> from the Nspawn template.</p>
+
+
+<div style="--line-number-gutter-width: 1ch" class="show-line-numbers wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo rm -f /var/lib/machines/rocky-10-template/etc/machine-id</div><div class="cm-line">sudo rm -f /var/lib/machines/rocky-10-template/etc/hostname</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">Make the template image read-only:</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl read-only rocky-10-template yes</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<p class="wp-block-paragraph">You can clone it and run a container from it.</p>
+
+
+<div class="wp-block-code">
+	<div class="cm-editor">
+		<div class="cm-scroller">
+			
+<pre>
+<code><div class="cm-line">sudo machinectl clone rocky-10-template new-container</div><div class="cm-line"></div></code></pre>
+		</div>
+	</div>
+</div>
+
+
+<h3 class="wp-block-heading">Final Thoughts</h3>
+
+
+
+<p class="wp-block-paragraph">As you&#8217;ve seen you can convert many Docker images to functional Nspawn containers.<br>Images based on complete Linux distributions are particularly well suited for this approach.</p>
+
+
+
+<p class="wp-block-paragraph">This way, instead of application containers you can run OS containers easily.<br>The process is repeatable and easy to automate.</p>

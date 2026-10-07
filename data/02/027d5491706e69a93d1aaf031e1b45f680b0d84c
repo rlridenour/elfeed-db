@@ -1,0 +1,477 @@
+<div class="sticky-toc" id="org2065881">
+<div id="text-table-of-contents" role="doc-toc">
+<ul>
+<li><a href="https://sachachua.com/blog/feed/index.xml#writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-voice-activity-detection-and-speech-recognition">1. Voice activity detection and speech recognition</a></li>
+<li><a href="https://sachachua.com/blog/feed/index.xml#writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-noticing-bingo-phrases">2. Noticing bingo phrases</a></li>
+</ul>
+</div>
+
+</div>
+
+
+<figure id="org2f7e64e">
+<img src="https://sachachua.com/blog/2026/10/using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time/2026-10-07_07-33-03.png" alt="2026-10-07_07-33-03.png">
+
+<figcaption><span class="figure-number">Figure 1: </span>Screenshot showing my list of target phrases and which ones have been recognized</figcaption>
+</figure>
+
+<p>
+When I'm working with a tutor to improve my French, I sometimes need
+to push myself to provide more details when I'm sharing and ask more
+follow-up questions in response to what they're saying, instead of
+falling back to « D'accord » and « C'est cool. » Visualizing the
+timeline in real-time lets me see if the turn-taking looks good. I
+might even need to take a more active role in controlling the
+conversation if I happen to be meeting a tutor who tends to go on
+monologues.
+</p>
+
+<p>
+When I'm talking out loud on my own for practice, this might also
+nudge me to reduce the pauses and enrich my vocabulary by practising
+saying things often enough that they become more automatic.
+</p>
+<div id="outline-container-writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-voice-activity-detection-and-speech-recognition" class="outline-3">
+<h3 id="writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-voice-activity-detection-and-speech-recognition"><span class="section-number-3">1.</span> <a href="https://sachachua.com/blog/feed/index.xml#writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-voice-activity-detection-and-speech-recognition">Voice activity detection and speech recognition</a></h3>
+<div class="outline-text-3" id="text-writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-voice-activity-detection-and-speech-recognition">
+<p>
+This code uses this server <a href="https://sachachua.com/blog/2026/10/using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time/asr.py">vad-file.py</a>, which I generated with Google Gemini. It emits JSONL for voice activity detection events (start/stop) and uses Orukeet to transcribe the speech once the voice activity detection notices it's finished. I also use spacy to look up token information because I want to someday colour the nouns by gender, which might allow me to correct myself in the next sentence instead of hesitating in the previous one.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code><span class="org-comment-delimiter">;; </span><span class="org-comment">Report on the balance between my tutor and me</span>
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-process</span> nil)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-dir</span> <span class="org-string">"~/vendor/orukeet"</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-command</span> <span class="org-highlight-quoted-quote">`</span>(,(expand-file-name <span class="org-string">".venv/bin/python"</span> sacha-vad-tutor-dir)
+                                  <span class="org-string">"asr.py"</span>
+                                  <span class="org-string">"&#45;&#45;spacy-model"</span>
+                                  <span class="org-string">"fr_dep_news_trf"</span>
+                                  <span class="org-string">"-s"</span> <span class="org-string">"300"</span> <span class="org-string">"-t"</span>
+                                  <span class="org-string">"VirtualMicSink.monitor=sacha"</span> <span class="org-string">"alsa_output.usb-AT_AT2040USB_202011110001-00.analog-stereo.monitor=tutor"</span>))
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-events</span> nil <span class="org-doc">"List of events as an list of alists (label start stop duration)."</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-labels</span> <span class="org-highlight-quoted-quote">'</span>(<span class="org-string">"sacha"</span> <span class="org-string">"tutor"</span>))
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-summary</span> <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"sacha"</span> . 0)
+                                  (<span class="org-string">"tutor"</span> . 0)))
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-session-length</span> (* 60 60) <span class="org-doc">"Number of seconds to use for scale."</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-update-view</span> ()
+  <span class="org-doc">"Visualize the last 3 minutes and the overview of the session.</span>
+<span class="org-doc">Also keep track of target phrases."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*tutor stats*"</span>)
+    (erase-buffer)
+    (<span class="org-keyword">let*</span> ((total (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">+</span> (mapcar <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">cdr</span> sacha-vad-tutor-summary)))
+           (height 30)
+           (width (window-width nil t))
+           (max-seconds
+            (<span class="org-keyword">if</span> sacha-vad-tutor-events
+                (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">max</span> (mapcar (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> o))
+                                    sacha-vad-tutor-events))
+              0))
+           (threshold 180)              <span class="org-comment-delimiter">; </span><span class="org-comment">last three minutes</span>
+           (threshold-seconds (- max-seconds threshold))
+           (recent
+            (seq-keep
+             (<span class="org-keyword">lambda</span> (o)
+               (<span class="org-keyword">when</span> (&gt;= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> o)
+                         threshold-seconds)
+                 (<span class="org-keyword">let-alist</span> o
+                   <span class="org-highlight-quoted-quote">`</span>((label . ,.label)
+                     (start . ,(- .start threshold-seconds))
+                     (end . ,(- .end threshold-seconds))))))
+             (copy-sequence sacha-vad-tutor-events)))
+           (recent-total (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">+</span> (mapcar (<span class="org-keyword">lambda</span> (o)
+                                             (-
+                                              (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> o)
+                                              (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> o)))
+                                           recent))))
+      (<span class="org-keyword">save-excursion</span>
+        (insert
+         (format <span class="org-string">"Last %d minute%s:\n"</span>
+                 (/ threshold 60)
+                 (<span class="org-keyword">if</span> (&gt; (/ threshold 60) 1)
+                     <span class="org-string">"s"</span>
+                   <span class="org-string">""</span>))
+         (mapconcat
+          (<span class="org-keyword">lambda</span> (o)
+            (format <span class="org-string">"%d%% %s\n"</span>
+                    (/ (* 100.0 (cdr o)) recent-total)
+                    (car o)))
+          (seq-map
+           (<span class="org-keyword">lambda</span> (group)
+             (cons (car group)
+                   (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">+</span> (mapcar (<span class="org-keyword">lambda</span> (o)
+                                       (-
+                                        (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> o)
+                                        (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> o)))
+                                     (cdr group)))))
+           (seq-group-by (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> o)) recent)))
+         <span class="org-string">"\n"</span>)
+        (svg-insert-image
+         (sacha-vad-visualize
+          sacha-vad-tutor-labels
+          recent
+          t
+          width height))
+        (insert
+         <span class="org-string">"\nTotal:\n"</span>
+
+         (mapconcat
+          (<span class="org-keyword">lambda</span> (o)
+            (format <span class="org-string">"%d%% %s\n"</span>
+                    (/ (* 100.0 (cdr o)) total)
+                    (car o)))
+          sacha-vad-tutor-summary))
+        (svg-insert-image
+         (sacha-vad-visualize sacha-vad-tutor-labels sacha-vad-tutor-events t
+                              width height
+                              sacha-vad-tutor-session-length))
+        (insert <span class="org-string">"\n\n"</span>  (sacha-learn-lang-bingo-summary))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-handle-end-event</span> (data)
+  <span class="org-doc">"Handle the end event."</span>
+  (<span class="org-keyword">let</span> ((event (list
+                (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data))
+                (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> (- (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">timestamp</span> data)
+                                (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">duration</span> data)
+                                (<span class="org-keyword">or</span> sacha-vad-tutor-start-seconds 0)))
+                (cons <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> (- (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">timestamp</span> data)
+                              (<span class="org-keyword">or</span> sacha-vad-tutor-start-seconds 0))))))
+    (<span class="org-keyword">push</span> event sacha-vad-tutor-events)
+    (<span class="org-keyword">let-alist</span> data
+      (<span class="org-keyword">incf</span> (alist-get (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data) sacha-vad-tutor-summary 0 nil <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>)
+            .duration))
+    (sacha-vad-tutor-update-view)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-filter</span> (proc string)
+  <span class="org-doc">"Add and parse."</span>
+  (<span class="org-keyword">when</span> (buffer-live-p (process-buffer proc))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">split the string by newline?</span>
+    (<span class="org-keyword">with-current-buffer</span> (process-buffer proc)
+      (goto-char (point-max))
+      (<span class="org-keyword">save-excursion</span>
+        (insert string))
+      (<span class="org-keyword">catch</span> <span class="org-highlight-quoted-quote">'</span><span class="org-constant">waiting</span>
+        (<span class="org-keyword">unless</span> (<span class="org-keyword">or</span> (eobp) (looking-at <span class="org-string">"\n*$"</span>))
+          (<span class="org-keyword">let</span> ((data (json-read)))
+            (<span class="org-keyword">when</span> (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">event</span> data) <span class="org-string">"end"</span>)
+              (sacha-vad-handle-end-event data))
+            (<span class="org-keyword">when</span> (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">event</span> data) <span class="org-string">"final"</span>)
+              (sacha-vad-handle-text-event data))))))))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-last-speaker</span> nil <span class="org-doc">"Previous speaker."</span>)
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-handle-text-event</span> (data)
+  (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*Transcript*"</span>)
+    (set (make-local-variable <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">window-point-insertion-type</span>) t)
+    (<span class="org-keyword">save-excursion</span>
+      (goto-char (point-max))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">insert break</span>
+      (insert
+       (<span class="org-keyword">if</span> (string= sacha-vad-last-speaker (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data))
+           <span class="org-string">" "</span>
+         (concat (<span class="org-keyword">if</span> (bobp) <span class="org-string">""</span> <span class="org-string">"\n\n"</span>) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data) <span class="org-string">": "</span>))
+       (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span> data))
+      (<span class="org-keyword">setq</span> sacha-vad-last-speaker (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data))
+      (<span class="org-keyword">when</span> (string= (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> data) <span class="org-string">"sacha"</span>)
+        (sacha-learn-lang-notice-bingo-words (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">text</span> data))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-start</span> ()
+  <span class="org-doc">"Start the process."</span>
+  (<span class="org-keyword">interactive</span>)
+  (sacha-vad-tutor-ensure)
+  (<span class="org-keyword">setq</span> sacha-vad-tutor-summary <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"sacha"</span> . 0)
+                                  (<span class="org-string">"tutor"</span> . 0))
+        sacha-vad-tutor-events nil)
+  (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*Transcript*"</span>)
+    (erase-buffer)
+    (display-buffer (current-buffer)))
+  (display-buffer (get-buffer-create <span class="org-string">"*tutor stats*"</span>)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-ensure</span> ()
+  <span class="org-doc">"Start the process if it's not already running."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">unless</span> (process-live-p sacha-vad-tutor-process)
+    (<span class="org-keyword">setq</span> sacha-vad-tutor-process-start-time (current-time))
+    (<span class="org-keyword">setq</span> sacha-vad-tutor-start-seconds 0)
+    (<span class="org-keyword">let</span> ((default-directory sacha-vad-tutor-dir))
+      (<span class="org-keyword">setq</span> sacha-vad-tutor-process
+            (make-process
+             <span class="org-builtin">:name</span> <span class="org-string">"vad-tutor"</span>
+             <span class="org-builtin">:command</span> sacha-vad-tutor-command
+             <span class="org-builtin">:connection-type</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">pipe</span>
+             <span class="org-builtin">:buffer</span> (get-buffer-create <span class="org-string">"*vad-tutor*"</span>)
+             <span class="org-builtin">:stderr</span> (get-buffer-create <span class="org-string">"*vad-tutor-err*"</span>)
+             <span class="org-builtin">:filter</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">sacha-vad-tutor-filter</span>)))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-stop</span> ()
+  <span class="org-doc">"Stop the process."</span>
+  (<span class="org-keyword">interactive</span>)
+  (interrupt-process sacha-vad-tutor-process))
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-js-parse-jsonl-file</span> (file)
+  <span class="org-doc">"Parse jsonl as a list"</span>
+  (<span class="org-keyword">let</span> (results)
+    (<span class="org-keyword">with-temp-buffer</span>
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (<span class="org-keyword">while</span> (not (eobp))
+        (<span class="org-keyword">condition-case</span> nil
+            (<span class="org-keyword">push</span> (json-read) results)
+          (<span class="org-warning">error</span> (goto-char (point-max))))))
+    (nreverse results)))
+
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-start-seconds</span> 0 <span class="org-doc">"Number of seconds to consider as the start."</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-vad-tutor-process-start-time</span> nil <span class="org-doc">"Time that the process started."</span>)
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-reset-clock</span> ()
+  <span class="org-doc">"Reset the start of the session."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> sacha-vad-tutor-start-seconds
+        (time-to-seconds (time-subtract (current-time)
+                                        sacha-vad-tutor-process-start-time)))
+  (mapcar (<span class="org-keyword">lambda</span> (o) (setcdr o 0)) sacha-vad-tutor-summary)
+  (<span class="org-keyword">setq</span> sacha-vad-tutor-events nil))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-visualize</span> (labels list <span class="org-type">&amp;optional</span> output-file width height max-seconds)
+  (<span class="org-keyword">setq</span> height (<span class="org-keyword">or</span> height 25))
+  (<span class="org-keyword">setq</span> width (<span class="org-keyword">or</span> width (window-width nil t)))
+  (<span class="org-keyword">let*</span> ((svg (svg-create width height))
+         (max-seconds (max
+                       (<span class="org-keyword">or</span> max-seconds 0)
+                       (<span class="org-keyword">if</span> list
+                           (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">max</span> (mapcar (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> o))
+                                               list))
+                         0)))
+         (pixels-per-second (/ (* 1.0 width) max-seconds))
+         (row-height (/ height (length labels))))
+    (<span class="org-keyword">dolist</span> (o list)
+      (<span class="org-keyword">let-alist</span> o
+        (<span class="org-keyword">let</span> ((y (* row-height (<span class="org-keyword">or</span> (seq-position labels .label <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">string=</span>) -1))))
+          (<span class="org-keyword">when</span> (&gt;= y 0)
+            (svg-rectangle
+             svg
+             (* .start pixels-per-second)
+             y
+             (* (- .end .start) pixels-per-second)
+             row-height <span class="org-builtin">:fill</span> <span class="org-string">"green"</span>)))))
+    (<span class="org-keyword">cond</span>
+     ((stringp output-file)
+      (<span class="org-keyword">with-temp-file</span> output-file
+        (svg-print svg)))
+     (output-file
+      svg)
+     (t
+      (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*vad*"</span>)
+        (goto-char (point-min))
+        (display-buffer (current-buffer))
+        (erase-buffer)
+        (svg-insert-image svg))))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-stats</span> (labels list)
+  <span class="org-doc">"Return the balance of time talking as (label total percentage)."</span>
+  (<span class="org-keyword">let*</span> ((max-seconds (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">+</span> (mapcar
+                                 (<span class="org-keyword">lambda</span> (o) (<span class="org-keyword">let-alist</span> o (- .end .start)))
+                                 list)))
+         (durations (mapcar (<span class="org-keyword">lambda</span> (o)
+                            (cons
+                             (car o)
+                             (mapcar (<span class="org-keyword">lambda</span> (e) (<span class="org-keyword">let-alist</span> e (- .end .start)))
+                                     (cdr o))))
+                          (seq-group-by (<span class="org-keyword">lambda</span> (o) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">label</span> o))
+                                        list))))
+    (seq-map
+     (<span class="org-keyword">lambda</span> (label)
+       (<span class="org-keyword">let*</span> ((row (cdr (assoc label durations)))
+              (total (apply <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">+</span> row)))
+         <span class="org-highlight-quoted-quote">`</span>((label . ,label)
+           (total . ,total)
+           (count . ,(length row))
+           (percentage . ,(<span class="org-keyword">and</span> total max-seconds (&gt; max-seconds 0) (* 100.0 (/ total max-seconds)))))))
+     labels)))
+
+<span class="org-comment-delimiter">;; </span><span class="org-comment">(sacha-vad-stats '("sacha" "tutor") (seq-take (sacha-js-parse-jsonl-file "~/proj/speech/output2.log") 5))</span>
+<span class="org-comment-delimiter">;; </span><span class="org-comment">(sacha-vad-stats '("sacha" "tutor") (sacha-js-parse-jsonl-file "~/proj/speech/output.log"))</span>
+<span class="org-comment-delimiter">;; </span><span class="org-comment">(sacha-vad-visualize '("sacha" "tutor") (sacha-js-parse-jsonl-file "~/proj/speech/output.log"))</span>
+<span class="org-comment-delimiter">;; </span><span class="org-comment">(sacha-vad-visualize '("sacha" "tutor") (seq-take (sacha-js-parse-jsonl-file "~/proj/speech/output2.log") 30))</span>
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-group-output</span> (files)
+  (<span class="org-keyword">let</span> ((grouped-files (seq-group-by
+                        (<span class="org-keyword">lambda</span> (o)
+                          (substring (file-name-base o) 0 10))
+                        files)))
+    (mapcar
+     (<span class="org-keyword">lambda</span> (group)
+       (<span class="org-keyword">let</span> ((start 0))
+         (cons (car (cdr group))
+               (seq-reduce
+                (<span class="org-keyword">lambda</span> (prev file)
+                  (append prev
+                          (<span class="org-keyword">let</span> ((max-seconds 0))
+                            (<span class="org-keyword">prog1</span> (mapcar (<span class="org-keyword">lambda</span> (event)
+                                             (<span class="org-keyword">incf</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start</span> event) start)
+                                             (<span class="org-keyword">incf</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> event) start)
+                                             (<span class="org-keyword">setq</span> max-seconds (max (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">end</span> event) max-seconds))
+                                             event)
+                                           (sacha-js-parse-jsonl-file file))
+                              (<span class="org-keyword">setq</span> start max-seconds)))))
+                (cdr group)
+                nil))))
+     grouped-files)))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-vad-tutor-make-table</span> (files <span class="org-type">&amp;optional</span> width height)
+  <span class="org-doc">"Make a summary table."</span>
+  (<span class="org-keyword">let</span> ((labels sacha-vad-tutor-labels)
+        (width (<span class="org-keyword">or</span> width 500))
+        (height (<span class="org-keyword">or</span> height 30)))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">combine data as needed</span>
+    (append
+     <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"Date"</span> <span class="org-string">"Tutor"</span> <span class="org-string">"Minutes"</span> <span class="org-string">"%"</span> <span class="org-string">"Visualization"</span>) hline)
+     (seq-map
+      (<span class="org-keyword">lambda</span> (group)
+        (<span class="org-keyword">let*</span> ((list (cdr group))
+               (base (file-name-base (car group))))
+          (<span class="org-keyword">if</span> list
+              (<span class="org-keyword">let-alist</span> (car (sacha-vad-stats labels list))
+                (<span class="org-keyword">let</span> ((svg-name
+                       (expand-file-name
+                        (concat (file-name-base (car group)) <span class="org-string">"-"</span> .label <span class="org-string">".svg"</span>)
+                        <span class="org-string">"~/proj/french/conversation"</span>)))
+                  (sacha-vad-visualize
+                   (list .label)
+                   list
+                   svg-name
+                   width
+                   height)
+                  (list
+                   (format-time-string <span class="org-string">"%Y-%m-%d"</span>
+                                       (seconds-to-time
+                                        (sacha-filename-timestamp (car group))))
+                   <span class="org-comment-delimiter">;; </span><span class="org-comment">(org-link-make-string (concat "file:" o) "file")</span>
+                   (<span class="org-keyword">if</span> (string-match <span class="org-string">"-conversation-</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[</span><span class="org-string"><span class="org-negation-char">^</span></span><span class="org-string">\\.]+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span> base)
+                       (s-capitalize (substring (match-string 1 base) 0 1))
+                     <span class="org-string">""</span>)
+
+                   (round (/ .total 60))
+                   (format <span class="org-string">"%d%%"</span> .percentage)
+                   (org-link-make-string (concat <span class="org-string">"file:"</span> svg-name)
+                                         (concat <span class="org-string">"file:"</span> svg-name))
+                   )))
+            (list <span class="org-string">"?"</span>))))
+      (sacha-vad-tutor-group-output files))
+     nil)))
+</code></pre>
+</div>
+
+</div>
+</div>
+<div id="outline-container-writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-noticing-bingo-phrases" class="outline-3">
+<h3 id="writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-noticing-bingo-phrases"><span class="section-number-3">2.</span> <a href="https://sachachua.com/blog/feed/index.xml#writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-noticing-bingo-phrases">Noticing bingo phrases</a></h3>
+<div class="outline-text-3" id="text-writing-and-editing-speech-recognition-using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time-noticing-bingo-phrases">
+<p>
+Here's the code that reminds me to use the words or expressions on my
+to-do list, and then keeps track of how often I've used them,
+prioritizes the ones that I haven't used yet, and displays these.
+It can work with either my Whisper dictation workflow or the VAD
+events server described above.
+</p>
+
+<p>
+I keep the list of expressions in <a href="https://sachachua.com/blog/2026/10/using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time/bingo.txt">file:///home/sacha/proj/french/bingo.txt</a>.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-learn-lang-bingo-word-file</span> <span class="org-string">"~/proj/french/bingo.txt"</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-learn-lang-bingo-words</span> nil <span class="org-doc">"List of words."</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-learn-lang-bingo-words-hash</span> nil <span class="org-doc">"Data for the counts."</span>)
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-learn-lang-bingo-words</span> ()
+  <span class="org-doc">"Load the list of words from the file."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">setq</span> sacha-learn-lang-bingo-words
+        (seq-map (<span class="org-keyword">lambda</span> (o)
+                   (<span class="org-keyword">when</span> (= (length o) 1)
+                     (<span class="org-keyword">setq</span> o (list (car o) 0)))
+                   (<span class="org-keyword">setq</span> o (append o (list
+                                      (string-trim (replace-regexp-in-string
+                                                    <span class="org-string">" *\\[.+?\\] *"</span> <span class="org-string">" "</span>
+                                                    (car o))))))
+                   o)
+                 (pcsv-parse-file sacha-learn-lang-bingo-word-file)))
+  sacha-learn-lang-bingo-words)
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-learn-lang-bingo-handler</span> (event)
+  <span class="org-doc">"Manually register the event."</span>
+  (<span class="org-keyword">interactive</span> <span class="org-string">"e"</span>)
+    (<span class="org-keyword">let*</span> ((pos (posn-point (event-end event)))
+           (val (get-text-property pos <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">bingo</span>)))
+      (<span class="org-keyword">when</span> val
+        (sacha-learn-lang-notice-bingo-words val))))
+
+(<span class="org-keyword">defvar-keymap</span> sacha-learn-lang-bingo-map
+  <span class="org-string">"&lt;mouse-1&gt;"</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">sacha-learn-lang-bingo-handler</span>)
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-learn-lang-bingo-summary</span> ()
+  <span class="org-doc">"Summarize the words to say."</span>
+  (<span class="org-keyword">let</span> ((target (seq-filter (<span class="org-keyword">lambda</span> (row) (= (elt row 1) 0))
+                            sacha-learn-lang-bingo-words))
+        (yay (seq-filter (<span class="org-keyword">lambda</span> (row) (&gt; (elt row 1) 0))
+                         sacha-learn-lang-bingo-words)))
+    (concat
+     (<span class="org-keyword">if</span> target
+         (concat <span class="org-string">"Target: "</span>
+                 (mapconcat (<span class="org-keyword">lambda</span> (row)
+                              (propertize
+                               (car row)
+                               <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">keymap</span> sacha-learn-lang-bingo-map
+                               <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">bingo</span> (car row)))
+                            target
+                            <span class="org-string">"; "</span>)
+                 <span class="org-string">"\n\n"</span>)
+       <span class="org-string">""</span>)
+     (<span class="org-keyword">if</span> yay
+         (concat
+          <span class="org-string">"Yay! "</span>
+          (mapconcat (<span class="org-keyword">lambda</span> (row)
+                       (propertize (format <span class="org-string">"%s (%s)"</span> (car row) (elt row 1))
+                                   <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">keymap</span> sacha-learn-lang-bingo-map
+                                   <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">bingo</span> (car row)))
+                     (seq-filter (<span class="org-keyword">lambda</span> (row) (&gt; (elt row 1) 0))
+                                 sacha-learn-lang-bingo-words)
+                     <span class="org-string">"; "</span>)
+          <span class="org-string">"\n\n"</span>)
+       <span class="org-string">""</span>))))
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-learn-lang-notice-bingo-words</span> (text)
+  <span class="org-doc">"Look for the bingo words in TEXT and celebrate when I use them.</span>
+<span class="org-doc">Add to `</span><span class="org-doc"><span class="org-constant">whisper-insert-text-at-point</span></span><span class="org-doc">'."</span>
+  (<span class="org-keyword">when</span> text
+    (<span class="org-keyword">unless</span> sacha-learn-lang-bingo-words (sacha-learn-lang-bingo-words))
+    (<span class="org-keyword">let</span> ((found (seq-find
+                  (<span class="org-keyword">lambda</span> (o)
+                    (<span class="org-keyword">and</span> (elt o 2)
+                         (string-match (concat <span class="org-string">"\\&lt;"</span> (elt o 2)) text)))
+                  sacha-learn-lang-bingo-words)))
+      (<span class="org-keyword">when</span> found
+        (<span class="org-keyword">incf</span> (elt found 1))
+        (sacha-vad-tutor-update-view)
+        (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*Bingo*"</span>)
+          (erase-buffer)
+          (insert (sacha-learn-lang-bingo-summary))))))
+  text)
+</code></pre>
+</div>
+
+</div>
+</div>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#writing-and-editing-speech-recognition-reporting-speaking-stats-balance">EmacsConfiguration.</a></div><div><a href="https://sachachua.com/blog/2026/10/using-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F10%2Fusing-emacs-to-visualize-speaking-and-target-words-phrases-in-real-ish-time%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

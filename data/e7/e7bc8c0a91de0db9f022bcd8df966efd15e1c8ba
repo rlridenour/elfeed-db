@@ -1,0 +1,152 @@
+<p><img src="https://cdn3.brettterpstra.com/uploads/2026/10/apex-marked-docs-rb.7537.jpg" width="800" height="226" style="margin:0 auto;clear:both;" class="header" /></p>
+<p>The <a href="https://markedapp.com/help">Marked help site</a>, and the copy that ships inside <a href="https://markedapp.com">Marked</a>, is generated from a pile of Markdown in a single folder. For a long time that pile was fed to MultiMarkdown. It now goes through <a href="https://github.com/ApexMarkdown/apex">Apex</a>.</p>
+
+<p>I&rsquo;ve been building this documentation for over a decade, so there&rsquo;s a lot to take into consideration when switching the build process so drastically. But the switch ended up being pretty painless. I pointed the help builder at the Apex binary, dropped a project config next to the sources, and the pages I already had kept rendering. The interesting part was everything I could add once that was in place.</p>
+
+<p>Using Apex, I was able to integrate a lot of the build process I&rsquo;d developed in custom Ruby scripts into the processor itself, giving me all the liquid syntax shortcuts and plugins I needed. The advanced image and attribute syntax made things really easy, and a little search and replace let me take full advantage of Apex&rsquo;s advanced features.</p>
+
+<p>If you haven&rsquo;t checked out Apex yet, the <a href="https://apexmarkdown.org">Apex site</a> has the overview, and the <a href="https://github.com/ApexMarkdown/apex/wiki">Apex wiki</a> has the details.</p>
+
+<h3 id="the-build-just-shells-out">The build just shells out</h3>
+
+<p><code class="language-plaintext highlighter-rouge">HelpDocs/config.yaml</code> still has a <code class="language-plaintext highlighter-rouge">Processor</code> key. The builder reads a page, pipes the Markdown to that command, and wraps the HTML in the help template. The line looks like this:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">Processor</span><span class="pi">:</span> <span class="s2">"</span><span class="s">env</span><span class="nv"> </span><span class="s">XDG_CONFIG_HOME=/var/empty</span><span class="nv"> </span><span class="s">/opt/homebrew/bin/apex"</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">XDG_CONFIG_HOME=/var/empty</code> keeps my personal Apex config out of the docs build. Apex then picks up <code class="language-plaintext highlighter-rouge">HelpDocs/.apex/config.yml</code>, because the build runs with <code class="language-plaintext highlighter-rouge">HelpDocs</code> as the working directory. For each page, the builder also sets <code class="language-plaintext highlighter-rouge">HELP_CURRENT_PAGE</code> to the page&rsquo;s filename. One of the plugins needs that.</p>
+
+<h3 id="what-i-turned-on">What I turned on</h3>
+
+<p>Unified mode, MultiMarkdown-style header ids, and plugins. The rest is there because the existing docs already depended on it.</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="na">id-format</span><span class="pi">:</span> <span class="s">mmd</span>
+<span class="na">plugins</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">widont</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">wikilinks</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">wikilink-space</span><span class="pi">:</span> <span class="s">underscore</span>
+<span class="na">wikilink-extension</span><span class="pi">:</span> <span class="s">html</span>
+<span class="na">image-captions</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">markdown-in-html</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">obfuscate-emails</span><span class="pi">:</span> <span class="kc">true</span>
+
+<span class="na">mode</span><span class="pi">:</span> <span class="s">unified</span>
+<span class="na">standalone</span><span class="pi">:</span> <span class="kc">false</span>
+<span class="na">pretty</span><span class="pi">:</span> <span class="kc">true</span>
+
+<span class="na">language</span><span class="pi">:</span> <span class="s">en</span>
+<span class="na">quoteslanguage</span><span class="pi">:</span> <span class="s">english</span>
+
+<span class="na">autolink</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">includes</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">relaxed-tables</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">sup-sub</span><span class="pi">:</span> <span class="kc">true</span>
+<span class="na">indices</span><span class="pi">:</span> <span class="kc">false</span>
+
+<span class="na">code-highlight</span><span class="pi">:</span> <span class="s">pygments</span>
+<span class="na">code-line-numbers</span><span class="pi">:</span> <span class="kc">false</span>
+<span class="na">highlight-language-only</span><span class="pi">:</span> <span class="kc">true</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">id-format: mmd</code> keeps header ids in the old MultiMarkdown style, without dashes, so in-page anchors did not all move. <code class="language-plaintext highlighter-rouge">standalone: false</code> matters because the help builder already supplies the HTML shell. <code class="language-plaintext highlighter-rouge">markdown-in-html</code> is on so a plugin can emit a <code class="language-plaintext highlighter-rouge">&lt;div markdown="1"&gt;</code> or a blockquote and Apex will still parse the Markdown inside it. <code class="language-plaintext highlighter-rouge">highlight-language-only</code> stops Pygments from guessing a language for every unlabeled fence.</p>
+
+<p>Wiki links are configured for this site specifically: spaces become underscores, and links get an <code class="language-plaintext highlighter-rouge">.html</code> extension. <code class="language-plaintext highlighter-rouge">[[Custom Processor]]</code> becomes a link to <code class="language-plaintext highlighter-rouge">Custom_Processor.html</code>.</p>
+
+<h3 id="automatic-wiki-links-from-the-help-config">Automatic wiki links from the help config</h3>
+
+<p>Explicit <code class="language-plaintext highlighter-rouge">[[wiki links]]</code> are only half of it. Most of the cross-linking in the docs is automatic, and it comes from the same <code class="language-plaintext highlighter-rouge">config.yaml</code> that defines the sidebar.</p>
+
+<p>Each page entry can carry a title and a <code class="language-plaintext highlighter-rouge">wiki_keywords</code> list:</p>
+
+<div class="language-yaml highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="pi">-</span> <span class="na">title</span><span class="pi">:</span> <span class="s">Choosing a Processor</span>
+  <span class="na">file</span><span class="pi">:</span> <span class="s">Choosing_a_Processor</span>
+  <span class="na">wiki_keywords</span><span class="pi">:</span>
+    <span class="pi">-</span> <span class="s">which processor</span>
+    <span class="pi">-</span> <span class="s">markdown processor</span>
+    <span class="pi">-</span> <span class="s">choose processor</span></code></pre></div></div>
+
+<p>A pre-parse plugin, <code class="language-plaintext highlighter-rouge">doc-wiki-links</code>, reads that file and builds a map of titles and keywords to <code class="language-plaintext highlighter-rouge">File.html</code>. Before Apex parses the page, the plugin walks the text and turns the first mention of each destination into a Markdown link. Longer phrases win, so &ldquo;markdown processor&rdquo; is linked before a bare &ldquo;processor&rdquo; can steal part of it. It only links a given page once per paragraph.</p>
+
+<p>It skips the current page (that&rsquo;s what <code class="language-plaintext highlighter-rouge">HELP_CURRENT_PAGE</code> is for), headings, fenced and indented code, inline code, links that are already there, and the little section table of contents another plugin inserts. If anything goes wrong it prints the original text and the build continues.</p>
+
+<p>The plugin is not a public project, but if you&rsquo;re interested, just contact me. It lives in <code class="language-plaintext highlighter-rouge">HelpDocs/.apex/plugins/doc-wiki-links/</code>, with a <code class="language-plaintext highlighter-rouge">plugin.yml</code> that marks it <code class="language-plaintext highlighter-rouge">pre_parse</code>. Apex loads it because <code class="language-plaintext highlighter-rouge">plugins: true</code> is set. The help builder never calls it directly. It just runs Apex.</p>
+
+<p>The protocol is small. Apex writes a JSON object to the plugin&rsquo;s stdin (<code class="language-plaintext highlighter-rouge">phase</code>, <code class="language-plaintext highlighter-rouge">text</code>, and a plugin id) and expects transformed Markdown on stdout. The readable implementation is Ruby. The <code class="language-plaintext highlighter-rouge">plugin.yml</code> points at a compiled binary (Crystal) so a full site build is not spawning Ruby for every page.</p>
+
+<h3 id="the-shortcut-plugin">The shortcut plugin</h3>
+
+<p>The other local plugin is <code class="language-plaintext highlighter-rouge">kbd</code>. The docs have used a Liquid-ish shorthand for years, and I did not want to rewrite hundreds of pages just to change processors. <code class="language-plaintext highlighter-rouge">kbd</code> runs in the same pre-parse phase and rewrites that shorthand into HTML before Apex sees it.</p>
+
+<p>A few of the things it still handles:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>Press {% kbd cmd shift O %} to open Quick Open.
+
+{% appmenu File, Print ({{cmd}}P) %}
+
+See {% prefspane Export %}.
+
+T&gt; This shows up as a tip.
+W&gt; This shows up as a warning.
+
+{% apponly %}Only in the in-app help.{% endapponly %}
+{% browseronly div %}
+Only on the website.
+{% endbrowseronly %}</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">{{cmd}}</code>, <code class="language-plaintext highlighter-rouge">{{shift}}</code>, <code class="language-plaintext highlighter-rouge">{{opt}}</code>, and the rest become the usual Mac key entities. <code class="language-plaintext highlighter-rouge">{% kbd %}</code> wraps combos in <code class="language-plaintext highlighter-rouge">&lt;kbd&gt;</code> tags and orders the modifiers the way Apple likes them. <code class="language-plaintext highlighter-rouge">{% appmenu %}</code> renders a menu path. <code class="language-plaintext highlighter-rouge">{% prefspane %}</code> links into Marked&rsquo;s settings via the <code class="language-plaintext highlighter-rouge">x-marked-3://pref/</code> URL scheme. <code class="language-plaintext highlighter-rouge">T&gt;</code>, <code class="language-plaintext highlighter-rouge">W&gt;</code>, <code class="language-plaintext highlighter-rouge">E&gt;</code>, and <code class="language-plaintext highlighter-rouge">I&gt;</code> become classed blockquotes. <code class="language-plaintext highlighter-rouge">{% apponly %}</code> and <code class="language-plaintext highlighter-rouge">{% browseronly %}</code> wrap chunks so the in-app help and the website can hide what does not belong. Notes and TODOs get stripped. If a page has more than one <code class="language-plaintext highlighter-rouge">##</code> heading, it also injects a section contents list.</p>
+
+<p><code class="language-plaintext highlighter-rouge">markdown-in-html</code> is what makes the block form useful. The plugin can wrap a div and Apex will still render the Markdown inside it.</p>
+
+<h3 id="images-including-the-modern-formats">Images, including the modern formats</h3>
+
+<p>Help pages have always used reference-style images with an <code class="language-plaintext highlighter-rouge">@2x</code> token, a width, and a class:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="p">[</span><span class="ss">prefs</span><span class="p">]:</span> <span class="sx">images/screenshots/preferences-Processor.jpg</span> width=689px class=preferencepane-scroll</code></pre></div></div>
+
+<p>That still works. My previous build system automatically checked for @2x versions and generated retina srcsets, but Apex allows me to just add <code class="language-plaintext highlighter-rouge">@2x</code> to an image tag. Adding modern formats is the same kind of token. <code class="language-plaintext highlighter-rouge">webp</code> and <code class="language-plaintext highlighter-rouge">avif</code> sit next to <code class="language-plaintext highlighter-rouge">@2x</code>:</p>
+
+<div class="language-markdown highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="p">[</span><span class="ss">prefs</span><span class="p">]:</span> <span class="sx">images/screenshots/preferences-Processor.jpg</span> @2x webp avif width=689px class=preferencepane-scroll</code></pre></div></div>
+
+<p>Apex emits a <code class="language-plaintext highlighter-rouge">&lt;picture&gt;</code>. AVIF first, then WebP, each with a 1x and a 2x candidate, and the original JPG stays on the <code class="language-plaintext highlighter-rouge">&lt;img&gt;</code> as the fallback:</p>
+
+<div class="language-html highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code><span class="nt">&lt;picture&gt;</span>
+  <span class="nt">&lt;source</span> <span class="na">type=</span><span class="s">"image/avif"</span> <span class="na">srcset=</span><span class="s">"images/screenshots/preferences-Processor.avif 1x, images/screenshots/preferences-Processor@2x.avif 2x"</span><span class="nt">&gt;</span>
+  <span class="nt">&lt;source</span> <span class="na">type=</span><span class="s">"image/webp"</span> <span class="na">srcset=</span><span class="s">"images/screenshots/preferences-Processor.webp 1x, images/screenshots/preferences-Processor@2x.webp 2x"</span><span class="nt">&gt;</span>
+  <span class="nt">&lt;img</span> <span class="na">src=</span><span class="s">"images/screenshots/preferences-Processor.jpg"</span> <span class="na">alt=</span><span class="s">""</span> <span class="na">width=</span><span class="s">"689px"</span> <span class="na">class=</span><span class="s">"preferencepane-scroll"</span><span class="nt">&gt;</span>
+<span class="nt">&lt;/picture&gt;</span></code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">image-captions: true</code> still wraps titled images in a figure. I did not have to invent a new image syntax to get retina assets and a JPG fallback in the same reference.</p>
+
+<h3 id="multimarkdown-still-just-works">MultiMarkdown still just works</h3>
+
+<p>This is the part I was most ready to fight with, and then didn&rsquo;t. Metadata, definition lists, footnotes, reference links, superscripts, and those image attributes all came along. I did not run a conversion pass on the docs. Unified mode already speaks the dialect I had been writing.</p>
+
+<h3 id="the-lock-in-caveat">The lock-in caveat</h3>
+
+<p>That convenience has a flip side, and it is one I keep running into while developing Apex.</p>
+
+<p>The point of the processor is that a document from somewhere else should render without a rewrite. CommonMark, GitHub Flavored Markdown, MultiMarkdown, Kramdown: pick a mode and Apex sticks to that flavor.</p>
+
+<div class="language-bash highlighter-rouge"><div class="highlight"><pre class="highlight fixed"><code>apex input.md <span class="nt">--mode</span> commonmark
+apex input.md <span class="nt">--mode</span> gfm
+apex input.md <span class="nt">--mode</span> mmd
+apex input.md <span class="nt">--mode</span> kramdown</code></pre></div></div>
+
+<p>Unified mode is the other direction. It turns on the union of those flavors, plus things none of them have. Wiki links, picture tokens, callouts, plugins, metadata variables, the whole list.</p>
+
+<p>So it is entirely possible to use all of that in one file and produce a document that no single other processor can read. A MultiMarkdown file still works. A file that mixes MultiMarkdown metadata, Kramdown attribute lists, GFM tables, <code class="language-plaintext highlighter-rouge">[[wiki links]]</code>, and <code class="language-plaintext highlighter-rouge">webp avif @2x</code> image tokens does not survive a round trip through Pandoc or MultiMarkdown or cmark-gfm.</p>
+
+<p>The restrictive modes exist so you can refuse that. Choosing not to use them can lock you into Apex. The Marked docs are fine with that. They are built with Apex on purpose, and the plugins only exist inside this repo. If I were publishing the source and expecting someone else&rsquo;s processor to consume it, I would pin a mode and stay inside it.</p>
+
+<h3 id="see-it-in-action">See it in action</h3>
+
+<p>Take a look through the <a href="https://markedapp.com/help">Marked help</a> to see the end result. Then check out <a href="https://github.com/ApexMarkdown/apex">Apex</a> and start building!</p>
+
+
+<p>Like or share this post <a title="This post on Mastodon" target="_blank" href="https://hachyderm.io/users/ttscoff/statuses/117399790432472691">on Mastodon</a>, <a title="Share on Bluesky" target="_blank" href="https://bsky.app/intent/compose?text=Using+Apex+for+the+Marked+docs%0A%0Ahttps%3A%2F%2Fbrettterpstra.com%2F2026%2F10%2F07%2Fusing-apex-for-the-marked-docs%2F">Bluesky</a>, or <a class="twitter" target="_blank" rel="nofollow" href="https://twitter.com/intent/tweet?original_referer=https%3A%2F%2Fbrettterpstra.com%2F2026%2F10%2F07%2Fusing-apex-for-the-marked-docs%2F&text=Using+Apex+for+the+Marked+docs&url=https%3A%2F%2Fbrettterpstra.com%2F2026%2F10%2F07%2Fusing-apex-for-the-marked-docs%2F&via=ttscoff" title="Tweet this post">Twitter</a>.</p>
+<hr style="margin:40px 0">
+
+<p>BrettTerpstra.com is supported by readers like you. <a href="https://brettterpstra.com/support/">Click here if you'd
+        like to help out.</a></p>
+<p>Find Brett on <a rel="me" href="https://hachyderm.io/@ttscoff">Mastodon</a>, <a
+        href="https://bsky.app/profile/ttscoff.bsky.social">Bluesky</a>, <a
+        href="https://github.com/ttscoff">GitHub</a>, and <a href="https://brettterpstra.com/elsewhere">everywhere
+        else</a>.</p><img src="https://brett.trpstra.net/link/535/17491365.gif" height="1" width="1"/>

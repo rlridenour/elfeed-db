@@ -1,0 +1,137 @@
+
+<p class="wp-block-paragraph">In Emacs &gt;= 31, an issue appeared where creating an indirect buffer from a base buffer running a tree-sitter major mode results in a <strong>loss of syntax highlighting</strong>.</p>
+
+
+
+<p class="wp-block-paragraph">I reported this issue, but the <strong>Emacs maintainers will not fix it</strong> (hopefully, they will see the benefit of fixing it one day, once they find a way to fix the architecture). This means that users who depend on indirect buffers are left without a solution.</p>
+
+
+
+<p class="wp-block-paragraph">To address this, <strong>I wrote a workaround that fixes syntax highlighting in cloned indirect buffers that use tree-sitter in Emacs &gt;= 31.</strong> (See below.)</p>
+
+
+
+<p class="wp-block-paragraph">Note: I published this workaround as a temporary fix for indirect buffer users while maintainers hopefully work toward a clean and permanent solution. I agree with the maintainers that we are better off finding a permanent solution instead of merging a hack upstream.</p>
+
+
+
+<h2 class="wp-block-heading">Why are indirect buffers useful</h2>
+
+
+
+<p class="wp-block-paragraph">Indirect buffers are useful because they allow maintaining independent display states for the same file content. For example:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Code folding: you can have the same source code open in two different windows, with one window completely folded to show only the high-level class architecture, while the other window is fully expanded for editing a specific method. (e.g., when using one of the code folding modes <a href="https://github.com/jamescherti/kirigami.el" target="_blank" rel="noopener">kirigami.el</a> supports, for example)</li>
+
+
+
+<li>Narrowing: They also allow independent narrowing. For example, the <code>narrow-to-defun</code> function can be used in an indirect buffer to isolate a single function, preventing accidental edits to other parts of the file, while keeping the entire file visible and editable in the base buffer.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">The bug</h2>
+
+
+
+<p class="wp-block-paragraph">To reproduce the bug:</p>
+
+
+
+<ul class="wp-block-list">
+<li>Open a source file that uses a tree-sitter major mode (e.g., <code>python-ts-mode</code>).</li>
+
+
+
+<li>Create a new window: <code>M-x split-window-right</code> to display the source code across two windows.</li>
+
+
+
+<li>Create an indirect buffer using <code>M-x clone-indirect-buffer</code>.</li>
+
+
+
+<li>Scroll down and observe that the syntax highlighting is entirely or partially missing in the new indirect buffer.</li>
+</ul>
+
+
+
+<h2 class="wp-block-heading">The workaround</h2>
+
+
+
+<p class="wp-block-paragraph">Since an official fix is not planned (See the technical context below), I wrote a workaround for users who depend on indirect buffers. Add the following Elisp code to your Emacs &gt;= 31 configuration to fix syntax highlighting on indirect buffers:</p>
+
+
+<pre class="wp-block-code"><span><code class="hljs language-lisp"><span class="hljs-comment">;; Author: James Cherti</span>
+<span class="hljs-comment">;; License: GPL</span>
+<span class="hljs-comment">;; URL: https://lists.gnu.org/archive/html/bug-gnu-emacs/2026-08/msg00904.html</span>
+
+(<span class="hljs-name">defun</span> initialize-indirect-buffer-treesit-parsers ()
+  <span class="hljs-string">"Initialize tree-sitter parsers in indirect buffers based on the base buffer."</span>
+  (<span class="hljs-name">when</span> (<span class="hljs-name">and</span> (<span class="hljs-name">fboundp</span> 'treesit-major-mode-setup)
+             (<span class="hljs-name">fboundp</span> 'treesit-parser-list)
+             (<span class="hljs-name">fboundp</span> 'treesit-parser-create))
+    (<span class="hljs-name">let*</span> ((<span class="hljs-name">base</span> (<span class="hljs-name">buffer-base-buffer</span>))
+           <span class="hljs-comment">;; If this is an indirect buffer, switch context to the base buffer</span>
+           <span class="hljs-comment">;; to retrieve its active parsers.</span>
+           (<span class="hljs-name">parser-list</span> (<span class="hljs-name">and</span> base
+                             (<span class="hljs-name">with-current-buffer</span> base
+                               (<span class="hljs-name">treesit-parser-list</span>)))))
+      (<span class="hljs-name">when</span> parser-list
+        <span class="hljs-comment">;; Instantiate identical parsers for this indirect buffer. </span>
+        (<span class="hljs-name">dolist</span> (<span class="hljs-name">parser</span> parser-list)
+          (<span class="hljs-name">treesit-parser-create</span> (<span class="hljs-name">treesit-parser-language</span> parser)))
+
+        <span class="hljs-comment">;; Activate tree-sitter features (such as font-lock and indentation).</span>
+        (<span class="hljs-name">treesit-major-mode-setup</span>)
+
+        <span class="hljs-comment">;; Force an immediate font-lock refresh</span>
+        (<span class="hljs-name">when</span> (<span class="hljs-name">fboundp</span> 'font-lock-flush)
+          (<span class="hljs-name">font-lock-flush</span>))))))
+
+(<span class="hljs-name">when</span> (<span class="hljs-name">&gt;=</span> emacs-major-version <span class="hljs-number">31</span>)
+  (<span class="hljs-name">add-hook</span> 'clone-indirect-buffer-hook #'initialize-indirect-buffer-treesit-parsers))</code></span></pre>
+
+
+<h2 class="wp-block-heading">The context: bug #81637</h2>
+
+
+
+<p class="wp-block-paragraph">According to the <a href="https://lists.gnu.org/archive/html/bug-gnu-emacs/2026-08/msg00904.html" target="_blank" rel="noopener">bug#81637</a> discussion, Emacs 30 shared the tree-sitter parser between the base buffer and the indirect buffer. This caused bugs with narrowing. If the base buffer was narrowed, the indirect buffer could see the whole text, but the shared parser only saw the narrowed portion.</p>
+
+
+
+<p class="wp-block-paragraph">To resolve the narrowing bugs, the architecture was changed so that indirect and base buffers maintain separate parser lists. However, when an indirect buffer is cloned, the major mode function is not executed.</p>
+
+
+
+<p class="wp-block-paragraph">While discussing potential fixes, it became clear that an Emacs upstream resolution is unlikely. One of the Emacs maintainers noted that full support for indirect buffers is difficult and advised against relying on them, stating that the Emacs does not officially support font-lock in indirect buffers.</p>
+<div class='yarpp yarpp-related yarpp-related-rss yarpp-template-list'>
+<!-- YARPP List -->
+<h3>Related posts:</h3><ol>
+<li><a href="https://www.jamescherti.com/fold-outline-indentation-emacs-package/" rel="bookmark" title="outline-indent.el - A modern indentation-based folding mode for Emacs">outline-indent.el - A modern indentation-based folding mode for Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-persist-restore-text-scale/" rel="bookmark" title="persist-text-scale.el - Persist and Restore the Text Scale">persist-text-scale.el - Persist and Restore the Text Scale</a></li>
+<li><a href="https://www.jamescherti.com/bufferfile-el-delete-or-rename-buffer-file-names-with-their-associated-buffers/" rel="bookmark" title="bufferfile: Rename, delete, or copy files and update their associated Emacs buffers (including clones and indirect buffers), buffer-local variables, and features that reference the file path, such as Eglot, Dired buffers, and the recentf list">bufferfile: Rename, delete, or copy files and update their associated Emacs buffers (including clones and indirect buffers), buffer-local variables, and features that reference the file path, such as Eglot, Dired buffers, and the recentf list</a></li>
+<li><a href="https://www.jamescherti.com/emacs-display-line-numbers-mode-performance/" rel="bookmark" title="Fixing slow scrolling in Emacs display-line-numbers-mode">Fixing slow scrolling in Emacs display-line-numbers-mode</a></li>
+<li><a href="https://www.jamescherti.com/emacs-terminal-performance-vterm-eat-ansi-term-ghostel/" rel="bookmark" title="Why your Emacs terminal is slow and how to fix It (vterm, eat, ghostel, term, and ansi-term)">Why your Emacs terminal is slow and how to fix It (vterm, eat, ghostel, term, and ansi-term)</a></li>
+<li><a href="https://www.jamescherti.com/measuring-emacs-startup-time/" rel="bookmark" title="Measuring Emacs startup time more accurately than the built-in emacs-init-time">Measuring Emacs startup time more accurately than the built-in emacs-init-time</a></li>
+<li><a href="https://www.jamescherti.com/emacs-consult-speed-async-searche-grep-ripgrep-fd-find/" rel="bookmark" title="Why Emacs Consult async searches feel slow and how to speed them up? (consult-fd, consult-find, consult-grep, consult-ripgrep...)">Why Emacs Consult async searches feel slow and how to speed them up? (consult-fd, consult-find, consult-grep, consult-ripgrep...)</a></li>
+<li><a href="https://www.jamescherti.com/emacs-spell-checker-flyspell-ispell-aspell/" rel="bookmark" title="Configuring Emacs Spell Checking with Flyspell, Ispell, and Aspell to Minimize False Positives in Source Code and Prose">Configuring Emacs Spell Checking with Flyspell, Ispell, and Aspell to Minimize False Positives in Source Code and Prose</a></li>
+<li><a href="https://www.jamescherti.com/emacs-the-definitive-guide-to-code-folding/" rel="bookmark" title="The Definitive Guide to Code Folding in Emacs">The Definitive Guide to Code Folding in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-compile-angel-byte-native-compile/" rel="bookmark" title="The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically">The compile-angel Emacs package: Byte-compile and Native-compile Emacs Lisp libraries Automatically</a></li>
+<li><a href="https://www.jamescherti.com/emacs-highlight-keywords-like-todo-fixme-note/" rel="bookmark" title="Emacs: Highlighting Codetags Like TODO, FIXME, BUG, NOTE...">Emacs: Highlighting Codetags Like TODO, FIXME, BUG, NOTE...</a></li>
+<li><a href="https://www.jamescherti.com/wordpress-robots-txt/" rel="bookmark" title="A better WordPress robots.txt and common mistakes to avoid">A better WordPress robots.txt and common mistakes to avoid</a></li>
+<li><a href="https://www.jamescherti.com/emacs-ultisnips-mode-edit-snippets-files/" rel="bookmark" title="ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)">ultisnips-mode.el - An Emacs major mode for editing Ultisnips snippet files (*.snippets files)</a></li>
+<li><a href="https://www.jamescherti.com/easysession-el-persist-restore-emacs-session/" rel="bookmark" title="easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement">easysession.el: Easily persist and restore Emacs sessions (windows, tab-bar, file buffers, scratch, Dired, narrowing, indirect buffers/clones, Magit buffers...); a robust desktop.el replacement</a></li>
+<li><a href="https://www.jamescherti.com/emacs-python-dev-using-eglot-pylsp-ruff-pylint-flake8/" rel="bookmark" title="Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters">Eglot for Python Development in Emacs: Integrating python-lsp-server (pylsp) with Linters and Formatters</a></li>
+<li><a href="https://www.jamescherti.com/essential-emacs-packages/" rel="bookmark" title="Best Emacs Packages for Efficient Software Development and Text Editing">Best Emacs Packages for Efficient Software Development and Text Editing</a></li>
+<li><a href="https://www.jamescherti.com/emacs-quick-fasd/" rel="bookmark" title="quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs">quick-fasd.el - Integrate Fasd for fast file and directory navigation in Emacs</a></li>
+<li><a href="https://www.jamescherti.com/emacs-eglot-performance/" rel="bookmark" title="Configuring Emacs Eglot for Better Performance and Latency">Configuring Emacs Eglot for Better Performance and Latency</a></li>
+<li><a href="https://www.jamescherti.com/buffer-guardian-el-automatically-save-emacs-buffers/" rel="bookmark" title="buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)">buffer-guardian.el - Automatically Save Emacs Buffers Without Manual Intervention (When Buffers Lose Focus, Regularly, or After Emacs is Idle)</a></li>
+<li><a href="https://www.jamescherti.com/emacs-fix-org-mode-copy-paste-yank-bleed/" rel="bookmark" title="Copy-paste without Emacs org-mode or markdown-mode Formatting Bleeding Into Other Buffers">Copy-paste without Emacs org-mode or markdown-mode Formatting Bleeding Into Other Buffers</a></li>
+</ol>
+</div>

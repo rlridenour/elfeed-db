@@ -1,0 +1,187 @@
+<p>Org Social is so simple it looks like it was born before the internet. A single plain text file, an editor and a host are enough to interact with other people.</p>
+<p>To "create an account", you just create a plain text file in any editor. Your "database" is your own hierarchy of posts. Your "algorithm" is however you decide to sort other people's posts. There is no "character limit". Your "server" is any hosting or web server. Your "interface" is your favorite editor. And if you want to "delete your account", you just delete the file. And of course, the syntax is richer than Markdown and just as easy to learn: Org Mode. You share and edit wherever you want, and you use it as a microblog, a journal, a forum, a bulletin board or a blog. Your file, your rules.</p>
+<p>Behind it there is infrastructure that enriches the interaction and connects it with other systems and formats (the Fediverse, RSS, clients...). Each piece adds one more level of convenience, but none of them is essential: they are 100% optional! And that is what I want to talk about.</p>
+<p>I'd like to take it apart piece by piece, explaining what each one does and why it exists.</p>
+<h2 id="blog-single-content__title--layer-0-a-plain-text-file" class="blog-single__content-title">Layer 0: a plain text file</h2>
+<p>Everything starts and ends here. A file called <code>social.org</code>, in UTF-8, with LF line endings.</p>
+<p>The header is your profile. They are Org Mode keywords:</p>
+<pre class="highlight"><code class="language-org">#+TITLE: My journal
+#+NICK: Alice
+#+DESCRIPTION: I write about Emacs and coffee
+#+AVATAR: https://alice.com/avatar.jpg
+#+LINK: https://alice.com
+#+FOLLOW: https://bob.com/social.org
+#+FOLLOW: friend https://carol.net/social.org</code></pre>
+<p>Below it, in a <code>* Posts</code> section, go your posts. Each one is a heading with an RFC 3339 timestamp, which works as a unique identifier:</p>
+<pre class="highlight"><code class="language-org">** 2025-05-01T12:00:00+0100
+:PROPERTIES:
+:LANG: en
+:TAGS: emacs org-social
+:END:
+
+Today I discovered Org Social and I can't stop writing.</code></pre>
+<p>And you already have a social network.</p>
+<p>Anyone can <code>curl</code> your file, read it with their own eyes or with a client or script, and follow you by adding your URL to their <code>#+FOLLOW:</code>.</p>
+<p>The interaction itself lives inside the format. There are no magic buttons, there are properties:</p>
+<ul>
+<li>Replying is a post with <code>:REPLY_TO: &lt;url&gt;#&lt;id&gt;</code> pointing to the original.</li>
+<li>Reacting is a reply with just <code>:MOOD: ❤</code> and an empty body.</li>
+<li>Sharing is <code>:INCLUDE:</code> with a reference to someone else's post.</li>
+<li>Voting in a poll is replying with <code>:POLL_OPTION:</code>.</li>
+<li>Mentioning someone is a link <code>[[org-social:https://bob.com/social.org][Bob]]</code>.</li>
+</ul>
+<p>Since it is plain text, you can edit all of it by hand if you feel like it.</p>
+<p>When you are done, you save the file and upload it to your server.</p>
+<p>Every decentralized social network has a weak spot, whichever one comes to mind. I covered this in <a href="https://en.andros.dev/blog/603e4e90/there-is-no-such-thing-as-full-decentralization/">There is no such thing as full decentralization</a>, but in short, you always have to decide which of these five things the network sacrifices:</p>
+<ul>
+<li>Identity</li>
+<li>Connectivity</li>
+<li>Discovery</li>
+<li>Cost</li>
+<li>Moderation</li>
+</ul>
+<p>Org Social sacrifices <strong>discovery</strong>. Nobody can find you unless you give them your URL, just like an email address. And that makes some interactions impossible to reconstruct. For example, what happens if someone you don't follow joins a thread you started? If you don't follow them, you never find out.</p>
+<p>That's why we need upper layers that mitigate the problem, although you should only use them if you think you need them. It may be that everyone taking part follows each other and needs nothing else. Otherwise, you will need a Relay: an index.</p>
+<h2 id="blog-single-content__title--layer-1-the-client" class="blog-single__content-title">Layer 1: the client</h2>
+<p>You can check each feed directly with <code>curl</code> or with your browser. However, just like with your list of RSS/Atom feeds, what we all end up doing for convenience is using a client. It reads every source, sorts them, filters them and merges them into a list that is easier to read and that you can also navigate. The same goes for Org Social.</p>
+<p>There is a client for Emacs, another for iOS, another for Android (in alpha as I write this), command line implementations and a public web viewer that needs no account or client. Clients build a timeline by merging all the feeds you follow, and they let you reply, react, share and vote in polls. But every change happens in your own file, not on a central server, and reading is volatile, since it is built on the fly.</p>
+<p><img alt="Screenshot of org-social.el in Emacs: the Org Social timeline with navigation buttons, posts with hashtags, reactions, author and an embedded image" class="medium" src="https://img.andros.dev/wW7h-5_23O-n71tlaB_MTzwKBCk=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/org-social-screenshot.png" /></p>
+<p>The client also acts as a translator between Org Social and the interface you choose. And it is a good way in for people who are already used to X/Twitter or Mastodon, or who don't want to bother learning the syntax.</p>
+<h2 id="blog-single-content__title--layer-2-the-relay" class="blog-single__content-title">Layer 2: the Relay</h2>
+<p>The Relay is a server that crawls the network of <code>social.org</code> files and builds an index: users, mentions, replies, groups and threads. It does this by reading the <code>#+FOLLOW:</code> lines of every feed it knows and downloading the files it finds. You can also register your feed manually so it reads it.</p>
+<p>It doesn't store content, only addresses. It notes who mentions whom, what replies to what and what belongs to each thread.</p>
+<p>Now you can write a client or a script that asks the Relay for the information that fills in the parts where you were blind before:</p>
+<pre class="highlight"><code class="language-bash"># Who mentioned me?
+curl "https://relay.org-social.org/notifications/?feed=..."
+
+# Give me the full thread of this post
+curl "https://relay.org-social.org/replies/?post=..."
+
+# Find everything about Emacs
+curl "https://relay.org-social.org/search/?q=emacs"</code></pre>
+<p>And that's not all: anyone can run their own Relay, locally or on a server. Their instance will connect to other public Relays and they will exchange information, so the whole network knows which feeds exist and how they relate.</p>
+<p>It also offers other features, such as real-time notifications, RSS/Atom feeds, post search and bridges to ActivityPub/Mastodon. Yes, you can follow Mastodon accounts from Org Social, or keep up with Org Social from your favorite RSS/Atom reader.</p>
+<h2 id="blog-single-content__title--layer-3-org-social-host" class="blog-single__content-title">Layer 3: Org Social Host</h2>
+<p>Needing your own hosting just to start taking part in the network is a tough requirement. That's why there is a free and open hosting service, integrated with the clients, that puts your <code>social.org</code> online with a single click.</p>
+<p>You pick a nick and get two addresses:</p>
+<ul>
+<li><strong>public-url</strong>: the one you share with everyone, for example <code>https://host.org-social.org/alice/social.org</code>.</li>
+<li><strong>vfile</strong>: a secret, signed URL that works as a password. Whoever has it can overwrite your file, so keep it safe.</li>
+</ul>
+<p>If you use a client, all of this is automatic and you never even see the secret URL, since it is stored in your configuration. It all happens behind the scenes.</p>
+<p>If you are curious, signing up is a single request:</p>
+<pre class="highlight"><code class="language-bash">curl -X POST https://host.org-social.org/signup \
+  -H "Content-Type: application/json" \
+  -d '{"nick": "alice"}'</code></pre>
+<p>And overwriting your file, another one:</p>
+<pre class="highlight"><code class="language-bash">curl -X POST https://host.org-social.org/upload \
+  -F "vfile=YOUR_VFILE" \
+  -F "file=@social.org"</code></pre>
+<p>It doesn't lock you in either. You can ask it for a permanent redirect (HTTP 301) to your new URL and your followers won't even notice. Their clients follow the redirect on their own, although it's a good idea to let them know so they update their <code>#+FOLLOW:</code>. It is a way in, not a requirement.</p>
+<p>You can also run it on your own server, with public sign-up disabled and your own domain.</p>
+<p>And it has an advantage that seasoned app developers will have guessed already: it makes syncing between devices easy. You can, for example, write in the mobile client and carry on in the Emacs one with simple HTTP requests. No old protocols, no third-party APIs.</p>
+<h2 id="blog-single-content__title--layer-4-mirror-or-cdn" class="blog-single__content-title">Layer 4: Mirror or CDN</h2>
+<p>Do you use an RSS/Atom reader? Then you already know that the more feeds you follow, the slower it gets.</p>
+<p>It doesn't matter how fast and parallel the downloads are. There will always be dropped connections, timeouts, errors and redirects. And if a feed is very large, the client has to parse all of it to keep what it cares about.</p>
+<p>In my case, I follow 250 feeds. Download and parse them every time I scroll? Not viable. Cache them? Then the problem becomes when to invalidate the cache.</p>
+<p>This is where the Mirror comes in. It is a server that keeps an up-to-date copy of every feed and saves you the parsing, sorting, thread building and mention consolidation. It exposes a simple REST API that returns JSON ready to use in a client.</p>
+<p>You can think of it as a client of clients, or a general-purpose client without an interface. Internally, it works non-stop to keep the most recent copy and to prepare the processed information so it is easy to consume.</p>
+<p>For example, if I want to build the timeline with Bob's and Carol's posts from the last 14 days:</p>
+<pre class="highlight"><code class="language-bash">curl --get "https://mirror.org-social.org/api/posts/" \
+  --data-urlencode "following=https://bob.com/social.org" \
+  --data-urlencode "following=https://carol.net/social.org" \
+  --data-urlencode "sinceDays=14"</code></pre>
+<p>It doesn't replace the Relay. In fact, it needs it to know which feeds exist and which ones have changed. And most importantly: it is <strong>read-only</strong>. It never edits or deletes anything at the source. To publish, you still write to your own file. Its only way in is a webhook that a client can call to say a feed has changed and the Mirror should update it:</p>
+<pre class="highlight"><code class="language-bash">curl -X POST "https://mirror.org-social.org/api/webhook/refresh/" \
+  -H "Content-Type: application/json" \
+  -d '{"feed": "https://alice.com/social.org"}'</code></pre>
+<p>It is optional. The client calls it right after publishing or uploading a new version of the file to your hosting, so the Mirror updates its copy straight away instead of waiting for the next refresh cycle.</p>
+<h2 id="blog-single-content__title--layer-5-push" class="blog-single__content-title">Layer 5: Push</h2>
+<p>The Relay already sends real-time notifications with Server-Sent Events, which clients can listen to in order to tell you about mentions, replies and reactions. But phones don't let an app keep connections open in the background, so there you need push notifications. It is the most specific layer of all, since each platform, iOS and Android, has its own notification system with its own certificates and tokens.</p>
+<p>If this layer goes down, all you lose is the convenience of getting alerts on your phone while the app is closed.</p>
+<h2 id="blog-single-content__title--layer-6-live-preview" class="blog-single__content-title">Layer 6: Live Preview</h2>
+<p>An Org Social post has an address in the format <code>https://&lt;host&gt;/social.org#&lt;timestamp&gt;</code>. For example, my first post: <code>https://host.org-social.org/andros/social.org#2025-08-14T09:11:00+0200</code>. It works fine between Org Social clients, but what happens if you want to share it on another social network? Nothing pretty: the whole <code>social.org</code> file gets shared.</p>
+<p>Live Preview turns a post into a web page. You give it the post URL, it downloads the original <code>social.org</code> (straight from the source, not through the Relay), finds the post and generates an HTML card with its Open Graph metadata: nick, avatar, text and date. Ready to share on any social network.</p>
+<p>For example, the URL above becomes:</p>
+<pre class="highlight"><code class="language-none">https://preview.org-social.org/?post=https%3A%2F%2Fhost.org-social.org%2Fandros%2Fsocial.org%232025-08-14T09%3A11%3A00%2B0200</code></pre>
+<p><img alt="Live Preview card of my first Org Social post: avatar, the nick andros, the text &quot;Hello Org Social.&quot; and the date 2025-08-14T09:11:00+0200" class="medium" src="https://img.andros.dev/yTgWbE2LRr0rENUK4XGxvnX1NFc=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/org-social-live-preview.png" /></p>
+<p>And if I share it on social media, it looks like this:</p>
+<p><img alt="WhatsApp screenshot after pasting the Live Preview link: the card shows my avatar, the nick andros, the text &quot;Hello Org Social.&quot; and the domain preview.org-social.org" class="medium" src="https://img.andros.dev/vPdJkT6bzgDTA3En5TQyCQzNx1A=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/org-social-live-preview-whatsapp.png" /></p>
+<p>Clients also use this link format in their share option.</p>
+<p>The same need gave birth to another very interesting feature: generating an HTML blog from your <code>social.org</code>, if it is hosted on <code>host.org-social.org</code>.</p>
+<p>For example, my Org Social web version would be <a href="https://preview.org-social.org/blog/andros" rel="noopener noreferrer" target="_blank">preview.org-social.org/blog/andros</a>.</p>
+<p><img alt="Screenshot of the Live Preview blog at preview.org-social.org/blog/andros: a header with my avatar, the title Andros' journal and my description, the pinned post &quot;Hello Org Social.&quot; and my latest posts below with date, links and tags" class="medium" src="https://img.andros.dev/vIG5wABU9ZL6U3o3IwzZPI1vNRg=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/org-social-live-preview-blog.png" /></p>
+<p>You write in Org Mode, upload the file to the hosting (with a simple <code>curl</code> if you like) and your HTML blog is generated automatically, ready to share. It isn't perfect, since you don't control the design, but it saves you from running a static site generator.</p>
+<h2 id="blog-single-content__title--summary" class="blog-single__content-title">Summary</h2>
+<p>In the end, they are not layers, but pieces orbiting around your <code>social.org</code>.</p>
+<pre class="mermaid">flowchart TB
+    File["social.org"]
+    Client["Client"]
+    Relay["Relay"]
+    Host["Host"]
+    Mirror["Mirror"]
+    Push["Push"]
+    Preview["Live Preview"]
+
+    Client -- "reads and writes" --> File
+    Client -- "uploads and syncs" --> Host
+    Host -- "hosts" --> File
+    Host -- "registers feeds" --> Relay
+    Relay -- "indexes" --> File
+    Client -- "mentions, threads and search" --> Relay
+    Mirror -- "which feeds exist and which change" --> Relay
+    Mirror -- "copies" --> File
+    Client -- "JSON timeline and webhook" --> Mirror
+    Relay -- "real-time notifications" --> Push
+    Push -- "phone alerts" --> Client
+    Preview -- "reads" --> File
+    Client -- "share link" --> Preview</pre>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Piece</th>
+<th>What it gives you</th>
+<th>If you remove it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>social.org</code></td>
+<td>Your identity and your posts</td>
+<td>There is no network</td>
+</tr>
+<tr>
+<td>Client</td>
+<td>Reading and writing comfortably</td>
+<td>You read with <code>curl</code> and edit by hand</td>
+</tr>
+<tr>
+<td>Relay</td>
+<td>Discovery, mentions, threads and bridges</td>
+<td>You only see who you follow</td>
+</tr>
+<tr>
+<td>Host</td>
+<td>Hosting without a server and syncing between devices</td>
+<td>You use your own hosting</td>
+</tr>
+<tr>
+<td>Mirror</td>
+<td>Ready-to-use JSON, no Org parsing</td>
+<td>The client downloads and parses every file</td>
+</tr>
+<tr>
+<td>Push</td>
+<td>Alerts on your phone</td>
+<td>You find out when you open the app</td>
+</tr>
+<tr>
+<td>Live Preview</td>
+<td>Sharing posts outside the network</td>
+<td>You share the raw file URL</td>
+</tr>
+</tbody>
+</table>
+</div><p>Whatever you use, the only essential piece is your <code>social.org</code>.</p>
+<p>If every Org Social server shut down tomorrow, what would you lose? Convenience. And what would you keep? Your file, intact, on your disk. You upload it anywhere else and keep posting.</p>
+<p>Few social networks can say the same.</p><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-6c165f77@andros.dev" class="link">comment+article-6c165f77@andros.dev</a> to leave a comment. The subject will be ignored.</p>

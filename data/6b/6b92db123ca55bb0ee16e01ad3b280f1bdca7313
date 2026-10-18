@@ -1,0 +1,209 @@
+<h2 id="goal">Goal</h2>
+<p>In this post I want to see how to build NetBSD kernel from source.
+To do this I plan to edit the kernel&rsquo;s code to print a message while NetBSD
+is booting, compile the kernel and boot it.</p>
+<h2 id="start-with-source-code">Start with source code</h2>
+<p>As specified in <a href="https://www.netbsd.org/docs/guide/en/chap-fetch.html">Chapter 32. Obtaining the sources</a>, the source code can be downloaded <a href="https://ftp.netbsd.org/pub/NetBSD/NetBSD-10.1/source/sets/">here</a>.</p>
+<p>Let&rsquo;s work with <strong>src.tgz</strong> only for now. It will be good enough for kernel compilation.
+Other archives are additions (like xsrc.tgz for X system or syssrc.tgz for sys utils)</p>
+<p>Create <strong>/usr/src</strong> folder, <strong>chown</strong> it to yourself and unpack the <strong>src.tgz</strong> with
+<strong>tar -xzf src.tgz -C /</strong></p>
+<p>This part is done.</p>
+<h2 id="patch-the-kernel">Patch the kernel</h2>
+<p>After you boot NetBSD, the entire boot precess output can be
+inspected by running<br><strong>dmesg</strong> or <strong>dmesg | less</strong> if you want to scroll it.</p>
+<p>Here is part of the output of mine:</p>
+<pre tabindex="0"><code>[     1.000000] Copyright (c) 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003,
+[     1.000000]     2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013,
+[     1.000000]     2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023,
+[     1.000000]     2024, 2025, 2026
+[     1.000000]     The NetBSD Foundation, Inc.  All rights reserved.
+[     1.000000] Copyright (c) 1982, 1986, 1989, 1991, 1993
+[     1.000000]     The Regents of the University of California.  All rights reserved.
+
+[     1.000000] NetBSD 11.0 (GENERIC) #0: Thu Jul 30 15:23:12 UTC 2026
+[     1.000000] 	mkrepro@mkrepro.NetBSD.org:/usr/src/sys/arch/amd64/compile/GENERIC
+[     1.000000] total memory = 8188 MB
+[     1.000000] avail memory = 7890 MB
+[     1.000000] timecounter: Timecounters tick every 10.000 msec
+[     1.000000] Kernelized RAIDframe activated
+[     1.000000] timecounter: Timecounter &#34;i8254&#34; frequency 1193182 Hz quality 100
+[     1.000004] efi: systbl at pa bfbee018
+[     1.000004] mainbus0 (root)
+[     1.000004] ACPI: RSDP 0x00000000BFBFA014 000024 (v02 BHYVE )
+[     1.000004] ACPI: XSDT 0x00000000BFBF90E8 00005C (v01 BHYVE  BVFACP   00000001      01000013)
+[     1.000004] ACPI: FACP 0x00000000BFBF8000 000114 (v05 BHYVE  BVFACP   00000001 BASL 20220504)
+[     1.000004] ACPI: DSDT 0x00000000BE74C000 0009F9 (v02 BHYVE  BVDSDT   00000001 INTL 20250807)
+[     1.000004] ACPI: FACS 0x00000000BFBFE000 000040
+[     1.000004] ACPI: APIC 0x00000000BFBF7000 000082 (v01 BHYVE  BVAPIC   00000001 BASL 20220504)
+[     1.000004] ACPI: HPET 0x00000000BFBF6000 000038 (v01 BHYVE  BVHPET   00000001 BASL 20220504)
+[     1.000004] ACPI: MCFG 0x00000000BFBF5000 00003C (v01 BHYVE  BVMCFG   00000001 BASL 20220504)
+[     1.000004] ACPI: SPCR 0x00000000BFBF4000 000058 (v01 BHYVE  BVSPCR   00000001 BASL 20220504)
+[     1.000004] ACPI: SRAT 0x00000000BFBF3000 000130 (v01 BHYVE  BVSRAT   00000001 BASL 20220504)
+[     1.000004] ACPI: BGRT 0x00000000BE2CA000 000038 (v01 INTEL  EDK2     00000002      01000013)
+[     1.000004] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[     1.000004] ioapic0 at mainbus0 apid 0: pa 0xfec00000, version 0x11, 32 pins
+[     1.000004] cpu0 at mainbus0 apid 0
+[     1.000004] cpu0: Use mfence to serialize rdtsc
+[     1.000004] cpu0: AMD Ryzen 5 7430U with Radeon Graphics         , id 0xa50f00
+[     1.000004] cpu0: node 0, package 0, core 0, smt 0
+[     1.000004] cpu1 at mainbus0 apid 1
+</code></pre><p>You can see output of some drivers like:</p>
+<ul>
+<li>ACPI: RSDP 0x00000000BFBFA014 000024 (v02 BHYVE )</li>
+<li>cpu0: Use mfence to serialize rdtsc</li>
+</ul>
+<p>But even before that, there is this message:</p>
+<pre tabindex="0"><code>[     1.000000] total memory = 8188 MB
+</code></pre><p>Let&rsquo;s find out where it comes from and print our own message near it.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span><span style="color:#75715e"># run this in the /usr/src</span>
+</span></span><span style="display:flex;"><span>grep -ri <span style="color:#e6db74">&#39;total memory = &#39;</span> .
+</span></span></code></pre></div><p>and here is the output I got:</p>
+<pre tabindex="0"><code>./sys/arch/atari/atari/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/emips/emips/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/evbppc/virtex/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/ews4800mips/ews4800mips/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/hp300/hp300/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/hpcsh/hpcsh/machdep.c:	_DPRINTF(&#34;total memory = %dMbyte\n&#34;, (int)(sh3_ptob(physmem) &gt;&gt; 20));
+./sys/arch/luna68k/luna68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/mac68k/mac68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/mips/mips/cpu_subr.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/mvme68k/mvme68k/machdep.c:	printf(&#34;total memory = %s&#34;, pbuf);
+./sys/arch/news68k/news68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/next68k/next68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/powerpc/booke/booke_machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/powerpc/ibm4xx/ibm4xx_machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/powerpc/oea/oea_machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/riscv/riscv/riscv_machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sh3/sh3/sh3_machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sgimips/sgimips/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sparc/sparc/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sparc64/sparc64/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sun2/sun2/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sun3/sun3/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/sun3/sun3x/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/vax/vax/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/virt68k/virt68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/arch/x68k/x68k/machdep.c:	printf(&#34;total memory = %s\n&#34;, pbuf);
+./sys/kern/init_main.c:	(*pr)(&#34;total memory = %s\n&#34;, pbuf);
+./sys/rump/librump/rumpkern/vm.c:	aprint_verbose(&#34;total memory = %s\n&#34;, buf);
+</code></pre><p>The <strong>./sys/arch</strong> is architecture specific code. I&rsquo;m on AMD64 architecture and I don&rsquo;t see it among the output.
+I don&rsquo;t know why and it&rsquo;s something to explore later but
+this line is interesting:<br> <strong>./sys/kern/init_main.c:	(*pr)(&ldquo;total memory = %s\n&rdquo;, pbuf);</strong></p>
+<p>Looks like something kernel related. Let&rsquo;s open it.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-c" data-lang="c"><span style="display:flex;"><span><span style="color:#66d9ef">void</span>
+</span></span><span style="display:flex;"><span><span style="color:#a6e22e">banner</span>(<span style="color:#66d9ef">void</span>)
+</span></span><span style="display:flex;"><span>{
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">static</span> <span style="color:#66d9ef">char</span> notice[] <span style="color:#f92672">=</span> <span style="color:#e6db74">&#34; Notice: this software is &#34;</span>
+</span></span><span style="display:flex;"><span>	    <span style="color:#e6db74">&#34;protected by copyright&#34;</span>;
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">char</span> pbuf[<span style="color:#ae81ff">81</span>];
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">void</span> (<span style="color:#f92672">*</span>pr)(<span style="color:#66d9ef">const</span> <span style="color:#66d9ef">char</span> <span style="color:#f92672">*</span>, ...) <span style="color:#a6e22e">__printflike</span>(<span style="color:#ae81ff">1</span>, <span style="color:#ae81ff">2</span>);
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">int</span> i;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#66d9ef">if</span> ((boothowto <span style="color:#f92672">&amp;</span> AB_SILENT) <span style="color:#f92672">!=</span> <span style="color:#ae81ff">0</span>) {
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">snprintf</span>(pbuf, <span style="color:#66d9ef">sizeof</span>(pbuf), <span style="color:#e6db74">&#34;%s %s (%s)&#34;</span>,
+</span></span><span style="display:flex;"><span>		    ostype, osrelease, kernel_ident);
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">printf_nolog</span>(<span style="color:#e6db74">&#34;%s&#34;</span>, pbuf);
+</span></span><span style="display:flex;"><span>		<span style="color:#66d9ef">for</span> (i <span style="color:#f92672">=</span> <span style="color:#ae81ff">80</span> <span style="color:#f92672">-</span> <span style="color:#a6e22e">strlen</span>(pbuf) <span style="color:#f92672">-</span> <span style="color:#66d9ef">sizeof</span>(notice); i <span style="color:#f92672">&gt;</span> <span style="color:#ae81ff">0</span>; i<span style="color:#f92672">--</span>)
+</span></span><span style="display:flex;"><span>			<span style="color:#a6e22e">printf</span>(<span style="color:#e6db74">&#34; &#34;</span>);
+</span></span><span style="display:flex;"><span>		<span style="color:#a6e22e">printf_nolog</span>(<span style="color:#e6db74">&#34;%s</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>, notice);
+</span></span><span style="display:flex;"><span>		pr <span style="color:#f92672">=</span> aprint_normal;
+</span></span><span style="display:flex;"><span>	} <span style="color:#66d9ef">else</span> {
+</span></span><span style="display:flex;"><span>		pr <span style="color:#f92672">=</span> printf;
+</span></span><span style="display:flex;"><span>	}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">memset</span>(pbuf, <span style="color:#ae81ff">0</span>, <span style="color:#66d9ef">sizeof</span>(pbuf));
+</span></span><span style="display:flex;"><span>	(<span style="color:#f92672">*</span>pr)(<span style="color:#e6db74">&#34;%s%s&#34;</span>, copyright, version);
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">format_bytes</span>(pbuf, MEM_PBUFSIZE, <span style="color:#a6e22e">ctob</span>((<span style="color:#66d9ef">uint64_t</span>)physmem));
+</span></span><span style="display:flex;"><span>	(<span style="color:#f92672">*</span>pr)(<span style="color:#e6db74">&#34;total memory = %s</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>, pbuf);
+</span></span><span style="display:flex;"><span>	<span style="color:#a6e22e">format_bytes</span>(pbuf, MEM_PBUFSIZE, <span style="color:#a6e22e">ctob</span>((<span style="color:#66d9ef">uint64_t</span>)<span style="color:#a6e22e">uvm_availmem</span>(false)));
+</span></span><span style="display:flex;"><span>	(<span style="color:#f92672">*</span>pr)(<span style="color:#e6db74">&#34;avail memory = %s</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>, pbuf);
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div><p>The function is called <strong>banner</strong> which I assume is the banner that we saw during the boot process. It checks out.</p>
+<p>The syntax of the print function is quite interesting <strong>(*pr)(&ldquo;total memory = %s\n&rdquo;, pbuf);</strong> but it&rsquo;s outside of
+scope of this post. We&rsquo;ll have a look at it in another post.</p>
+<p>Let&rsquo;s just add one more line at the end of this <strong>banner</strong> function:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-c" data-lang="c"><span style="display:flex;"><span>(<span style="color:#f92672">*</span>pr)(<span style="color:#e6db74">&#34;You can create art and beauty on this computer</span><span style="color:#ae81ff">\n</span><span style="color:#e6db74">&#34;</span>);
+</span></span></code></pre></div><p>Save. Done!</p>
+<h2 id="compile-and-boot-the-kernel">Compile and boot the kernel</h2>
+<p>Now being in <strong>/usr/src</strong> folder run this command (needed only once):</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>./build.sh -U -j6 tools <span style="color:#75715e"># adjust -j6 to your number of vcpu. It&#39;s similar to &#34;make&#34;</span>
+</span></span></code></pre></div><p>This may take awhile. NetBSD tools are essential component of reproducible builds and includes compiler which must be built from source too.
+Again, run only once and forget about it.</p>
+<p>If you see errors about <strong>/usr/obj</strong> not found, create the folder and <strong>chown</strong> it to yourself.</p>
+<p>When done, we can compile the kernel:</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>./build.sh -U -j6 kernel<span style="color:#f92672">=</span>GENERIC <span style="color:#75715e"># -U is for &#34;build as current user not root&#34;</span>
+</span></span></code></pre></div><p>This will start the compilation. <strong>GENERIC</strong> is the name of the kernel config file in <strong>/usr/src/sys/arch/amd64/conf/</strong>.
+You can create your own kernel config and pass it to <strong>./build.sh</strong> script.</p>
+<p>Kernel compilation is relatively quick and when done you can see an output like this:</p>
+<pre tabindex="0"><code>===&gt; Kernels built from GENERIC:
+  /usr/src/sys/arch/amd64/compile/obj/GENERIC/netbsd
+===&gt; build.sh ended:      Wed Sep 23 18:30:32 AEST 2026
+===&gt; Summary of results:
+	 build.sh command:    ./build.sh -U -j6 kernel=GENERIC
+	 build.sh started:    Wed Sep 23 18:26:47 AEST 2026
+	 NetBSD version:      11.0
+	 MACHINE:             amd64
+	 MACHINE_ARCH:        x86_64
+	 Build platform:      NetBSD 11.0 amd64
+	 HOST_SH:             /bin/sh
+	 share/mk MAKECONF:   /etc/mk.conf
+	 MAKECONF file:       /etc/mk.conf (File not found)
+	 TOOLDIR path:        /usr/src/obj/tooldir.NetBSD-11.0-amd64
+	 DESTDIR path:        /usr/src/obj/destdir.amd64
+	 RELEASEDIR path:     /usr/src/obj/releasedir
+	 Updated makewrapper: /usr/src/obj/tooldir.NetBSD-11.0-amd64/bin/nbmake-amd64
+	 Building kernel without building new tools
+	 Building kernel:     GENERIC
+	 Build directory:     /usr/src/sys/arch/amd64/compile/obj/GENERIC
+	 Kernels built from GENERIC:
+	  /usr/src/sys/arch/amd64/compile/obj/GENERIC/netbsd
+	 build.sh ended:      Wed Sep 23 18:30:32 AEST 2026
+</code></pre><p>The interesting part is:</p>
+<pre tabindex="0"><code>Kernels built from GENERIC:
+  /usr/src/sys/arch/amd64/compile/obj/GENERIC/netbsd
+</code></pre><p>This is our new kernel. Let&rsquo;s copy it to the root folder under a different name just in case.</p>
+<div class="highlight"><pre tabindex="0" style="color:#f8f8f2;background-color:#272822;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>cp /usr/src/sys/arch/amd64/compile/obj/GENERIC/netbsd /netbsd.test <span style="color:#75715e"># as root</span>
+</span></span><span style="display:flex;"><span><span style="color:#75715e"># /netbsd is already there and that&#39;s the kernel that system boots by default.</span>
+</span></span></code></pre></div><p>All done. Now what&rsquo;s left is to reboot and boot our custom kernel.</p>
+<p>Restart and press <strong>SPACE</strong> at the boot screen to stop the countdown.</p>
+<p><a href="https://blog.bekenev.net/assets/img/netbsd.boot.png" target="_blank"><img width="100%" src="https://blog.bekenev.net/assets/img/netbsd.boot.png" /></a></p>
+<p>Then press 3 to drop to the boot prompt.</p>
+<p>Now just type <strong>boot /netbsd.test</strong> and observe the output!</p>
+<pre tabindex="0"><code>[     1.000000] Copyright (c) 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003,
+[     1.000000]     2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012, 2013,
+[     1.000000]     2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023,
+[     1.000000]     2024, 2025, 2026
+[     1.000000]     The NetBSD Foundation, Inc.  All rights reserved.
+[     1.000000] Copyright (c) 1982, 1986, 1989, 1991, 1993
+[     1.000000]     The Regents of the University of California.  All rights reserved.
+
+[     1.000000] NetBSD 11.0 (GENERIC) #1: Wed Sep 23 18:51:29 AEST 2026
+[     1.000000]         krydos@netbsdvm:/usr/obj/sys/arch/amd64/compile/GENERIC
+[     1.000000] total memory = 8188 MB
+[     1.000000] avail memory = 7890 MB
+[     1.000000] You can create art and beauty on this computer   &lt;---- here!!!
+[     1.000000] timecounter: Timecounters tick every 10.000 msec
+[     1.000000] Kernelized RAIDframe activated
+[     1.000000] timecounter: Timecounter &#34;i8254&#34; frequency 1193182 Hz quality 100
+[     1.000004] efi: systbl at pa bfbee018
+[     1.000004] mainbus0 (root)
+[     1.000004] ACPI: RSDP 0x00000000BFBFA014 000024 (v02 BHYVE )
+[     1.000004] ACPI: XSDT 0x00000000BFBF90E8 00005C (v01 BHYVE  BVFACP   00000001      01000013)
+[     1.000004] ACPI: FACP 0x00000000BFBF8000 000114 (v05 BHYVE  BVFACP   00000001 BASL 20220504)
+[     1.000004] ACPI: DSDT 0x00000000BE74C000 0009F9 (v02 BHYVE  BVDSDT   00000001 INTL 20250807)
+[     1.000004] ACPI: FACS 0x00000000BFBFE000 000040
+[     1.000004] ACPI: APIC 0x00000000BFBF7000 000082 (v01 BHYVE  BVAPIC   00000001 BASL 20220504)
+[     1.000004] ACPI: HPET 0x00000000BFBF6000 000038 (v01 BHYVE  BVHPET   00000001 BASL 20220504)
+[     1.000004] ACPI: MCFG 0x00000000BFBF5000 00003C (v01 BHYVE  BVMCFG   00000001 BASL 20220504)
+[     1.000004] ACPI: SPCR 0x00000000BFBF4000 000058 (v01 BHYVE  BVSPCR   00000001 BASL 20220504)
+[     1.000004] ACPI: SRAT 0x00000000BFBF3000 000130 (v01 BHYVE  BVSRAT   00000001 BASL 20220504)
+[     1.000004] ACPI: BGRT 0x00000000BE2CA000 000038 (v01 INTEL  EDK2     00000002      01000013)
+[     1.000004] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[     1.000004] ioapic0 at mainbus0 apid 0: pa 0xfec00000, version 0x11, 32 pins
+[     1.000004] cpu0 at mainbus0 apid 0
+[     1.000004] cpu0: Use mfence to serialize rdtsc
+[     1.000004] cpu0: AMD Ryzen 5 7430U with Radeon Graphics         , id 0xa50f00
+[     1.000004] cpu0: node 0, package 0, core 0, smt 0
+[     1.000004] cpu1 at mainbus0 apid 1
+</code></pre><p>Woohoo!</p>

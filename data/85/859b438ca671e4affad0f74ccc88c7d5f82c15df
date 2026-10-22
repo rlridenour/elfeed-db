@@ -1,0 +1,42 @@
+<h2>Flush the macOS DNS cache</h2>
+<div class="highlight"><pre><span></span><code>$ sudo dscacheutil -flushcache
+$ sudo killall -HUP mDNSResponder
+</code></pre></div>
+
+<h2>Watch DNS traffic</h2>
+<p>Watch all DNS quries to <a href="skybert.net">skybert.net</a> using <code>tcpdump</code>:</p>
+<div class="highlight"><pre><span></span><code>$ sudo /usr/sbin/tcpdump -l  -n -k -i pktap,all port 53 | grep skybert.net
+</code></pre></div>
+
+<h1>mDNSResponder</h1>
+<p>On macOS, DNS requests don't go to the DNS server directly, but
+instead the <a href="">com.apple.mDNSResponder</a> sub system. Since it caches
+all the queries, it's often more interesting to watch its logs than
+the capturing outgoing packages on port <code>53</code>:</p>
+<div class="highlight"><pre><span></span><code>$ log stream --predicate 'subsystem == "com.apple.mDNSResponder"'
+</code></pre></div>
+
+<p>This will list both IPv4 and IPv6 entries. To limit this to only IPv4,
+expand the query with:</p>
+<div class="highlight"><pre><span></span><code>$ log stream --predicate '
+    subsystem == "com.apple.mDNSResponder"
+    AND eventMessage CONTAINS "qtype: A,"
+  '
+</code></pre></div>
+
+<p>You can extend this further to incldue the name of the program calling
+<code>mDNSResponder</code>. My program here was called <code>dnsreq</code>:</p>
+<div class="highlight"><pre><span></span><code>$ log stream \
+  --predicate '
+    subsystem == "com.apple.mDNSResponder" AND
+    eventMessage CONTAINS "qtype: A," AND
+    eventMessage CONTAINS "(dnsreq)"
+'
+..
+Timestamp                       Thread     Type        Activity             PID    TTL
+2026-10-21 14:01:48.245878+0200 0x155d     Default     0x0                  689    0
+    mDNSResponder:
+    [com.apple.mDNSResponder:Default] [R342318] DNSServiceQueryRecord START --
+    qname: &lt;private&gt; &lt;dn:6oGD/g&gt;, qtype: A, flags: 0x15000, interface index: 0,
+    client pid: 79074 (dnsreq), name hash: &lt;dn:6oGD/g&gt;
+</code></pre></div>

@@ -1,0 +1,88 @@
+<div class="highlight"><pre><span></span><code>$ brew install authzed/tap/spicedb authzed/tap/zed
+</code></pre></div>
+
+<h2>Starting the thing</h2>
+<p>The doc says to start it like this:</p>
+<div class="highlight"><pre><span></span><code>$ spicedb serve --datastore-conn-pool-read-max-open 50
+..
+1:35PM ERR terminated with errors error="required flag(s) \"grpc-preshared-key\" not set"
+</code></pre></div>
+
+<p>Ok, let's pass a pre-shared key:</p>
+<div class="highlight"><pre><span></span><code>$ spicedb serve --datastore-conn-pool-read-max-open 50 --grpc-preshared-key asdfadfs
+..
+1:37PM ERR terminated with errors error="failed to create gRPC server: failed to listen on addr for gRPC server: listen tcp :50051: bind: address already in use"
+</code></pre></div>
+
+<p>Something else is running on port <code>50051</code>?</p>
+<div class="highlight"><pre><span></span><code>❯ sudo lsof -nP -iTCP -sTCP:LISTEN | grep 50051
+Password:
+launchd       1           root    8u  IPv6 0x7e88492295394464      0t0  TCP *:50051 (LISTEN)
+launchd       1           root   10u  IPv4 0xfe29e5878d806e3e      0t0  TCP *:50051 (LISTEN)
+</code></pre></div>
+
+<p>Indeed. The init system, <code>launchd</code> is.</p>
+<p>Ok, then, let's start spicedb on a different port. To find out what the port parameter was, I did:</p>
+<div class="highlight"><pre><span></span><code>$ spicedb serve --help | grep 50051
+      --grpc-addr string                      address to listen on to serve gRPC (default "50051")
+</code></pre></div>
+
+<p>Ok, so let's change this to something that's not taken:</p>
+<div class="highlight"><pre><span></span><code>$ spicedb serve --datastore-conn-pool-read-max-open 50 --grpc-preshared-key foobarbaz --grpc-addr :9901
+..
+1:45PM INF http server started serving addr=:9090 insecure=true service=metrics
+..
+</code></pre></div>
+
+<p>That looks better.  Turns out, it's now listening on <em>two</em> ports, the one I specified and one more:</p>
+<div class="highlight"><pre><span></span><code>$ lsof -nP -iTCP -sTCP:LISTEN | grep spicedb
+spicedb 61495 torstein    4u  IPv6 0x99013ee09ce4c918      0t0  TCP *:9901 (LISTEN)
+spicedb 61495 torstein    7u  IPv6  0x472ed0712bca149      0t0  TCP *:9090 (LISTEN)
+</code></pre></div>
+
+<p>In the doc, I spotted <code>--http-enabled</code>, thinking it would be useful, I included it too and now got three TCP sockets listening for inbound connections:</p>
+<div class="highlight"><pre><span></span><code>$ spicedb serve --datastore-conn-pool-read-max-open 50 --grpc-preshared-key foobarbaz --grpc-addr :9901 --http-enabled
+..
+1:47PM INF grpc server started serving addr=:9901 insecure=true network=tcp service=grpc workers=0
+..
+1:47PM INF http server started serving addr=:8443 insecure=true service=http
+1:47PM INF http server started serving addr=:9090 insecure=true service=metrics
+..
+</code></pre></div>
+
+<p><code>lsof</code> confirms this:</p>
+<div class="highlight"><pre><span></span><code>$ lsof -nP -iTCP -sTCP:LISTEN | grep spicedb
+spicedb 62041 torstein    4u  IPv6 0x99013ee09ce4c918      0t0  TCP *:9901 (LISTEN)
+spicedb 62041 torstein    7u  IPv6 0xc1e16da20285958f      0t0  TCP *:8443 (LISTEN)
+spicedb 62041 torstein    8u  IPv6 0x5cccabf65dca7727      0t0  TCP *:9090 (LISTEN)
+</code></pre></div>
+
+<p>Now, let's do something with this spicy process.</p>
+<h2>Configure the spicedb client, zed</h2>
+<div class="highlight"><pre><span></span><code>$ zed context set localhost localhost:9901 foobarbaz --insecure
+</code></pre></div>
+
+<p>Define a few entities:</p>
+<div class="highlight"><pre><span></span><code><span class="n">zed</span><span class="w"> </span><span class="n">schema</span><span class="w"> </span><span class="nb">write</span><span class="w"> </span><span class="o">&lt;</span><span class="p">(</span><span class="n">cat</span><span class="w"> </span><span class="o">&lt;&lt;</span><span class="w"> </span><span class="n">EOF</span>
+<span class="n">definition</span><span class="w"> </span><span class="n">user</span><span class="w"> </span><span class="p">{}</span>
+<span class="n">definition</span><span class="w"> </span><span class="n">post</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">relation</span><span class="w"> </span><span class="n">reader:</span><span class="w"> </span><span class="n">user</span>
+<span class="w">    </span><span class="n">relation</span><span class="w"> </span><span class="n">writer:</span><span class="w"> </span><span class="n">user</span>
+<span class="w">    </span><span class="n">permission</span><span class="w"> </span><span class="nb">read</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">reader</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">writer</span>
+<span class="w">    </span><span class="n">permission</span><span class="w"> </span><span class="nb">write</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">writer</span>
+<span class="p">}</span>
+<span class="n">EOF</span>
+<span class="p">)</span>
+</code></pre></div>
+
+<p>Create some relationships between these entities:</p>
+<div class="highlight"><pre><span></span><code>$ zed relationship create post:1 writer user:emilia
+$ zed relationship create post:1 reader user:beatrice
+</code></pre></div>
+
+<h2>Check some permissions</h2>
+<div class="highlight"><pre><span></span><code>$ zed permission check post:1 read  user:emilia  # true
+$ zed permission check post:1 write user:emilia  # true
+$ zed permission check post:1 read  user:beatrice # true
+$ zed permission check post:1 write user:beatrice # false
+</code></pre></div>

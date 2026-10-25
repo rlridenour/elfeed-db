@@ -1,0 +1,2971 @@
+<p>
+<a href="https://sachachua.com/blog/2026/10/upcoming-chat-with-linkarzu-about-using-emacs-for-25-years/">While summarizing my history with Emacs</a>, I was curious about just how many <a href="https://sachachua.com/blog/category/emacs-news">Emacs News</a> posts I've written and how many links I've highlighted. 564 posts, &gt; 34000 items, an average of 60 items per posts.
+</p>
+
+<p>
+Analysis: It turned out that my <a href="https://github.com/sachac/emacs-news">emacs-news/index.org</a> only went back to about 2016,
+missing a few months of 2015.
+To fill in the data, I needed to convert the old HTML files into Org format.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-:eval"><code>find -name \*news\*.html -exec zsh -c 'pandoc -f html -t org {} &#45;&#45;wrap=none -o $(basename {} .html).org' \;
+</code></pre>
+</div>
+
+
+<p>
+Then I inserted the old entries into my file.
+<code>insert-file-contents</code> doesn't seem to move the point, but if I narrow to my Posts subtree (<code>org-narrow-to-subtree</code>), then I can go to the end of the narrowed part.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-emacs-news-insert-old-ones</span> ()
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let</span> ((dir <span class="org-string">"~/proj/static-blog/blog/2015/"</span>))
+    (<span class="org-keyword">dolist</span> (f
+             (sort
+              (directory-files-recursively dir <span class="org-string">"news.*org$"</span>)
+              <span class="org-builtin">:key</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">file-name-base</span>
+              <span class="org-builtin">:reverse</span> t))
+      (insert <span class="org-string">"** "</span> (substring (file-name-base f) 0 10) <span class="org-string">" Emacs News\n\n"</span>)
+      (insert-file-contents f)
+      (goto-char (point-max)))))
+</code></pre>
+</div>
+
+
+<p>
+With all the entries in place, let's look at the list items that start with a link.
+</p>
+
+<details><summary>code for analysis</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code><span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-emacs-news-count-links</span> ()
+  <span class="org-doc">"Return the number of main links in this subtree."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">let</span> ((count 0))
+    (<span class="org-keyword">save-excursion</span>
+      (org-back-to-heading)
+      (<span class="org-keyword">while</span> (re-search-forward <span class="org-string">"^ *- \\[\\["</span> (<span class="org-keyword">save-excursion</span> (org-end-of-subtree)) t)
+        (<span class="org-keyword">incf</span> count)))
+    (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+      (message <span class="org-string">"%d"</span> count))
+    count))
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-emacs-news-analyze</span> ()
+  <span class="org-doc">"Count how many entries and items. Make a table of entries."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">with-current-buffer</span> (find-file-noselect <span class="org-string">"~/sync/emacs-news/index.org"</span>)
+    (goto-char (point-min))
+    (<span class="org-keyword">let</span> (results)
+      (org-map-entries
+       (<span class="org-keyword">lambda</span> ()
+         (<span class="org-keyword">let</span> ((title (org-entry-get (point) <span class="org-string">"ITEM"</span>)))
+           (<span class="org-keyword">when</span> (string-match <span class="org-string">"</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string"> Emacs"</span> title)
+             (<span class="org-keyword">push</span> (list (match-string 1 title)
+                         (sacha-emacs-news-count-links))
+                   results)))))
+      (seq-uniq (sort results <span class="org-builtin">:key</span> <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">car</span> <span class="org-builtin">:reverse</span> t)))))
+</code></pre>
+</div>
+
+</details>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp" id="orgd57c2cb"><code>(append <span class="org-highlight-quoted-quote">'</span>((<span class="org-string">"Date"</span> <span class="org-string">"Count"</span>) hline) (sacha-emacs-news-analyze))
+</code></pre>
+</div>
+
+
+
+<div class="org-src-container">
+<pre class="src src-gnuplot"><code><span class="org-constant">set</span> <span class="org-type">title</span> <span class="org-string">"Number of links in Emacs News per week"</span>
+<span class="org-constant">set</span> xdata time
+<span class="org-constant">set</span> timefmt <span class="org-string">"%Y-%m-%d"</span>
+<span class="org-constant">set</span> format x <span class="org-string">"%Y"</span>
+<span class="org-constant">set</span> xlabel <span class="org-string">"Year"</span>
+<span class="org-constant">set</span> ylabel <span class="org-string">"Count"</span>
+<span class="org-constant">set</span> grid
+<span class="org-keyword">plot</span> data <span class="org-type">using</span> 1:2 <span class="org-type">with</span> <span class="org-function-name">lines</span> <span class="org-type">title</span> <span class="org-string">"Items"</span>
+</code></pre>
+</div>
+
+
+
+<figure id="org9307c01">
+<img src="https://sachachua.com/blog/2026/10/analyzing-emacs-news/emacs-news.png" alt="emacs-news.png">
+
+</figure>
+
+<p>
+This probably tracks my availability more than anything else. The dip in 2017 and 2018 corresponds pretty well to the time that the kiddo needed more of my attention. Babies sleep a lot; toddlers, not so much.
+</p>
+
+<p>
+I generally feel that there are so many interesting rabbit holes to go down each week,
+and the Emacs community is active enough that there's always one or two things I want to add to my to-do list to explore further.
+Putting together Emacs News is one of the highlights of my week. <a href="https://sachachua.com/blog/2023/12/analyzing-my-emacs-time-over-the-last-11-years-or-so/">It takes me about 1 - 2 hours</a>,
+and some of that is just because I get distracted trying out the cool stuff I come across.
+</p>
+
+<p>
+Learning from similar newsletters: <a href="https://alan.petitepomme.net/cwn/">OCaml Weekly News</a> has a single author as well and does a lot more summarization, but includes fewer links.
+<a href="https://this-week-in-rust.org/">This Week in Rust</a> is a similar link-dump weekly newsletter.
+It's written by a larger team and it has more commentary.
+I think that for the Emacs community, I'm still leaning towards this large list of categorized links for easy skimming.
+As I get the hang of writing more, I'd like to write more blog posts myself that Emacs News can also link to.
+If your community doesn't already have a weekly or monthly newsletter, I highly recommend it as a way to <a href="https://sachachua.com/blog/2025/05/working-on-the-plumbing-in-a-small-web-community/">bring the community together</a>.
+</p>
+
+<p>
+Here's the table, in case you're curious:
+</p>
+
+<details class="code-details"><summary>Data</summary>
+<table>
+
+
+<colgroup>
+<col class="org-right">
+
+<col class="org-right">
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-right">Date</th>
+<th scope="col" class="org-right">Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-right">2026-10-19</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-10-12</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-10-05</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-09-28</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-09-21</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-09-14</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-09-07</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-08-31</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-08-24</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-08-17</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-08-10</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-08-03</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-07-27</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-07-20</td>
+<td class="org-right">99</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-07-13</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-07-06</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-06-29</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-06-22</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-06-15</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-06-08</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-06-01</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-05-25</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-05-18</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-05-11</td>
+<td class="org-right">94</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-05-04</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-04-27</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-04-20</td>
+<td class="org-right">91</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-04-13</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-04-06</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-03-30</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-03-23</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-03-16</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-03-09</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-03-02</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-02-23</td>
+<td class="org-right">96</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-02-16</td>
+<td class="org-right">89</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-02-09</td>
+<td class="org-right">87</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-02-02</td>
+<td class="org-right">109</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-01-26</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-01-19</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-01-12</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-01-05</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2026-01-04</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-12-29</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-12-22</td>
+<td class="org-right">99</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-12-15</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-12-08</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-12-01</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-11-24</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-11-17</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-11-10</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-11-03</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-10-27</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-10-20</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-10-13</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-10-06</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-09-29</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-09-22</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-09-15</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-09-08</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-09-01</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-08-25</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-08-18</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-08-11</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-08-04</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-07-28</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-07-21</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-07-14</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-07-07</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-06-30</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-06-23</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-06-16</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-06-09</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-06-02</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-05-26</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-05-19</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-05-12</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-05-05</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-04-28</td>
+<td class="org-right">96</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-04-21</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-04-14</td>
+<td class="org-right">99</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-04-07</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-31</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-24</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-17</td>
+<td class="org-right">94</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-10</td>
+<td class="org-right">102</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-03-03</td>
+<td class="org-right">102</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-24</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-17</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-10</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-02-03</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-27</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-20</td>
+<td class="org-right">80</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-13</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2025-01-06</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-30</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-23</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-16</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-09</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-12-02</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-25</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-18</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-11</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-11-04</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-28</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-21</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-14</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-10-07</td>
+<td class="org-right">80</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-30</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-23</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-16</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-09</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-09-02</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-26</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-19</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-12</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-08-05</td>
+<td class="org-right">45</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-29</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-22</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-15</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-08</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-07-01</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-24</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-17</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-10</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-06-03</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-27</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-20</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-13</td>
+<td class="org-right">91</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-05-06</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-29</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-22</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-15</td>
+<td class="org-right">94</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-08</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-04-01</td>
+<td class="org-right">95</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-03-25</td>
+<td class="org-right">91</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-03-18</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-03-11</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-03-04</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-02-26</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-02-19</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-02-12</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-02-05</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-29</td>
+<td class="org-right">96</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-22</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-15</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-08</td>
+<td class="org-right">99</td>
+</tr>
+
+<tr>
+<td class="org-right">2024-01-01</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-25</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-18</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-11</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-12-04</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-11-27</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-11-20</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-11-13</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-11-06</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-30</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-23</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-16</td>
+<td class="org-right">91</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-09</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-10-02</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-09-25</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-09-18</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-09-11</td>
+<td class="org-right">90</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-09-04</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-28</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-21</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-14</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-08-07</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-31</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-24</td>
+<td class="org-right">46</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-17</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-10</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-07-03</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-06-26</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-06-19</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-06-12</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-06-05</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-29</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-22</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-15</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-08</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-05-01</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-04-24</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-04-17</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-04-10</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-04-03</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-03-27</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-03-20</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-03-13</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-03-06</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-02-27</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-02-20</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-02-13</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-02-06</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-01-30</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-01-23</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-01-16</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-01-09</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2023-01-02</td>
+<td class="org-right">89</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-12-26</td>
+<td class="org-right">89</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-12-19</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-12-12</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-12-05</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-11-28</td>
+<td class="org-right">90</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-11-21</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-11-14</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-11-07</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-10-31</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-10-24</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-10-17</td>
+<td class="org-right">54</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-10-10</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-10-03</td>
+<td class="org-right">81</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-09-26</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-09-19</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-09-12</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-09-05</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-08-29</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-08-22</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-08-15</td>
+<td class="org-right">45</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-08-08</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-08-01</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-07-25</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-07-18</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-07-11</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-07-04</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-06-27</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-06-20</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-06-13</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-06-06</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-05-30</td>
+<td class="org-right">38</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-05-23</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-05-16</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-05-09</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-05-02</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-04-25</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-04-18</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-04-11</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-04-04</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-03-28</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-03-21</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-03-14</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-03-07</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-02-28</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-02-21</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-02-14</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-02-07</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-01-31</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-01-24</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-01-17</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-01-10</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2022-01-03</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-12-27</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-12-20</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-12-13</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-12-06</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-11-29</td>
+<td class="org-right">75</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-11-22</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-11-15</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-11-08</td>
+<td class="org-right">94</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-11-01</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-10-25</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-10-18</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-10-11</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-10-04</td>
+<td class="org-right">91</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-09-27</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-09-20</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-09-13</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-09-06</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-08-30</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-08-23</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-08-16</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-08-09</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-08-02</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-07-26</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-07-19</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-07-12</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-07-05</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-06-28</td>
+<td class="org-right">46</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-06-21</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-06-14</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-06-07</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-05-31</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-05-24</td>
+<td class="org-right">46</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-05-17</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-05-10</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-05-03</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-04-26</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-04-19</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-04-12</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-04-05</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-03-29</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-03-22</td>
+<td class="org-right">82</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-03-15</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-03-08</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-03-01</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-02-22</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-02-15</td>
+<td class="org-right">96</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-02-08</td>
+<td class="org-right">74</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-02-01</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-01-25</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-01-18</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-01-11</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2021-01-04</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-12-28</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-12-21</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-12-14</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-12-07</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-11-30</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-11-23</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-11-16</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-11-09</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-11-02</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-10-26</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-10-19</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-10-12</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-10-05</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-09-28</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-09-21</td>
+<td class="org-right">81</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-09-14</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-09-07</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-08-31</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-08-24</td>
+<td class="org-right">73</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-08-17</td>
+<td class="org-right">80</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-08-10</td>
+<td class="org-right">89</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-08-03</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-07-27</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-07-20</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-07-13</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-07-06</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-06-29</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-06-22</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-06-15</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-06-08</td>
+<td class="org-right">66</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-06-01</td>
+<td class="org-right">116</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-05-25</td>
+<td class="org-right">64</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-05-18</td>
+<td class="org-right">83</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-05-11</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-05-04</td>
+<td class="org-right">77</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-04-27</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-04-20</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-04-13</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-04-06</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-03-30</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-03-23</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-03-16</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-03-09</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-03-02</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-02-24</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-02-17</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-02-10</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-02-03</td>
+<td class="org-right">67</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-01-27</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-01-20</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-01-13</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2020-01-06</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-12-30</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-12-23</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-12-16</td>
+<td class="org-right">71</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-12-09</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-12-02</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-11-25</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-11-18</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-11-11</td>
+<td class="org-right">62</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-11-04</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-10-28</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-10-21</td>
+<td class="org-right">59</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-10-14</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-10-07</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-09-30</td>
+<td class="org-right">68</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-09-23</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-09-16</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-09-09</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-09-02</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-08-26</td>
+<td class="org-right">61</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-08-19</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-08-12</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-08-05</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-07-29</td>
+<td class="org-right">79</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-07-22</td>
+<td class="org-right">96</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-07-15</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-07-08</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-07-01</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-06-24</td>
+<td class="org-right">76</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-06-17</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-06-10</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-06-03</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-05-27</td>
+<td class="org-right">69</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-05-20</td>
+<td class="org-right">86</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-05-13</td>
+<td class="org-right">100</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-05-06</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-04-29</td>
+<td class="org-right">92</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-04-22</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-04-15</td>
+<td class="org-right">97</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-04-08</td>
+<td class="org-right">88</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-04-01</td>
+<td class="org-right">94</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-03-25</td>
+<td class="org-right">85</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-03-18</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-03-11</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-03-04</td>
+<td class="org-right">70</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-02-25</td>
+<td class="org-right">80</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-02-18</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-02-11</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-02-04</td>
+<td class="org-right">65</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-01-28</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-01-21</td>
+<td class="org-right">27</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-01-14</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2019-01-07</td>
+<td class="org-right">63</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-12-31</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-12-24</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-12-17</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-12-10</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-12-03</td>
+<td class="org-right">42</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-11-26</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-11-19</td>
+<td class="org-right">42</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-11-12</td>
+<td class="org-right">58</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-11-05</td>
+<td class="org-right">38</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-10-29</td>
+<td class="org-right">31</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-10-22</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-10-15</td>
+<td class="org-right">31</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-10-08</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-10-01</td>
+<td class="org-right">49</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-09-24</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-09-17</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-09-03</td>
+<td class="org-right">84</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-08-27</td>
+<td class="org-right">23</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-08-20</td>
+<td class="org-right">24</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-08-13</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-08-06</td>
+<td class="org-right">25</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-07-30</td>
+<td class="org-right">24</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-07-23</td>
+<td class="org-right">27</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-07-16</td>
+<td class="org-right">25</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-07-09</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-07-02</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-06-25</td>
+<td class="org-right">36</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-06-18</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-06-11</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-06-04</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-05-28</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-05-21</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-05-14</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-05-07</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-04-30</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-04-23</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-04-16</td>
+<td class="org-right">31</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-04-09</td>
+<td class="org-right">44</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-04-02</td>
+<td class="org-right">20</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-03-26</td>
+<td class="org-right">22</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-03-20</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-03-12</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-03-04</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-02-26</td>
+<td class="org-right">23</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-02-19</td>
+<td class="org-right">39</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-02-12</td>
+<td class="org-right">20</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-02-05</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-01-29</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-01-23</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-01-15</td>
+<td class="org-right">18</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-01-09</td>
+<td class="org-right">30</td>
+</tr>
+
+<tr>
+<td class="org-right">2018-01-01</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-12-26</td>
+<td class="org-right">30</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-12-19</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-12-11</td>
+<td class="org-right">20</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-12-04</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-11-27</td>
+<td class="org-right">20</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-11-20</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-11-13</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-11-06</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-10-30</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-10-23</td>
+<td class="org-right">28</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-08-21</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-08-14</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-08-07</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-07-31</td>
+<td class="org-right">53</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-07-24</td>
+<td class="org-right">52</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-07-17</td>
+<td class="org-right">54</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-07-10</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-07-03</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-06-26</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-06-19</td>
+<td class="org-right">21</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-06-12</td>
+<td class="org-right">24</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-06-05</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-05-29</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-05-22</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-05-15</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-05-08</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-05-01</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-04-24</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-04-17</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-04-10</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-04-03</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-03-27</td>
+<td class="org-right">31</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-03-20</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-03-13</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-03-06</td>
+<td class="org-right">38</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-02-27</td>
+<td class="org-right">44</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-02-20</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-02-06</td>
+<td class="org-right">23</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-30</td>
+<td class="org-right">30</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-23</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-16</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-13</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-09</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2017-01-02</td>
+<td class="org-right">25</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-12-26</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-12-19</td>
+<td class="org-right">44</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-12-12</td>
+<td class="org-right">36</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-12-05</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-11-28</td>
+<td class="org-right">27</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-11-21</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-11-14</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-11-07</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-10-31</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-10-24</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-10-17</td>
+<td class="org-right">36</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-10-10</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-10-03</td>
+<td class="org-right">41</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-09-26</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-09-19</td>
+<td class="org-right">39</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-09-12</td>
+<td class="org-right">27</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-09-05</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-08-29</td>
+<td class="org-right">78</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-08-22</td>
+<td class="org-right">19</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-08-15</td>
+<td class="org-right">17</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-08-08</td>
+<td class="org-right">19</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-08-01</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-07-25</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-07-18</td>
+<td class="org-right">26</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-07-10</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-07-04</td>
+<td class="org-right">48</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-06-27</td>
+<td class="org-right">32</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-06-20</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-06-13</td>
+<td class="org-right">34</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-06-06</td>
+<td class="org-right">29</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-05-30</td>
+<td class="org-right">39</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-05-23</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-05-16</td>
+<td class="org-right">43</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-05-09</td>
+<td class="org-right">60</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-05-02</td>
+<td class="org-right">45</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-04-25</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-04-18</td>
+<td class="org-right">35</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-04-11</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-04-04</td>
+<td class="org-right">42</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-03-28</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-03-21</td>
+<td class="org-right">42</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-03-14</td>
+<td class="org-right">93</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-02-22</td>
+<td class="org-right">72</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-02-15</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-02-15</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-02-08</td>
+<td class="org-right">57</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-02-01</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-01-25</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-01-18</td>
+<td class="org-right">37</td>
+</tr>
+
+<tr>
+<td class="org-right">2016-01-11</td>
+<td class="org-right">51</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-12-28</td>
+<td class="org-right">55</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-12-21</td>
+<td class="org-right">33</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-12-14</td>
+<td class="org-right">45</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-12-07</td>
+<td class="org-right">50</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-11-30</td>
+<td class="org-right">56</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-11-23</td>
+<td class="org-right">47</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-11-16</td>
+<td class="org-right">54</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-11-09</td>
+<td class="org-right">40</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-11-02</td>
+<td class="org-right">25</td>
+</tr>
+
+<tr>
+<td class="org-right">2015-10-26</td>
+<td class="org-right">32</td>
+</tr>
+</tbody>
+</table>
+
+
+</details>
+<div><a href="https://sachachua.com/blog/2026/10/analyzing-emacs-news/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F10%2Fanalyzing-emacs-news%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

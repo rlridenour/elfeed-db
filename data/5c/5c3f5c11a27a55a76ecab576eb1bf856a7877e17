@@ -1,0 +1,216 @@
+<p>
+I'm preparing for a conversation with <a href="https://linkarzu.com/">linkarzu</a>.
+It would be fun to quote snippets from some of the other videos he has.
+I like the way he does a lot of reaction videos that build on what people have shared.
+He tends to listen to things at 1.25 or 1.5x speed.
+I'm not sure if I have the patience even for that,
+so it'd be nice to be able to just quickly skim the text.
+He also clips a lot of his own videos.
+It might be interesting to play around with my workflows for listening to snippets and clipping them.
+</p>
+
+<p>
+I've grabbed YouTube captions and reformatted them before:
+</p>
+<ul class="org-ul">
+<li><a href="https://sachachua.com/blog/2021/04/grabbing-the-youtube-auto-generated-captions-is-pretty-useful-when-making-emacs-news/">Grabbing the Youtube auto-generated captions is pretty useful when making Emacs News</a> (2021)</li>
+<li><a href="https://sachachua.com/blog/2021/04/org-mode-insert-youtube-video-with-separate-captions/">Org Mode: Insert YouTube video with separate captions</a> (2021)</li>
+</ul>
+
+<p>
+This time around, I want to get the VTT format so that I can possibly use them with <a href="https://github.com/sachac/subed-record">subed-record</a> to clip audio or video.
+</p>
+
+<p>
+From a YouTube link, I want to run a single command that gets me a VTT file with that as the media source and with the captions.
+If there are any chapters in the description, it would be lovely to get them too. I can get them from the JSON, yay!
+</p>
+
+<p>
+Now I can use <code>M-x sacha-subed-youtube</code> to open the VTT file, which is cached locally, and I can use <code>M-x sacha-subed-youtube-region-as-quote</code> after selecting a section. Well, actually, I have an Embark command <code>s</code> (for "subed") that I can run on a YouTube video link and a selected-mode shortcut for <code>y</code> that I can run when the region is selected. Results:
+</p>
+
+<p>
+<a href="https://youtu.be/-1qS7Xiuh9E?t=586&end=619">I Asked Prot If I Should Switch to Emacs</a>
+</p>
+<blockquote>
+<p>
+<span class="media-time" data-start="586.000">00:09:46</span>: I think the value of Org is that it is in the context of Emacs, which can now do other things. It can be your email client. It can be your agenda. Of course, it can be your programming environment. All these sorts of things, like your RSS feed reader and so on. And in the context of all that, you also have Org. So for me, that's kind of the value. But otherwise, having Org elsewhere, it's great still, because the paradigm of Org, I think, is a portable paradigm.
+</p>
+</blockquote>
+
+<p>
+<a href="https://youtu.be/N95_UgZXPms?t=0&end=7">Org Mode in Neovim Is Finally Here - Full org.nvim Demo</a>
+</p>
+<blockquote>
+<p>
+<span class="media-time" data-start="0.000">00:00:00</span>: I think that I achieved like 100% of parity with the original Org Mode version on Emacs.
+</p>
+</blockquote>
+
+<details><summary>Code for subed + YouTube</summary>
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-subed-youtube-dir</span> <span class="org-string">"~/proj/youtube-captions"</span>
+  <span class="org-doc">"Directory with YouTube captions."</span>)
+(<span class="org-keyword">defvar</span> <span class="org-variable-name">sacha-subed-youtube-temp-dir</span> <span class="org-string">"~/Downloads"</span> <span class="org-doc">"Snap installations need a workaround for permission."</span>)
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-youtube</span> (url)
+  <span class="org-doc">"Download the automatic subtitles or check my cache."</span>
+  (<span class="org-keyword">interactive</span> <span class="org-string">"MURL: "</span>)
+  (<span class="org-keyword">let*</span> ((id (sacha-org-yt-id url))
+         (existing (car (directory-files sacha-subed-youtube-dir t
+                                         (concat <span class="org-string">"^"</span> (regexp-quote id) <span class="org-string">".*\\.vtt\\'"</span>)))))
+    (<span class="org-keyword">if</span> existing
+        (<span class="org-keyword">progn</span>
+          (find-file existing)
+          (subed-mpv-play-from-url url))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Download</span>
+      (<span class="org-keyword">let</span> ((directory (make-temp-file (expand-file-name <span class="org-string">"yt-dlp"</span> sacha-subed-youtube-temp-dir) t))
+            filename
+            json
+            match
+            chapters
+            subtitles)
+        (<span class="org-keyword">with-current-buffer</span> (get-buffer-create <span class="org-string">"*yt-dlp*"</span>)
+          (<span class="org-keyword">let</span> ((default-directory directory))
+            (call-process
+             <span class="org-string">"yt-dlp"</span> nil t nil
+             <span class="org-string">"&#45;&#45;skip-download"</span>
+             <span class="org-string">"&#45;&#45;write-info-json"</span>
+             <span class="org-string">"&#45;&#45;sub-format"</span>
+             <span class="org-string">"vtt"</span>
+             <span class="org-string">"&#45;&#45;write-subs"</span>
+             <span class="org-string">"&#45;&#45;write-auto-subs"</span>
+             url)))
+        (<span class="org-keyword">when</span> (null (directory-files directory t <span class="org-string">"\\.json$"</span>))
+          (<span class="org-warning">error</span> <span class="org-string">"Could not get data."</span>))
+        (<span class="org-keyword">setq</span> json (json-read-file (car (directory-files directory t <span class="org-string">"\\.json$"</span>))))
+        (<span class="org-keyword">setq</span> chapters (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">chapters</span> json))
+        (<span class="org-keyword">setq</span> filename (expand-file-name
+                        (concat id <span class="org-string">" - "</span> (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> json) <span class="org-string">".vtt"</span>)
+                        sacha-subed-youtube-dir))
+        (<span class="org-keyword">setq</span> subtitles (subed-parse-file (car (directory-files
+                                                directory t
+                                                <span class="org-string">"\\.vtt$"</span>))))
+        (delete-directory directory t)
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">add the chapters as comments</span>
+        (mapc
+         (<span class="org-keyword">lambda</span> (sub)
+           (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> chapters
+                      (&gt;= (elt sub 1)
+                          (* (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">start_time</span> (car chapters)) 1000)))
+             (<span class="org-keyword">setf</span> (elt sub 4) (alist-get <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">title</span> (<span class="org-keyword">pop</span> chapters)))))
+         subtitles)
+        (subed-create-file
+         filename
+         subtitles
+         t)
+        (find-file filename)
+        (subed-mpv-play-from-url url)))))
+
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-youtube-id</span> ()
+  <span class="org-doc">"Return the YouTube ID."</span>
+  (<span class="org-keyword">or</span> (<span class="org-keyword">save-restriction</span>
+        (<span class="org-keyword">save-excursion</span>
+          (goto-char (point-min))
+          (subed-forward-subtitle-text)
+          (<span class="org-keyword">when</span> (subed-record-get-directive <span class="org-string">"YOUTUBE_URL"</span>)
+            (sacha-org-yt-id
+             (subed-record-get-directive <span class="org-string">"YOUTUBE_URL"</span>)))))
+      (car (split-string (file-name-base (buffer-file-name)) <span class="org-string">" "</span>))))
+
+<span class="org-comment-delimiter">;; </span><span class="org-comment">Now we just need a quick way to copy a YouTube URL.</span>
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-youtube-url</span> (<span class="org-type">&amp;optional</span> start-msecs end-msecs)
+  <span class="org-doc">"Copy YouTube URL for the current timestamp."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">when-let*</span>
+      ((id (sacha-subed-youtube-id))
+       (s
+        (<span class="org-keyword">if</span> end-msecs
+            (format <span class="org-string">"https://youtu.be/%s?t=%d&amp;end=%d"</span>
+                    id
+                    (/ (<span class="org-keyword">or</span> start-msecs (subed-subtitle-msecs-start))
+                       1000)
+                    (1+ (/ end-msecs
+                           1000)))
+          (format <span class="org-string">"https://youtu.be/%s?t=%d"</span>
+                    id
+                    (/ (<span class="org-keyword">or</span> start-msecs (subed-subtitle-msecs-start))
+                       1000)))))
+    (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+      (kill-new s)
+      (message <span class="org-string">"%s"</span> s))
+    s))
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-youtube-play</span> ()
+  <span class="org-doc">"Play this video from YouTube."</span>
+  (<span class="org-keyword">interactive</span>)
+  (<span class="org-keyword">when-let*</span>
+      ((id (sacha-subed-youtube-id))
+       (s (concat <span class="org-string">"https://youtu.be/"</span> id)))
+    (<span class="org-keyword">when</span> (string= subed-mpv-media-file s)
+      (subed-mpv-play-from-url s))
+    (subed-mpv-jump-to-current-subtitle)
+    (subed-mpv-unpause)))
+
+<span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-subed-youtube-region-as-quote</span> (beg end <span class="org-type">&amp;optional</span> label)
+  <span class="org-doc">"Format this as a quote."</span>
+  (<span class="org-keyword">interactive</span> (list (region-beginning) (region-end) (<span class="org-keyword">when</span> current-prefix-arg (read-string <span class="org-string">"Label: "</span>))))
+  (<span class="org-keyword">let*</span> ((id (sacha-subed-youtube-id))
+         (url (sacha-subed-youtube-url
+               (<span class="org-keyword">save-excursion</span>
+                 (goto-char beg)
+                 (subed-subtitle-msecs-start))
+               (<span class="org-keyword">save-excursion</span>
+                 (goto-char end)
+                 (subed-subtitle-msecs-stop))))
+         (base (file-name-base (buffer-file-name)))
+         (text (subed-subtitle-list-text (subed-subtitle-list beg end)))
+         (s (format
+             <span class="org-string">"%s\n#+begin_quote\n%s: %s\n#+end_quote\n"</span>
+             (org-link-make-string
+              (concat <span class="org-string">"yt:"</span> url)
+              (<span class="org-keyword">or</span> label
+                  (<span class="org-keyword">and</span> (string-match (format <span class="org-string">"^%s - </span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">(</span></span><span class="org-string">.+</span><span class="org-string"><span class="org-regexp-grouping-backslash">\\</span></span><span class="org-string"><span class="org-regexp-grouping-construct">)</span></span><span class="org-string">"</span> (regexp-quote id)) base)
+                       (match-string 1 base))
+                  (sacha-page-title url)))
+             (org-link-make-string
+              (concat <span class="org-string">"vtime:"</span>
+                      (subed-msecs-to-timestamp
+                       (<span class="org-keyword">save-excursion</span>
+                         (goto-char beg)
+                         (subed-subtitle-msecs-start))
+                       t)))
+             (<span class="org-keyword">with-temp-buffer</span>
+               (insert text)
+               (<span class="org-keyword">let</span> ((fill-column most-positive-fixnum))
+                 (fill-region (point-min) (point-max))
+                 (string-trim (buffer-string)))))))
+      (<span class="org-keyword">when</span> (called-interactively-p <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">any</span>)
+        (kill-new s)
+        (message <span class="org-string">"%s"</span> s))
+      s))
+</code></pre>
+</div>
+
+</details>
+
+<p>
+Some of this code hasn't been committed to <a href="https://github.com/sachac/subed">subed</a> yet, but I will commit it sometime this week.
+</p>
+
+<p>
+My next steps might be to:
+</p>
+
+<ul class="org-ul">
+<li>cache the video as a whole to make it easier to check the waveforms</li>
+<li>extract the segment to a standalone video file so that it's easy for me to play back or include in another video</li>
+<li>see if I can use my voice activity detection and semi-streaming speech recognition to get a VTT of my current OBS recording</li>
+</ul>
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#subed">EmacsConfiguration.</a></div><div><a href="https://sachachua.com/blog/2026/10/subed-el-and-quoting-snippets-of-youtube-videos-from-the-auto-captions/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F10%2Fsubed-el-and-quoting-snippets-of-youtube-videos-from-the-auto-captions%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

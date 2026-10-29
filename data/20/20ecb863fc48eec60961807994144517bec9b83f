@@ -1,0 +1,136 @@
+<p>
+I make lots of little <a href="https://emacsconf.org/2026/talks">EmacsConf schedule</a> updates based on the speakers' feedback.
+I needed a way to keep track of the schedule that I've just sent the speaker so that I could calculate the differences and notify them again the next time I change the schedule for their talk.
+I like the way that keeping track of this lets me include a summary of the change in the subject and in the body of the message. For example, one of the emails I sent today had the subject:
+This blog post is about updating the <code>EMAILED_SCHEDULE</code> entry property in my Org Mode file that keeps track of this year's conference talks so that I can save the schedule that I've emailed. I want to set it only after I've successfully sent the email, because I might change my mind or forget to send the e-mail, and I want to make sure the entry property is based on what I've e-mailed.
+</p>
+
+<pre class="example" id="org1929970">
+EmacsConf 2026: Schedule update as of 2026-10-28: svg: Sun ~2:20 PM EST (40 min earlier)
+</pre>
+
+<p>
+I send the messages within Emacs, of course. This lets me use <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-mail.el">emacsconf-mail.el</a> to mail-merge using Emacs Lisp. I can then use <code>message-sent-hook</code> to run buffer-specific code once I've sent the message. This lets me set it up so that each message updates its own talk once I've used <code>C-c C-c</code> to send it.
+</p>
+
+<p>
+First, I need a function that adds to a talk's logbook.
+This is not specifically needed for the <code>message-sent-hook</code>, but it's useful for keeping track of the fact that I've sent this kind of email to that speaker on this date.
+It's very helpful to be able to see who I've already sent the backstage information to or when was the last time I sent them a schedule update.
+I can also filter the list of talks by the text in the logs so that if I partially send a mail merge and then cancel the rest because I want to tweak the code, I can send the new mail merge only to the remaining speakers.
+This is in <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf.el">emacsconf.el</a>.
+</p>
+
+<p>
+</p><details><summary>emacsconf-add-to-talk-logbook: Add NOTE as a logbook entry for TALK.</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">emacsconf-add-to-talk-logbook</span> (talk note)
+  <span class="org-doc">"Add NOTE as a logbook entry for TALK."</span>
+  (<span class="org-keyword">interactive</span> (list (emacsconf-complete-talk) (read-string <span class="org-string">"Note: "</span>)))
+  (<span class="org-keyword">save-window-excursion</span>
+    (<span class="org-keyword">save-excursion</span>
+      (<span class="org-keyword">emacsconf-with-talk-heading</span> talk
+        (emacsconf-add-to-logbook
+         (<span class="org-keyword">if</span> (functionp note)
+             (funcall note)
+           note))
+        (bury-buffer (current-buffer))))))
+
+</pre></div></details>
+<p></p>
+
+<p>
+This function is the one that gets added to the message sent hook. It's in <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-mail.el">emacsconf-mail.el</a>:
+</p>
+
+<p>
+</p><details><summary>emacsconf-mail-add-to-logbook: Add to logbook for all matching talks from this speaker.</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">emacsconf-mail-add-to-logbook</span> (email note)
+  <span class="org-doc">"Add to logbook for all matching talks from this speaker."</span>
+  (<span class="org-keyword">interactive</span>
+   (<span class="org-keyword">let*</span> ((email (mail-strip-quoted-names
+                  (plist-get (plist-get (notmuch-show-get-message-properties) <span class="org-builtin">:headers</span>)
+                             <span class="org-builtin">:From</span>)))
+          (talks (emacsconf-mail-talks email)))
+     (list
+      email
+      (read-string (format <span class="org-string">"Note for %s: "</span>
+                           (mapconcat (<span class="org-keyword">lambda</span> (o) (plist-get o <span class="org-builtin">:slug</span>))
+                                      talks<span class="org-string">", "</span>))))))
+  (<span class="org-keyword">condition-case</span> e
+      (<span class="org-keyword">save-window-excursion</span>
+        (mapc
+         (<span class="org-keyword">lambda</span> (talk)
+           (emacsconf-add-to-talk-logbook talk note))
+         (emacsconf-mail-talks email)))
+    (<span class="org-warning">error</span> (message <span class="org-string">"Error %s"</span> e))))
+
+</pre></div></details>
+<p></p>
+
+<p>
+And this function actually sets up the <code>message-sent-hook</code>:
+</p>
+
+<p>
+</p><details><summary>emacsconf-mail-log-message-when-sent</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">emacsconf-mail-log-message-when-sent</span> (o message)
+  (add-hook <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">message-sent-hook</span>
+            <span class="org-highlight-quoted-quote">`</span>(<span class="org-keyword">lambda</span> ()
+               (<span class="org-keyword">save-window-excursion</span>
+                 (emacsconf-add-to-talk-logbook
+                  ,(plist-get o <span class="org-builtin">:slug</span>)
+                  ,message))
+               (<span class="org-keyword">when</span> (match-buffers <span class="org-string">"*unsent"</span>)
+                 (switch-to-buffer (car (match-buffers <span class="org-string">"*unsent"</span>)))))
+            nil t))
+
+</pre></div></details>
+<p></p>
+
+<p>
+Which gets called by this part of <code>emacsconf-mail-prepare</code>:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(<span class="org-keyword">when</span> (plist-get template <span class="org-builtin">:log-note</span>)
+  (mapc (<span class="org-keyword">lambda</span> (talk)
+          (emacsconf-mail-log-message-when-sent talk (plist-get template <span class="org-builtin">:log-note</span>)))
+        (emacsconf-mail-talks email)))
+</code></pre>
+</div>
+
+
+<p>
+Then my <code>emacsconf-mail-interim-schedule-update</code> can specify the <code>:log-note</code> like this:
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>      <span class="org-builtin">:log-note</span>
+      (<span class="org-keyword">lambda</span> ()
+        (<span class="org-keyword">dolist</span> (talk (cdr group))
+          (<span class="org-keyword">emacsconf-with-talk-heading</span> talk
+            (emacsconf-schedule-save-emailed-time)))
+        (concat <span class="org-string">"emacsconf-mail-interim-schedule-update"</span>
+                (<span class="org-keyword">if</span> log-note (concat <span class="org-string">": "</span> log-note) <span class="org-string">""</span>) <span class="org-string">" - "</span> summary))
+</code></pre>
+</div>
+
+
+<p>
+This lets me run that code only when the mail gets sent.
+</p>
+
+<p>
+Next automation idea: Someday I may even figure out how to attach an
+iCalendar file (including updates to events) so that people can add it to their calendars.
+</p>
+
+<p>
+If you find yourself wanting to run code when a message gets sent, then definitely take a look at <code>message-sent-hook</code>.
+You can add a buffer-local hook with the fourth argument to add-hook (ex: <code>(add-hook 'message-sent-hook (lambda () ...) nil t)</code>) so that you can take actions specific to that message.
+</p>
+
+<p>
+Have fun!
+</p>
+<div><a href="https://sachachua.com/blog/2026/10/emacsconf-using-message-sent-hook-to-run-buffer-specific-code-to-keep-track-of-e-mailed-schedules/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F10%2Femacsconf-using-message-sent-hook-to-run-buffer-specific-code-to-keep-track-of-e-mailed-schedules%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

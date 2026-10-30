@@ -1,0 +1,203 @@
+<p>I like forums. Debates, questions, answers, opinions, etc. That feeling of an asynchronous community, where answers are thought through and content lasts, is what makes the internet an interesting place. That is why I like reading them and taking part in them. But I had never designed or built one. In my spare time I started sketching one, and I ended up building my humble <em>headless</em>, federated forum, with simple, modern technologies and open standards.</p>
+<p>And I learned a lot along the way. A forum looks simple, but it hides the classic problems of any server. Who can do what? How do you tell a moderator from a regular user? What happens when you have to ban someone? How do you stop someone from stealing an account? Roles, permissions, bans and security. I had to solve them one by one, and you don't learn that by reading.</p>
+<p>Let me tell you how I made <a href="https://git.andros.dev/andros/tyrtulia">Tyrtulia</a>.</p>
+<h2 id="blog-single-content__title--a-forum-with-no-interface" class="blog-single__content-title">A forum with no interface</h2>
+<p>The server only offers a solid, documented API. It is REST with hypermedia: the client only knows one route, <code>GET /</code>, and discovers everything else by following links. Underneath there are some very boring standards:</p>
+<ul>
+<li>RFC 9110: HTTP semantics, with <code>ETag</code> and <code>If-Match</code> so edits don't overwrite each other.</li>
+<li>RFC 9457: errors.</li>
+<li>RFC 7396: partial updates with <code>PATCH</code>.</li>
+<li>RFC 6570: URL templates.</li>
+<li>RFC 4287: Atom feeds.</li>
+<li>RFC 9562: UUIDv7 identifiers.</li>
+<li>JSON Schema: validation.</li>
+<li>Server-Sent Events: real-time events.</li>
+</ul>
+<p>There is no web interface, no forms, no advanced authentication systems, no file handling (images, attachments, etc.), and nothing that isn't strictly needed to read and write messages.</p>
+<p>That is why it is so light. It uses between 60 and 70 MB of RAM and about 50 MB of disk. It only needs Python and SQLite to run.</p>
+<h3 id="blog-single-content__title--an-api-that-discovers-itself" class="blog-single__content-title">An API that discovers itself</h3>
+<p>How does a client know what it can do? The server tells it with links. Look at the same request, <code>GET /</code>, made by a guest (simplified):</p>
+<pre class="highlight"><code class="language-json">{
+    "name": "Forum of example.org",
+    "_links": {
+        "self": {"href": "/", "method": "GET"},
+        "latest": {"href": "/threads", "method": "GET"},
+        "search": {"href": "/search{?q,author,in}", "method": "GET", "templated": true},
+        "login": {"href": "/sessions", "method": "POST", "schema": "/schemas/session"}
+    }
+}</code></pre>
+<p>And now by <code>alice</code>, logged in:</p>
+<pre class="highlight"><code class="language-json">{
+    "name": "Forum of example.org",
+    "_links": {
+        "self": {"href": "/", "method": "GET"},
+        "latest": {"href": "/threads", "method": "GET"},
+        "search": {"href": "/search{?q,author,in}", "method": "GET", "templated": true},
+        "createThread": {"href": "/threads", "method": "POST", "schema": "/schemas/thread"},
+        "notifications": {"href": "/notifications", "method": "GET"},
+        "events": {"href": "/events", "method": "GET", "type": "text/event-stream"}
+    }
+}</code></pre>
+<p>If I change a route tomorrow, no client breaks, because none of them knew it in advance. They just follow the links the server gives them.</p>
+<h2 id="blog-single-content__title--why-not-use-one-that-already-exists" class="blog-single__content-title">Why not use one that already exists?</h2>
+<p>I know there are very complete free software forums:</p>
+<ul>
+<li><strong><a href="https://www.discourse.org/" rel="noopener noreferrer" target="_blank">Discourse</a></strong>: the most popular one today.</li>
+<li><strong><a href="https://flarum.org/" rel="noopener noreferrer" target="_blank">Flarum</a></strong>: PHP with MySQL.</li>
+<li><strong><a href="https://nodebb.org/" rel="noopener noreferrer" target="_blank">NodeBB</a></strong>: Node.js, with MongoDB, Redis or PostgreSQL. It stands out for real time with WebSockets.</li>
+</ul>
+<p>Or the good old classic: <a href="https://www.phpbb.com/" rel="noopener noreferrer" target="_blank">phpBB</a>.</p>
+<p>They are all fantastic, but they are designed to be used from a web browser. They also have an ambitious scope. That is ideal for large communities, but too much for a small, light forum.</p>
+<p>That said, Tyrtulia doesn't give up on the browser: it can be indexed by search engines and anyone can read it on the web.</p>
+<h2 id="blog-single-content__title--no-passwords" class="blog-single__content-title">No passwords</h2>
+<p>No OAuth, no OpenID, no sign-up forms. There are two ways to authenticate:</p>
+<ul>
+<li><strong>Your Unix user</strong>: the client talks to the forum through a Unix socket. The operating system tells the forum which user is on the other side. No sign-up, no login. Your user is your account.</li>
+<li><strong>SSH key</strong>: the client connects over HTTP and the forum sends it a challenge. The client signs it with your private SSH key and the forum verifies it with your public key.</li>
+</ul>
+<p>There is no registration over HTTP. If you have a Unix user on the server, you already have an account: it is created the first time you connect through the socket. From there you can add your SSH keys to log in from outside. If you don't have a user on the machine, the administrator creates an account for you with your public key from the command line. On a tilde, having a Unix user is already the invitation.</p>
+<p>Easy to use, secure, and no passwords to steal.</p>
+<h2 id="blog-single-content__title--what-changes-compared-to-bbj" class="blog-single__content-title">What changes compared to BBJ</h2>
+<p>The idea isn't mine. I was inspired by <a href="https://github.com/bbj-dev/bbj" rel="noopener noreferrer" target="_blank">BBJ</a>, a bulletin board for the terminal built for small communities or clubs (tildes, pubnixes, club servers, etc.). I took its spirit and brought it to my own ground. Still, there are important differences.</p>
+<p>First, the foundations.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th></th>
+<th>BBJ</th>
+<th>Tyrtulia</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>API style</td>
+<td>RPC: everything is <code>POST /api/&lt;endpoint&gt;</code></td>
+<td>REST with hypermedia (HAL): only <code>GET /</code> is known</td>
+</tr>
+<tr>
+<td>Permissions</td>
+<td>The client asks (<code>is_admin</code>, <code>edit_query</code>)</td>
+<td>Links that appear or disappear</td>
+</tr>
+<tr>
+<td>Authentication</td>
+<td>Unsalted SHA-256 hash of the password on every request</td>
+<td>No passwords: Unix socket or SSH-signed challenge</td>
+</tr>
+<tr>
+<td>Errors</td>
+<td>6 custom numeric codes</td>
+<td>RFC 9457 with a catalog of types</td>
+</tr>
+<tr>
+<td>Pagination</td>
+<td>Everything at once</td>
+<td>Cursor based</td>
+</tr>
+<tr>
+<td>Concurrency</td>
+<td>The last edit wins, silently</td>
+<td><code>ETag</code> and <code>If-Match</code></td>
+</tr>
+<tr>
+<td>Text format</td>
+<td>Custom language (<code>[bold: ...]</code>, <code>[red: ...]</code>)</td>
+<td>Standard Markdown</td>
+</tr>
+<tr>
+<td>Validation</td>
+<td>A <code>db_validate</code> endpoint</td>
+<td>JSON Schema linked from each form</td>
+</tr>
+<tr>
+<td>Configuration</td>
+<td><code>config.json</code></td>
+<td>TOML</td>
+</tr>
+</tbody>
+</table>
+</div><p>Then, the features I missed.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th></th>
+<th>BBJ</th>
+<th>Tyrtulia</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Reply to a specific post</td>
+<td><code>&gt;&gt;N</code> quotes in the text</td>
+<td>Linked replies, with a tree view</td>
+</tr>
+<tr>
+<td>Mentions</td>
+<td>No</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Notifications</td>
+<td>No (pending since 2017)</td>
+<td>Inbox with replies, mentions and alerts</td>
+</tr>
+<tr>
+<td>Real time</td>
+<td>No, you have to poll</td>
+<td>Server-Sent Events, with resume</td>
+</tr>
+<tr>
+<td>Edit history</td>
+<td>No, editing overwrites</td>
+<td>Full, with diffs and revert</td>
+</tr>
+<tr>
+<td>Deletion</td>
+<td>Deletes the row</td>
+<td>Tombstone: numbering is preserved</td>
+</tr>
+<tr>
+<td>Search</td>
+<td>Each client searches what it has downloaded</td>
+<td>Server-side full text, accent and case insensitive</td>
+</tr>
+<tr>
+<td>Feeds</td>
+<td>No</td>
+<td>Atom for the forum and each thread</td>
+</tr>
+<tr>
+<td>Moderation</td>
+<td>Admin or not</td>
+<td>Roles, hidden posts, reports and a public log</td>
+</tr>
+<tr>
+<td>Rate limiting</td>
+<td>No</td>
+<td>Per user and per IP</td>
+</tr>
+</tbody>
+</table>
+</div><p>What they share is a small server built on SQLite and several text clients against a documented API.</p>
+<h2 id="blog-single-content__title--clients" class="blog-single__content-title">Clients</h2>
+<p>A <em>headless</em> forum needs clients, no way around it.</p>
+<h3 id="blog-single-content__title--tyrtulia-tui" class="blog-single__content-title">Tyrtulia TUI</h3>
+<p><a href="https://git.andros.dev/andros/tyrtulia-tui">Tyrtulia TUI</a> is the terminal client, built with Textual.</p>
+<p><img alt="A thread in Tyrtulia TUI" src="https://img.andros.dev/a68h_x8D3VTyz8p6Y-BoFh0w2Gw=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/tyrtulia-tui-thread.png" /></p>
+<h3 id="blog-single-content__title--tyrtuliael" class="blog-single__content-title">tyrtulia.el</h3>
+<p>If you know me a little, you know this package was a must: <a href="https://git.andros.dev/andros/tyrtulia.el">tyrtulia.el</a>.</p>
+<p><img alt="A thread in tyrtulia.el" src="https://img.andros.dev/oDU8xw1h26NmhxlC25_EYvrLc3I=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/tyrtulia-el-thread.png" /></p>
+<h3 id="blog-single-content__title--tyrtulia-web" class="blog-single__content-title">Tyrtulia Web</h3>
+<p><a href="https://git.andros.dev/andros/tyrtulia-web">Tyrtulia Web</a> is more a mirror of the content than a client. Its goal is to let search engines index the forum and let anyone read it from a browser.</p>
+<p><img alt="A thread in Tyrtulia Web" src="https://img.andros.dev/dGNVvmXPwcmaRRWW0hQQh3SqU7Q=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/tyrtulia-web-thread.png" /></p>
+<p>It has an unstyled theme and another one that mimics my website.</p>
+<h2 id="blog-single-content__title--federation" class="blog-single__content-title">Federation</h2>
+<p>You can connect to one forum or set up several. Federation happens in the clients: servers don't talk to each other or copy messages between them. Each forum is independent, with its own users, rules and moderators.</p>
+<p>Instead of splitting them into tabs or accounts, the clients mix the threads of all of them into a single list.</p>
+<p><img alt="Three forums in the same list" src="https://img.andros.dev/J9wYL7kquMLlj2nNlNjC1koCw0Y=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/10/tyrtulia-el-forums.png" /></p>
+<p>Of course, you can only write in the forums where you have an account. In the rest you can only read.</p>
+<p>I think it's a pretty cool feature, because it keeps the API code much simpler and lets you explore other forums at zero cost.</p>
+<h2 id="blog-single-content__title--try-it" class="blog-single__content-title">Try it</h2>
+<p>It has been fun to design and build. Of course there are more complete forums, more powerful federation systems, and even decentralized systems that leave Tyrtulia in the dust (Aether, Nostr...). But its niche is very specific: a light, closed-access, federated, indexable, secure forum with text clients. For everything else, there are better things out there.</p>
+<p>If you feel like trying it, the installation guide is in the <a href="https://git.andros.dev/andros/tyrtulia#getting-started-for-administrators">Tyrtulia repository</a>.</p>
+<p>I look forward to your feedback.</p><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-b5c8c6aa@andros.dev" class="link">comment+article-b5c8c6aa@andros.dev</a> to leave a comment. The subject will be ignored.</p>

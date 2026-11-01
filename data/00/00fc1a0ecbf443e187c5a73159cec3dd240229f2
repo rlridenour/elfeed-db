@@ -1,0 +1,308 @@
+
+        <link rel="stylesheet" type="text/css" href="https://rahuljuliato.com/rss-styles.css">
+        <h2>Intro</h2>
+<p>I usually stick with some favorite font for a while, then, for some
+reason, the bug bites: some new activity, different hardware or work,
+and I want to change the default font.</p>
+<p>I have this old file with content like this:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span> <span class="token lisp-property property">:family</span> <span class="token string">"3270 Nerd Font Mono"</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span> <span class="token lisp-property property">:family</span> <span class="token string">"GoMono Nerd Font"</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span> <span class="token lisp-property property">:family</span> <span class="token string">"Hack Nerd Font Mono"</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span> <span class="token lisp-property property">:family</span> <span class="token string">"Iosevka Nerd Font Mono"</span><span class="token punctuation">)</span>
+<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span> <span class="token lisp-property property">:family</span> <span class="token string">"JetBrainsMono Nerd Font"</span><span class="token punctuation">)</span>
+<span class="token comment">;; ... and a bunch more</span>
+</code></pre></div>
+<p>What I do (shame on me) is put the cursor at the end of a line, <code>C-x C-e</code>, switch back to the buffer or tab I was working on, look around
+for a while, switch back to the file, move down one line, <code>C-x C-e</code>
+again... You get the idea. It works, but it's clunky, and changing the
+size means editing the line and adding <code>:height</code> to it.</p>
+<p>I wanted a way to scrub through my font list and increase or decrease
+the font height using only the arrow keys, while I check live what
+feels right.</p>
+<p>That's a perfect job for a
+<a href="https://www.gnu.org/software/emacs/manual/html_mono/transient.html">transient</a>
+menu, which has shipped with Emacs since version 28, written by the
+one and only Jonas Bernoulli, author of nothing less than
+<a href="https://magit.vc/">Magit</a>.</p>
+<p>This post is a walkthrough of how you can implement such functionality
+yourself, and hopefully a guide along your Elisp learning journey.</p>
+<blockquote>
+<p><strong>TL;DR:</strong> jump straight to the <a href="#full-source">full source</a>, put it
+in your init file, edit the font list, and run <code>M-x font-cycle</code>.</p>
+</blockquote>
+<h2>Font Candidates</h2>
+<p>First, we build a list of font families:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">font-cycle-families</span></span>
+  <span class="token punctuation">'(</span><span class="token string">"3270 Nerd Font Mono"</span>
+	<span class="token string">"GoMono Nerd Font"</span>
+	<span class="token string">"Hack Nerd Font Mono"</span>
+	<span class="token string">"Hurmit Nerd Font Mono"</span>
+	<span class="token string">"Inconsolata <span class="token argument">LGC</span> Nerd Font"</span>
+	<span class="token string">"Iosevka Nerd Font Mono"</span>
+	<span class="token string">"IosevkaTerm Nerd Font Mono"</span>
+	<span class="token string">"JetBrainsMono Nerd Font"</span>
+	<span class="token string">"Lekton Nerd Font Mono"</span>
+	<span class="token string">"M+CodeLat50 Nerd Font"</span>
+	<span class="token string">"Maple Mono NF"</span>
+	<span class="token string">"MartianMono Nerd Font"</span>
+	<span class="token string">"SauceCodePro Nerd Font"</span>
+	<span class="token string">"UbuntuMono Nerd Font Mono"</span>
+	<span class="token string">"VictorMono Nerd Font Mono"</span>
+	<span class="token string">"ZedMono Nerd Font Mono"</span><span class="token punctuation">)</span>
+  <span class="token string">"Font families to cycle through with <span class="token symbol">`font-cycle'</span>."</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>If you don't know the exact family name of a font you have installed,
+and how it is "perceived" by Emacs, you can use <code>M-x describe-font</code>
+with completion, or <code>M-: (font-family-list)</code>.</p>
+<p>If a family on that list is not installed (a typo, another machine, a
+font you uninstalled), <code>set-face-attribute</code> won't complain. Emacs just
+falls back to some other font, and you end up judging the wrong
+thing. So, before cycling, we keep only the families Emacs can
+actually find:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--installed</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the members of <span class="token symbol">`font-cycle-families'</span> installed on this system."</span>
+  <span class="token punctuation">(</span><span class="token car">seq-filter</span> <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">family</span></span><span class="token punctuation">)</span></span> <span class="token punctuation">(</span><span class="token car">find-font</span> <span class="token punctuation">(</span><span class="token car">font-spec</span> <span class="token lisp-property property">:family</span> family<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			  font-cycle-families<span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<h2>Left and Right (fonts) Cycling</h2>
+<p>Cycling is an index and a <code>mod</code>. The <code>mod</code> is what makes it wrap
+around: going right from the last font takes you to the first one,
+and going left from the first takes you to the last.</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">font-cycle--index</span></span> <span class="token number">0</span>
+  <span class="token string">"Position of the current font in the installed families."</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--select</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">index</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Use the installed family at <span class="token argument">INDEX</span>, wrapping around both ends."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">fonts</span> <span class="token punctuation">(</span><span class="token car">font-cycle--installed</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">unless</span> fonts
+	  <span class="token punctuation">(</span><span class="token car">user-error</span> <span class="token string">"None of <span class="token symbol">`font-cycle-families'</span> is installed"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">setq</span> font-cycle--index <span class="token punctuation">(</span><span class="token car">mod</span> index <span class="token punctuation">(</span><span class="token car">length</span> fonts<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span>
+						<span class="token lisp-property property">:family</span> <span class="token punctuation">(</span><span class="token car">nth</span> font-cycle--index fonts<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-next</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Switch to the next font."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--select</span> <span class="token punctuation">(</span>1+ font-cycle--index<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-previous</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Switch to the previous font."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--select</span> <span class="token punctuation">(</span>1- font-cycle--index<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Note that <code>mod</code> in Elisp follows the sign of the divisor, so <code>(mod -1 16)</code> is <code>15</code>, not <code>-1</code>. This is what we want for going left.</p>
+<h2>Up and Down (height) Cycling</h2>
+<p>For the size, we change the <code>:height</code> of the <code>default</code> face. Its unit
+is 1/10 of a point, so a step of <code>10</code> is one point:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--resize</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">delta</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Change the default face height by <span class="token argument">DELTA</span> (1/10 pt)."</span>
+  <span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span>
+					  <span class="token lisp-property property">:height</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span> delta<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-bigger</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Increase the font size by 1pt."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--resize</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-smaller</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Decrease the font size by 1pt."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--resize</span> <span class="token number">-10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<h2>Keeping the Winner</h2>
+<p>When I finally find a combination I like, I don't want to remember and
+retype it. So one more command builds the exact line for my init file
+and puts it in the kill ring for later yanking:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--form</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the <span class="token symbol">`set-face-attribute'</span> call for the current font."</span>
+  <span class="token punctuation">(</span><span class="token car">format</span> <span class="token string">"(set-face-attribute 'default nil :family %<span class="token argument">S</span> :height %d)"</span>
+		  <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:family</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-copy</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Copy the current font setting as Elisp to the kill ring."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">kill-new</span> <span class="token punctuation">(</span><span class="token car">font-cycle--form</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token keyword">message</span> <span class="token string">"Copied: %s"</span> <span class="token punctuation">(</span><span class="token car">current-kill</span> <span class="token number">0</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Then it's just a <code>C-y</code> in <code>init.el</code>.</p>
+<h2>The Transient Menu</h2>
+<p>Now let's glue everything together. Each suffix marked with
+<code>:transient t</code> runs its command and keeps the menu open, so you can
+press the arrows as many times as you want. <code>y</code> and <code>q</code> don't have it,
+so they close the menu.</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">transient-define-prefix</span> font-cycle <span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token string">"Cycle through <span class="token symbol">`font-cycle-families'</span> and adjust the font size."</span>
+  <span class="token punctuation">[</span><span class="token lisp-property property">:description</span> font-cycle--description
+   <span class="token punctuation">[</span><span class="token string">"Font"</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;right>"</span> <span class="token string">"next"</span> font-cycle-next        <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;left>"</span> <span class="token string">"previous"</span> font-cycle-previous <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">]</span>
+   <span class="token punctuation">[</span><span class="token string">"Size"</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;up>"</span> <span class="token string">"bigger"</span> font-cycle-bigger       <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;down>"</span> <span class="token string">"smaller"</span> font-cycle-smaller   <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">]</span>
+   <span class="token punctuation">[</span><span class="token string">"Done"</span>
+	<span class="token punctuation">(</span><span class="token string">"y"</span> <span class="token string">"copy as elisp"</span> font-cycle-copy<span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"q"</span> <span class="token string">"quit"</span> transient-quit-one<span class="token punctuation">)</span><span class="token punctuation">]</span><span class="token punctuation">]</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>The <code>:description</code> of the outer group is a function, and transient
+calls it again every time the menu is redrawn. That gives us a header
+that always tells which font is on screen, its size, and where we are
+in the list:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--description</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Header showing the current font, its size and position in the list."</span>
+  <span class="token punctuation">(</span><span class="token car">format</span> <span class="token string">"%s  %dpt  [%d/%d]"</span>
+		  <span class="token punctuation">(</span><span class="token car">propertize</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:family</span><span class="token punctuation">)</span> <span class="token quoted-symbol variable symbol">'face</span> <span class="token quoted-symbol variable symbol">'bold</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">/</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span> <span class="token number">10</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span>1+ font-cycle--index<span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">length</span> <span class="token punctuation">(</span><span class="token car">font-cycle--installed</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+</code></pre></div>
+<p>Run <code>M-x font-cycle</code> and you get something like this at the bottom of
+the frame:</p>
+<div class="remark-highlight"><pre class="language-text"><code class="language-text">IosevkaTerm Nerd Font Mono  16pt  [7/16]
+Font             Size            Done
+ &lt;right&gt; next     &lt;up&gt;   bigger   y copy as elisp
+ &lt;left&gt;  previous &lt;down&gt; smaller  q quit</code></pre></div>
+<p>Since the menu lives at the bottom, everything above it is your real
+work: the buffers you were editing, your theme, your splits. Tap
+right, look, tap right again. If you like it, bump it up a point or
+two. When you're done, <code>y</code> and paste.</p>
+<p>If you want it one key away:</p>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token punctuation">(</span><span class="token car">keymap-global-set</span> <span class="token string">"C-c f"</span> <span class="token quoted-symbol variable symbol">#'font-cycle</span><span class="token punctuation">)</span>
+</code></pre></div>
+<h2>Full Source</h2>
+<div class="remark-highlight"><pre class="language-elisp"><code class="language-elisp"><span class="token heading comment title">;;; font-cycle.el --- Test-drive fonts with a transient menu  -*- lexical-binding: t; -*-</span>
+
+<span class="token punctuation">(</span><span class="token keyword">require</span> <span class="token quoted-symbol variable symbol">'transient</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">font-cycle-families</span></span>
+  <span class="token punctuation">'(</span><span class="token string">"3270 Nerd Font Mono"</span>
+	<span class="token string">"GoMono Nerd Font"</span>
+	<span class="token string">"Hack Nerd Font Mono"</span>
+	<span class="token string">"Hurmit Nerd Font Mono"</span>
+	<span class="token string">"Inconsolata <span class="token argument">LGC</span> Nerd Font"</span>
+	<span class="token string">"Iosevka Nerd Font Mono"</span>
+	<span class="token string">"IosevkaTerm Nerd Font Mono"</span>
+	<span class="token string">"JetBrainsMono Nerd Font"</span>
+	<span class="token string">"Lekton Nerd Font Mono"</span>
+	<span class="token string">"M+CodeLat50 Nerd Font"</span>
+	<span class="token string">"Maple Mono NF"</span>
+	<span class="token string">"MartianMono Nerd Font"</span>
+	<span class="token string">"SauceCodePro Nerd Font"</span>
+	<span class="token string">"UbuntuMono Nerd Font Mono"</span>
+	<span class="token string">"VictorMono Nerd Font Mono"</span>
+	<span class="token string">"ZedMono Nerd Font Mono"</span><span class="token punctuation">)</span>
+  <span class="token string">"Font families to cycle through with <span class="token symbol">`font-cycle'</span>."</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defvar"><span class="token keyword">defvar</span> <span class="token variable">font-cycle--index</span></span> <span class="token number">0</span>
+  <span class="token string">"Position of the current font in the installed families."</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--installed</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the members of <span class="token symbol">`font-cycle-families'</span> installed on this system."</span>
+  <span class="token punctuation">(</span><span class="token car">seq-filter</span> <span class="token punctuation">(</span><span class="token lambda"><span class="token keyword">lambda</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">family</span></span><span class="token punctuation">)</span></span> <span class="token punctuation">(</span><span class="token car">find-font</span> <span class="token punctuation">(</span><span class="token car">font-spec</span> <span class="token lisp-property property">:family</span> family<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+			  font-cycle-families<span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--select</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">index</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Use the installed family at <span class="token argument">INDEX</span>, wrapping around both ends."</span>
+  <span class="token punctuation">(</span><span class="token keyword">let</span> <span class="token punctuation">(</span><span class="token punctuation">(</span><span class="token car">fonts</span> <span class="token punctuation">(</span><span class="token car">font-cycle--installed</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">unless</span> fonts
+	  <span class="token punctuation">(</span><span class="token car">user-error</span> <span class="token string">"None of <span class="token symbol">`font-cycle-families'</span> is installed"</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token keyword">setq</span> font-cycle--index <span class="token punctuation">(</span><span class="token car">mod</span> index <span class="token punctuation">(</span><span class="token car">length</span> fonts<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span>
+						<span class="token lisp-property property">:family</span> <span class="token punctuation">(</span><span class="token car">nth</span> font-cycle--index fonts<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-next</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Switch to the next font."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--select</span> <span class="token punctuation">(</span>1+ font-cycle--index<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-previous</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Switch to the previous font."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--select</span> <span class="token punctuation">(</span>1- font-cycle--index<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--resize</span> <span class="token punctuation">(</span><span class="token arguments"><span class="token argument variable">delta</span></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Change the default face height by <span class="token argument">DELTA</span> (1/10 pt)."</span>
+  <span class="token punctuation">(</span><span class="token car">set-face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token boolean">nil</span>
+					  <span class="token lisp-property property">:height</span> <span class="token punctuation">(</span><span class="token car">+</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span> delta<span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-bigger</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Increase the font size by 1pt."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--resize</span> <span class="token number">10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-smaller</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Decrease the font size by 1pt."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">font-cycle--resize</span> <span class="token number">-10</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--form</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Return the <span class="token symbol">`set-face-attribute'</span> call for the current font."</span>
+  <span class="token punctuation">(</span><span class="token car">format</span> <span class="token string">"(set-face-attribute 'default nil :family %<span class="token argument">S</span> :height %d)"</span>
+		  <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:family</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle-copy</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Copy the current font setting as Elisp to the kill ring."</span>
+  <span class="token punctuation">(</span><span class="token interactive keyword">interactive</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token car">kill-new</span> <span class="token punctuation">(</span><span class="token car">font-cycle--form</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+  <span class="token punctuation">(</span><span class="token keyword">message</span> <span class="token string">"Copied: %s"</span> <span class="token punctuation">(</span><span class="token car">current-kill</span> <span class="token number">0</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token defun"><span class="token keyword">defun</span> <span class="token function">font-cycle--description</span> <span class="token punctuation">(</span><span class="token arguments"></span><span class="token punctuation">)</span></span>
+  <span class="token string">"Header showing the current font, its size and position in the list."</span>
+  <span class="token punctuation">(</span><span class="token car">format</span> <span class="token string">"%s  %dpt  [%d/%d]"</span>
+		  <span class="token punctuation">(</span><span class="token car">propertize</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:family</span><span class="token punctuation">)</span> <span class="token quoted-symbol variable symbol">'face</span> <span class="token quoted-symbol variable symbol">'bold</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">/</span> <span class="token punctuation">(</span><span class="token car">face-attribute</span> <span class="token quoted-symbol variable symbol">'default</span> <span class="token lisp-property property">:height</span><span class="token punctuation">)</span> <span class="token number">10</span><span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span>1+ font-cycle--index<span class="token punctuation">)</span>
+		  <span class="token punctuation">(</span><span class="token car">length</span> <span class="token punctuation">(</span><span class="token car">font-cycle--installed</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token car">transient-define-prefix</span> font-cycle <span class="token punctuation">(</span><span class="token punctuation">)</span>
+  <span class="token string">"Cycle through <span class="token symbol">`font-cycle-families'</span> and adjust the font size."</span>
+  <span class="token punctuation">[</span><span class="token lisp-property property">:description</span> font-cycle--description
+   <span class="token punctuation">[</span><span class="token string">"Font"</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;right>"</span> <span class="token string">"next"</span> font-cycle-next        <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;left>"</span> <span class="token string">"previous"</span> font-cycle-previous <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">]</span>
+   <span class="token punctuation">[</span><span class="token string">"Size"</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;up>"</span> <span class="token string">"bigger"</span> font-cycle-bigger       <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"&#x3C;down>"</span> <span class="token string">"smaller"</span> font-cycle-smaller   <span class="token lisp-property property">:transient</span> <span class="token boolean">t</span><span class="token punctuation">)</span><span class="token punctuation">]</span>
+   <span class="token punctuation">[</span><span class="token string">"Done"</span>
+	<span class="token punctuation">(</span><span class="token string">"y"</span> <span class="token string">"copy as elisp"</span> font-cycle-copy<span class="token punctuation">)</span>
+	<span class="token punctuation">(</span><span class="token string">"q"</span> <span class="token string">"quit"</span> transient-quit-one<span class="token punctuation">)</span><span class="token punctuation">]</span><span class="token punctuation">]</span><span class="token punctuation">)</span>
+
+<span class="token punctuation">(</span><span class="token keyword">provide</span> <span class="token quoted-symbol variable symbol">'font-cycle</span><span class="token punctuation">)</span>
+<span class="token heading comment title">;;; font-cycle.el ends here</span>
+</code></pre></div>
+<h2>What Could be Improved</h2>
+<p>A few extras, if you want to practice some Elisp:</p>
+<ul>
+<li>Replace the index and <code>mod</code> with Emacs' built-in <code>ring.el</code>.</li>
+<li>Show the visible columns and lines in the header, so you know how
+much fits on screen with each font and size.</li>
+<li>Start cycling from the font you are currently using.</li>
+<li>Add a key that restores the font and size you had before opening the
+menu.</li>
+<li>Cycle themes, or a second list for the <code>variable-pitch</code> face, the
+same way.</li>
+<li>Turn it into a publishable package: <code>defcustom</code>s, an autoload,
+proper headers, and a clean <code>checkdoc</code> and byte-compile.</li>
+</ul>
+<h2>Honorable Mentions</h2>
+<p>Font picking seems to be in the air lately. If you'd rather use
+something ready-made, or just want to see other takes on the idea,
+check these out:</p>
+<ul>
+<li><a href="https://elpa.gnu.org/packages/show-font.html">show-font</a>, by
+Protesilaos, on GNU ELPA: previews installed fonts in a dedicated
+buffer, and <code>show-font-tabulated</code> lists every font rendered in its
+own typeface.</li>
+<li><a href="https://gitlab.com/vegasharmon/flick">flick</a>, "a quick and simple
+font picker", by Vegas Harmon, recently shared on r/emacs.</li>
+<li><a href="https://www.reddit.com/r/emacs/comments/1w31p3u/comment/p6wxkuc/">This r/emacs comment</a>,
+from a recent discussion on the same subject.</li>
+</ul>
+<h2>Wrapping Up</h2>
+<p>There's nothing specifically clever here: a list, an index, a <code>mod</code>,
+and a transient menu holding it all together.</p>
+<p>I hope this educational post helps you with the basics of using
+transient, and maybe teaches you something new about Emacs Lisp along
+the way.</p>
+<p>As for me, I'm currently on font 7 of 16. Ask me again next month.</p>

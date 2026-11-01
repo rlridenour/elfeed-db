@@ -1,0 +1,2774 @@
+<div class="subtitle">
+<p><strong>TL;DR</strong>: LaTeX in Org mode now go <strong>whoosh</strong>, all pretty like.  Install the development branch of Org mode to use it.</p>
+</div>
+<p>After grumbling about the inadequacy of LaTeX previews in Emacs &ndash; and specifically Org mode &ndash; for over a decade, <a href="https://tecosaur.net/">Tecosaur</a> and I decided to take the leap and rewrite the feature from the ground up.  The result is a preview system for LaTeX math that can provide near-WYSIWYG feedback but retains the properties we expect in the Emacs environment: text-first, extensible and composable.</p>
+<p><span class="org-target" id="org-target--org-latex-preview-youtube-demo"></span></p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-auto-mode-1.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-auto-mode-1.mp4">[org-latex-preview video demo 1]</a></video>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-auto-mode-inline-3.mp4" type="video/mp4">
+<a href=https://karthinks.com/img/olp-auto-mode-inline-1.mp4">[org-latex-preview video demo 3: inline math]</a></video>
+<p>It&rsquo;s not much code, but it contains many moving pieces and makes contact with several corners of Emacs.  Now that the feature is part of Org mode, I thought I would take this opportunity to document how it works from the ground up, and use it as a launchpad to explain relevant aspects of Emacs&rsquo; event loop and its unofficial package API
+<span class="sidenote-number"><small class="sidenote">
+Emacs doesn&rsquo;t really have a &ldquo;package API&rdquo;, since you build Emacs packages from the same elements as Emacs itself.
+</small></span>
+.</p>
+<p>This article is not an exhaustive demo of all the shiny new features, although there are a few videos peppered throughout.  It&rsquo;s also not the user manual (not yet updated on orgmode.org) or a tutorial (see Tecosaur&rsquo;s <a href="https://blog.tecosaur.net/tmio/2026-11-01-preview.html">This Month in Org</a> writeup).</p>
+<p>Instead, it aims to provide an overview of the goals and design of the library, along with some explainers of relevant aspects of the Emacs API and tips to write your own features.  This write-up is for you if you are interested in</p>
+<ul>
+<li>a broad understanding of LaTeX preview generation (how and why),</li>
+<li>learning about Emacs&rsquo; event loop, subprocess interaction, overlay-based display and UI, or</li>
+<li>a case study on building a non-trivial Emacs &ldquo;application&rdquo; from scratch.</li>
+</ul>
+<hr>
+<svg class="inline-svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="396.39685pt" height="396.39685pt" viewBox="0 0 396.39685 396.39685" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-10-31T23:13:41.307683</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.1, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ 
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 396.39685 
+L 396.39685 396.39685 
+L 396.39685 0 
+L 0 0 
+L 0 396.39685 
+z
+" style="fill: none; opacity: 0"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 19.467549 197.971654 
+Q 198.425197 197.971654 377.382845 197.971654 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 27.467549 201.971654 
+L 19.467549 197.971654 
+L 27.467549 193.971654 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 369.382845 193.971654 
+L 377.382845 197.971654 
+L 369.382845 201.971654 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 198.425197 376.929302 
+Q 198.425197 197.971654 198.425197 19.014005 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 202.425197 368.929302 
+L 198.425197 376.929302 
+L 194.425197 368.929302 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+    <path d="M 194.425197 27.014005 
+L 198.425197 19.014005 
+L 202.425197 27.014005 
+" style="fill: none; stroke: #808080; stroke-width: 2.2; stroke-linecap: round"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 26.418898 52.093465 
+L 115.313386 52.093465 
+Q 123.029291 52.093465 123.029291 44.377559 
+L 123.029291 34.085433 
+Q 123.029291 26.369528 115.313386 26.369528 
+L 26.418898 26.369528 
+Q 18.702992 26.369528 18.702992 34.085433 
+L 18.702992 44.377559 
+Q 18.702992 52.093465 26.418898 52.093465 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #a3b09a"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 252.873071 52.093465 
+L 382.087559 52.093465 
+Q 389.803465 52.093465 389.803465 44.377559 
+L 389.803465 34.085433 
+Q 389.803465 26.369528 382.087559 26.369528 
+L 252.873071 26.369528 
+Q 245.157165 26.369528 245.157165 34.085433 
+L 245.157165 44.377559 
+Q 245.157165 52.093465 252.873071 52.093465 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #a3b09a"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 11.31874 372.438425 
+L 130.413543 372.438425 
+Q 138.149291 372.438425 138.149291 364.702677 
+L 138.149291 354.390236 
+Q 138.149291 346.654488 130.413543 346.654488 
+L 11.31874 346.654488 
+Q 3.582992 346.654488 3.582992 354.390236 
+L 3.582992 364.702677 
+Q 3.582992 372.438425 11.31874 372.438425 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #a3b09a"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 278.702362 372.408425 
+L 367.59685 372.408425 
+Q 375.312756 372.408425 375.312756 364.69252 
+L 375.312756 354.400394 
+Q 375.312756 346.684488 367.59685 346.684488 
+L 278.702362 346.684488 
+Q 270.986457 346.684488 270.986457 354.400394 
+L 270.986457 364.69252 
+Q 270.986457 372.408425 278.702362 372.408425 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #a3b09a"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 55.788661 209.087622 
+L 153.975118 209.087622 
+Q 160.645039 209.087622 160.645039 202.417701 
+L 160.645039 193.525606 
+Q 160.645039 186.855685 153.975118 186.855685 
+L 55.788661 186.855685 
+Q 49.11874 186.855685 49.11874 193.525606 
+L 49.11874 202.417701 
+Q 49.11874 209.087622 55.788661 209.087622 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #b18bb1"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 249.789921 209.087622 
+L 339.816378 209.087622 
+Q 346.486299 209.087622 346.486299 202.417701 
+L 346.486299 193.525606 
+Q 346.486299 186.855685 339.816378 186.855685 
+L 249.789921 186.855685 
+Q 243.12 186.855685 243.12 193.525606 
+L 243.12 202.417701 
+Q 243.12 209.087622 249.789921 209.087622 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #b18bb1"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 192.958677 119.888504 
+L 203.891717 119.888504 
+Q 212.092346 119.888504 212.092346 111.687874 
+L 212.092346 46.145197 
+Q 212.092346 37.944567 203.891717 37.944567 
+L 192.958677 37.944567 
+Q 184.758047 37.944567 184.758047 46.145197 
+L 184.758047 111.687874 
+Q 184.758047 119.888504 192.958677 119.888504 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #b18bb1"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 192.958677 351.985512 
+L 203.891717 351.985512 
+Q 212.092346 351.985512 212.092346 343.784882 
+L 212.092346 261.922205 
+Q 212.092346 253.721575 203.891717 253.721575 
+L 192.958677 253.721575 
+Q 184.758047 253.721575 184.758047 261.922205 
+L 184.758047 343.784882 
+Q 184.758047 351.985512 192.958677 351.985512 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #b18bb1"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 69.653858 310.181783 
+L 145.779213 310.181783 
+Q 158.679685 310.181783 158.679685 297.281311 
+L 158.679685 280.079319 
+Q 158.679685 267.178846 145.779213 267.178846 
+L 69.653858 267.178846 
+Q 56.753386 267.178846 56.753386 280.079319 
+L 56.753386 297.281311 
+Q 56.753386 310.181783 69.653858 310.181783 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #d2a566"/>
+   </g>
+   <g id="patch_13">
+    <a xlink:href="https://orgmode.org/manual/" target="_blank">
+     <path d="M 256.899213 310.294283 
+L 321.368504 310.294283 
+Q 334.337008 310.294283 334.337008 297.32578 
+L 334.337008 280.03485 
+Q 334.337008 267.066346 321.368504 267.066346 
+L 256.899213 267.066346 
+Q 243.930709 267.066346 243.930709 280.03485 
+L 243.930709 297.32578 
+Q 243.930709 310.294283 256.899213 310.294283 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #d2a566"/>
+    </a>
+   </g>
+   <g id="patch_14">
+    <a xlink:href="https://blog.tecosaur.net/tmio/2026-11-01-preview.html" target="_blank">
+     <path d="M 253.191496 139.168252 
+L 325.07622 139.168252 
+Q 340.817008 139.168252 340.817008 123.427465 
+L 340.817008 102.437102 
+Q 340.817008 86.696315 325.07622 86.696315 
+L 253.191496 86.696315 
+Q 237.450709 86.696315 237.450709 102.437102 
+L 237.450709 123.427465 
+Q 237.450709 139.168252 253.191496 139.168252 
+z
+" clip-path="url(#p9faeef5dad)" style="fill: #d2a566"/>
+    </a>
+   </g>
+   <g id="text_1">
+    <!-- Tutorials -->
+    <g style="fill: #1f2a3f" transform="translate(25.866142 44.511496) scale(0.2 -0.2)">
+     <defs>
+      <path id="UbuntuMono-Regular-37" d="M 2950 3962 
+L 2950 3514 
+L 1862 3514 
+L 1862 0 
+L 1338 0 
+L 1338 3514 
+L 250 3514 
+L 250 3962 
+L 2950 3962 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-58" d="M 2746 83 
+Q 2573 38 2288 -13 
+Q 2003 -64 1619 -64 
+Q 1280 -64 1056 35 
+Q 832 134 691 316 
+Q 550 499 492 748 
+Q 435 998 435 1299 
+L 435 2970 
+L 960 2970 
+L 960 1414 
+Q 960 864 1123 633 
+Q 1286 403 1670 403 
+Q 1754 403 1840 409 
+Q 1926 416 2003 425 
+Q 2080 435 2137 444 
+Q 2195 454 2214 461 
+L 2214 2970 
+L 2746 2970 
+L 2746 83 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-57" d="M 1555 2970 
+L 2810 2970 
+L 2810 2528 
+L 1555 2528 
+L 1555 1146 
+Q 1555 922 1587 781 
+Q 1619 640 1692 553 
+Q 1766 467 1881 435 
+Q 1997 403 2163 403 
+Q 2394 403 2534 441 
+Q 2675 480 2803 544 
+L 2880 96 
+Q 2790 58 2595 -6 
+Q 2400 -70 2112 -70 
+Q 1779 -70 1568 6 
+Q 1357 83 1238 236 
+Q 1120 390 1075 617 
+Q 1030 845 1030 1146 
+L 1030 2528 
+L 403 2528 
+L 403 2970 
+L 1030 2970 
+L 1030 3802 
+L 1555 3891 
+L 1555 2970 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-52" d="M 2944 1485 
+Q 2944 1133 2845 848 
+Q 2746 563 2566 358 
+Q 2387 154 2137 42 
+Q 1888 -70 1594 -70 
+Q 1306 -70 1059 42 
+Q 813 154 633 358 
+Q 454 563 355 848 
+Q 256 1133 256 1485 
+Q 256 1837 355 2125 
+Q 454 2413 633 2614 
+Q 813 2816 1059 2928 
+Q 1306 3040 1594 3040 
+Q 1888 3040 2137 2928 
+Q 2387 2816 2566 2614 
+Q 2746 2413 2845 2125 
+Q 2944 1837 2944 1485 
+z
+M 2400 1485 
+Q 2400 1990 2182 2281 
+Q 1965 2573 1594 2573 
+Q 1229 2573 1014 2281 
+Q 800 1990 800 1485 
+Q 800 986 1014 694 
+Q 1229 403 1594 403 
+Q 1965 403 2182 694 
+Q 2400 986 2400 1485 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-55" d="M 685 0 
+L 685 2810 
+Q 1338 3034 2003 3034 
+Q 2208 3034 2393 3018 
+Q 2579 3002 2803 2950 
+L 2707 2483 
+Q 2502 2541 2345 2557 
+Q 2189 2573 2003 2573 
+Q 1613 2573 1210 2464 
+L 1210 0 
+L 685 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-4c" d="M 1338 3430 
+Q 1171 3430 1049 3545 
+Q 928 3661 928 3859 
+Q 928 4058 1049 4173 
+Q 1171 4288 1338 4288 
+Q 1510 4288 1628 4173 
+Q 1747 4058 1747 3859 
+Q 1747 3661 1628 3545 
+Q 1510 3430 1338 3430 
+z
+M 1203 2528 
+L 346 2528 
+L 346 2970 
+L 1728 2970 
+L 1728 1146 
+Q 1728 704 1849 553 
+Q 1971 403 2214 403 
+Q 2400 403 2557 448 
+Q 2714 493 2803 544 
+L 2880 96 
+Q 2842 77 2771 48 
+Q 2701 19 2608 -6 
+Q 2515 -32 2403 -51 
+Q 2291 -70 2170 -70 
+Q 1888 -70 1702 6 
+Q 1517 83 1405 236 
+Q 1293 390 1248 617 
+Q 1203 845 1203 1146 
+L 1203 2528 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-44" d="M 1632 378 
+Q 1830 378 1987 390 
+Q 2144 403 2246 422 
+L 2246 1306 
+Q 2144 1338 2000 1357 
+Q 1856 1376 1696 1376 
+Q 1549 1376 1408 1353 
+Q 1267 1331 1158 1273 
+Q 1050 1216 979 1123 
+Q 909 1030 909 890 
+Q 909 602 1104 490 
+Q 1299 378 1632 378 
+z
+M 1581 3040 
+Q 1914 3040 2141 2957 
+Q 2368 2874 2509 2726 
+Q 2650 2579 2707 2368 
+Q 2765 2157 2765 1907 
+L 2765 51 
+Q 2579 19 2275 -25 
+Q 1971 -70 1651 -70 
+Q 1408 -70 1177 -28 
+Q 947 13 768 118 
+Q 589 224 480 409 
+Q 371 595 371 883 
+Q 371 1139 483 1315 
+Q 595 1491 771 1600 
+Q 947 1709 1174 1757 
+Q 1402 1805 1632 1805 
+Q 1946 1805 2246 1734 
+L 2246 1882 
+Q 2246 2016 2217 2141 
+Q 2189 2266 2109 2368 
+Q 2029 2470 1891 2531 
+Q 1754 2592 1536 2592 
+Q 1261 2592 1056 2553 
+Q 851 2515 742 2477 
+L 678 2912 
+Q 787 2963 1040 3001 
+Q 1293 3040 1581 3040 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-4f" d="M 2163 -70 
+Q 1882 -70 1696 6 
+Q 1510 83 1401 236 
+Q 1293 390 1248 617 
+Q 1203 845 1203 1146 
+L 1203 3955 
+L 346 3955 
+L 346 4403 
+L 1728 4403 
+L 1728 1146 
+Q 1728 922 1757 781 
+Q 1786 640 1846 553 
+Q 1907 467 1996 435 
+Q 2086 403 2208 403 
+Q 2394 403 2554 448 
+Q 2714 493 2803 544 
+L 2880 96 
+Q 2842 77 2771 48 
+Q 2701 19 2605 -6 
+Q 2509 -32 2397 -51 
+Q 2285 -70 2163 -70 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-56" d="M 2246 742 
+Q 2246 902 2115 1004 
+Q 1984 1107 1789 1184 
+Q 1594 1261 1363 1334 
+Q 1133 1408 937 1517 
+Q 742 1626 611 1786 
+Q 480 1946 480 2202 
+Q 480 2560 771 2800 
+Q 1062 3040 1683 3040 
+Q 1926 3040 2185 3005 
+Q 2445 2970 2630 2912 
+L 2534 2438 
+Q 2483 2464 2393 2493 
+Q 2304 2522 2189 2544 
+Q 2074 2566 1942 2579 
+Q 1811 2592 1690 2592 
+Q 998 2592 998 2214 
+Q 998 2080 1129 1987 
+Q 1261 1894 1459 1817 
+Q 1658 1741 1888 1661 
+Q 2118 1581 2316 1465 
+Q 2515 1350 2646 1187 
+Q 2778 1024 2778 774 
+Q 2778 371 2464 150 
+Q 2150 -70 1472 -70 
+Q 1165 -70 909 -19 
+Q 653 32 422 134 
+L 525 614 
+Q 749 512 995 445 
+Q 1242 378 1523 378 
+Q 2246 378 2246 742 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-37"/>
+     <use xlink:href="#UbuntuMono-Regular-58" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-57" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-52" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-55" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-4c" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-44" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-4f" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-56" transform="translate(400 0)"/>
+    </g>
+   </g>
+   <g id="text_2">
+    <!-- How-To Guides -->
+    <g style="fill: #1f2a3f" transform="translate(252.480315 44.511496) scale(0.2 -0.2)">
+     <defs>
+      <path id="UbuntuMono-Regular-2b" d="M 2387 3962 
+L 2912 3962 
+L 2912 0 
+L 2387 0 
+L 2387 1843 
+L 813 1843 
+L 813 0 
+L 288 0 
+L 288 3962 
+L 813 3962 
+L 813 2291 
+L 2387 2291 
+L 2387 3962 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-5a" d="M 2195 0 
+Q 2099 218 2028 397 
+Q 1958 576 1891 755 
+Q 1824 934 1757 1129 
+Q 1690 1325 1600 1574 
+Q 1510 1325 1440 1129 
+Q 1370 934 1302 755 
+Q 1235 576 1161 397 
+Q 1088 218 992 0 
+L 595 0 
+Q 416 787 297 1558 
+Q 179 2330 122 2970 
+L 621 2970 
+Q 640 2720 662 2480 
+Q 685 2240 717 1977 
+Q 749 1715 790 1408 
+Q 832 1101 883 717 
+Q 986 973 1056 1165 
+Q 1126 1357 1184 1529 
+Q 1242 1702 1296 1881 
+Q 1350 2061 1414 2285 
+L 1811 2285 
+Q 1875 2061 1926 1881 
+Q 1978 1702 2035 1529 
+Q 2093 1357 2157 1165 
+Q 2221 973 2317 723 
+Q 2374 1075 2419 1376 
+Q 2464 1677 2496 1942 
+Q 2528 2208 2553 2457 
+Q 2579 2707 2598 2970 
+L 3078 2970 
+Q 3046 2650 3001 2285 
+Q 2957 1920 2893 1536 
+Q 2829 1152 2752 758 
+Q 2675 365 2592 0 
+L 2195 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-10" d="M 896 1875 
+L 2304 1875 
+L 2304 1376 
+L 896 1376 
+L 896 1875 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-3" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-2a" d="M 2387 1952 
+L 2912 1952 
+L 2912 96 
+Q 2790 51 2521 -16 
+Q 2253 -83 1888 -83 
+Q 1530 -83 1235 54 
+Q 941 192 733 454 
+Q 525 717 409 1104 
+Q 294 1491 294 1984 
+Q 294 2483 422 2867 
+Q 550 3251 771 3513 
+Q 992 3776 1286 3913 
+Q 1581 4051 1920 4051 
+Q 2138 4051 2304 4019 
+Q 2470 3987 2588 3942 
+Q 2707 3898 2784 3850 
+Q 2861 3802 2899 3776 
+L 2726 3334 
+Q 2579 3450 2377 3523 
+Q 2176 3597 1952 3597 
+Q 1709 3597 1501 3481 
+Q 1293 3366 1145 3155 
+Q 998 2944 915 2646 
+Q 832 2349 832 1984 
+Q 832 1626 905 1331 
+Q 979 1037 1120 825 
+Q 1261 614 1469 496 
+Q 1677 378 1946 378 
+Q 2131 378 2233 403 
+Q 2336 429 2387 454 
+L 2387 1952 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-47" d="M 2214 2342 
+Q 2125 2426 1952 2499 
+Q 1779 2573 1594 2573 
+Q 1382 2573 1232 2489 
+Q 1082 2406 986 2262 
+Q 890 2118 845 1916 
+Q 800 1715 800 1485 
+Q 800 966 1043 684 
+Q 1286 403 1677 403 
+Q 1875 403 2012 422 
+Q 2150 442 2214 461 
+L 2214 2342 
+z
+M 2214 4346 
+L 2746 4435 
+L 2746 83 
+Q 2573 32 2304 -19 
+Q 2035 -70 1677 -70 
+Q 1357 -70 1094 38 
+Q 832 147 646 348 
+Q 461 550 358 838 
+Q 256 1126 256 1485 
+Q 256 1830 342 2115 
+Q 429 2400 595 2605 
+Q 762 2810 995 2925 
+Q 1229 3040 1530 3040 
+Q 1766 3040 1945 2982 
+Q 2125 2925 2214 2861 
+L 2214 4346 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-48" d="M 1658 3040 
+Q 2259 3040 2585 2665 
+Q 2912 2291 2912 1530 
+L 2912 1344 
+L 787 1344 
+Q 819 883 1091 643 
+Q 1363 403 1856 403 
+Q 2138 403 2336 448 
+Q 2534 493 2637 544 
+L 2707 96 
+Q 2611 45 2361 -12 
+Q 2112 -70 1798 -70 
+Q 1414 -70 1123 48 
+Q 832 166 640 371 
+Q 448 576 352 861 
+Q 256 1146 256 1478 
+Q 256 1875 377 2169 
+Q 499 2464 697 2656 
+Q 896 2848 1145 2944 
+Q 1395 3040 1658 3040 
+z
+M 2374 1773 
+Q 2374 2150 2176 2371 
+Q 1978 2592 1651 2592 
+Q 1466 2592 1315 2521 
+Q 1165 2451 1056 2336 
+Q 947 2221 883 2073 
+Q 819 1926 800 1773 
+L 2374 1773 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-2b"/>
+     <use xlink:href="#UbuntuMono-Regular-52" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-5a" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-10" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-37" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-52" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-3" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2a" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-58" transform="translate(400 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-4c" transform="translate(450 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-47" transform="translate(500 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-48" transform="translate(550 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-56" transform="translate(600 0)"/>
+    </g>
+   </g>
+   <g id="text_3">
+    <!-- Explanations -->
+    <g style="fill: #1f2a3f" transform="translate(10.866142 364.826457) scale(0.2 -0.2)">
+     <defs>
+      <path id="UbuntuMono-Regular-28" d="M 582 0 
+L 582 3962 
+L 2803 3962 
+L 2803 3514 
+L 1107 3514 
+L 1107 2298 
+L 2592 2298 
+L 2592 1850 
+L 1107 1850 
+L 1107 448 
+L 2944 448 
+L 2944 0 
+L 582 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-5b" d="M 2432 0 
+Q 2368 128 2275 281 
+Q 2182 435 2073 598 
+Q 1965 762 1846 922 
+Q 1728 1082 1613 1222 
+Q 1498 1075 1370 915 
+Q 1242 755 1123 592 
+Q 1005 429 902 275 
+Q 800 122 730 0 
+L 186 0 
+Q 397 384 701 790 
+Q 1005 1197 1299 1562 
+L 230 2970 
+L 826 2970 
+L 1626 1933 
+L 2362 2970 
+L 2925 2970 
+L 1946 1594 
+Q 2234 1216 2525 806 
+Q 2816 397 3021 0 
+L 2432 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-53" d="M 2400 1478 
+Q 2400 1997 2157 2281 
+Q 1914 2566 1523 2566 
+Q 1306 2566 1181 2547 
+Q 1056 2528 986 2502 
+L 986 627 
+Q 1075 544 1248 473 
+Q 1421 403 1606 403 
+Q 1818 403 1968 486 
+Q 2118 570 2214 714 
+Q 2310 858 2355 1053 
+Q 2400 1248 2400 1478 
+z
+M 2944 1478 
+Q 2944 1139 2857 854 
+Q 2771 570 2608 365 
+Q 2445 160 2208 45 
+Q 1971 -70 1670 -70 
+Q 1434 -70 1254 -12 
+Q 1075 45 986 115 
+L 986 -1056 
+L 454 -1056 
+L 454 2880 
+Q 627 2931 899 2982 
+Q 1171 3034 1523 3034 
+Q 1843 3034 2105 2925 
+Q 2368 2816 2553 2614 
+Q 2739 2413 2841 2125 
+Q 2944 1837 2944 1478 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-51" d="M 454 2886 
+Q 742 2957 1027 2995 
+Q 1312 3034 1562 3034 
+Q 2157 3034 2461 2726 
+Q 2765 2419 2765 1741 
+L 2765 0 
+L 2240 0 
+L 2240 1645 
+Q 2240 1933 2189 2112 
+Q 2138 2291 2045 2390 
+Q 1952 2490 1821 2528 
+Q 1690 2566 1536 2566 
+Q 1408 2566 1264 2550 
+Q 1120 2534 986 2509 
+L 986 0 
+L 454 0 
+L 454 2886 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-28"/>
+     <use xlink:href="#UbuntuMono-Regular-5b" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-53" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-4f" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-44" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-51" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-44" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-57" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-4c" transform="translate(400 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-52" transform="translate(450 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-51" transform="translate(500 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-56" transform="translate(550 0)"/>
+    </g>
+   </g>
+   <g id="text_4">
+    <!-- Reference -->
+    <g style="fill: #1f2a3f" transform="translate(278.149606 364.826457) scale(0.2 -0.2)">
+     <defs>
+      <path id="UbuntuMono-Regular-35" d="M 2758 2752 
+Q 2758 2387 2566 2108 
+Q 2374 1830 2048 1677 
+Q 2144 1523 2262 1328 
+Q 2381 1133 2502 912 
+Q 2624 691 2742 457 
+Q 2861 224 2963 0 
+L 2400 0 
+Q 2208 461 1981 883 
+Q 1754 1306 1542 1568 
+Q 1504 1562 1430 1562 
+Q 1357 1562 1331 1562 
+L 883 1562 
+L 883 0 
+L 352 0 
+L 352 3904 
+Q 448 3930 573 3949 
+Q 698 3968 829 3977 
+Q 960 3987 1088 3993 
+Q 1216 4000 1318 4000 
+Q 2035 4000 2396 3686 
+Q 2758 3373 2758 2752 
+z
+M 1363 3546 
+Q 1216 3546 1078 3542 
+Q 941 3539 883 3526 
+L 883 1997 
+L 1222 1997 
+Q 1453 1997 1635 2029 
+Q 1818 2061 1949 2147 
+Q 2080 2234 2150 2384 
+Q 2221 2534 2221 2778 
+Q 2221 3008 2150 3155 
+Q 2080 3302 1965 3388 
+Q 1850 3475 1693 3510 
+Q 1536 3546 1363 3546 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-49" d="M 1030 0 
+L 1030 2528 
+L 403 2528 
+L 403 2970 
+L 1030 2970 
+L 1030 3238 
+Q 1030 3584 1126 3811 
+Q 1222 4038 1379 4179 
+Q 1536 4320 1744 4377 
+Q 1952 4435 2182 4435 
+Q 2413 4435 2646 4384 
+Q 2880 4333 3085 4262 
+L 2989 3808 
+Q 2848 3878 2637 3929 
+Q 2426 3981 2208 3981 
+Q 2074 3981 1955 3945 
+Q 1837 3910 1747 3824 
+Q 1658 3738 1606 3594 
+Q 1555 3450 1555 3232 
+L 1555 2970 
+L 2752 2970 
+L 2752 2528 
+L 1555 2528 
+L 1555 0 
+L 1030 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-46" d="M 314 1478 
+Q 314 1882 442 2176 
+Q 570 2470 794 2662 
+Q 1018 2854 1315 2947 
+Q 1613 3040 1952 3040 
+Q 2170 3040 2384 3011 
+Q 2598 2982 2842 2906 
+L 2720 2451 
+Q 2509 2528 2333 2550 
+Q 2157 2573 1978 2573 
+Q 1747 2573 1542 2512 
+Q 1338 2451 1187 2320 
+Q 1037 2189 947 1981 
+Q 858 1773 858 1478 
+Q 858 1197 941 995 
+Q 1024 794 1174 662 
+Q 1325 531 1536 467 
+Q 1747 403 2003 403 
+Q 2208 403 2397 425 
+Q 2586 448 2810 525 
+L 2886 83 
+Q 2662 0 2432 -35 
+Q 2202 -70 1933 -70 
+Q 1574 -70 1276 29 
+Q 979 128 764 320 
+Q 550 512 432 803 
+Q 314 1094 314 1478 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-35"/>
+     <use xlink:href="#UbuntuMono-Regular-48" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-49" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-48" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-55" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-48" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-51" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-46" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-48" transform="translate(400 0)"/>
+    </g>
+   </g>
+   <g id="text_5">
+    <!-- FOR LEARNING -->
+    <g style="fill: #1f2a3f" transform="translate(56.88189 202.195654) scale(0.16 -0.16)">
+     <defs>
+      <path id="UbuntuMono-Regular-29" d="M 582 0 
+L 582 3962 
+L 2829 3962 
+L 2829 3514 
+L 1107 3514 
+L 1107 2278 
+L 2624 2278 
+L 2624 1837 
+L 1107 1837 
+L 1107 0 
+L 582 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-32" d="M 186 1984 
+Q 186 2515 288 2905 
+Q 390 3296 576 3549 
+Q 762 3802 1021 3926 
+Q 1280 4051 1600 4051 
+Q 1914 4051 2176 3926 
+Q 2438 3802 2624 3549 
+Q 2810 3296 2915 2905 
+Q 3021 2515 3021 1984 
+Q 3021 1453 2915 1062 
+Q 2810 672 2624 416 
+Q 2438 160 2176 38 
+Q 1914 -83 1600 -83 
+Q 1280 -83 1021 38 
+Q 762 160 576 416 
+Q 390 672 288 1062 
+Q 186 1453 186 1984 
+z
+M 723 1984 
+Q 723 1203 934 787 
+Q 1146 371 1587 371 
+Q 2035 371 2259 787 
+Q 2483 1203 2483 1984 
+Q 2483 2765 2259 3181 
+Q 2035 3597 1587 3597 
+Q 1146 3597 934 3181 
+Q 723 2765 723 1984 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-2f" d="M 2944 448 
+L 2944 0 
+L 582 0 
+L 582 3962 
+L 1107 3962 
+L 1107 448 
+L 2944 448 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-24" d="M 2586 0 
+L 2349 1037 
+L 826 1037 
+L 595 0 
+L 58 0 
+Q 166 422 300 915 
+Q 435 1408 592 1926 
+Q 749 2445 921 2966 
+Q 1094 3488 1286 3962 
+L 1939 3962 
+Q 2125 3488 2294 2966 
+Q 2464 2445 2614 1926 
+Q 2765 1408 2899 915 
+Q 3034 422 3142 0 
+L 2586 0 
+z
+M 1594 3501 
+Q 1446 3098 1273 2566 
+Q 1101 2035 947 1472 
+L 2227 1472 
+Q 2080 2048 1910 2582 
+Q 1741 3117 1594 3501 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-31" d="M 2310 0 
+Q 2093 531 1901 963 
+Q 1709 1395 1533 1772 
+Q 1357 2150 1184 2486 
+Q 1011 2822 832 3162 
+L 832 0 
+L 352 0 
+L 352 3962 
+L 890 3962 
+Q 1152 3482 1347 3123 
+Q 1542 2765 1705 2429 
+Q 1869 2093 2022 1737 
+Q 2176 1382 2368 915 
+L 2368 3962 
+L 2848 3962 
+L 2848 0 
+L 2310 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-2c" d="M 1862 3514 
+L 1862 448 
+L 2630 448 
+L 2630 0 
+L 570 0 
+L 570 448 
+L 1338 448 
+L 1338 3514 
+L 570 3514 
+L 570 3962 
+L 2630 3962 
+L 2630 3514 
+L 1862 3514 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-29"/>
+     <use xlink:href="#UbuntuMono-Regular-32" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-3" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2f" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-28" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-24" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-31" transform="translate(400 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2c" transform="translate(450 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-31" transform="translate(500 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2a" transform="translate(550 0)"/>
+    </g>
+   </g>
+   <g id="text_6">
+    <!-- FOR WORKING -->
+    <g style="fill: #1f2a3f" transform="translate(250.80315 202.195654) scale(0.16 -0.16)">
+     <defs>
+      <path id="UbuntuMono-Regular-3a" d="M 979 0 
+L 486 0 
+Q 429 390 387 860 
+Q 346 1331 310 1843 
+Q 275 2355 249 2892 
+Q 224 3430 205 3962 
+L 717 3962 
+L 787 653 
+L 1363 2458 
+L 1824 2458 
+L 2413 653 
+L 2483 3962 
+L 2995 3962 
+Q 2976 3424 2947 2886 
+Q 2918 2349 2880 1840 
+Q 2842 1331 2797 864 
+Q 2752 397 2701 0 
+L 2214 0 
+L 1594 1971 
+L 979 0 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-2e" d="M 3008 3962 
+Q 2694 3494 2320 3033 
+Q 1946 2573 1510 2112 
+Q 1715 1939 1945 1708 
+Q 2176 1478 2397 1206 
+Q 2618 934 2813 627 
+Q 3008 320 3142 0 
+L 2547 0 
+Q 2387 294 2201 576 
+Q 2016 858 1808 1101 
+Q 1600 1344 1379 1545 
+Q 1158 1747 934 1894 
+L 934 0 
+L 410 0 
+L 410 3962 
+L 934 3962 
+L 934 2195 
+Q 1350 2624 1731 3091 
+Q 2112 3558 2400 3962 
+L 3008 3962 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-29"/>
+     <use xlink:href="#UbuntuMono-Regular-32" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-3" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-3a" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-32" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2e" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2c" transform="translate(400 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-31" transform="translate(450 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2a" transform="translate(500 0)"/>
+    </g>
+   </g>
+   <g id="text_7">
+    <!-- PRACTICAL -->
+    <g style="fill: #1f2a3f" transform="translate(202.649197 114.916535) rotate(-90) scale(0.16 -0.16)">
+     <defs>
+      <path id="UbuntuMono-Regular-33" d="M 1504 4000 
+Q 1856 4000 2121 3910 
+Q 2387 3821 2563 3657 
+Q 2739 3494 2825 3270 
+Q 2912 3046 2912 2771 
+Q 2912 2150 2547 1814 
+Q 2182 1478 1453 1478 
+L 992 1478 
+L 992 0 
+L 467 0 
+L 467 3904 
+Q 582 3930 720 3949 
+Q 858 3968 995 3981 
+Q 1133 3994 1264 3997 
+Q 1395 4000 1504 4000 
+z
+M 1542 3546 
+Q 1376 3546 1222 3542 
+Q 1069 3539 992 3526 
+L 992 1926 
+L 1427 1926 
+Q 1907 1926 2140 2118 
+Q 2374 2310 2374 2752 
+Q 2374 3546 1542 3546 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-Regular-26" d="M 2944 166 
+Q 2720 38 2467 -22 
+Q 2214 -83 1926 -83 
+Q 1574 -83 1276 41 
+Q 979 166 761 419 
+Q 544 672 419 1062 
+Q 294 1453 294 1984 
+Q 294 2490 425 2874 
+Q 557 3258 781 3520 
+Q 1005 3782 1305 3916 
+Q 1606 4051 1946 4051 
+Q 2182 4051 2428 3987 
+Q 2675 3923 2912 3776 
+L 2758 3341 
+Q 2336 3584 1965 3584 
+Q 1702 3584 1494 3472 
+Q 1286 3360 1139 3149 
+Q 992 2938 912 2643 
+Q 832 2349 832 1984 
+Q 832 1574 918 1273 
+Q 1005 973 1158 774 
+Q 1312 576 1526 480 
+Q 1741 384 1990 384 
+Q 2176 384 2381 432 
+Q 2586 480 2803 602 
+L 2944 166 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-Regular-33"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-24" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-26" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-37" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2c" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-26" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-24" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2f" transform="translate(400 0)"/>
+    </g>
+   </g>
+   <g id="text_8">
+    <!-- THEORETICAL -->
+    <g style="fill: #1f2a3f" transform="translate(202.649197 346.853543) rotate(-90) scale(0.16 -0.16)">
+     <use xlink:href="#UbuntuMono-Regular-37"/>
+     <use xlink:href="#UbuntuMono-Regular-2b" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-28" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-32" transform="translate(150 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-35" transform="translate(200 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-28" transform="translate(250 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-37" transform="translate(300 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2c" transform="translate(350 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-26" transform="translate(400 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-24" transform="translate(450 0)"/>
+     <use xlink:href="#UbuntuMono-Regular-2f" transform="translate(500 0)"/>
+    </g>
+   </g>
+   <g id="text_9">
+    <!-- ⊙ You are -->
+    <g style="fill: #1f2a3f" transform="translate(63.997239 285.069721) scale(0.19 -0.19)">
+     <defs>
+      <path id="DejaVuSansMono-BoldOblique-834" d="M 1403 2547 
+L 2444 2547 
+L 2444 1406 
+L 1403 1406 
+L 1403 2547 
+z
+M 1220 3721 
+Q 1547 3859 1926 3859 
+Q 2306 3859 2632 3721 
+Q 2959 3584 3231 3316 
+Q 3500 3044 3638 2716 
+Q 3772 2391 3772 2006 
+Q 3772 1631 3638 1303 
+Q 3503 978 3231 706 
+Q 2959 438 2632 300 
+Q 2306 163 1926 163 
+Q 1547 163 1220 300 
+Q 894 438 622 706 
+Q 350 978 216 1303 
+Q 81 1631 81 2006 
+Q 81 2391 216 2716 
+Q 353 3044 622 3316 
+Q 894 3584 1220 3721 
+z
+M 2400 3159 
+Q 2181 3253 1926 3253 
+Q 1672 3253 1450 3159 
+Q 1234 3066 1053 2888 
+Q 869 2703 780 2484 
+Q 691 2266 691 2006 
+Q 691 1756 780 1537 
+Q 869 1319 1053 1134 
+Q 1234 956 1450 863 
+Q 1672 769 1926 769 
+Q 2181 769 2400 863 
+Q 2619 956 2800 1134 
+Q 2984 1319 3073 1537 
+Q 3163 1756 3163 2006 
+Q 3163 2266 3073 2484 
+Q 2984 2703 2800 2888 
+Q 2619 3066 2400 3159 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-3" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-3c" d="M 1990 2176 
+Q 2093 2323 2240 2544 
+Q 2387 2765 2540 3011 
+Q 2694 3258 2844 3507 
+Q 2995 3757 3110 3962 
+L 3955 3962 
+Q 3757 3635 3561 3328 
+Q 3366 3021 3161 2720 
+Q 2957 2419 2729 2121 
+Q 2502 1824 2246 1510 
+L 1882 0 
+L 1094 0 
+L 1453 1504 
+Q 1254 2125 1126 2717 
+Q 998 3309 909 3962 
+L 1683 3962 
+Q 1722 3501 1808 3037 
+Q 1894 2573 1990 2176 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-52" d="M 1638 602 
+Q 1830 602 1977 717 
+Q 2125 832 2230 1005 
+Q 2336 1178 2390 1379 
+Q 2445 1581 2445 1760 
+Q 2445 2061 2358 2233 
+Q 2272 2406 2003 2406 
+Q 1818 2406 1667 2291 
+Q 1517 2176 1414 2003 
+Q 1312 1830 1257 1628 
+Q 1203 1427 1203 1248 
+Q 1203 947 1289 774 
+Q 1376 602 1638 602 
+z
+M 1478 -83 
+Q 941 -83 678 224 
+Q 416 531 416 1043 
+Q 416 1427 531 1792 
+Q 646 2157 870 2445 
+Q 1094 2733 1427 2909 
+Q 1760 3085 2195 3085 
+Q 2662 3085 2947 2800 
+Q 3232 2515 3232 1952 
+Q 3232 1574 3123 1209 
+Q 3014 845 2793 557 
+Q 2573 269 2243 93 
+Q 1914 -83 1478 -83 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-58" d="M 1414 -70 
+Q 896 -70 691 173 
+Q 486 416 486 838 
+Q 486 1133 576 1523 
+L 934 3008 
+L 1722 3008 
+L 1382 1574 
+Q 1331 1382 1305 1225 
+Q 1280 1069 1280 947 
+Q 1280 614 1600 614 
+Q 1779 614 1884 688 
+Q 1990 762 2086 870 
+Q 2099 960 2108 1043 
+Q 2118 1126 2150 1235 
+L 2573 3008 
+L 3360 3008 
+L 2931 1229 
+Q 2906 1114 2890 1002 
+Q 2874 890 2874 774 
+Q 2874 589 2912 413 
+Q 2950 237 3008 64 
+L 2317 -51 
+Q 2304 -26 2285 12 
+Q 2266 51 2246 96 
+Q 2227 141 2214 176 
+Q 2202 211 2195 230 
+Q 2067 134 1862 32 
+Q 1658 -70 1414 -70 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-44" d="M 1606 602 
+Q 1786 602 1907 682 
+Q 2029 762 2118 870 
+Q 2131 960 2144 1043 
+Q 2157 1126 2182 1235 
+L 2458 2374 
+Q 2387 2394 2310 2400 
+Q 2234 2406 2163 2406 
+Q 1939 2406 1760 2300 
+Q 1581 2195 1453 2022 
+Q 1325 1850 1257 1626 
+Q 1190 1402 1190 1165 
+Q 1190 998 1219 889 
+Q 1248 781 1302 717 
+Q 1357 653 1433 627 
+Q 1510 602 1606 602 
+z
+M 1318 -70 
+Q 896 -64 653 233 
+Q 410 531 410 1101 
+Q 410 1536 557 1901 
+Q 704 2266 960 2525 
+Q 1216 2784 1558 2928 
+Q 1901 3072 2285 3072 
+Q 2547 3072 2816 3021 
+Q 3085 2970 3360 2861 
+L 2963 1229 
+Q 2938 1114 2925 1002 
+Q 2912 890 2912 774 
+Q 2912 589 2947 413 
+Q 2982 237 3040 64 
+L 2349 -51 
+Q 2336 -26 2317 12 
+Q 2298 51 2278 96 
+Q 2259 141 2246 176 
+Q 2234 211 2227 230 
+Q 2099 134 1881 32 
+Q 1664 -70 1318 -70 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-55" d="M 3123 2227 
+Q 3002 2272 2835 2297 
+Q 2669 2323 2426 2323 
+Q 2259 2323 2083 2300 
+Q 1907 2278 1760 2227 
+L 1229 0 
+L 442 0 
+L 1114 2810 
+Q 1414 2931 1763 2998 
+Q 2112 3066 2419 3066 
+Q 2778 3066 3005 3034 
+Q 3232 3002 3424 2950 
+L 3123 2227 
+z
+" transform="scale(0.015625)"/>
+      <path id="UbuntuMono-BoldItalic-48" d="M 1254 1069 
+Q 1254 954 1292 861 
+Q 1331 768 1417 704 
+Q 1504 640 1648 605 
+Q 1792 570 2010 570 
+Q 2266 570 2496 624 
+Q 2726 678 2835 730 
+L 2886 134 
+Q 2733 58 2457 -9 
+Q 2182 -77 1856 -77 
+Q 1491 -77 1228 16 
+Q 966 109 800 275 
+Q 634 442 557 669 
+Q 480 896 480 1171 
+Q 480 1542 605 1891 
+Q 730 2240 970 2502 
+Q 1210 2765 1552 2925 
+Q 1894 3085 2336 3085 
+Q 2778 3085 3059 2867 
+Q 3341 2650 3341 2259 
+Q 3341 1933 3181 1705 
+Q 3021 1478 2739 1337 
+Q 2458 1197 2077 1133 
+Q 1696 1069 1254 1069 
+z
+M 2189 2458 
+Q 1894 2458 1628 2256 
+Q 1363 2054 1261 1613 
+Q 1664 1613 1923 1664 
+Q 2182 1715 2329 1795 
+Q 2477 1875 2534 1971 
+Q 2592 2067 2592 2150 
+Q 2592 2298 2486 2378 
+Q 2381 2458 2189 2458 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#DejaVuSansMono-BoldOblique-834"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-3" transform="translate(60.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-3c" transform="translate(110.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-52" transform="translate(160.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-58" transform="translate(210.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-3" transform="translate(260.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-44" transform="translate(310.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-55" transform="translate(360.203125 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-48" transform="translate(410.203125 0)"/>
+    </g>
+    <!-- here -->
+    <g style="fill: #1f2a3f" transform="translate(88.716535 302.322909) scale(0.19 -0.19)">
+     <defs>
+      <path id="UbuntuMono-BoldItalic-4b" d="M 1786 2995 
+Q 1894 3027 2009 3049 
+Q 2125 3072 2234 3072 
+Q 2707 3072 2944 2845 
+Q 3181 2618 3181 2202 
+Q 3181 2093 3165 1965 
+Q 3149 1837 3117 1696 
+L 2707 0 
+L 1920 0 
+L 2304 1594 
+Q 2323 1696 2348 1805 
+Q 2374 1914 2374 2022 
+Q 2374 2170 2297 2282 
+Q 2221 2394 2003 2394 
+Q 1920 2394 1821 2378 
+Q 1722 2362 1632 2323 
+L 1069 0 
+L 282 0 
+L 1312 4307 
+L 2131 4442 
+L 1786 2995 
+z
+" transform="scale(0.015625)"/>
+     </defs>
+     <use xlink:href="#UbuntuMono-BoldItalic-4b"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-48" transform="translate(50 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-55" transform="translate(100 0)"/>
+     <use xlink:href="#UbuntuMono-BoldItalic-48" transform="translate(150 0)"/>
+    </g>
+   </g>
+   <g id="text_10">
+    <a xlink:href="https://orgmode.org/manual/" target="_blank">
+     <!-- Org mode -->
+     <g style="fill: #1f2a3f" transform="translate(251.133858 285.061706) scale(0.19 -0.19)">
+      <defs>
+       <path id="UbuntuMono-BoldItalic-32" d="M 2349 4051 
+Q 2867 4051 3161 3715 
+Q 3456 3379 3456 2822 
+Q 3456 2573 3417 2259 
+Q 3379 1946 3289 1622 
+Q 3200 1299 3053 992 
+Q 2906 685 2694 445 
+Q 2483 205 2198 61 
+Q 1914 -83 1542 -83 
+Q 1018 -83 723 253 
+Q 429 589 429 1146 
+Q 429 1395 467 1708 
+Q 506 2022 598 2345 
+Q 691 2669 835 2976 
+Q 979 3283 1193 3523 
+Q 1408 3763 1693 3907 
+Q 1978 4051 2349 4051 
+z
+M 1632 602 
+Q 1894 602 2089 826 
+Q 2285 1050 2413 1379 
+Q 2541 1709 2605 2083 
+Q 2669 2458 2669 2765 
+Q 2669 3014 2582 3190 
+Q 2496 3366 2259 3366 
+Q 1997 3366 1798 3142 
+Q 1600 2918 1472 2588 
+Q 1344 2259 1280 1881 
+Q 1216 1504 1216 1203 
+Q 1216 954 1302 778 
+Q 1389 602 1632 602 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-4a" d="M 2803 352 
+Q 2714 -19 2579 -288 
+Q 2445 -557 2237 -733 
+Q 2029 -909 1741 -992 
+Q 1453 -1075 1062 -1075 
+Q 723 -1075 483 -1014 
+Q 243 -954 6 -826 
+L 282 -205 
+Q 448 -275 656 -339 
+Q 864 -403 1139 -403 
+Q 1523 -403 1718 -240 
+Q 1914 -77 1978 192 
+L 2016 358 
+Q 1875 288 1728 246 
+Q 1581 205 1446 205 
+Q 934 205 710 493 
+Q 486 781 486 1254 
+Q 486 1690 643 2029 
+Q 800 2368 1062 2598 
+Q 1325 2829 1661 2950 
+Q 1997 3072 2355 3072 
+Q 2624 3072 2896 3030 
+Q 3168 2989 3411 2886 
+L 2803 352 
+z
+M 2509 2394 
+Q 2355 2432 2214 2432 
+Q 1997 2432 1821 2339 
+Q 1645 2246 1520 2092 
+Q 1395 1939 1324 1734 
+Q 1254 1530 1254 1312 
+Q 1254 1120 1337 979 
+Q 1421 838 1677 838 
+Q 1766 838 1904 873 
+Q 2042 909 2170 992 
+L 2509 2394 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-50" d="M 826 2874 
+Q 1062 2957 1257 2998 
+Q 1453 3040 1638 3040 
+Q 1805 3040 1949 2989 
+Q 2093 2938 2182 2816 
+Q 2330 2931 2499 2985 
+Q 2669 3040 2803 3040 
+Q 3059 3040 3222 2883 
+Q 3386 2726 3386 2394 
+Q 3386 2317 3376 2230 
+Q 3366 2144 3341 2054 
+L 2854 0 
+L 2214 0 
+L 2714 2112 
+Q 2726 2157 2732 2205 
+Q 2739 2253 2739 2278 
+Q 2739 2470 2566 2470 
+Q 2502 2470 2444 2438 
+Q 2387 2406 2336 2362 
+Q 2336 2214 2298 2054 
+L 2080 1146 
+L 1459 1146 
+L 1683 2099 
+Q 1696 2138 1709 2189 
+Q 1722 2240 1722 2291 
+Q 1722 2355 1690 2409 
+Q 1658 2464 1562 2464 
+Q 1453 2464 1357 2432 
+L 774 0 
+L 134 0 
+L 826 2874 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-47" d="M 1606 602 
+Q 1786 602 1907 682 
+Q 2029 762 2118 870 
+Q 2131 960 2144 1043 
+Q 2157 1126 2182 1235 
+L 2458 2374 
+Q 2387 2394 2310 2400 
+Q 2234 2406 2163 2406 
+Q 1939 2406 1760 2300 
+Q 1581 2195 1453 2022 
+Q 1325 1850 1257 1626 
+Q 1190 1402 1190 1165 
+Q 1190 998 1219 889 
+Q 1248 781 1302 717 
+Q 1357 653 1433 627 
+Q 1510 602 1606 602 
+z
+M 2963 1229 
+Q 2938 1114 2925 1002 
+Q 2912 890 2912 774 
+Q 2912 589 2947 413 
+Q 2982 237 3040 64 
+L 2349 -51 
+Q 2336 -26 2317 12 
+Q 2298 51 2278 96 
+Q 2259 141 2246 176 
+Q 2234 211 2227 230 
+Q 2099 134 1881 32 
+Q 1664 -70 1318 -70 
+Q 896 -64 653 233 
+Q 410 531 410 1101 
+Q 410 1536 557 1897 
+Q 704 2259 957 2515 
+Q 1210 2771 1552 2912 
+Q 1894 3053 2278 3053 
+Q 2451 3053 2611 3008 
+L 2918 4307 
+L 3738 4442 
+L 2963 1229 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#UbuntuMono-BoldItalic-32"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-55" transform="translate(50 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4a" transform="translate(100 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-3" transform="translate(150 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-50" transform="translate(200 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-52" transform="translate(250 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-47" transform="translate(300 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-48" transform="translate(350 0)"/>
+     </g>
+    </a>
+    <a xlink:href="https://orgmode.org/manual/" target="_blank">
+     <!-- manual -->
+     <g style="fill: #1f2a3f" transform="translate(260.633858 302.351112) scale(0.19 -0.19)">
+      <defs>
+       <path id="UbuntuMono-BoldItalic-51" d="M 973 2880 
+Q 1171 2944 1491 3008 
+Q 1811 3072 2176 3072 
+Q 2714 3072 2947 2841 
+Q 3181 2611 3181 2202 
+Q 3181 2093 3165 1965 
+Q 3149 1837 3117 1696 
+L 2701 0 
+L 1914 0 
+L 2304 1594 
+Q 2323 1696 2348 1805 
+Q 2374 1914 2374 2022 
+Q 2374 2170 2294 2282 
+Q 2214 2394 2003 2394 
+Q 1914 2394 1818 2378 
+Q 1722 2362 1632 2323 
+L 1069 0 
+L 282 0 
+L 973 2880 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-4f" d="M 2912 128 
+Q 2886 115 2812 80 
+Q 2739 45 2617 13 
+Q 2496 -19 2333 -44 
+Q 2170 -70 1971 -70 
+Q 1536 -70 1318 154 
+Q 1101 378 1101 781 
+Q 1101 890 1117 1008 
+Q 1133 1126 1165 1254 
+L 1760 3750 
+L 928 3750 
+L 1082 4403 
+L 2701 4403 
+L 1946 1203 
+Q 1933 1139 1917 1065 
+Q 1901 992 1901 934 
+Q 1901 806 1971 710 
+Q 2042 614 2259 614 
+Q 2349 614 2441 630 
+Q 2534 646 2617 672 
+Q 2701 698 2765 717 
+Q 2829 736 2861 749 
+L 2912 128 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#UbuntuMono-BoldItalic-50"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-44" transform="translate(50 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-51" transform="translate(100 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-58" transform="translate(150 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-44" transform="translate(200 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4f" transform="translate(250 0)"/>
+     </g>
+    </a>
+   </g>
+   <g id="text_11">
+    <a xlink:href="https://blog.tecosaur.net/tmio/2026-11-01-preview.html" target="_blank">
+     <!-- Tecosaur's -->
+     <g style="fill: #1f2a3f" transform="translate(249.133858 102.612033) scale(0.16 -0.16)">
+      <defs>
+       <path id="UbuntuMono-BoldItalic-37" d="M 3859 3962 
+L 3706 3309 
+L 2656 3309 
+L 1862 0 
+L 1075 0 
+L 1869 3309 
+L 826 3309 
+L 979 3962 
+L 3859 3962 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-46" d="M 493 1165 
+Q 493 1581 640 1933 
+Q 787 2285 1052 2537 
+Q 1318 2790 1683 2934 
+Q 2048 3078 2490 3078 
+Q 2662 3078 2793 3065 
+Q 2925 3053 3033 3030 
+Q 3142 3008 3228 2979 
+Q 3315 2950 3398 2912 
+L 3117 2285 
+Q 3014 2330 2854 2365 
+Q 2694 2400 2490 2400 
+Q 2227 2400 2009 2320 
+Q 1792 2240 1629 2086 
+Q 1466 1933 1376 1709 
+Q 1286 1485 1286 1197 
+Q 1286 1069 1318 963 
+Q 1350 858 1436 781 
+Q 1523 704 1673 659 
+Q 1824 614 2054 614 
+Q 2304 614 2518 662 
+Q 2733 710 2842 762 
+L 2918 134 
+Q 2842 96 2752 57 
+Q 2662 19 2540 -9 
+Q 2419 -38 2256 -54 
+Q 2093 -70 1869 -70 
+Q 1478 -70 1216 29 
+Q 954 128 794 294 
+Q 634 461 563 688 
+Q 493 915 493 1165 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-56" d="M 1498 582 
+Q 1837 582 1965 672 
+Q 2093 762 2093 883 
+Q 2093 941 2070 985 
+Q 2048 1030 1993 1072 
+Q 1939 1114 1843 1155 
+Q 1747 1197 1600 1254 
+Q 1421 1318 1286 1388 
+Q 1152 1459 1062 1552 
+Q 973 1645 928 1766 
+Q 883 1888 883 2054 
+Q 883 2522 1212 2803 
+Q 1542 3085 2202 3085 
+Q 2528 3085 2800 3027 
+Q 3072 2970 3232 2893 
+L 2944 2272 
+Q 2797 2342 2608 2387 
+Q 2419 2432 2131 2432 
+Q 2067 2432 1987 2422 
+Q 1907 2413 1836 2381 
+Q 1766 2349 1718 2294 
+Q 1670 2240 1670 2157 
+Q 1670 2099 1686 2057 
+Q 1702 2016 1753 1974 
+Q 1805 1933 1901 1888 
+Q 1997 1843 2157 1786 
+Q 2349 1709 2486 1632 
+Q 2624 1555 2717 1459 
+Q 2810 1363 2851 1235 
+Q 2893 1107 2893 928 
+Q 2893 742 2816 563 
+Q 2739 384 2576 240 
+Q 2413 96 2150 6 
+Q 1888 -83 1523 -83 
+Q 1261 -83 1062 -51 
+Q 864 -19 717 25 
+Q 570 70 470 118 
+Q 371 166 314 198 
+L 608 819 
+Q 736 749 960 665 
+Q 1184 582 1498 582 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-a" d="M 2899 4346 
+L 2778 3846 
+Q 2701 3526 2550 3145 
+Q 2400 2765 2253 2432 
+L 1792 2432 
+Q 1798 2598 1811 2796 
+Q 1824 2995 1843 3196 
+Q 1862 3398 1891 3593 
+Q 1920 3789 1958 3949 
+L 2054 4346 
+L 2899 4346 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#UbuntuMono-BoldItalic-37"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-48" transform="translate(50 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-46" transform="translate(100 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-52" transform="translate(150 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-56" transform="translate(200 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-44" transform="translate(250 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-58" transform="translate(300 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-55" transform="translate(350 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-a" transform="translate(400 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-56" transform="translate(450 0)"/>
+     </g>
+    </a>
+    <a xlink:href="https://blog.tecosaur.net/tmio/2026-11-01-preview.html" target="_blank">
+     <!-- "This Month -->
+     <g style="fill: #1f2a3f" transform="translate(245.133858 117.141033) scale(0.16 -0.16)">
+      <defs>
+       <path id="UbuntuMono-BoldItalic-5" d="M 2291 4346 
+L 2195 3942 
+Q 2163 3795 2105 3619 
+Q 2048 3443 1977 3257 
+Q 1907 3072 1830 2889 
+Q 1754 2707 1683 2547 
+L 1235 2547 
+Q 1242 2707 1251 2902 
+Q 1261 3098 1280 3299 
+Q 1299 3501 1328 3693 
+Q 1357 3885 1395 4045 
+L 1459 4346 
+L 2291 4346 
+z
+M 3552 4346 
+L 3462 3942 
+Q 3430 3795 3372 3619 
+Q 3315 3443 3244 3257 
+Q 3174 3072 3097 2889 
+Q 3021 2707 2944 2547 
+L 2496 2547 
+Q 2502 2707 2515 2902 
+Q 2528 3098 2547 3299 
+Q 2566 3501 2592 3693 
+Q 2618 3885 2656 4045 
+L 2726 4346 
+L 3552 4346 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-4c" d="M 2938 83 
+Q 2701 -6 2493 -38 
+Q 2285 -70 2106 -70 
+Q 1651 -70 1433 150 
+Q 1216 371 1216 774 
+Q 1216 986 1286 1267 
+L 1542 2355 
+L 710 2355 
+L 870 3008 
+L 2490 3008 
+L 2054 1171 
+Q 2016 1037 2016 934 
+Q 2016 614 2342 614 
+Q 2451 614 2598 636 
+Q 2746 659 2925 723 
+L 2938 83 
+z
+M 2125 3373 
+Q 1920 3373 1795 3481 
+Q 1670 3590 1670 3821 
+Q 1670 3942 1715 4048 
+Q 1760 4154 1833 4224 
+Q 1907 4294 2003 4336 
+Q 2099 4378 2202 4378 
+Q 2387 4378 2524 4269 
+Q 2662 4160 2662 3917 
+Q 2662 3802 2614 3699 
+Q 2566 3597 2489 3526 
+Q 2413 3456 2317 3414 
+Q 2221 3373 2125 3373 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-30" d="M 1862 3962 
+Q 1875 3827 1897 3606 
+Q 1920 3386 1939 3133 
+Q 1958 2880 1974 2611 
+Q 1990 2342 2003 2112 
+L 2963 3962 
+L 3686 3962 
+Q 3558 2995 3363 2012 
+Q 3168 1030 2944 0 
+L 2221 0 
+L 3014 3110 
+L 2131 1402 
+L 1574 1402 
+Q 1562 1824 1533 2259 
+Q 1504 2694 1472 3078 
+L 762 0 
+L 38 0 
+Q 173 486 317 1011 
+Q 461 1536 608 2057 
+Q 755 2579 899 3065 
+Q 1043 3552 1184 3962 
+L 1862 3962 
+z
+" transform="scale(0.015625)"/>
+       <path id="UbuntuMono-BoldItalic-57" d="M 1306 2355 
+L 704 2355 
+L 864 3008 
+L 1459 3008 
+L 1638 3763 
+L 2464 3891 
+L 2246 3008 
+L 3392 3008 
+L 3232 2355 
+L 2093 2355 
+L 1811 1184 
+Q 1779 1024 1779 934 
+Q 1779 742 1910 678 
+Q 2042 614 2208 614 
+Q 2381 614 2563 656 
+Q 2746 698 2918 768 
+L 2912 109 
+Q 2714 19 2474 -25 
+Q 2234 -70 1997 -70 
+Q 1485 -70 1232 150 
+Q 979 371 979 794 
+Q 979 896 992 1001 
+Q 1005 1107 1037 1229 
+L 1306 2355 
+z
+" transform="scale(0.015625)"/>
+      </defs>
+      <use xlink:href="#UbuntuMono-BoldItalic-5"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-37" transform="translate(50 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4b" transform="translate(100 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4c" transform="translate(150 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-56" transform="translate(200 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-3" transform="translate(250 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-30" transform="translate(300 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-52" transform="translate(350 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-51" transform="translate(400 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-57" transform="translate(450 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4b" transform="translate(500 0)"/>
+     </g>
+    </a>
+    <a xlink:href="https://blog.tecosaur.net/tmio/2026-11-01-preview.html" target="_blank">
+     <!-- in Org" -->
+     <g style="fill: #1f2a3f" transform="translate(261.133858 131.653033) scale(0.16 -0.16)">
+      <use xlink:href="#UbuntuMono-BoldItalic-4c"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-51" transform="translate(50 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-3" transform="translate(100 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-32" transform="translate(150 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-55" transform="translate(200 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-4a" transform="translate(250 0)"/>
+      <use xlink:href="#UbuntuMono-BoldItalic-5" transform="translate(300 0)"/>
+     </g>
+    </a>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p9faeef5dad">
+   <rect x="0" y="0" width="396.39685" height="396.39685"/>
+  </clipPath>
+ </defs>
+</svg>
+<style>
+.detail-icon {
+float: right;
+width: 25px;
+}
+</style>
+<h2 id="what-is-org-latex-preview">What is <code>org-latex-preview</code>?</h2>
+<p>This is a feature included with Org mode to preview LaTeX math snippets as images in Emacs buffers.  The contents of LaTeX fragments and environments in Org mode are replaced with rendered images.</p>
+<div class="wide" style="margin-top: 8px">
+<div class="column">
+  <a href="https://karthinks.com/img/olp-before-1.png"><img src="https://karthinks.com/img/olp-before-1.png" style="width:100%;border-radius:5px;box-shadow: 0px -5px 10px #421D5D"></a>
+</div>
+<div class="column">
+  <a href="https://karthinks.com/img/olp-after-1.png"><img src="https://karthinks.com/img/olp-after-1.png" style="width:100%;border-radius:5px;box-shadow: 0px -5px 10px #421D5D"></a>
+</div>
+</div>
+<p>It has existed for decades at this point, but in a form that I consider barely usable; this rewrite overhauls the code base and adds a number of quality-of-life features.  There is a 13 minute demo that can give you a good idea of the new capabilities of Org mode:</p>
+<hr>
+<p><span class="org-target" id="org-target--org-latex-preview-everywhere-youtube-demo"></span></p>
+<div class="videocontainer"><iframe width="680" height="382" src="https://www.youtube-nocookie.com/embed/n-AfvuV-bYo" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen>[<a href="https://www.youtube.com/watch?v=n-AfvuV-bYo">Video Demo (13:13)</a>]</iframe></div>
+<hr>
+<p>The bullet points, if you prefer:</p>
+<ul>
+<li>Preview generation is fully asynchronous
+<span class="sidenote-number"><small class="sidenote">
+Or as asynchronous as Emacs in its current form allows.
+</small></span>
+, with images placed continuously as they are generated</li>
+<li>Bulk generation: Preview 200 to 800 snippets per second</li>
+<li>Previews blend in correctly with surrounding colors</li>
+<li>Automatically match the current Emacs theme (even through theme changes)</li>
+<li>Previews are aligned with and scaled to match the font baseline and size</li>
+<li>Previews auto-generate for newly inserted LaTeX</li>
+<li>Previews auto-update as you change the underlying LaTeX</li>
+<li>Preview as you type: Live-previews of LaTeX fragments</li>
+<li>Consistent (correct) equation numbering across the document</li>
+<li>LaTeX compilation error reporting for previews</li>
+</ul>
+<p>And a couple more quick demos:</p>
+<p><video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-auto-mode-2.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-auto-mode-2.mp4">[org-latex-preview video demo 2]</a></video></p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-auto-mode-tikz.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-auto-mode-tikz.mp4">[org-latex-preview tikz demo]</a></video>
+<p>The rest of this article is mostly about how it works, and briefly why.  As such, it has a &ldquo;fractal&rdquo; level of detail.  There is information intended</p>
+<ul>
+<li>to give the casual reader a bird&rsquo;s eye view of LaTeX preview generation,</li>
+<li>to give the motivated reader a detailed look at its many pieces,</li>
+<li>for the potential new Emacs package author looking for pointers on aspects of Emacs&rsquo; API,</li>
+<li>for folks wanting to develop a similar feature for applications <em>other</em> than Emacs,</li>
+<li>and information that is of no use whatsoever except to the future maintainers of the <code>org-latex-preview</code> library.</li>
+</ul>
+<p>To that end, many details are tucked away in blocks like the following.  You can safely ignore them in favor of the top-level headings, images and video demos.</p>
+<div class="grid">
+<details class="details implementation">
+<summary><span><img src="https://karthinks.com/img/lisp-icon.png" class=detail-icon></span> Implementation details</summary>
+<div class="details">
+<p>Blocks like this describe the concrete implementation of aspects of the code.</p>
+<p>This is probably only interesting if you are looking to dive into the code itself, or if you are looking to write a similar package.</p>
+</div>
+</details>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Emacs API notes</summary>
+<div class="details">
+<p>Blocks like this are for additional notes on aspects of Emacs&rsquo; API, including the odd code snippets.</p>
+<p>Warning: Here be idiosyncratic takes.</p>
+</div>
+</details>
+<details class="details orgnote">
+<summary><span><img src="https://karthinks.com/img/org-mode-icon.png" class=detail-icon></span> Org Mode notes</summary>
+<div class="details">
+<p>Blocks like this describe other Org features relevant to LaTeX preview generation.</p>
+</div>
+</details>
+<details class="details">
+<summary><span><img src="https://karthinks.com/img/term-logo.png" class=detail-icon></span> Command output</summary>
+<div class="details">
+<p>Blocks like this describe CLI commands associated with this process, or their output.</p>
+</div>
+</details>
+</div>
+<hr>
+<h2 id="isn-t-this-a-narrow-feature-to-spend-so-much-time-on">Isn&rsquo;t this a narrow feature to spend so much time on?</h2>
+<p>Indeed, this feature</p>
+<ul>
+<li>requires a LaTeX distribution installed,</li>
+<li>works only with Org mode (for now),</li>
+<li>and is glued together from several processes and grossly inefficient in the larger scheme of things.</li>
+<li>It&rsquo;s also finicky, as all hyper-configurable software is.</li>
+</ul>
+<p>LaTeX was not built with the aim of minimizing latency.  Having to start multiple new processes even for a one-character change places a hard cap on what&rsquo;s possible in terms of real-time feedback.  Implementing an equivalent preview feature for a system designed for modern computers, like Typst, is trivial in comparison.</p>
+<p>Moreover, as popular as Org mode is, it&rsquo;s a small player in the space of markup languages.  The fraction of Org and LaTeX users who would prefer to use Org mode to write LaTeX is smaller still.  And while Org attempts to integrate well with LaTeX, navigating the mishmash of Org and LaTeX syntax presents an extra learning curve on top of learning to use the two markup languages individually.</p>
+<p>But it also has a few things going for it.</p>
+<p>First, LaTeX is ubiquitous, and Org mode is a far more convenient format for writing than raw LaTeX.  There is significantly less visual noise (think Markdown vs HTML), and Org provides an escape hatch for adding LaTeX verbatim.  Org&rsquo;s simple interface for shuffling text around, monitoring task progress and executing code blocks makes it easy for eventual LaTeX documents to begin as Org files.  Since everything in Emacs composes with everything else, your system for (say) <a href="https://karthinks.com/software/latex-input-for-impatient-scholars/">fast LaTeX input</a> transfers over to Org mode seamlessly.</p>
+<p>Second, the fact that Org is versatile as a publishing tool implies that some benefits of better LaTeX support transfer over to other formats too, like equations in HTML or ODT exports.</p>
+<p>There is a wide swath of applications built on Org mode that benefit from LaTeX math input, such as Org Roam and Org Noter.  For these applications converting Org documents to LaTeX is not the goal, as they are not primarily publication tools: they stick around as private digital archives, and better LaTeX support is a bonus to the user&rsquo;s expressivity.</p>
+<p>Real-time feedback when editing LaTeX snippets is a categorical improvement to the user&rsquo;s experience.  I did not realize this when I started work on <code>org-latex-preview</code>, but now I wouldn&rsquo;t want to LaTeX without it.
+<span class="sidenote-number"><small class="sidenote">
+It baffles me that web LaTeX editors (Overleaf etc) don&rsquo;t provide this out of the box, especially as they target novice LaTeX users.
+</small></span>
+.</p>
+<p>Finally, we <em>can</em> keep Org mode out of the picture: <code>org-latex-preview</code> can technically work anywhere in Emacs, and in every major-mode. it&rsquo;s just not there yet
+<span class="sidenote-number"><small class="sidenote">
+(See <a href="#latex-previews-everywhere-in-emacs">below</a>)
+</small></span>
+.</p>
+<p>But perhaps the most germane reason is that Emacs users don&rsquo;t shy away from settling comfortably into tiny, cramped and poorly insulated niches.  Comes with the territory!</p>
+<h2 id="the-objectives">The Objectives</h2>
+<h3 id="never-block-emacs">Never Block Emacs</h3>
+<p>Emacs users are closely acquainted with its frequent unresponsiveness.  You&rsquo;re never more than one minor-mode or mode line indicator away from causing Emacs to block or lag.  While it&rsquo;s not a big ask to wait a second for the result of an action <em>you</em> initiate, the unresponsiveness often manifests as short random freezes, which is unacceptable.  But there&rsquo;s more.  Beyond the annoyance and inconvenience, poor responsiveness denies us an entire class of uses: real-time feedback is everything for interactive applications.</p>
+<p>Owing to both its design and age, Emacs is not very well suited for asynchronous applications.  Certain patterns of asynchronous usage are viable (see below), but concurrency support is limited and parallelism is absent: no worker threads, channels, async-io, or anything of the like.</p>
+<details class="details apinote">
+<summary>Generator-based async in Emacs lisp <span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>I lied.  In addition to Elisp threads, there exist prototype libraries for async-io (<a href="https://nullprogram.com/blog/2019/03/10/">Chris Wellons</a>) and channels/CSP (<a href="https://andreyorst.gitlab.io/posts/2023-02-01-ad-hoc-async-in-emacs-lisp-via-generators/">Andrey Listopadov</a>) based on Emacs&rsquo; <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Generators.html">generators library</a>, which in turn is implemented using continuation passing.  But generators as provided by this library do not have anywhere near the level of robustness or support you need to build actual applications: no introspection, error handling or debugging support, poor performance, and just overall jankiness.  I&rsquo;ve tried and lived to regret it &ndash; <a href="https://github.com/karthink/elfeed-tube">Elfeed Tube</a> is a real mess.</p>
+<p>The <a href="https://elpa.gnu.org/packages/futur.html">Futur</a> package is another promising swing at an async-io style interface, but it&rsquo;s new and I haven&rsquo;t been able to try it yet.</p>
+<p>In any event, a more responsive <code>org-latex-preview</code> would require parallelism and not just concurrency.  There is John Wiegley&rsquo;s <a href="https://github.com/jwiegley/emacs-async">async library</a> (and packages inspired by it, like <a href="https://codeberg.org/FelipeLema/session-async.el">session-async</a>) that spawn a child Emacs that runs in parallel, but communication is limited and the overhead is sizeable, so this is a bit of a bludgeon.</p>
+</div>
+</details>
+<p>The upshot is this: we want <code>org-latex-preview</code> to be as asynchronous as possible within Emacs&rsquo; effectively single-threaded event loop model.  The goal is to minimize how long the user has to wait, in terms of both the overall run time and the fraction of that for which Emacs is unresponsive.  We end up having to trade these off against each other.</p>
+<h3 id="go-fast--relative-to-latex-and-emacs">Go Fast (relative to LaTeX and Emacs)</h3>
+<p>A close second concern is preview generation speed.  This is desirable both in the large and the small.  Previewing upwards of a hundred LaTeX math fragments in a math-heavy Org document used to be an exercise in patience.  Now it takes about one second, and can be much faster with some trade-offs.</p>
+<style>.center-table table { margin-left: auto;  margin-right: auto;  text-align: right;  }</style>
+<div class="ox-hugo-table center-table">
+<table>
+<thead>
+<tr>
+<th>LaTeX Fragments</th>
+<th>Old preview system (s)</th>
+<th><code>org-latex-preview</code> (s)</th>
+<th>Speed up</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>35</td>
+<td>12.96</td>
+<td>0.43</td>
+<td>30x</td>
+</tr>
+<tr>
+<td>70</td>
+<td>22.59</td>
+<td>0.51</td>
+<td>44x</td>
+</tr>
+<tr>
+<td>160</td>
+<td>33.99</td>
+<td>0.68</td>
+<td>50x</td>
+</tr>
+<tr>
+<td>330</td>
+<td>84.95</td>
+<td>1.32</td>
+<td>64x</td>
+</tr>
+<tr>
+<td>660</td>
+<td>139.73</td>
+<td>1.96</td>
+<td>71x</td>
+</tr>
+<tr>
+<td>1000</td>
+<td>194.16</td>
+<td>3.24</td>
+<td>60x</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><a id="figure--timing-chart-svg-only"></a></p>
+<figure><img src="https://karthinks.com/img/olp_preview_timing_chart_svg_only.svg"
+         alt="Figure 1: LaTeX preview generation times under the slowest settings. The vertical axis is time, and along each vertical line the red chunks correspond to intervals for which Emacs is blocked. We still manage to process a file with 250 LaTeX fragments in about a second with minimal impact on Emacs&amp;rsquo; responsiveness."/><figcaption>
+            <p><span class="figure-number">Figure 1: </span>LaTeX preview generation times under the slowest settings.  The vertical axis is time, and along each vertical line the red chunks correspond to intervals for which Emacs is blocked.  We still manage to process a file with 250 LaTeX fragments in about a second with minimal impact on Emacs&rsquo; responsiveness.</p>
+        </figcaption>
+</figure>
+
+<h3 id="provide-real-time-feedback">Provide Real-Time Feedback</h3>
+<p>Speeding up bulk generation is at most a boost in convenience.  You don&rsquo;t regenerate a large buffer&rsquo;s worth of previews more than once every few sessions, and the resulting images are cached anyway.  The more interesting aspect is that speed enables a close to real-time feedback loop that wasn&rsquo;t available before.  This is especially useful when you&rsquo;re deep inside a messy structure like an array:</p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-auto-mode-array.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-auto-mode-array.mp4">[Video: Live previews of a LaTeX array]</a></video>
+<p>No more counting field separators.  No more exiting, regenerating and re-examining snippets.  It&rsquo;s the best parts of WYSIWYG and visible markup, together.</p>
+<h3 id="look-pretty">Look Pretty</h3>
+<p>Even in the niche of academic types who use Org mode with LaTeX, there are very different orientations.  There&rsquo;s Org the transient format, where an Org document starts out as a rough sketch, a thought bubble translated to the screen, and soon transitions into a TeX file that becomes the source of truth.  There&rsquo;s Org the intermediate publication format, where the document lives as an Org file, but its value is in the web page or PDF document it eventually becomes.  For the adherents of this style the appearance of the Org document is irrelevant.</p>
+<p>Finally, there&rsquo;s the class of uses described <a href="#isn-t-this-a-narrow-feature-to-spend-so-much-time-on">above</a>, where the desired output is the Org document itself, or a cross-linked collection of them.  These are folks who care about the aesthetics of Org documents and often suffer a thousand cuts in trying to make Emacs look &ldquo;modern&rdquo;.</p>
+<p>One of the objectives of <code>org-latex-preview</code> is to ease their self-imposed burden somewhat: LaTeX previews should blend in perfectly with the surrounding text.  This means</p>
+<ul>
+<li>preview image sizing that is consistent with surrounding text,</li>
+<li>with perfect baseline alignment at any font size,</li>
+<li>and Emacs theme-aware colors that change automatically with the theme.</li>
+</ul>
+<p>Getting the fonts to match is possible too, but requires some degree of compromise on the part of the user
+<span class="sidenote-number"><small class="sidenote">
+You could start by using the variable-pitch Latin Modern font in your Org documents.
+</small></span>
+.</p>
+<p>Each of these is a long-standing issue with LaTeX previews in Org, and Stack Overflow and the usual haunts have decades of discussions on how to fix them, with band-aid after band-aid proposed as solutions.  We took an elephant gun to this problem, starting by throwing out the giant mess that was Org&rsquo;s accreted LaTeX preview code of the past two decades.</p>
+<p>Here&rsquo;s a demo of theme-aware LaTeX preview colors:</p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-theme-change.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-theme-change.mp4">[video demo: LaTeX previews that respect the color theme]</a></video>
+<h3 id="windfalls-consistent-numbering-error-reporting">Windfalls: Consistent numbering, error reporting</h3>
+<p>Finally, there are a few features we picked up along the way because they came free.</p>
+<p>Recording compilation errors was a simple matter since we scan the LaTeX output anyway.</p>
+<p>Consistent equation numbering was expensive in the past because numbering changes can propagate across the document, and parsing the Org document and LaTeX fragment compilation were both slow.  Recent changes to Org have made the former a non-issue (see the <a href="#parsing">parsing section below</a>), and the <a href="#figure--timing-chart-svg-only">performance scaling</a> of our bulk LaTeX runs has fixed the latter.</p>
+<p>There are several more minor features along for the ride, such as improvements to editing LaTeX with <code>org-edit-special</code> (<code>C-c '</code>).</p>
+<h2 id="the-emacs-api-an-overview">The Emacs API: An Overview</h2>
+<p>As mentioned in the introduction, the LaTeX preview system draws on a few different facets of the Emacs API: mainly async process interaction (the &ldquo;backend&rdquo;) and overlays (the UI or &ldquo;frontend&rdquo;).  The live-updating behavior leans heavily on hooks and timers, and we join these pieces together with very simple Lispy data structures, like alists and plists.</p>
+<p>We also (naturally) use a few Org mode specific APIs, including ones developed by us for this purpose.  We cover these further below as we encounter them.</p>
+<h3 id="the-substrate-emacs-event-loop">The Substrate: Emacs&rsquo; Event Loop</h3>
+<p>If you are designing an Emacs application that interacts with the outside world, it helps to start with a mental picture of Emacs&rsquo; event loop.  To a first approximation, the main loop does only four things:</p>
+<p><a id="figure--emacs-event-loop-simple"></a></p>
+<figure><img src="https://karthinks.com/img/emacs-event-loop-simple.png"/>
+</figure>
+
+<ul>
+<li>Read input events: This includes keyboard, mouse and touchscreen events, but also some OS signals.  This is the user&rsquo;s interface to Emacs.</li>
+<li>Evaluate commands and redisplay: This is the heart of the Lisp evaluator, and Emacs&rsquo; interface to the user.</li>
+</ul>
+<p>Together these two connect the user and Emacs.  If the main loop did only these two things Emacs would still qualify for the title of &ldquo;Lisp evaluator masquerading as a text editor&rdquo;, but it wouldn&rsquo;t be nearly as useful.  For that we need it to</p>
+<ul>
+<li>Read subprocess output: This includes output from &ldquo;regular&rdquo; processes like shell commands or LaTeX, but also network requests. This connects Emacs to the world
+<span class="sidenote-number"><small class="sidenote">
+(your computer and the network)
+</small></span>
+, and vice-versa.  Command shells, LaTeX previews, LLM clients and most IDE features work because of this.</li>
+</ul>
+<p>The last event loop function combines the above three, but across time:</p>
+<ul>
+<li>Run timers: Schedule code for the future and run them when timers are ripe.  Somewhat tentatively, I&rsquo;m including garbage collection here.</li>
+</ul>
+<p>This design explains why timers in Emacs are not reliable in the absolute sense.  The timer runs not when it&rsquo;s ripe, but when it&rsquo;s ripe <em>and</em> when the main loop gets around to it.  Nevertheless, scheduling code provides a much-needed degree of flexibility to a rigidly ordered task list.</p>
+<details>
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> &ldquo;To a first approximation&rdquo;</summary>
+<div class="details">
+<p>The way these four tasks are actually organized in the main loop code is less pleasing:</p>
+<figure><img src="https://karthinks.com/img/emacs-event-loop-detailed.png"/>
+</figure>
+
+<p>Also, Emacs is obviously doing things outside of the event loop as well.  Font caches are compacted, Emacs is responding to the compositor and some OS signals, interacting with dynamic modules, and so on.  In the currently experimental MPS branch, some garbage collection activities also occur in the background.   These are invisible to the Lisp evaluator and thus out of scope when learning to build an Elisp package.</p>
+</div>
+</details>
+<h3 id="the-backend-subprocess-interaction">The Backend: Subprocess Interaction</h3>
+<p><a id="figure--async-interaction-via-processes"></a></p>
+<figure><img src="https://karthinks.com/img/async-interaction-via-processes.png" width="450px"/>
+</figure>
+
+<p>This design suggests that <em>Emacs can only do one thing at a time</em>
+<span class="sidenote-number"><small class="sidenote">
+As of Emacs 31
+</small></span>
+, so that designing a responsive application is a steep ask.   But the situation is more nuanced:</p>
+<ol>
+<li>
+<p>Yes, the Lisp evaluator holds a global interpreter lock.  At any point in time Emacs is doing exactly one of the following: painting the screen (redisplay), updating syntax highlighting (fontification), running hook functions or timers, responding to window changes, handling keyboard input, and &ndash; crucially for us &ndash; interacting with subprocesses.  Every action is thus <span class="Orange">blocking</span>.</p>
+</li>
+<li>
+<p>The only <span class="Purple">asynchronous</span> interaction possible is by starting an OS-level subprocess
+<span class="sidenote-number"><small class="sidenote">
+Another lie, since we have <a href="#org-target--org-latex-preview-dynamic-modules">dynamic modules, covered below</a>.
+</small></span>
+.  Emacs continues to run independently from the subprocess, but it still has to handle its <code>STDOUT</code> and <code>STDERR</code> streams and respond to process signals.  When it is doing this, it cannot pay attention to your input or anything else.  Again, Emacs can only do one thing at a time.</p>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Starting asynchronous subprocesses</summary>
+<div class="details">
+<p>There are multiple commands to start an asynchronous subprocess from Emacs (see <code>M-x shortdoc</code> <code>process</code>), but <code>start-process</code> covers most common use cases.</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>      (<span style="color:#007020">setq</span> <span style="color:#963">my-process-object</span>
+</span></span><span style="display:flex;"><span>            (<span style="color:#06b;font-weight:bold">start-process</span> <span style="background-color:#fff0f0">&#34;name&#34;</span> <span style="background-color:#fff0f0">&#34;buffer-name&#34;</span> <span style="background-color:#fff0f0">&#34;program&#34;</span> <span style="background-color:#fff0f0">&#34;--arg1&#34;</span> <span style="background-color:#fff0f0">&#34;--arg2&#34;</span> <span style="background-color:#fff0f0">&#34;...&#34;</span>))
+</span></span></code></pre></div><p>Processes are (optionally) associated with a buffer where process output is inserted.  To send a subprocess some input, there&rsquo;s <code>process-send-string</code> and <code>process-send-region</code>.  Responding to process output and signals is the responsibility of process filters and sentinels (<a href="#org-target--org-latex-preview-process-filters-sentinels">next block</a>).  <code>kill-process</code> does what you&rsquo;d expect.  All of these functions take the process object that <code>start-process</code> returns as an argument.</p>
+<p>Except for some <a href="#org-target--org-latex-preview-fiddly-details">fiddly details</a>, that&rsquo;s essentially all there is to the process interaction API.  There are several variants of <code>start-process</code> available &ndash; the synchronous <code>call-process</code>, the shell versions <code>start-process-shell-command</code> and <code>call-process-shell-command</code>, and so on.  The only one that does something different is the primitive <code>make-process</code>, which is a more extensive version that can (additionally) create network processes, send data through TCP or Unix sockets and so on.</p>
+</div>
+</details>
+</li>
+<li>
+<p>Emacs will try to prioritize user input events.  To do this it can delay tasks like reading from subprcesses if necessary.  <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Idle-Timers.html">Idle timers</a> are another example of this.  Some actions are thus <span class="Green">delayable</span>, but they block Emacs when they (eventually) run.  There might be a penalty to pay afterwards, for instance when there&rsquo;s more subprocess output to process as a result of delaying the task.</p>
+<p><span class="org-target" id="org-target--org-latex-preview-process-filters-sentinels"></span></p>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Process filters and sentinels: Handling process output</summary>
+<div class="details">
+<p>By default, Emacs inserts the output from a subprocess into the process buffer, or ignores it if there is no process buffer.  (Crucially, it still has to read the output from the process pipe.)  This is good enough for simple tasks.  To use or transform subprocess output in more specialized ways, you can write an elisp function that is used as a <em>process filter</em>.  It is called whenever Emacs reads new process output.  In the language of shell commands, I think of process filters like this:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>      $ start-process <span style="background-color:#fff0f0">&#34;some-process&#34;</span> 2&gt;&amp;<span style="color:#60e;font-weight:bold">1</span> | process-filter
+</span></span></code></pre></div><p>Process filters can be tricky to write if you want to parse structured process output, because the amount of data that Emacs reads from the pipe can be arbitrary.  Unless latency is a concern, it&rsquo;s often preferable to work with <em>process sentinels</em> for this reason.  Sentinels are the second tool Emacs makes available for reacting to processes.  A process sentinel is an elisp function (callback) called whenever the process changes state or raises a signal, including when it terminates.  Practically speaking, I think of them like this:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-bash" data-lang="bash"><span style="display:flex;"><span>      $ start-process <span style="background-color:#fff0f0">&#34;some-process&#34;</span> 2&gt;&amp;<span style="color:#60e;font-weight:bold">1</span> &gt; process-buffer <span style="color:#333">&amp;&amp;</span> <span style="color:#666;background-color:#fff0f0;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#666;background-color:#fff0f0;font-weight:bold"></span>          process-sentinel &lt; process-buffer
+</span></span></code></pre></div><p>They are typically used for cleaning up after the process, and updating Emacs&rsquo; state depending on how the subprocess ends.  But you can use them to access the process buffer containing all the process output, and thus do whatever you would in the filter.</p>
+<p>Filters and sentinels can be attached to a subprocess object created with <code>start-process</code> using <code>set-process-filter</code> and <code>set-process-sentinel</code> respectively.</p>
+</div>
+</details>
+</li>
+<li>
+<p>Many blocking operations can be interrupted by signaling a <code>quit</code>: this is what pressing <code>C-g</code> does, with some variations, in most contexts.  Crucially for us, however, quitting is suppressed when Emacs is handling subprocess output or signals
+<span class="sidenote-number"><small class="sidenote">
+This is to keep your <code>C-g</code> from doing something unpredictable to &ldquo;background&rdquo; code that you didn&rsquo;t initiate.
+</small></span>
+.  If Emacs is blocked because it&rsquo;s reading a large data dump&hellip; well, tough luck.</p>
+</li>
+</ol>
+<details class="details apinote">
+<summary>Interrupting code <span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p><code>keyboard-quit</code> (<code>C-g</code>) is a <em>specific</em> input that interrupts <em>any</em> code, with a few exceptions.</p>
+<p>The obverse of this is to wrap code in a <code>while-no-input</code> clause &ndash; now <em>any</em> input will interrupt the processing of <em>this</em> specific block.  This can be used to do background processing in small chunks without making Emacs unresponsive, but there are subtleties involved that I&rsquo;m not familiar with.</p>
+</div>
+</details>
+<p>Despite these carveouts, a package that interacts heavily with external processes faces a latency-throughput tradeoff.  The more time Emacs spends starting processes and managing their output, the less attention it can pay to your input.  Designing Org&rsquo;s LaTeX preview thus involves finding an acceptable balance.</p>
+<p><a id="figure--emacs-latency-vs-throughput"></a></p>
+<figure><img src="https://karthinks.com/img/emacs-latency-vs-throughput.png"
+         alt="Figure 2: (Top) Emacs dealing with a &amp;ldquo;fat&amp;rdquo; high-throughput process, where it spends a chunk of time reading subprocess output. The time between reading your input and running the resulting command is thus longer than (bottom) the &amp;ldquo;thin&amp;rdquo; low-throughput case."/><figcaption>
+            <p><span class="figure-number">Figure 2: </span>(Top) Emacs dealing with a &ldquo;fat&rdquo; high-throughput process, where it spends a chunk of time reading subprocess output.  The time between reading your input and running the resulting command is thus longer than (bottom) the &ldquo;thin&rdquo; low-throughput case.</p>
+        </figcaption>
+</figure>
+
+<p>It is <em>significantly</em> easier to write a large Emacs library than an equally versatile plugin for most plugin systems built around multi-threaded GUI applications.  I say this as a non-programmer who has only succeeded at the former.  We lean on the interpreter lock in many ways, choosing <a href="#how-it-works-data-flow">simple data structures</a> and <a href="#how-it-works-control-flow">control flow</a> that wouldn&rsquo;t work if Emacs was multi-threaded.  But most of Emacs wouldn&rsquo;t work if Emacs was multi-threaded, anyway.  In for a penny&hellip;</p>
+<h3 id="the-frontend-displaying-images-over-text">The Frontend: Displaying images over text</h3>
+<p><a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Overlays.html">Overlays</a> are a way to alter the appearance or behavior of regions of buffer text without modifying the text itself.  Displaying images is one of their most common uses: LaTeX preview images are overlaid on top of the source fragments.</p>
+<figure><img src="https://karthinks.com/img/olp-before-and-after-2.png"/>
+</figure>
+
+<p>Once you have the preview images in hand, placing them in overlays and managing their state is essentially all the LaTeX preview code does.</p>
+<p>In fact, overlays account for much of the display trickery in Emacs:  Images over text?  Overlays. &ldquo;Virtual text&rdquo; like in <code>whitespace-mode</code>?  Overlays.  <a href="https://github.com/xiongtx/eros">Inline results</a> of code evaluation: overlays. <a href="https://github.com/magnars/multiple-cursors.el">Multiple cursors</a>? Those are overlays.  Emacs has only one cursor.</p>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Making overlays</summary>
+<div class="details">
+<p>For a quick look into the overlay API, run <code>M-x shortdoc</code> <code>overlay</code>.</p>
+<p>The even shorter version: We can create an overlay <code>ov</code> from buffer position <code>BEG</code> to <code>END</code> with</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">setq</span> <span style="color:#963">ov</span> (<span style="color:#06b;font-weight:bold">make-overlay</span> <span style="color:#963">BEG</span> <span style="color:#963">END</span>))
+</span></span></code></pre></div><p>and move it around with</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">move-overlay</span> <span style="color:#963">ov</span> <span style="color:#963">NEW-BEG</span> <span style="color:#963">NEW-END</span>)
+</span></span></code></pre></div><p>To avoid creating garbage, it is preferable to reuse overlays when possible instead of throwing them away with <code>(delete-overlay ov)</code> and starting over. <code>move-overlay</code> can move them to other buffers too.</p>
+<p>The only other tricky question is what happens to the overlay when text is inserted at its left or right boundaries.  Does it expand to contain the text?  This is left as an exercise for the reader.</p>
+</div>
+</details>
+<p>These alterations are specified by adding or modifying the overlay&rsquo;s &ldquo;properties&rdquo;.  Like <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Symbol-Properties.html">symbol properties</a>, overlay properties are a way to store arbitrary information along with the overlay, and <code>org-latex-preview</code> uses them to keep track of state, such as whether the preview image is out of date because the LaTeX fragment has been edited, and to store LaTeX compilation errors for the corresponding fragment.</p>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Overlay properties</summary>
+<div class="details">
+<p>To set and retrieve overlay properties, we can use</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#963">prop</span> <span style="color:#963">value</span>)
+</span></span><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-get</span> <span style="color:#963">ov</span> <span style="color:#963">prop</span>)
+</span></span></code></pre></div><p>where the property <code>prop</code> is any elisp symbol.  There is also an <code>overlay-properties</code> function to access the full list.  Once again, <code>M-x shortdoc</code> <code>overlay</code> has us covered.</p>
+</div>
+</details>
+<figure class="alignright"><img src="https://karthinks.com/img/olp-phi-overlaid.png"/>
+</figure>
+
+<p>Some properties have special meanings as interpreted by Emacs&rsquo; display engine.  <code>display</code>, the most common property, changes how the overlay region appears on screen, and this is typically set to the image we want to see in place of the text.</p>
+<p>But several more interesting modifications are possible with overlays, such as changing the face (font+style) of the underlying text, making it invisible, making it intangible to the cursor, or specifying keymaps that are activated when the cursor is within the bounds of the overlay.</p>
+<details class="details apinote">
+<summary><span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span> Fun with overlay properties</summary>
+<div class="details">
+<p>The only other detail we need is the <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Overlay-Properties.html">list of overlay properties</a> that Emacs considers special.  The <code>display</code> property can be used to show an image instead of the text &ldquo;below&rdquo; (or &ldquo;under&rdquo;) the overlay, for example:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">let</span> ((<span style="color:#963">img</span> (<span style="color:#963">create-image</span> <span style="background-color:#fff0f0">&#34;/path/to/image.png&#34;</span>)))
+</span></span><span style="display:flex;"><span>  (<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;display</span> <span style="color:#963">img</span>))
+</span></span></code></pre></div><hr>
+<p>The <code>face</code> property can change the display of the text.  Here we dim the text the overlay covers:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;face</span> <span style="color:#a60;background-color:#fff0f0">&#39;shadow</span>)
+</span></span></code></pre></div><p>Here are a few more interesting uses of other special overlay properties.</p>
+<hr>
+<p>Send a message if the text under the overlay changes:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">defun</span> <span style="color:#963">notify-on-ov-change</span> (<span style="color:#963">ov</span> <span style="color:#963">after-p</span> <span style="color:#963">beg</span> <span style="color:#963">end</span> <span style="color:#038;font-weight:bold">&amp;optional</span> <span style="color:#963">_</span>)
+</span></span><span style="display:flex;"><span>   (<span style="color:#007020">when</span> <span style="color:#963">after-p</span>
+</span></span><span style="display:flex;"><span>     (<span style="color:#06b;font-weight:bold">message</span> <span style="background-color:#fff0f0">&#34;Text changed: %s&#34;</span>
+</span></span><span style="display:flex;"><span>              (<span style="color:#06b;font-weight:bold">buffer-substring-no-properties</span> <span style="color:#963">beg</span> <span style="color:#963">end</span>))))
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;modification-hooks</span> (<span style="color:#06b;font-weight:bold">list</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">notify-on-ov-change</span>))
+</span></span></code></pre></div><p>You can use this to set up a &ldquo;watcher&rdquo; &ndash; perhaps run a process when a region inside a buffer changes
+<span class="sidenote-number"><small class="sidenote">
+If you want to set up a watcher on the contents of the entire buffer as opposed to a piece of it, you should avoid overlays and look at the hook <code>after-change-functions</code> instead.  Be warned: it&rsquo;s easy to slow down Emacs to a crawl this way if you&rsquo;re not careful.
+</small></span>
+!  This is not hypothetical: <code>preview-latex</code> does this to <a href="#precompilation">re-dump the LaTeX preamble</a> of TeX files (in the background) as you edit them.</p>
+<hr>
+<p>Add a highlight and tooltip (&ldquo;hover text&rdquo;) when the mouse is on the overlay:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;mouse-face</span> <span style="color:#a60;background-color:#fff0f0">&#39;highlight</span>)
+</span></span><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;help-echo</span> <span style="background-color:#fff0f0">&#34;You&#39;re on an overlay, pal.&#34;</span>)
+</span></span></code></pre></div><hr>
+<p>Open the displayed image externally when pressing <code>RET</code> with the cursor on it:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#06b;font-weight:bold">overlay-put</span>
+</span></span><span style="display:flex;"><span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;keymap</span>
+</span></span><span style="display:flex;"><span> (<span style="color:#963">define-keymap</span> <span style="background-color:#fff0f0">&#34;RET&#34;</span>
+</span></span><span style="display:flex;"><span>   (<span style="color:#007020">lambda</span> () (<span style="color:#007020">interactive</span>)
+</span></span><span style="display:flex;"><span>     (<span style="color:#963">when-let*</span> ((<span style="color:#963">img</span> (<span style="color:#06b;font-weight:bold">get-char-property</span> (<span style="color:#06b;font-weight:bold">point</span>) <span style="color:#a60;background-color:#fff0f0">&#39;display</span>))
+</span></span><span style="display:flex;"><span>                 ((<span style="color:#06b;font-weight:bold">imagep</span> <span style="color:#963">img</span>))
+</span></span><span style="display:flex;"><span>                 (<span style="color:#963">file</span> (<span style="color:#963">image-property</span> <span style="color:#963">img</span> <span style="color:#007020">:file</span>)))
+</span></span><span style="display:flex;"><span>       (<span style="color:#06b;font-weight:bold">start-process</span> <span style="background-color:#fff0f0">&#34;view-image&#34;</span> <span style="color:#036;font-weight:bold">nil</span>
+</span></span><span style="display:flex;"><span>                      <span style="background-color:#fff0f0">&#34;xdg-open&#34;</span> <span style="color:#963">file</span>)))))
+</span></span></code></pre></div><p>This works by defining a <code>keymap</code> overlay property with the required function.  (On non-Linux systems, you will want to change <code>&quot;xdg-open&quot;</code> to an equivalent command-line utility.)</p>
+<hr>
+<p>Center an image in a window:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">let*</span> ((<span style="color:#963">img</span> (<span style="color:#963">image-create</span> <span style="background-color:#fff0f0">&#34;/path/to/image.png&#34;</span>))
+</span></span><span style="display:flex;"><span>       (<span style="color:#963">spacing</span> (<span style="color:#06b;font-weight:bold">propertize</span>
+</span></span><span style="display:flex;"><span>                 <span style="background-color:#fff0f0">&#34; &#34;</span> <span style="color:#a60;background-color:#fff0f0">&#39;face</span> <span style="color:#a60;background-color:#fff0f0">&#39;default</span>
+</span></span><span style="display:flex;"><span>                 <span style="color:#a60;background-color:#fff0f0">&#39;display</span>
+</span></span><span style="display:flex;"><span>                 <span style="color:#333">`</span>(<span style="color:#963">space</span> <span style="color:#007020">:align-to</span> (<span style="color:#06b;font-weight:bold">-</span> <span style="color:#963">center</span> (<span style="color:#60e;font-weight:bold">0.5</span> <span style="color:#333">.</span> <span style="color:#333">,</span><span style="color:#963">img</span>))))))
+</span></span><span style="display:flex;"><span>  (<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;display</span> <span style="color:#963">img</span>)
+</span></span><span style="display:flex;"><span>  (<span style="color:#06b;font-weight:bold">overlay-put</span> <span style="color:#963">ov</span> <span style="color:#a60;background-color:#fff0f0">&#39;before-string</span> <span style="color:#963">spacing</span>))
+</span></span></code></pre></div><p>This image stays centered as you resize the window:</p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-overlay-image-centered.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-overlay-image-centered.mp4">[Video: Centered images using overlays]</a></video>
+<p>This one needs a little explanation:  The <code>before-string</code> overlay property displays an object before the overlay itself.  The object we choose to display is some propertized text with a <code>display</code> <em>text-property</em>.  The <code>display</code> text-property provides the means to <a href="https://www.gnu.org/software/emacs/manual/html_node/elisp/Pixel-Specification.html">insert spaces of specified widths</a>, and a symbolic way to refer to the text margins, window center and horizontal window boundary positions.  Combining the two gives us (consistently) centered images in Emacs.</p>
+</div>
+</details>
+<h3 id="the-reactive-ui-hooks-and-timers">The Reactive UI: Hooks and Timers</h3>
+<p>In its basic form, the LaTeX preview feature involves no reactive behavior: there is one command to overlay preview images on LaTeX fragments, another to clear those overlays, and nothing else.</p>
+<p>But this is a far cry from our goal of real-time feedback.  For LaTeX previews to be automatically generated and updated as we type, we need both timers and <em>hooks</em>.</p>
+<p>Hooks are variables provided by Emacs where we can register code to run at certain points.  In this case, we want to react primarily to two kinds of user inputs:</p>
+<ul>
+<li>Cursor motion, so that entering a previewed LaTeX fragment reveals its source and leaving it re-displays the image.</li>
+<li>Buffer changes, so that a preview generation subprocess automatically fires when a new LaTeX fragment is typed in or an existing one is edited.</li>
+</ul>
+<p>In turn, <code>org-latex-preview</code> exposes hooks of its own for consumers to run additional processing.  These fire when LaTeX subprocesses finish, when overlays are created, and so on.</p>
+<p>Timers are complementary to hooks, used to space out or limit the consequences of hooks firing.  They are used</p>
+<ul>
+<li>to keep these hooks from firing <em>all the time</em>, which would create redundant subprocesses with each edit, locking up the main loop.  They provide the means to implement <a href="https://karthinks.com/software/cool-your-heels-emacs/">throttling and debouncing</a>.</li>
+<li>to delay clean-up tasks like deleting intermediate LaTeX output until Emacs is idle.</li>
+</ul>
+<h2 id="the-structure-of-org-latex-preview">The structure of <code>org-latex-preview</code></h2>
+<p>Besides basic Elisp data structures, that&rsquo;s everything we need from Emacs to implement non-blocking, fast LaTeX previews.  Assuming you have a handle on what <code>org-latex-preview</code> does, we can start peering into the how.</p>
+<h3 id="how-it-works-control-flow">How it works: control flow</h3>
+<p>Here is a high-level overview of the control flow of LaTeX preview generation:</p>
+<p><a id="figure--org-latex-preview-process-chart"></a></p>
+<figure><img src="https://karthinks.com/img/olp-control-flowchart.svg"
+         alt="Figure 3: Control flow for Org mode&amp;rsquo;s LaTeX preview system."/><figcaption>
+            <p><span class="figure-number">Figure 3: </span>Control flow for Org mode&rsquo;s LaTeX preview system.</p>
+        </figcaption>
+</figure>
+
+<p>This is a rough picture of how LaTeX previews are generated in Org mode, subdivided into tasks
+<span class="sidenote-number"><small class="sidenote">
+The made-up term &ldquo;task&rdquo; corresponds to a handful of functions devoted, in our heads, to one purpose.
+</small></span>
+.  Each action belongs to one of three categories:</p>
+<ul>
+<li><span class="Orange">Blocking</span> tasks: These must run synchronously and thus require the user to wait while Emacs is unresponsive.  We want this to be minimal and/or done ahead of time.</li>
+<li><span class="Green">Delayable</span> tasks: These tasks can be delayed if more immediate actions &ndash; such as accepting user input &ndash; are pending.  However, once such a task is started it runs synchronously and we&rsquo;re locked in.  We want this work to be chunked into small independent pieces.</li>
+<li><span class="Purple">Asynchronous</span> tasks: These are subprocesses spawned by Emacs and managed by the OS.  Emacs monitors the process status and handles process output in a delayable fashion, but is otherwise unencumbered by them.</li>
+</ul>
+<p>When a LaTeX preview command is issued, the first chunk of processing (the <span class="Orange">PREPARE</span> block)</p>
+<ol>
+<li>sets up overlays in the buffer that &ldquo;cover&rdquo; the fragments, with the intent to add preview images to them at the end,</li>
+<li>creates a TeX file containing the relevant LaTeX fragments from the Org buffer, along with a preamble.  This preamble is optionally precompiled, which can speed up processing considerably.</li>
+</ol>
+<p>It then starts a two step process chain (the <span class="Purple">RUN</span> block) that runs asynchronously.  The end result of a successful run is a preview image or series of images.</p>
+<p>The <span class="Green">PROCESS FILTERS</span> block: From this point on until either process ends, Emacs checks in periodically through the associated process filter, acting on the <code>STDOUT</code> to capture various bits of preview metadata.  It also keeps track of images that have finished processing, and (synchronously) caches them and adds them to the overlays in the buffer for these fragments.  This continuous update is doubly useful:</p>
+<ul>
+<li>Previews start appearing in the buffer much faster, with the window viewport being updated first.</li>
+<li>This processing happens in small chunks instead of all at once at the end, so Emacs stays more (even if not fully) responsive to input.</li>
+</ul>
+<p>The <span class="Orange">POSTPROCESS</span> block: After the subprocesses have finished, Emacs runs their process sentinels, which clean up the detritus of this process chain, or reset the buffer if the preview run failed.</p>
+<p>And speaking of detritus&hellip;</p>
+<h3 id="how-it-works-file-i-o">How it works: file I/O</h3>
+<p><a id="figure--org-latex-preview-file-chart"></a></p>
+<figure><img src="https://karthinks.com/img/olp-files-flowchart.svg"/>
+</figure>
+
+<p>This figure shows the same process but with an emphasis on disk I/O.  The primary chain is <span style="background: #88c0d0;color:black">TeX file</span> → <span style="background: #88c0d0;color:black">DVI/PDF output file</span> → <span style="background: #88c0d0;color:black">SVG/PNG preview images</span>.</p>
+<p>Of the file categories involved in the process, we care about two: the &ldquo;format dump file&rdquo; produced by precompilation, and the preview images.  Both are cached and persisted across Emacs sessions.  All other produced files are deleted by the POSTPROCESS block.</p>
+<h3 id="how-it-works-data-flow">How it works: data flow</h3>
+<p>Displaying previews that are color-, alignment- and size-aware, along with associated information like errors, requires a considerable amount of bookkeeping.  Since this information arrives piecemeal and processing happens asynchronously in chunks, we also need some way of storing and passing along this context.  There are perhaps clever ways to do this, but we use a straightforward solution &ndash; a (dynamic) global plist that associates each active process chain with its data (see <a href="#org-target--org-latex-preview-org-async-explainer">org-async</a> below).</p>
+<figure class="alignright"><img src="https://karthinks.com/img/olp-data-extended-info.svg"/>
+</figure>
+
+<p>All of the data generated and required for the many tasks in our process chain are captured in a single mutable container, referred to here &ndash; for convenience &ndash; as &ldquo;Extended Info&rdquo; (<code>extended-info</code>).  This data includes</p>
+<ul>
+<li>User preferences for the preview run, such as the LaTeX compiler in use,</li>
+<li>Input LaTeX strings to be rendered,</li>
+<li>Input file paths, output image paths and image cache details,</li>
+<li>Emacs&rsquo; context like the current buffer &ndash; which is important since we need to restore it before we can run asynchronous callbacks,</li>
+<li>Overlay positions and properties,</li>
+<li>Compilation errors,</li>
+<li>Computed preview geometry and fontsize for alignment,</li>
+</ul>
+<p>and more besides.</p>
+<details class="details implementation">
+<summary><code>extended-info</code>: implementation <span><img src="https://karthinks.com/img/lisp-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>&ldquo;Extended Info&rdquo; is implemented as a plist (property list).  Actually, almost every compound data structure <code>org-latex-preview</code> uses is either an alist or a plist, which is just a linked-list under the hood.  <code>extended-info</code> is also a tree since a few of its members are plists themselves (<a href="#org0ce9534">see below</a>).</p>
+<p>We used property lists at first since they&rsquo;re mutable and schema-less, and the design of the library was very fluid.  Unfortunately we are now well past the point where we could switch to something more structured like <code>cl-defstruct</code>, so plists it is.</p>
+<p>If it&rsquo;s any consolation, most of Org works with large property lists too.  Org&rsquo;s export system passes around a big <code>plist</code> bucket for communication in much the same way we do here.  Access can get expensive as they grow, but at least passing them around is cheap.  It&rsquo;s&hellip; not much of a consolation.</p>
+</div>
+</details>
+<details class="details apinote">
+<summary><code>apply</code> yourself: property lists as arguments <span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>plists have one other coincidental(?) advantage: You can splice them in as arguments to a <code>cl-defun</code>.</p>
+<p>Consider:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">cl-defun</span> <span style="color:#963">foo</span> (<span style="color:#038;font-weight:bold">&amp;key</span> (<span style="color:#963">buf</span> (<span style="color:#06b;font-weight:bold">current-buffer</span>)) (<span style="color:#963">valid-p</span> <span style="color:#036;font-weight:bold">t</span>) (<span style="color:#963">pred</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">ignore</span>)
+</span></span><span style="display:flex;"><span>                    <span style="color:#038;font-weight:bold">&amp;allow-other-keys</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#888">;; body of foo</span>
+</span></span><span style="display:flex;"><span>  )
+</span></span></code></pre></div><p>This function has the signature</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#963">foo</span> <span style="color:#007020">:buf</span> <span style="color:#963">some-buffer</span> <span style="color:#007020">:valid-p</span> <span style="color:#036;font-weight:bold">t</span> <span style="color:#007020">:pred</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">always</span>)
+</span></span></code></pre></div><p>which is just a list with the name of the function followed by&hellip; a plist.  So we can build up the plist programmatically and use it directly as <code>foo</code>&rsquo;s argument list:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">let</span> ((<span style="color:#963">arglist</span> <span style="color:#333">`</span>(<span style="color:#007020">:buf</span> <span style="color:#333">,</span><span style="color:#963">some-buffer</span> <span style="color:#007020">:valid-p</span> <span style="color:#036;font-weight:bold">t</span> <span style="color:#007020">:pred</span> <span style="color:#333">,</span><span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">always</span> <span style="color:#007020">:unknown-key</span> <span style="color:#036;font-weight:bold">nil</span>)))
+</span></span><span style="display:flex;"><span>  (<span style="color:#06b;font-weight:bold">apply</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">foo</span> <span style="color:#963">arglist</span>))
+</span></span></code></pre></div><p>&rsquo;tis a silly thing but oh, so satisfying.  In fact, this is a convenient way to feed a job spec to <code>org-async</code> (<a href="#org-target--org-latex-preview-org-async-explainer">see below</a>).</p>
+</div>
+</details>
+<h4 id="how-extended-info-is-populated">How <code>extended-info</code> is populated</h4>
+<p>The setup functions in the <span class="Orange">PREPARE</span> block initialize this bucket with data from parsing the buffer &ndash; i.e., LaTeX fragment locations, equation numbers, etc.  From then on, each task updates <code>extended-info</code> with progressively more information.  The structure of <code>extended-info</code> and this flow of information into it is visualized in this &ldquo;data flow&rdquo; diagram:</p>
+<div class="wide">
+<figure><img src="https://karthinks.com/img/olp-in-data-flowchart.svg"/>
+</figure>
+
+</div>
+<p>Contained in &ldquo;Extended Info&rdquo;: &ldquo;Processing Info&rdquo; contains information about and relevant to the external process (LaTeX and the image converter).  &ldquo;Fragment&rdquo; is a list of metadata for fragments to be previewed, including the overlays that will eventually display the preview images.  All of this preview metadata is obtained from the outputs of the latex and image converter runs via the process filters.</p>
+<p>Note that Emacs&rsquo; interpreter lock precludes data races and other concurrency issues, since only one function modifies <code>extended-info</code> at a time.</p>
+<h4 id="how-extended-info-is-accessed">How <code>extended-info</code> is accessed</h4>
+<p>The above chart only captures the flow of data in one direction: from the sources of computation into the <code>extended-info</code> container.  Tasks that don&rsquo;t modify <code>extended-info</code> still need to read it  to do their jobs.  For example,</p>
+<ul>
+<li><span class="Green">Clean up temporary files</span> needs the paths to the temporary files.</li>
+<li><span class="Orange">Cache images and metadata</span> needs the generated image paths, as well as all the geometry metadata.</li>
+</ul>
+<p>Most functions in the process chain are passed <code>extended-info</code>, or a subset thereof, as an argument.</p>
+<figure><img src="https://karthinks.com/img/olp-out-data-flowchart.svg"/>
+</figure>
+
+<p>Once again, we get away with it because there are no concurrency problems when there is no concurrency.  This design pattern of passing around a single heap-allocated container across setup functions and callbacks works for all kinds of applications in Emacs.  This is exactly how Org&rsquo;s (synchronous) export system manages information as well.</p>
+<h2 id="org-latex-preview-pieces-and-the-org-api"><code>org-latex-preview</code> Pieces and the Org API</h2>
+<p>This is where we get into the weeds.  If you&rsquo;re here for the bird&rsquo;s eye view, you can skip ahead to <a href="#live-previews-hooks-galore">Live previews</a> now.</p>
+<h3 id="parsing">Parsing</h3>
+<p>This is the <span class="Orange">Collect LaTeX Fragments</span> task in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>Org&rsquo;s syntax is <a href="https://orgmode.org/worg/org-syntax.html#LaTeX_Fragments">extensive</a>, and parsing Org files used to involve a giant mess of regular expressions.  Thankfully the mess is now handled by the <code>org-element</code> library, which provides a simple and powerful API for querying or acting on Org&rsquo;s AST.  A fair amount of work has gone into making it perform well under the constraints of Emacs&rsquo; single-threaded event loop
+<span class="sidenote-number"><small class="sidenote">
+Besides caching its state, it uses <a href="#the-reactive-ui-hooks-and-timers">timers</a> to schedule parsing work outside of the times the user is interacting with Emacs.
+</small></span>
+.</p>
+<p>Crucially for us, Org has first-class support for LaTeX environments and fragments, and this greatly simplifies parsing and metadata handling.  This support is what makes using LaTeX in Org a pleasant experience in the first place.</p>
+<details class="details orgnote" id="org-latex-preview-org-element-explainer">
+<summary><span><img src="https://karthinks.com/img/org-mode-icon.png" class=detail-icon></span> The <code>org-element</code> library</summary>
+<div class="details">
+<p>Added in late 2021, the <code>org-element</code> library greatly simplifies the process of working with Org documents.</p>
+<p>I have a minimal working knowledge of the library, so this block covers only the aspects of <code>org-element</code> that we use in <code>org-latex-preview</code>.</p>
+<p>Org&rsquo;s syntax distinguishes between &ldquo;elements&rdquo; and &ldquo;objects&rdquo;, where anything &ldquo;larger&rdquo; than a paragraph is an element, and any syntax that could be contained within a paragraph is an object
+<span class="sidenote-number"><small class="sidenote">
+Incidentally, the default <code>mark-paragraph</code> binding runs <code>org-mark-element</code> in Org mode, which selects the smallest logical element is at point instead.  Try <code>M-h</code> at different locations in an Org buffer to see what element you&rsquo;re on!
+</small></span>
+.</p>
+<p>This distinction matters to us because LaTeX text to be previewed can be either.  As you might expect, inline math (<code>$...$</code> or <code>\(...\)</code>) is an object, and LaTeX environments (<code>\begin{foo}...\end{foo}</code>) are elements, and they differ in the way we must display the preview images.</p>
+<p>Every node in the AST as parsed by <code>org-element</code> is made available as a plist whose keys are properties of the element.  These properties include the start and end positions of the element and its contents (<code>:begin</code>, <code>:end</code> and <code>:contents</code>), as well as metadata like properties and keywords.  For example, every element can be named with a <code>#+name:</code> keyword.</p>
+<p>These are the only things we need from <code>org-element</code> as far as parsing goes.</p>
+</div>
+</details>
+<p>The objective of the parsing step is to find the bounds of LaTeX fragments in the buffer (or in some region).  In principle, we could do this with <code>org-element</code>:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#963">org-element-map</span>
+</span></span><span style="display:flex;"><span>    (<span style="color:#963">org-element-parse-buffer</span>)
+</span></span><span style="display:flex;"><span>    <span style="color:#333">&#39;</span>(<span style="color:#963">latex-environment</span> <span style="color:#963">latex-fragment</span>)
+</span></span><span style="display:flex;"><span>  <span style="color:#06b;font-weight:bold">#&#39;identity</span>)
+</span></span></code></pre></div><p>But this would be too slow, and would allocate far more memory than we need.  Instead, we use a simple regexp scan of the buffer to find the bounds of LaTeX fragments and environments, and <code>org-element</code> only to gather specific metadata about these elements.</p>
+<h3 id="preamble-generation">Preamble generation</h3>
+<p>This is the <span class="Orange">Create preamble</span> task in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>Many editor plugins (and web apps) implement LaTeX previews, usually via <a href="https://www.mathjax.org/">MathJax</a> or <a href="https://katex.org/">KaTeX</a>.  KaTeX is fast, and both function well for web pages with limited needs.  But they implement ersatz support for a limited number of LaTeX packages, and cannot consume an actual &ldquo;full-fat&rdquo; LaTeX preamble of the kind you might use when writing a research paper.  There is no <code>\usepackage{}</code> macro or TikZ support, for example.</p>
+<p>By comparison, <code>org-latex-preview</code> is backed by a full LaTeX engine and LaTeX distribution, so nothing is off the table.  Of course, this means we need a way to construct the preamble and feed it to the LaTeX engine.</p>
+<p>In addition to Emacs-wide settings (like <code>org-latex-preview-preamble</code> and <code>org-latex-packages-alist</code>), document-specific LaTeX headers can be specified with the <code>#+latex_header:</code> directive:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-org" data-lang="org"><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \newcommand{\sOmega}{{\scriptstyle \Omega}}</span>
+</span></span><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \DeclareMathOperator{\diag}{diag}</span>
+</span></span><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \DeclareMathOperator{\toep}{toep}</span>
+</span></span><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \usepackage{calc,cancel}</span>
+</span></span><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \usepackage{rotating}</span>
+</span></span><span style="display:flex;"><span><span style="color:#c00;font-weight:bold">#+latex_header</span><span style="color:#888">: \usepackage{tikz}</span>
+</span></span></code></pre></div><p>The combined preamble must be constructed when exporting the Org document to LaTeX, and this machinery lives in the <code>ox-latex</code> library.  <code>org-latex-preview</code> simply calls into it for the preamble.  Among other benefits, this means the preamble used for the preview run is identical to the one used for LaTeX exports
+<span class="sidenote-number"><small class="sidenote">
+unless you <em>want</em> them to differ, because of course Org provides ways to do that
+</small></span>
+, so these truly are <em>previews</em>.</p>
+<details class="details orgnote">
+<summary>The <code>org-export</code> (<code>ox</code>) library <span><img src="https://karthinks.com/img/org-mode-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>The <code>ox</code> library and its children, like <code>ox-latex</code> provide an interface to convert Org documents to any other format, like Pandoc does.</p>
+<p>While the specifics (like collating a LaTeX preamble) are output-format dependent, the basic method is uniform and simple.  An exporter maps each Org syntax <a href="#org76ac7ab">element and object</a> to a function that creates the equivalent in the output format, like image links to HTML <code>img</code> tags, or <code>#+begin_quote ... #+end_quote</code> blocks to HTML blockquotes elements.  The fact that the Org syntax supports LaTeX environments natively helps with LaTeX exports.</p>
+<p>Of course, when a clean mapping like this is not possible, you can work on the buffer directly and rip out and replace raw text.  Emacs, huh.</p>
+</div>
+</details>
+<p>This does make <code>ox-latex</code> one of the few dependencies of <code>org-latex-preview</code>, which is regrettable given the larger aim of <a href="#latex-previews-everywhere-in-emacs">providing LaTeX previews across Emacs</a>.</p>
+<h3 id="precompilation">Precompilation</h3>
+<p>This is the <span class="Orange">Precompile LaTeX preamble</span> task in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>To process a preamble, the LaTeX engine needs to tokenize and execute tens of thousands of lines of macro source.  For a complex preamble, the kind you would use for a book, this can take several seconds on a modern processor.</p>
+<p>Since <code>org-latex-preview</code> aims to provide close to real-time feedback as you type, we resort to a trick from the 1990s: we serialize the entire engine state &ndash; the string pool, macro bodies as token lists, font data, engine execution parameters and so on &ndash; into a single binary memory image.  This process, called <em>format dumping</em> or <em>precompilation</em>, was automated for document preambles by David Carlisle&rsquo;s <code>mylatex.ltx</code>, modernized as the <code>mylatexformat</code> package by Florent Chervet.</p>
+<p>The upshot is that precompilation saves a significant amount of LaTeX startup time, reducing and (almost) flattening it across all preamble sizes.</p>
+<p>Precompilation relies on a number of hacks and only works because pdftex has changed little for decades.  Unfortunately, precompilation is not supported at all by xelatex and only partially by lualatex
+<span class="sidenote-number"><small class="sidenote">
+preambles that load OpenType fonts or Lua code are unsupported
+</small></span>
+, so <code>org-latex-preview</code> is slow with the Unicode engines.</p>
+<p>Under a <a href="#how-a-modern-latex-preview-system-should-work">different LaTeX preview architecture</a>, none of this would be needed.  But it&rsquo;s what we have so far: a very 90s solution for a very 90s editor.</p>
+<h3 id="creating-the-tex-file">Creating the TeX file</h3>
+<p>And speaking of being stuck with an old architecture, depending on pdflatex implies that we have to create and feed it a TeX file for each batch of previews
+<span class="sidenote-number"><small class="sidenote">
+pdflatex and friends do accept input via STDIN, but this did not work out for finicky reasons.
+</small></span>
+.</p>
+<p>This is the <span class="Orange">Create TeX file</span> task in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>As you might expect, the generated TeX file contains a reference to the precompiled dump file and a listing of all the LaTeX fragments to be previewed.  Instead of placing them into the document separated by something like <code>\pagebreak</code>, we place them inside <code>\begin{preview}</code> and <code>\end{preview}</code> blocks provided by the <a href="https://www.ctan.org/pkg/preview">preview.sty</a> CTAN package.</p>
+<p><code>preview.sty</code> is authored by David Kastrup, who also wrote the Emacs-side <code>preview.el</code> package that&rsquo;s part of AUCTeX.  <code>preview.el</code> was the inspiration for <code>org-latex-preview</code> &ndash; it was clear at least that previews in Org mode could be much, much faster.</p>
+<p><code>preview.sty</code> does three critical things for us:</p>
+<ol>
+<li>It places each preview snippet (enclosed within <code>\begin{preview}</code> and <code>\end{preview}</code> blocks) on a separate page in the LaTeX output;</li>
+<li>it finds the boundaries of the generated text and crops the page down to them;</li>
+<li>and it reports the font size, image size and baseline position in the LaTeX process&rsquo; output stream.</li>
+</ol>
+<p>These modifications were technically doable through a combination of other packages (Org&rsquo;s old implementation used the tightpage option of the preview machinery), but in cumbersome and error-prone ways.</p>
+<p>This makes <code>preview.sty</code> an external dependency of <code>org-latex-preview</code>.  Fortunately this package is included by default even with minimal installs of all common LaTeX distributions.</p>
+<h3 id="the-process-runner">The process runner</h3>
+<p>The pipeline from the LaTeX fragment text in the TeX file to images suitable for preview consists of two steps.  A LaTeX engine (pdflatex, xelatex or lualatex) produces DVI, XDV or PDF output, which is fed to an image converter (dvisvgm, dvipng or imagemagick) to produce PNG or SVG images.  This is the <span class="Purple">RUN</span> block of the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>This involves a fair bit of bookkeeping, and Emacs&rsquo; callback-based async process management (via &ldquo;process sentinels&rdquo; and &ldquo;process filters&rdquo;) isn&rsquo;t the most ergonomic tool for this.  In the absence of reliable async-io support, we use <code>org-async</code>, a declarative process chain manager now bundled with Org mode.</p>
+<p><span class="org-target" id="org-target--org-latex-preview-org-async-explainer"></span></p>
+<details class="details orgnote">
+<summary>The <code>org-async</code> library <span><img src="https://karthinks.com/img/org-mode-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>Because we need to run a chain of processes with different callback behaviors depending on the exit statuses, <code>org-latex-preview</code> uses <code>org-async</code>, a process queue manager that wraps Emacs&rsquo; <code>start-process</code>, process filter and process sentinel API.  It handles a lot of the bookkeeping for us, providing for</p>
+<ul>
+<li>declarative specification of a tree of processes that branch on the exit status of a process,</li>
+<li>including the ability to register multiple callbacks as required,</li>
+<li>keeping track of the context (the <code>extended-info</code> bucket in our case) and passing it to the filter and sentinel,</li>
+<li>and limiting the pool of concurrent subprocesses and handling timeouts.</li>
+</ul>
+<p>The global variable that keeps track of the context data between async calls is managed by <code>org-async</code>.</p>
+<hr>
+<div class="warning">
+<p>The following code might be out of date, please refer to the Org manual.</p>
+</div>
+<p>An example of an <code>org-async</code> job spec might look like the following (simplified for clarity):</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">setq</span> <span style="color:#963">task-spec</span>
+</span></span><span style="display:flex;"><span>      (<span style="color:#06b;font-weight:bold">list</span> <span style="color:#a60;background-color:#fff0f0">&#39;org-async-task</span>             <span style="color:#888">; &lt;-- LaTeX compilation task</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#333">&#39;</span>(<span style="background-color:#fff0f0">&#34;latex&#34;</span> <span style="background-color:#fff0f0">&#34;-interaction&#34;</span> <span style="background-color:#fff0f0">&#34;nonstopmode&#34;</span> <span style="background-color:#fff0f0">&#34;texfile.tex&#34;</span>)
+</span></span><span style="display:flex;"><span>            <span style="color:#007020">:buffer</span> <span style="color:#036;font-weight:bold">t</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#007020">:info</span> <span style="color:#963">extended-info</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#007020">:filter</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">latex-preview-filter</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#007020">:failure</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">latex-failure-callback</span>
+</span></span><span style="display:flex;"><span>            <span style="color:#007020">:success</span> (<span style="color:#06b;font-weight:bold">list</span> <span style="color:#a60;background-color:#fff0f0">&#39;org-async-task</span> <span style="color:#888">; &lt;-- Image conversion task</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#333">&#39;</span>(<span style="background-color:#fff0f0">&#34;dvisvgm&#34;</span> <span style="background-color:#fff0f0">&#34;--page=1-&#34;</span> <span style="background-color:#fff0f0">&#34;-o out-%p.svg&#34;</span> <span style="background-color:#fff0f0">&#34;texfile.dvi&#34;</span>)
+</span></span><span style="display:flex;"><span>                           <span style="color:#007020">:buffer</span> <span style="color:#036;font-weight:bold">t</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#007020">:info</span> <span style="color:#963">extended-info</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#007020">:filter</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">dvisvgm-place-previews-filter</span>
+</span></span><span style="display:flex;"><span>                           <span style="color:#007020">:failure</span> (<span style="color:#06b;font-weight:bold">list</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">dvisvgm-failure-callback</span>
+</span></span><span style="display:flex;"><span>                                          <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">log-errors-callback</span>
+</span></span><span style="display:flex;"><span>                                          <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">cleanup-callback</span>)
+</span></span><span style="display:flex;"><span>                           <span style="color:#007020">:success</span> (<span style="color:#06b;font-weight:bold">list</span> <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">check-fragments</span>
+</span></span><span style="display:flex;"><span>                                          <span style="color:#06b;font-weight:bold">#&#39;</span><span style="color:#963">cleanup-callabck</span>))))
+</span></span></code></pre></div><p>Starting this process chain is simple:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#963">org-async-call</span> <span style="color:#963">task-spec</span>)
+</span></span></code></pre></div><p><code>org-async-call</code> also provides other conveniences like timeouts, retries and concurrent subprocess limits.</p>
+</div>
+</details>
+<p><span class="org-target" id="org-target--org-latex-preview-dvipng-parallel-path"></span>
+An example of this bookkeeping is that the pipeline isn&rsquo;t always serial.  When generating PNG images with dvipng, we start LaTeX and dvipng in parallel.  Dvipng processes pages of the DVI file as they appear, while the LaTeX process is still churning them out.  (Generating PNG preview images for a large Org buffer is much faster than the other routes.)</p>
+<h3 id="tracking-with-process-filters">Tracking with process filters</h3>
+<p>On the other side of the process invocation are the &ldquo;process filters&rdquo;, which are callbacks <a href="#figure--emacs-event-loop-simple">called by the event loop</a> whenever Emacs reads chunks of subprocess output.  This is the <span class="Green">PROCESS FILTERS</span> block in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<details class="details apinote">
+<summary>A shell metaphor for process filters <span><img src="https://karthinks.com/img/emacs-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<p>Following the <a href="#org-target--org-latex-preview-process-filters-sentinels">shell metaphor for process filters</a>, a simple way to think of a process filter for an Emacs subprocess is as a sink at the end of a Unix pipe:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span>some-process 2&gt;&amp;<span style="color:#60e;font-weight:bold">1</span> | process-filter
+</span></span></code></pre></div><p>In the LaTeX preview case, the picture is a little more complex as there are multiple processes:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span>latex -interaction nonstopmode -output-directory /tmp preview-file.tex | latex-process-filter; <span style="color:#666;background-color:#fff0f0;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#666;background-color:#fff0f0;font-weight:bold"></span>dvisvgm --page<span style="color:#333">=</span>1- --bbox<span style="color:#333">=</span>preview -o image-file.svg preview-file.dvi | image-converter-process-filter
+</span></span></code></pre></div><p>The analogy is different for each of the image converters.  Since <a href="#org-target--org-latex-preview-dvipng-parallel-path">dvipng runs in parallel with LaTeX</a>, for example:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-sh" data-lang="sh"><span style="display:flex;"><span><span style="color:#333">{</span> latex -interaction nonstopmode -output-directory /tmp preview-file.tex | latex-process-filter; <span style="color:#333">}</span> &amp; <span style="color:#666;background-color:#fff0f0;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#666;background-color:#fff0f0;font-weight:bold"></span><span style="color:#333">{</span> dvipng --follow -T tight --depth --height -o image-%09d.png preview-file.dvi | image-converter-process-filter; <span style="color:#333">}</span>
+</span></span></code></pre></div></div>
+</details>
+<p>In <code>org-latex-preview</code>&rsquo;s process filters we look for the output (DVI or image) file paths, but also a variety of metadata that preview.sty and dvisvgm emit.  This includes geometry information like the width, height and baseline alignment of the image, and any compilation errors.</p>
+<details>
+<summary>Sample LaTeX output with <code>preview.sty</code> <span><img src="https://karthinks.com/img/term-logo.png" class=detail-icon></span></summary>
+<div class="details">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>Preview: Fontsize 10pt
+</span></span><span style="display:flex;"><span>! Preview: Snippet 1 started.
+</span></span><span style="display:flex;"><span>&lt;-&gt;&lt;-&gt;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>l.9 \begin{preview}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>Preview: Tightpage -32891 -32891 32891 32891
+</span></span><span style="display:flex;"><span>! Preview: Snippet 1 ended.(973936+0x22609920).
+</span></span><span style="display:flex;"><span>&lt;-&gt;&lt;-&gt;
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>l.14 \end{preview}
+</span></span></code></pre></div><p>The printed information is cryptic.  Here&rsquo;s what the numbers mean.</p>
+<ul>
+<li>The &ldquo;tightpage&rdquo; line reports margins around the rendered equation:
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>                         Margins:
+</span></span><span style="display:flex;"><span>                         left  bottom  right    top
+</span></span><span style="display:flex;"><span>    Preview: Tightpage -32891  -32891  32891  32891
+</span></span></code></pre></div>The unit is &ldquo;Base pts&rdquo;, which is 1:65536 of a pt.  (There is an additional factor of 72:72.27 on top relating a Base pt to a scaled point.)</li>
+<li>The next line reports the width, depth (below baseline) and height (from baseline) of the image.
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>                                height     depth    width
+</span></span><span style="display:flex;"><span>    ! Preview: Snippet 1 ended.(973936  +  0     x  22609920).
+</span></span></code></pre></div></li>
+<li>Finally, any compilation errors reported for each preview in the above output (none here) are captured as well.
+<ul>
+<li>Errors are reported on lines starting with &ldquo;lN&rdquo;, where N is the line number.</li>
+<li>Messages are reported (as above) on lines starting with &ldquo;!&rdquo;.</li>
+</ul>
+</li>
+</ul>
+<p>The <a href="https://www.ctan.org/pkg/preview">preview.sty manual</a> provides more details and documents other options.</p>
+</div>
+</details>
+<details>
+<summary>Sample image converter output streams <span><img src="https://karthinks.com/img/term-logo.png" class=detail-icon></span></summary>
+<div class="details">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>pre-processing DVI file (format version 2)
+</span></span><span style="display:flex;"><span>processing page 1
+</span></span><span style="display:flex;"><span>  applying bounding box set by preview package (version 13.1)
+</span></span><span style="display:flex;"><span>  width=346.003754pt, height=15.362961pt, depth=.501877pt
+</span></span><span style="display:flex;"><span>  graphic size: 346.003754pt x 15.864838pt (121.606411mm x 5.575853mm)
+</span></span><span style="display:flex;"><span>  output written to /tmp/org-tex-ang3Se-000000001.svg
+</span></span><span style="display:flex;"><span>1 of 1 page converted in 0.16035 seconds
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-text" data-lang="text"><span style="display:flex;"><span>[1 (preview-latex version 13.1) (preview-latex tightpage option detected, will use its bounding box) depth=1 height=29]
+</span></span></code></pre></div></div>
+</details>
+<p><span class="org-target" id="org-target--org-latex-preview-fiddly-details"></span></p>
+<details class="details apinote">
+<summary>Fine-tuning Emacs&rsquo; process interaction parameters</summary>
+<div class="details">
+<blockquote>
+<p>&ldquo;Whenever Emacs reads chunks of subprocess output&hellip;&rdquo;</p>
+</blockquote>
+<p>This phrasing omits some important but fiddly details about how often and how much output is read at a time, in much the same way as the Unix pipe <code>|</code> symbol does.</p>
+<p>While the event loop is switching between <a href="#figure--emacs-event-loop-simple">its four main tasks</a> continuously, there  are (only) a couple of knobs available at the Elisp level to manage how Emacs reads subprocess output.</p>
+<ul>
+<li><code>read-process-output-max</code> limits how much it reads in one event loop turn.  Setting it to a high value means output from chatty processes will be read sooner, but at the expense of blocking user input.  This is, essentially, Emacs&rsquo; <a href="#figure--emacs-latency-vs-throughput">latency vs throughput</a> curse in a nutshell.</li>
+<li><code>process-adaptive-read-buffering</code> tries to delay reading from subprocesses that produce very small chunks of data at a time, as this is inefficient.  In practice turning this on has tended to make things worse instead of better when running most subprocesses.</li>
+</ul>
+<p>Trying to optimize this for <code>org-latex-preview</code> has proved to be&hellip; difficult.  The rates and sizes of output emitted varies significantly between different LaTeX engines and image converters:</p>
+<p><a id="figure--timing-chart-svg-and-png"></a></p>
+<figure><img src="https://karthinks.com/img/olp_preview_timing_chart_svg_and_png.svg"
+         alt="Figure 4: Intervals for which Emacs is blocked when previewing using SVG and PNG images. The vertical axis is time, and the solid chunks are periods where Emacs is unresponsive."/><figcaption>
+            <p><span class="figure-number">Figure 4: </span>Intervals for which Emacs is blocked when previewing using SVG and PNG images.  The vertical axis is time, and the solid chunks are periods where Emacs is unresponsive.</p>
+        </figcaption>
+</figure>
+
+<p>They differ even between different versions of the same program across Texlive versions:</p>
+<p><a id="figure--org-latex-preview-texlive-2022-vs-2023"></a></p>
+<figure><img src="https://karthinks.com/img/texlive2022-vs-texlive2023.svg"
+         alt="Figure 5: A time-aligned flamegraph profile showing process filter calls for the LaTeX and image converter processes when using Texlive 2022 and 2023. In the aggregate, the LaTeX and dvisvgm binaries shipped with Texlive 2023 aren&amp;rsquo;t faster or slower than the former. They just have a different profile across time to which it is difficult to adjust."/><figcaption>
+            <p><span class="figure-number">Figure 5: </span>A time-aligned flamegraph profile showing process filter calls for the LaTeX and image converter processes when using Texlive 2022 and 2023.  In the aggregate, the LaTeX and dvisvgm binaries shipped with Texlive 2023 aren&rsquo;t faster or slower than the former.  They just have a different profile across time to which it is difficult to adjust.</p>
+        </figcaption>
+</figure>
+
+<p><code>org-latex-preview</code> settles for a broadly acceptable set of defaults in this regard.</p>
+</div>
+</details>
+<p>But the main reason we use process filters here is that we can place images in the buffer as they are generated (and read in from the process STDOUT by the event loop), and don&rsquo;t have to wait for the LaTeX or image converter processes to end.</p>
+<h3 id="cleaning-up-with-process-sentinels">Cleaning up with process sentinels</h3>
+<p>The unfortunate result of being forced to do file I/O at each step of the pipeline is that we are left with a trail of intermediate files that need to be swept away
+<span class="sidenote-number"><small class="sidenote">
+Instead of, say, a block of shared memory that can simply be freed.
+</small></span>
+.  This is the <span class="Orange">POSTPROCESS</span> block in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>, accomplished in the &ldquo;process sentinels&rdquo;.</p>
+<p>A process sentinel is a callback invoked by the event loop when the process changes status.  In principle this includes any status change (exit, signal, stop/continue), but in practice we only care about it after the process exits.</p>
+<p>Clearing the intermediate detritus of the compilation is not an urgent task, so <code>org-latex-preview</code>&rsquo;s process sentinels actually schedule this on an idle timer.  Their other major function in this design is to diagnose process failures and restart the job when the cause looks transient.</p>
+<h3 id="caching">Caching</h3>
+<p>This is the <span class="Orange">Cache images and metadata</span> task in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>LaTeX preview generation is an order of magnitude (or two) faster than what Org did before, so caching preview images might seem like a secondary concern.  But <code>org-latex-preview</code> still caches images, for a few reasons:</p>
+<ul>
+<li>The same state may be encountered dozens of times when editing a fragment with live previews.</li>
+<li>We would like to avoid rerunning LaTeX in contexts where the Org document itself is the final output, such as in-Emacs slideshow programs.</li>
+<li>When exporting to other formats (HTML or ODT), <code>org-latex-preview</code> is responsible for generating the images to be bundled with the web page or document.</li>
+</ul>
+<p>In addition to the text of the LaTeX fragment itself, preview images are specific to the LaTeX preview pipeline configuration, the preamble, the Emacs theme and even the fragment&rsquo;s position in the buffer when equation numbering is turned on.  To cache previews reproducibly, all of these inputs are hashed together as the key to the cached image.</p>
+<details class="details orgnote">
+<summary><span><img src="https://karthinks.com/img/org-mode-icon.png" class=detail-icon></span> The <code>org-persist</code> library</summary>
+<div class="details">
+<p>While you can specify where the preview images should be cached relative to the document, <code>org-latex-preview</code> defaults to using <code>org-persist</code>, a general-purpose caching library that is part of Org mode.  <code>org-persist</code> is used for various caching duties by Org mode, such as resources fetched from the Internet and the partial syntax trees of parsed Org buffers.</p>
+<p>Caching LaTeX preview images actually involves more than copying a file somewhere and serializing a hash table to disk.  We also need to store, as Elisp data, the image display geometry information, including the baseline alignment height.  The <code>org-persist</code> API supports caching different container kinds for exactly this purpose.</p>
+<p>Finally, with sufficient time (or a large enough corpus) the cache of LaTeX images can grow to gigabytes in size, so cache entries are set to expire after a month, another function served by <code>org-persist</code>&rsquo;s built-in garbage collection.</p>
+</div>
+</details>
+<h3 id="displaying-images-and-overlay-management">Displaying images and overlay management</h3>
+<p>This covers the in-buffer UI and affordances of <code>org-latex-preview</code>, indicated by the <span class="Orange">Create overlays</span> and <span class="Orange">Place LaTeX previews</span> blocks in the <a href="#figure--org-latex-preview-process-chart">control flow diagram</a>.</p>
+<p>Beyond what is covered in <a href="#the-frontend-displaying-images-over-text">displaying images over text</a>, displaying the image itself is simple: the image just needs to be resized and aligned according to the recorded geometry.  The overlays themselves are set up before starting the LaTeX run, and a series of overlay properties are set or unset over the course of the process.</p>
+<ul>
+<li>If an existing image is being updated, the overlay optionally gets a &ldquo;face&rdquo; property indicating that the preview is out of date.</li>
+<li>If this is a fresh preview, an overlay property marks it as &ldquo;processing&rdquo;, displayed in the fringe.</li>
+<li>If any compilation errors are captured, they&rsquo;re placed as tooltip text via an overlay property.  Via the SVG&rsquo;s <code>currentColor</code> attribute, we also color the overlay image red to indicate that there was an error.</li>
+</ul>
+<p>These are basic but (hopefully) intuitive indicators of the state of the preview.</p>
+<h2 id="live-previews-hooks-galore">Live previews: Hooks galore</h2>
+<p>The breakdown provided so far does not explain the claims we made in the objectives section, like real-time (or at least fast) feedback as you type.  As seen in the demos above, there is one more element to making the previews appear &ldquo;live&rdquo; and reactive to cursor movement or buffer edits.</p>
+<p>For the seamless hide/show behavior:</p>
+<ul>
+<li>Moving the cursor into the region covered by the overlay should &ldquo;open&rdquo; the overlay, reveal the underlying text and move the image next to or below the LaTeX fragment.</li>
+<li>Moving the cursor out of the region should do the reverse, and &ldquo;close up&rdquo; the overlay.</li>
+</ul>
+<p>For real-time feedback:</p>
+<ul>
+<li>Editing a fragment with a visible preview marks the preview out of date, so the image should either disappear or be updated.</li>
+<li>If editing displaymath and the numbering changes, all other numbered environments in the buffer should be updated as well.</li>
+<li>Editing a previewed fragment in another buffer (with <code>org-edit-special</code>, <code>C-c '</code>) should cause the preview to be updated as you type.</li>
+<li>When typing or pasting text, LaTeX environments need to be detected and parsed, and the preview pipeline started in real time.</li>
+</ul>
+<p>All of these are achieved using hooks, which is ultimately the only mechanism we have to trigger reactive behavior in Emacs.  The hide/show behavior involves tracking the cursor position via <code>pre-command-hook</code> and <code>post-command-hook</code> (made buffer-local).  Buffer edits are tracked via <code>after-change-functions</code>, but with several fast-fail heuristics to avoid slowing down Emacs
+<span class="sidenote-number"><small class="sidenote">
+The difficulty of identifying, in real time, <code>$</code> and <code>$$</code> as LaTeX delimiter starts, delimiter ends, or as actual dollar signs is why live previews require the unambiguous <code>\(...\)</code> and <code>\[...\]</code> delimiters, even though the dollars are supported in non-live usage.
+</small></span>
+.  The list goes on, since we need to track Org&rsquo;s folding states, as well as changes in other buffers when using <code>org-edit-special</code>.</p>
+<p>The other strategy we&rsquo;re forced to employ, given the event loop&rsquo;s limitations, is to throttle and debounce pipeline calls, batching edits and avoiding race conditions between in-flight LaTeX runs &ndash; the interpreter lock protects Elisp state, but independent subprocesses will happily interleave and clobber each other&rsquo;s output.</p>
+<p>Finally, this feature is the source of dozens of edge cases, such as editing fragments inside folded regions (during global text replacement, say), or the many invalid intermediate states of a LaTeX fragment causing the preview to fail repeatedly.  Knocking down these bugs while keeping this path fast was a substantial portion of the effort over the years this library was developed
+<span class="sidenote-number"><small class="sidenote">
+Now that it&rsquo;s part of Org mode and seeing more widespread use, there are no doubt several more edge cases waiting to be reported!
+</small></span>
+.</p>
+<h2 id="latex-previews-everywhere-in-emacs">LaTeX previews everywhere in Emacs</h2>
+<p>A proof of concept: the design of <code>org-latex-preview</code> makes it possible to preview LaTeX outside of Org mode.  Here&rsquo;s an example previewing LaTeX-formatted comments in a prog buffer (Clojure, here):</p>
+<video preload="metadata" style="center" width="700" controls>
+<source src="https://karthinks.com/img/olp-prog-preview.mp4" type="video/mp4">
+<a href="https://karthinks.com/img/olp-prog-preview.mp4">[Video demo: LaTeX previews in prog-mode]</a></video>
+<p>In fact, you can use the same code to preview LaTeX fragments literally anywhere in Emacs, including, delightfully, the Emacs calculator.  This (18 minute) demo runs through a bunch of contexts outside of Org mode showcasing live LaTeX previews:</p>
+<hr>
+<p><span class="org-target" id="org-target--org-latex-preview-everywhere-youtube-demo"></span></p>
+<div class="videocontainer"><iframe width="680" height="382" src="https://www.youtube-nocookie.com/embed/u44X_th6_oY" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen>[<a href="https://www.youtube.com/watch?v=u44X_th6_oY">Video Demo (18:00)</a>]</iframe></div>
+<hr>
+<p>While this feature exists only as a prototype, it&rsquo;s simple to implement and extend.  To see why, let&rsquo;s look again at the <a href="#figure--org-latex-preview-process-chart">preview process breakdown</a>.  All tasks here are agnostic of Org mode save for two:</p>
+<figure><img src="https://karthinks.com/img/olp-non-org-flowchart.svg"/>
+</figure>
+
+<ul>
+<li><span class="Orange">Collect LaTeX fragments</span>: currently handled by <code>org-element</code>,</li>
+<li><span class="Orange">Create preamble</span>: currently assembled by the <code>org-export</code> (<code>ox-latex</code>) library.</li>
+</ul>
+<p>To use LaTeX previews outside of Org mode, we only need providers for these two tasks:</p>
+<ul>
+<li>
+<p>A parser that can identify the boundaries of LaTeX fragments in the buffer
+<span class="sidenote-number"><small class="sidenote">
+Technically you could reuse <code>org-element</code> in non-Org buffers for this, but there will be many false negatives and occasional false positives.
+</small></span>
+.  This does not need to be a full-fledged parser &ndash; just a regexp scan of the buffer looking for <code>\begin{</code> or <code>\[</code> can suffice.  This is how the above demos were created.</p>
+</li>
+<li>
+<p>A LaTeX preamble generator appropriate for the buffer.  This can just be a constant string (instead of a function) that includes a reasonable set of LaTeX packages.  I used Org&rsquo;s default LaTeX preamble string everywhere in the above demos.</p>
+</li>
+</ul>
+<details>
+<summary>The Emacs-wide API for <code>org-latex-preview</code> <span><img src="https://karthinks.com/img/lisp-icon.png" class=detail-icon></span></summary>
+<div class="details">
+<div class="warning">
+<p>This description might be out of date, please refer to the Org manual.</p>
+</div>
+<p><code>org-latex-preview</code> tries to separate these independent concerns by providing the function <code>org-latex-preview-place</code>, that generates previews anywhere in Emacs given the above information.  Previewing LaTeX fragments is as simple as:</p>
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span>(<span style="color:#007020">require</span> <span style="color:#a60;background-color:#fff0f0">&#39;org-latex-preview</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>(<span style="color:#963">org-latex-preview-place</span> <span style="color:#a60;background-color:#fff0f0">&#39;dvisvgm</span> <span style="color:#963">entries</span> <span style="color:#036;font-weight:bold">nil</span> <span style="color:#963">preamble</span>)
+</span></span></code></pre></div><p>where <code>entries</code> encodes the start and end positions of the fragments, and <code>preamble</code> is the LaTeX preamble to use.</p>
+<div class="grid">
+<div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span><span style="color:#888">;; entries is a list of lists</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">;; Each entry is (start end),</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">;; or (start end contents)</span>
+</span></span><span style="display:flex;"><span>((<span style="color:#00d;font-weight:bold">1342</span> <span style="color:#00d;font-weight:bold">1388</span>)
+</span></span><span style="display:flex;"><span> (<span style="color:#00d;font-weight:bold">1911</span> <span style="color:#00d;font-weight:bold">2104</span>)
+</span></span><span style="display:flex;"><span> (<span style="color:#00d;font-weight:bold">2273</span> <span style="color:#00d;font-weight:bold">2295</span> <span style="background-color:#fff0f0">&#34;\\( \\epsilon + 3 \\)&#34;</span>))
+</span></span></code></pre></div><div class="highlight"><pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-emacs-lisp" data-lang="emacs-lisp"><span style="display:flex;"><span><span style="color:#888">;; preamble is a preamble string</span>
+</span></span><span style="display:flex;"><span><span style="color:#888">;; See `org-latex-preview-preamble&#39;</span>
+</span></span><span style="display:flex;"><span><span style="background-color:#fff0f0">&#34;\\documentclass{article}
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0"> [DEFAULT-PACKAGES]
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0"> [PACKAGES]
+</span></span></span><span style="display:flex;"><span><span style="background-color:#fff0f0"> \\usepackage{xcolor}&#34;</span>
+</span></span></code></pre></div></div>
+<p>The positions in <code>entries</code> would be obtained from your parser for the major mode.  For <code>preamble</code> you can just reuse or tweak <code>org-latex-preview-preamble</code> in a pinch.  See the function documentation for more details.</p>
+<p>Requiring the <code>org-latex-preview</code> library will in turn load a few Org libraries (<code>org-element</code>, <code>org-persist</code>, <code>ox</code> and <code>org-macs</code>), but it does <em>not</em> load all of Org.  We tried hard to keep from loading the 16,000-line behemoth that is <code>org.el</code>.</p>
+</div>
+</details>
+<p>As of late 2026, abstracting the library from its major-mode adapters remains on the TODO list.</p>
+<h2 id="how-a-modern-latex-preview-system-should-work">How a modern LaTeX preview system <em>should</em> work</h2>
+<p>When we started <code>org-latex-preview</code> in 2021, live-updating previews were not available anywhere except one LaTeX formula-editing website and, to a lesser degree, <a href="https://www.lyx.org/">LyX</a>.  We often wondered why, since <code>preview.sty</code> did most of the work for you and the editor side was pretty simple to implement.  If <code>org-latex-preview</code> were a thrown-together external Emacs package providing many of the same features (sans polish), it could have been written over a couple of weekends.  I know this because <a href="https://github.com/karthink/org-preview">I wrote it</a>.  <a href="https://github.com/karthink/org-auctex">Twice</a>.</p>
+<p>Over the years, however, this feature has grown in ubiquity and there are plugins for most note-taking (Obsidian) and editing software (Neovim, VS Code) that provide this.  Emacs itself has at least four active implementations of live LaTeX previews now, and a frontier LLM can probably implement a basic version for your preferred platform with one prompt.</p>
+<p>Even so, Emacs remains the oldest platform to implement this feature, and does so in the most complete and mature form
+<span class="sidenote-number"><small class="sidenote">
+As of 2026.
+</small></span>
+.  Considering I spent a lot of this write-up complaining about the limitations of the Elisp runtime, this is remarkable.</p>
+<p>But creating temporary files after every buffer change and spawning separate LaTeX processes remains a terrible way to do real-time updates.  Precompilation is another hack, unsupported by LaTeX engines besides pdflatex.  While <code>org-latex-preview</code> is a massive improvement over the previous LaTeX preview implementation for Org mode, it&rsquo;s still the Elisp equivalent of a Bash script that got out of hand.  Quite simply, this is the wrong level at which to address the problem.  A better way to implement continuous previews would be to talk to a managed process over a pipe or socket.  The right approach here is to work at the level of the TeX engine, as <a href="https://github.com/let-def/texpresso">TeXPresso</a> does.</p>
+<p><span class="org-target" id="org-target--org-latex-preview-dynamic-modules"></span>
+But it would be even better to avoid inter-process communication entirely and use an <a href="https://www.phimulambda.org/blog/emacs-dynamic-module.html">Emacs dynamic module</a>, linking with a modern LaTeX library that does incremental (instead of batch) compilation.  &ldquo;Lightweight&rdquo; alternatives like KaTeX or MathJaX don&rsquo;t cut it, since we need a full-fat LaTeX compiler, macros and all.  One possible candidate for this is <a href="https://github.com/HenryXiaoYang/realtime-tex">realtime-tex</a>, the <code>rtex</code> library, which embeds LuaLaTeX (the most modern of the LaTeX engines) and compiles incrementally and effectively instantaneously
+<span class="sidenote-number"><small class="sidenote">
+Although I would be inclined to wait for the project to mature.
+</small></span>
+.  This would be a quality improvement almost as drastic as the one <code>org-latex-preview</code> makes over its predecessor.</p>
+<p>Of course, a dynamic module linking an incremental compiler is a completely different architecture from what we have now, and would share at most the image display and UI layer.  So projects like this and the inevitable official Typst preview package for Org are tabled for another day.  Maybe you&rsquo;ll be the one to implement them?</p>

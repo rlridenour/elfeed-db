@@ -1,0 +1,146 @@
+<p>
+Emacs already tells you when a version-controlled file has local changes, but it does it with a punctuation mark: a clean file shows <code>Git-master</code> in the mode line, and a modified file shows <code>Git:master</code>. The only difference is the separator, and if the theme leaves the VC state faces unspecified there is not even a colour change. I wanted something I could see without stopping to parse the mode line, without adding another package or another Git subprocess. The result is a single bold status letter at the start of the mode line: <code>M</code> for modified, <code>A</code> for added, <code>D</code> for deleted, <code>U</code> for a conflict, and <code>L</code> for a lock.
+</p>
+
+
+<div id="org809d3b4" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20261024120000-emacs--Making-Git-Changes-Obvious-in-the-Mode-Line.jpg" alt="20261024120000-emacs--Making-Git-Changes-Obvious-in-the-Mode-Line.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+The built-in <code>vc</code> integration puts a backend/state string in the mode line. For Git it looks like this:
+</p>
+
+<table class="table table-striped" border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+
+
+<colgroup>
+<col  class="org-left" />
+
+<col  class="org-left" />
+
+<col  class="org-left" />
+</colgroup>
+<thead>
+<tr>
+<th scope="col" class="org-left">State</th>
+<th scope="col" class="org-left">Mode line</th>
+<th scope="col" class="org-left">Indicator</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="org-left">Clean</td>
+<td class="org-left"><code>Git-master</code></td>
+<td class="org-left"><code>-</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Modified</td>
+<td class="org-left"><code>Git:master</code></td>
+<td class="org-left"><code>:</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Added</td>
+<td class="org-left"><code>Git@master</code></td>
+<td class="org-left"><code>@</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Conflict/removed</td>
+<td class="org-left"><code>Git!master</code></td>
+<td class="org-left"><code>!</code></td>
+</tr>
+
+<tr>
+<td class="org-left">Missing</td>
+<td class="org-left"><code>Git?master</code></td>
+<td class="org-left"><code>?</code></td>
+</tr>
+</tbody>
+</table>
+
+<p>
+Hovering over the string gives the full description ("Locally modified file under the Git version control system"), and clicking it opens the VC menu. That is all useful, but the separator is not a status indicator you notice at a glance. <code>C-x v =</code> and <code>C-x v d</code> are there when you want the details.
+</p>
+
+<p>
+The mode line string is a propertized string, and its face encodes the VC state. Reading that face is cheap: no <code>vc-state</code> call, no <code>git status</code>, just a property lookup on a value VC has already computed. I map the faces to the same letters Git uses:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><code>(<span style="color: #569cd6; font-weight: bold;">defface</span> <span style="color: #9cdcfe; font-weight: bold; font-style: italic;">my/vc-dirty-indicator-face</span>
+  '((t <span style="color: #c586c0; font-weight: bold;">:weight</span> bold))
+  <span style="color: #6a9955; font-style: italic;">"Face for the mode-line local-changes indicator.
+  Only the weight is set, so the foreground and background follow the
+  mode line's normal colours."</span>
+  <span style="color: #c586c0; font-weight: bold;">:group</span> 'vc)
+
+(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/vc-dirty-indicator</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Return a Git-style status letter for local VCS changes."</span>
+  (<span style="color: #569cd6; font-weight: bold;">let*</span> ((face (<span style="color: #569cd6; font-weight: bold;">and</span> (<span style="color: #569cd6; font-weight: bold;">bound-and-true-p</span> vc-mode)
+                    (stringp vc-mode)
+                    (&gt; (length vc-mode) 1)
+                    (get-text-property 1 'face vc-mode)))
+         (info (<span style="color: #569cd6; font-weight: bold;">pcase</span> face
+                 ('vc-edited-state '(<span style="color: #ce9178; font-style: italic;">"M"</span> <span style="color: #ce9178; font-style: italic;">"Locally modified file"</span>))
+                 ('vc-locally-added-state '(<span style="color: #ce9178; font-style: italic;">"A"</span> <span style="color: #ce9178; font-style: italic;">"Locally added file"</span>))
+                 ('vc-conflict-state '(<span style="color: #ce9178; font-style: italic;">"U"</span> <span style="color: #ce9178; font-style: italic;">"File contains merge conflicts"</span>))
+                 ('vc-removed-state '(<span style="color: #ce9178; font-style: italic;">"D"</span> <span style="color: #ce9178; font-style: italic;">"File removed from version control"</span>))
+                 ('vc-missing-state '(<span style="color: #ce9178; font-style: italic;">"D"</span> <span style="color: #ce9178; font-style: italic;">"Tracked file missing from disk"</span>))
+                 ('vc-locked-state '(<span style="color: #ce9178; font-style: italic;">"L"</span> <span style="color: #ce9178; font-style: italic;">"File locked by another user"</span>)))))
+    (<span style="color: #569cd6; font-weight: bold;">when</span> info
+      (propertize (concat (car info) <span style="color: #ce9178; font-style: italic;">" "</span>)
+                  'face 'my/vc-dirty-indicator-face
+                  'help-echo (cadr info)))))
+</code></pre>
+</div>
+
+<p>
+Then put it at the start of the mode line. The install function removes any previous copy first, so reloading the config does not give you two indicators:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><code>(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/vc-dirty-indicator--install</span> ()
+  <span style="color: #6a9955; font-style: italic;">"Insert the dirty indicator at the start of `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">mode-line-format</span><span style="color: #6a9955; font-style: italic;">'."</span>
+  (<span style="color: #569cd6; font-weight: bold;">let*</span> ((indicator '(<span style="color: #c586c0; font-weight: bold;">:eval</span> (my/vc-dirty-indicator)))
+         (fmt (default-value 'mode-line-format)))
+    (<span style="color: #569cd6; font-weight: bold;">when</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (listp fmt) fmt)
+      (<span style="color: #569cd6; font-weight: bold;">setq</span> fmt (delete indicator fmt))
+      (<span style="color: #569cd6; font-weight: bold;">let</span> ((new nil)
+            (inserted nil))
+        (<span style="color: #569cd6; font-weight: bold;">dolist</span> (item fmt)
+          (<span style="color: #569cd6; font-weight: bold;">push</span> item new)
+          (<span style="color: #569cd6; font-weight: bold;">when</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (not inserted) (eq item 'mode-line-front-space))
+            (<span style="color: #569cd6; font-weight: bold;">push</span> indicator new)
+            (<span style="color: #569cd6; font-weight: bold;">setq</span> inserted t)))
+        (<span style="color: #569cd6; font-weight: bold;">unless</span> inserted
+          (<span style="color: #569cd6; font-weight: bold;">push</span> indicator new))
+        (<span style="color: #569cd6; font-weight: bold;">setq-default</span> mode-line-format (nreverse new))))))
+
+(my/vc-dirty-indicator--install)
+</code></pre>
+</div>
+
+<p>
+The face sets only <code>:weight bold</code>, so the letter uses whatever foreground and background the mode line already has. I tried a red background first; it was too loud, and the bold letter is enough.
+</p>
+
+<ul class="org-ul">
+<li>Clean file: no letter.</li>
+<li>Saved but uncommitted change: <code>M</code> at the start of the mode line.</li>
+<li>New file after <code>git add</code>: <code>A</code>.</li>
+<li>Staged or working-tree deletion: <code>D</code>.</li>
+<li>Merge conflict: <code>U</code>.</li>
+<li>Missing tracked file: <code>D</code> with a "missing from disk" tooltip.</li>
+</ul>
+
+<p>
+The existing <code>**</code> indicator still means the buffer has unsaved edits; the version-control letter follows the state VC knows about and updates when VC refreshes the mode line, such as after saving or a VC operation. Untracked files do not get a <code>?</code> letter because <code>vc</code> does not install a mode-line state for unregistered files; <code>C-x v d</code> or <code>git status</code> remains the place to see those.
+</p>
+
+<p>
+The mode-line letter answers the smaller, more frequent question: is this file carrying local changes right now? One character, no extra processes, and no guessing what a colon means.
+</p>

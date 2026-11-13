@@ -1,0 +1,185 @@
+<p>
+I record brief introductions for all the <a href="https://emacsconf.org/organizers-notebook/">EmacsConf</a> talks so that they can be played automatically. That way, hosts don't have to worry about pronunciations on air, and there's one less changeover that might introduce technical issues. We can cut to the next talk a bit abruptly because everything runs off <a href="https://sachachua.com/blog/2023/10/emacsconf-backstage-autopilot-with-crontab/">a crontab-powered schedule</a> to keep things running on time on multiple tracks, so it helps to have a little transition between Q&amp;A and the next talk. It's also nice having some kind of pronunciation reference so that when people discuss the talks or even just think about them with their internal monologues, they might have a better sense of how to say the speakers' names. We ask speakers to say their names at the beginning of their presentation, but people don't often include their last names, so the intro gets that consistently. The intro videos are available on the talk pages after the conference, and I've occasionally used them to remember how someone's name is pronounced.
+</p>
+
+<p>
+Here's an example intro from EmacsConf 2025:
+<video preload="none" controls="1" src="https://emacsconf.org/2025/emacsconf-2025-org-babel&#45;&#45;making-orgbabel-reactive&#45;&#45;abhinav-tushar&#45;&#45;intro.webm" type="video/webm"><track kind="subtitles" label="Captions" src="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/emacsconf-2025-org-babel&#45;&#45;making-orgbabel-reactive&#45;&#45;abhinav-tushar&#45;&#45;intro.vtt" srclang="en" default=""></video>
+</p>
+
+<p>
+Here's my process for preparing those intros with Emacs.
+</p>
+
+<p>
+First, I create all the intro slides with LaTeX and TikZ using the function <code>emacsconf-stream-generate-in-between-pages</code> from <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-stream.el">emacsconf-stream.el</a>. This year, the template I'm using is <a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/_template.tex">_template.tex</a> and the background image is <a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/_template_bg.pdf">_template_bg.pdf</a>.
+I used to use an SVG and just replace the elements within it (<a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/template.svg">template.svg</a>, <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-stream.el">emacsconf-stream-generate-in-between-page-svg</a>). This year, some of the talk titles are very long and SVG doesn't have widespread support for wrapping.
+LaTeX handles wrapping and positioning beautifully. This even allows me to have ligatures like the "ff" in Jeff Trull's name.
+I noticed those ligatures disappeared when I used Inkscape to convert to PNG, so I needed this command instead:
+<code>inkscape &#45;&#45;pdf-poppler &#45;&#45;export-type=png -w 1280 -h 720 &#45;&#45;export-background-opacity=0 &#45;&#45;export-text-to-path</code>
+</p>
+
+<p>
+This is the function that generates the individual intro slide:
+</p>
+
+<p>
+</p><details><summary>emacsconf-stream-generate-in-between-page: Use LaTeX to generate the intro slide for TALK based on assets/in-between/_template.tex.</summary><div class="org-src-container"><pre class="src src-emacs-lisp">(<span class="org-keyword">defun</span> <span class="org-function-name">emacsconf-stream-generate-in-between-page</span> (talk <span class="org-type">&amp;optional</span> prev info force)
+  <span class="org-doc">"Use LaTeX to generate the intro slide for TALK based on assets/in-between/_template.tex."</span>
+  (<span class="org-keyword">interactive</span> (list (emacsconf-complete-talk-info)))
+  (<span class="org-keyword">let*</span> ((prev (<span class="org-keyword">or</span> prev (emacsconf-previous-talk talk info)))
+         (dir (expand-file-name <span class="org-string">"in-between"</span> emacsconf-stream-asset-dir))
+         (template
+          (<span class="org-keyword">with-temp-buffer</span>
+            (insert-file-contents
+             (expand-file-name <span class="org-string">"_template.tex"</span> dir))
+            (buffer-string)))
+         (default-directory dir))
+    (write-region
+     (emacsconf-replace-plist-in-string
+      (list
+       <span class="org-builtin">:current-title</span>
+       (<span class="org-keyword">or</span> (plist-get talk <span class="org-builtin">:title</span>) <span class="org-string">""</span>)
+       <span class="org-builtin">:current-speakers</span>
+       (<span class="org-keyword">or</span> (plist-get talk <span class="org-builtin">:speakers</span>) <span class="org-string">""</span>)
+       <span class="org-builtin">:current-details</span>
+       (format <span class="org-string">"%s\\\\\n%s"</span>
+               (<span class="org-keyword">or</span> (plist-get talk <span class="org-builtin">:absolute-url</span>) <span class="org-string">""</span>)
+               (<span class="org-keyword">pcase</span> (plist-get talk <span class="org-builtin">:q-and-a</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"live"</span>) <span class="org-string">"Live Q\\&amp;A after talk"</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"pad"</span>) <span class="org-string">"Etherpad"</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"IRC"</span>) <span class="org-string">"IRC Q\\&amp;A after talk"</span>)
+                 (_ <span class="org-string">""</span>)))
+       <span class="org-builtin">:previous-title</span>
+       (<span class="org-keyword">or</span> (plist-get prev <span class="org-builtin">:title</span>) <span class="org-string">""</span>)
+       <span class="org-builtin">:conf-name</span> emacsconf-name
+       <span class="org-builtin">:conf-year</span> emacsconf-year
+       <span class="org-builtin">:previous-speakers</span>
+       (<span class="org-keyword">or</span> (plist-get prev <span class="org-builtin">:speakers</span>) <span class="org-string">""</span>)
+       <span class="org-builtin">:previous-details</span>
+       (format <span class="org-string">"%s\\\\\n%s"</span>
+               (<span class="org-keyword">or</span> (plist-get prev <span class="org-builtin">:absolute-url</span>) <span class="org-string">""</span>)
+               (<span class="org-keyword">pcase</span> (plist-get prev <span class="org-builtin">:q-and-a</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"live"</span>) <span class="org-string">"Live Q\\&amp;A after talk"</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"pad"</span>) <span class="org-string">"Etherpad"</span>)
+                 ((<span class="org-keyword">rx</span> <span class="org-string">"IRC"</span>) <span class="org-string">"IRC Q\\&amp;A after talk"</span>)
+                 (_ <span class="org-string">""</span>))))
+      template)
+     nil
+     (expand-file-name (concat (plist-get talk <span class="org-builtin">:slug</span>) <span class="org-string">".tex"</span>) dir))
+    (shell-command
+     (format <span class="org-string">"lualatex -shell-escape %s &amp;&amp; inkscape &#45;&#45;pdf-poppler &#45;&#45;export-type=png -w 1280 -h 720 &#45;&#45;export-background-opacity=0 &#45;&#45;export-text-to-path %s"</span>
+             (expand-file-name (concat (plist-get talk <span class="org-builtin">:slug</span>) <span class="org-string">".tex"</span>)
+                               dir)
+             (expand-file-name (concat (plist-get talk <span class="org-builtin">:slug</span>) <span class="org-string">".pdf"</span>)
+                               dir)))))
+
+</pre></div></details>
+<p></p>
+
+<p>
+and here's an example slide it creates:
+</p>
+
+
+<figure id="org91c9fbc">
+<img src="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/listen.png" alt="listen.png">
+
+</figure>
+
+<p>
+Once I had the intro slides, I prepared my script. I called <code>emacsconf-subed-intro-subtitles</code> from <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-subed.el">emacsconf-subed.el</a> to create a VTT captions file that starts like this:
+</p>
+
+<pre class="example" id="orgc1da62e">
+WEBVTT
+
+
+NOTE
+#+OUTPUT: emacsconf-2026-sat-open&#45;&#45;saturday-opening-remarks&#45;&#45;sacha-chua&#45;&#45;intro.webm
+[[file:/home/sacha/proj/emacsconf/2026/assets/in-between/sat-open.png]]
+
+00:00:00.000 &#45;&#45;&gt; 00:00:00.000
+Next, we have "Saturday opening remarks",
+by Sacha Chua.
+You can ask questions via Etherpad.
+
+NOTE
+#+OUTPUT: emacsconf-2026-planning&#45;&#45;the-emacs-planning-habits-of-a-questionably-effective-person-my-40year-journey-of-planning-with-emacs-org-mode-paper-journals-etc&#45;&#45;george-jones&#45;&#45;intro.webm
+[[file:/home/sacha/proj/emacsconf/2026/assets/in-between/planning.png]]
+
+00:00:00.000 &#45;&#45;&gt; 00:00:00.000
+Next, we have "The Emacs Planning Habits of a Questionably Effective Person: My 40-year journey of planning with Emacs, Org Mode, paper journals, etc.",
+by George Jones.
+You can ask questions via web conference by joining from the talk page
+or ask questions through Etherpad or IRC.
+</pre>
+
+<p>
+The text is based on the Org entry properties for each talk in our conf.org file.
+It used <a href="https://github.com/sachac/subed-record">subed-record</a> directives to define the output files and the visuals.
+</p>
+
+<p>
+Then I used <code>subed-record</code> to start recording each segment. I pressed <code>&lt;left&gt;</code> (<code>subed-record-retry</code>) to re-record a segment as many times as I needed to. This adds or updates an <code>#+AUDIO</code> directive that points to the current recording and it also updates the timestamps. When I was satisfied, I pressed <code>&lt;right&gt;</code> (<code>subed-record-accept-segment</code>) to update the ending timestamp and move on to the next segment to record. Whenever I needed to take a break from recording, I used <code>RET</code> (<code>subed-record-accept-and-stop</code>) to accept the last segment and stop.
+After recording, I used <a href="https://github.com/sachac/subed/blob/main/subed/subed-waveform.el">subed-waveform-show-all</a> to see the waveforms for each segment. I left- and right-clicked on the waveforms to refine the start and end timestamp, getting rid of the sound from the keyboard shortcuts, and I used <code>subed-split-subtitle</code> to split each long cue into the proper lines for the subtitles.
+</p>
+
+<p>
+Here's the livestream where I worked on some of the intros.
+</p><div class="yt-video"><iframe width="456" height="315" title="YouTube video player" src="https://www.youtube-nocookie.com/embed/c1_ZQi-ptOU?t=56?enablejsapi=1&start=56" frameborder="0" allowfullscreen=""></iframe><a href="https://youtu.be/c1_ZQi-ptOU?t=56">Watch on YouTube</a></div>
+<p></p>
+
+<p>
+After editing the audio this way, I used <a href="https://github.com/sachac/subed-record/blob/main/subed-record.el">subed-record-compile-video</a> (<code>C-c C-c</code> after <code>subed-record-set-up</code>) to create all the videos by using <a href="https://github.com/sachac/compile-media">compile-media</a> and <a href="https://ffmpegbyexample.com/">FFmpeg</a>. I could also regenerate just one or two videos by selecting the region and then using the same function..
+</p>
+
+<p>
+Once the videos finished, I uploaded them to our password-protected backstage area, and <code>emacsconf-publish-backstage-index</code> added them to the page.
+</p>
+
+
+<figure id="org9b41185">
+<a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_09-25-45.png"><img src="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_09-25-45.png" alt="2026-11-12_09-25-45.png"></a>
+
+<figcaption><span class="figure-number">Figure 1: </span>Backstage links to intro</figcaption>
+</figure>
+
+<p>
+Then I used <a href="https://git.emacsconf.org/emacsconf-el/tree/emacsconf-mail.el">emacsconf-mail-intro-to-all</a> to send emails to all the
+speakers with the links to the intros for review. Many speakers
+confirmed that their pronunciations were fine, and some replied with a
+recording of their name so that I could use it for reference. I added
+those in the comments so that I could replay them while recording with
+<code>R</code> (<a href="https://codeberg.org/sachac/learn-lang/src/branch/main/learn-lang-subed-record.el">learn-lang-subed-record-play-current-reference</a>) or
+<code>learn-lang-subed-record-play-reference-and-current-subtitle</code>. I also
+copied and pasted the relevant part of the caption file so that I
+could record different variations with <code>subed-record</code>. It's just text,
+after all, so it's easy to do all sorts of things the way that you
+would do them normally in Emacs. For example, here's what it looked
+like when I was editing the versions for Erik's name:
+</p>
+
+
+<figure id="orgdfbcb52">
+<a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_14-48-14.png"><img src="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_14-48-14.png" alt="2026-11-12_14-48-14.png"></a>
+
+<figcaption><span class="figure-number">Figure 2: </span>Screenshot showing reference comments</figcaption>
+</figure>
+
+<p>
+Erik said option B sounds closest. It's not quite perfect, but it's closer than the pronunciation I started with. I might circle back around to this and try again sometime. =) Anyway, to use option B in the final video, I can just delete the cues for the other versions and remove the part where I said option B. Then I can select that part of the subtitles and compile just his video.
+</p>
+
+
+<figure id="orga216251">
+<a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_21-14-47.png"><img src="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/2026-11-12_21-14-47.png" alt="2026-11-12_21-14-47.png"></a>
+
+<figcaption><span class="figure-number">Figure 3: </span>After selecting the audio for Erik's intro</figcaption>
+</figure>
+
+<p>
+This makes it easy to update the intros whenever something changes. For example, if a speaker turns out to be available during the conference for a live Q&amp;A session, I can update the Org entry for their talk (set <code>:Q_AND_A: live</code>), regenerate the intro slide, and re-record the Q&amp;A explanation or even copy-and-paste one from a different intro. They can also change their talk title and that's totally okay. Yay Emacs!
+</p>
+<div><a href="https://sachachua.com/blog/2026/11/emacsconf-recording-and-re-recording-introductions/index.org">View Org source for this post</a></div>
+<p>You can <a href="https://social.sachachua.com/@sacha/statuses/01M79JMMHVK1QP84R5PWFBVAB7" target="_blank" rel="noopener noreferrer">comment on Mastodon</a> or <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F11%2Femacsconf-recording-and-re-recording-introductions%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

@@ -1,0 +1,265 @@
+<p>There is no better way to learn a specification than implementing it.</p>
+<p>Very recently I went from being an occasional Gopher reader to a writer. Little by little I understand the affection its community has for it, and the reasons why it is still alive beyond nostalgia.</p>
+<p>Back to the matter at hand: I am one of those people who struggle to work with a technology they do not understand, even partially. So I started reading <a href="https://www.rfc-editor.org/info/rfc1436" rel="noopener noreferrer" target="_blank">RFC 1436</a> (the Gopher specification). By browsing Gopherspace with Unix commands (<code>nc</code>, <code>grep</code>, <code>sed</code>, etc.), and checking the specification now and then, I learned how the protocol works and how it is implemented. That is why I decided to write a Gopher server in Python. Not to replace the existing software, which is mature and stable, but as one more exercise to dig deeper.</p>
+<p>Fun fact: Python had its own Gopher library, <code>gopherlib</code>, which was removed in <a href="https://docs.python.org/2.7/whatsnew/2.6.html" rel="noopener noreferrer" target="_blank">Python 2.6</a>. You will not miss it much, though. A server fits in 9 lines of code.</p>
+<pre class="highlight"><code class="language-python">import socket as Socket
+
+socket = Socket.socket(Socket.AF_INET, Socket.SOCK_STREAM, 0)
+socket.setsockopt(Socket.SOL_SOCKET, Socket.SO_REUSEADDR, 1)
+socket.bind(("0.0.0.0", 70))
+socket.listen(5)
+while True:
+    connection, client_address = socket.accept()
+    connection.send(str.encode("iHello world\t\tlocalhost\t70\r\n.\r\n"))
+    connection.close()</code></pre>
+<p>If you run it and connect with a Gopher client to <code>gopher://localhost</code>, you will find a classic "Hello world". A heads-up: on Linux you will need <code>sudo</code> to open port 70, because it is a privileged port.</p>
+<p>And that's it!</p>
+<p>Let's go line by line. It is really interesting to see how Gopher works under the hood.</p>
+<h2 id="blog-single-content__title--minimal-server" class="blog-single__content-title">Minimal server</h2>
+<pre class="highlight"><code class="language-python">socket = Socket.socket(Socket.AF_INET, Socket.SOCK_STREAM, 0)
+socket.setsockopt(Socket.SOL_SOCKET, Socket.SO_REUSEADDR, 1)
+socket.bind(("0.0.0.0", 70))
+socket.listen(5)</code></pre>
+<p>The first lines are the TCP server: create the socket, listen, and wait for clients one at a time. Gopher is a text protocol that runs over TCP, so there is nothing else to do. Every request is a new connection, and the server remembers nothing about the previous one.</p>
+<p>The RFC explicitly says the server keeps no state, which makes the implementation much simpler: no cookies, no sessions, no authentication, etc.</p>
+<p>On top of that, it needs no encryption, so we can forget about TLS and certificates. And it listens on port 70, the one IANA assigned to Gopher, just like HTTP has port 80.</p>
+<pre class="highlight"><code class="language-python">while True:
+    connection, client_address = socket.accept()</code></pre>
+<p>The infinite loop serves the clients. <code>accept()</code> waits until someone connects and gives us <code>connection</code>, a socket to talk to that client. <code>client_address</code> is its IP and port: we do not use it in this server.</p>
+<pre class="highlight"><code class="language-python">    connection.send(str.encode("iHello world\t\tlocalhost\t70\r\n.\r\n"))</code></pre>
+<p>Gopher has no headers and no status codes. Every response is either a <strong>menu</strong> or a <strong>text file</strong>.</p>
+<p>In this case, we respond with a menu that has a single item: "Hello world". The line ends with <code>\r\n</code>, and the whole menu ends with a line containing only a period (<code>.</code>). So we are sending two lines: the item and the final period.</p>
+<p>Every menu line has 5 parts:</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th>Part</th>
+<th>In the example</th>
+<th>What it is for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Type</td>
+<td><code>i</code></td>
+<td>A character that says what the item is</td>
+</tr>
+<tr>
+<td>Text</td>
+<td><code>Hello world</code></td>
+<td>What the user sees</td>
+</tr>
+<tr>
+<td>Selector</td>
+<td>(empty)</td>
+<td>What the client will send if the item is clicked. Not used in this example</td>
+</tr>
+<tr>
+<td>Host</td>
+<td><code>localhost</code></td>
+<td>The server where the item lives. It could be a different one if we want to point to another Gopher server</td>
+</tr>
+<tr>
+<td>Port</td>
+<td><code>70</code></td>
+<td>Its port</td>
+</tr>
+</tbody>
+</table>
+</div><p>The type, <code>i</code> in this case, sits right before the text. The other parts are separated by a tab (<code>\t</code>), and the line ends with <code>\r\n</code>.</p>
+<p>Type <code>i</code> is an informational line: just text, no link. Fun fact: it does not appear in the RFC! It is an extension that almost every client accepts. The other types will show up in the next examples.</p>
+<pre class="highlight"><code class="language-python">    connection.close()</code></pre>
+<p>Finally, we close the connection. According to the RFC, it is the server that closes it after responding. One request, one response, goodbye.</p>
+<p>This is the sequence diagram of the interaction with the client:</p>
+<pre class="mermaid">sequenceDiagram
+    participant C as Client
+    participant S as Server (port 70)
+    C->>S: Opens a TCP connection
+    C->>S: Selector + CRLF
+    S->>C: Menu or file, ending with "."
+    S->>C: Closes the connection</pre>
+<p>We now have the foundation of the server.</p>
+<p>Gopher can return menus and text files. We already know how to return a menu. The second part is missing.</p>
+<h2 id="blog-single-content__title--serving-menus-and-text-files" class="blog-single__content-title">Serving menus and text files</h2>
+<p>A menu and a file are very different responses. A menu is made of lines with the 5 parts we just saw. A file is plain text, as is, ending with a line containing a period. No type, no tabs, no host.</p>
+<p>But if there are no headers, how does the client know what it is going to receive? From the type of the link it clicked. If it clicked a type <code>1</code> item, it expects a menu. If it clicked a type <code>0</code> item, it expects a text file. The type lives in the link, not in the response.</p>
+<p>And what does the client send when an item is clicked? That line's selector, as is, ending with <code>\r\n</code>. For the server it is an opaque string: it looks like a path, but it could be <code>foo</code> or <code>42</code>. Each server interprets it however it wants. If it arrives empty, the client is asking for the main menu.</p>
+<p>With these pieces we will build a small navigation. The main menu will have a type <code>1</code> item, "Documents", leading to another menu. This is the core of Gopher: menus linking to menus, like folders inside folders. Inside there will be a type <code>0</code> item, "About me", with the selector <code>/docs/about.txt</code>. When the user clicks it in their client, or requests it by hand with <code>nc</code>, the server will receive <code>/docs/about.txt\r\n</code> and respond with the file contents.</p>
+<p>In short, the interaction flow will be:</p>
+<pre class="mermaid">sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: "" + CRLF
+    S->>C: 1Documents TAB /docs TAB localhost TAB 70
+    S->>C: Closes the connection
+    Note over C: The user clicks "Documents"
+    C->>S: /docs + CRLF
+    S->>C: 0About me TAB /docs/about.txt TAB localhost TAB 70
+    S->>C: Closes the connection
+    Note over C: The user clicks "About me"
+    C->>S: /docs/about.txt + CRLF
+    S->>C: File contents + "."
+    S->>C: Closes the connection</pre>
+<p>And if someone requests a selector that does not exist, we will respond with a type <code>3</code> item, the RFC's error type (the equivalent of an HTTP 40x or 50x).</p>
+<p>On to the implementation.</p>
+<p>We create <code>about.txt</code> next to the script:</p>
+<pre class="highlight"><code class="language-text">Hi! I am Bob.
+This text file is served over Gopher.</code></pre>
+<p>In the server, inside the infinite loop, we read the client's request and keep its first line: the selector. Depending on its value, we return a menu, a text file or an error.</p>
+<pre class="highlight"><code class="language-python">data = connection.recv(1024).decode()
+selector = data.split("\r\n")[0]
+
+if selector in ("", "/"):
+    # The main menu
+    response = f"1Documents\t/docs\t{host}\t{port}\r\n.\r\n"
+
+elif selector == "/docs":
+    # A submenu
+    response = f"0About me\t/docs/about.txt\t{host}\t{port}\r\n.\r\n"
+
+elif selector == "/docs/about.txt":
+    # Serve the file contents
+    with open("about.txt") as file:
+        response = file.read() + ".\r\n"
+
+else:
+    # Error
+    response = f"3Not Found\t\t{host}\t{port}\r\n.\r\n"
+
+connection.send(str.encode(response))</code></pre>
+<p>All together:</p>
+<pre class="highlight"><code class="language-python">import socket as Socket
+
+host = "localhost"
+port = 70
+socket = Socket.socket(Socket.AF_INET, Socket.SOCK_STREAM, 0)
+socket.setsockopt(Socket.SOL_SOCKET, Socket.SO_REUSEADDR, 1)
+socket.bind(("0.0.0.0", port))
+socket.listen(5)
+while True:
+    connection, client_address = socket.accept()
+    data = connection.recv(1024).decode()
+    selector = data.split("\r\n")[0]
+    if selector in ("", "/"):
+        response = f"1Documents\t/docs\t{host}\t{port}\r\n.\r\n"
+    elif selector == "/docs":
+        response = f"0About me\t/docs/about.txt\t{host}\t{port}\r\n.\r\n"
+    elif selector == "/docs/about.txt":
+        with open("about.txt") as file:
+            response = file.read() + ".\r\n"
+    else:
+        response = f"3Not Found\t\t{host}\t{port}\r\n.\r\n"
+    connection.send(str.encode(response))
+    connection.close()</code></pre>
+<p>We moved the host and port into variables so we do not repeat them.</p>
+<p>Open <code>gopher://localhost</code> and you will see a single item, "Documents", which your client will show as a folder. Click it and you will enter a new menu with "About me", a text document. Click it and the file contents will appear, as is.</p>
+<p>We have built a complete interaction flow, with menus and text files.</p>
+<p>Now let's make our site a bit more interactive with type <code>7</code>, the equivalent of an input.</p>
+<h2 id="blog-single-content__title--inputs-and-searches" class="blog-single__content-title">Inputs and searches</h2>
+<p>Gopher has no forms or inputs, but it does have a type for searches: the RFC calls it <em>Index-Search server</em>. Although it was designed for search engines, nothing stops us from using it for anything else.</p>
+<p>A type <code>7</code> item is written like any other menu line. When it is clicked, a client must ask the user for some text. Then it sends the selector, a tab, and whatever the user typed.</p>
+<p>If we type "Cat" and the selector is <code>/hello-user</code>, the client will send:</p>
+<pre class="highlight"><code class="language-text">/hello-user\tCat\r\n</code></pre>
+<p>According to the RFC, the response to a search is always a menu. And that is what we will do: we will ask for the user's name and return a menu with an informational line greeting them.</p>
+<p>The interaction flow will be:</p>
+<pre class="mermaid">sequenceDiagram
+    participant C as Client
+    participant S as Server
+    C->>S: "" + CRLF
+    S->>C: 7Say hello TAB /hello-user TAB localhost TAB 70
+    S->>C: Closes the connection
+    Note over C: The user clicks "Say hello" and types "Cat"
+    C->>S: /hello-user TAB Cat + CRLF
+    S->>C: iHello Cat TAB TAB localhost TAB 70
+    S->>C: Closes the connection</pre>
+<p>Back to the implementation.</p>
+<p>Now the first line of the request can carry two parts separated by a tab. <code>partition("\t")</code> splits them: the selector on one side and the user's text on the other. If there is no tab, <code>query</code> is empty and everything works as before.</p>
+<pre class="highlight"><code class="language-python">data = connection.recv(1024).decode()
+selector, _, query = data.split("\r\n")[0].partition("\t")
+
+if selector in ("", "/"):
+    # The main menu, with a search item
+    response = f"7Say hello\t/hello-user\t{host}\t{port}\r\n.\r\n"
+
+elif selector == "/hello-user":
+    # A menu with the greeting
+    response = f"iHello {query}\t\t{host}\t{port}\r\n.\r\n"
+
+else:
+    # Error
+    response = f"3Not Found\t\t{host}\t{port}\r\n.\r\n"
+
+connection.send(str.encode(response))</code></pre>
+<p>All together:</p>
+<pre class="highlight"><code class="language-python">import socket as Socket
+
+host = "localhost"
+port = 70
+socket = Socket.socket(Socket.AF_INET, Socket.SOCK_STREAM, 0)
+socket.setsockopt(Socket.SOL_SOCKET, Socket.SO_REUSEADDR, 1)
+socket.bind(("0.0.0.0", port))
+socket.listen(5)
+while True:
+    connection, client_address = socket.accept()
+    data = connection.recv(1024).decode()
+    selector, _, query = data.split("\r\n")[0].partition("\t")
+    if selector in ("", "/"):
+        response = f"7Say hello\t/hello-user\t{host}\t{port}\r\n.\r\n"
+    elif selector == "/hello-user":
+        response = f"iHello {query}\t\t{host}\t{port}\r\n.\r\n"
+    else:
+        response = f"3Not Found\t\t{host}\t{port}\r\n.\r\n"
+    connection.send(str.encode(response))
+    connection.close()</code></pre>
+<p>Open <code>gopher://localhost</code> with your favorite client and you will see a single item, "Say hello", which your client will show as a search. Click it and it will ask you for some text. Type a name, for example "Cat", and confirm. The server will reply with a new menu: "Hello Cat".</p>
+<h2 id="blog-single-content__title--generating-content-on-the-fly" class="blog-single__content-title">Generating content on the fly</h2>
+<p>Our code writes every response at the moment it is requested, so nothing forces it to be fixed: we can generate content in real time. For example, listing the most voted stories on the Hacker News front page.</p>
+<p>We will use the <a href="https://hn.algolia.com/api" rel="noopener noreferrer" target="_blank">Algolia API</a>, which returns the 10 front page stories with the most points in a single request. We will build one menu line for each.</p>
+<p>Each story will be a type <code>h</code> item, a web link. Its selector starts with <code>URL:</code> followed by the address. Like <code>i</code>, it is not in the RFC: it is another extension that most clients understand.</p>
+<p>Stories without an external link, such as "Ask HN" posts, will point to their discussion page.</p>
+<pre class="highlight"><code class="language-python">import json
+import socket as Socket
+from urllib.request import urlopen
+
+host = "localhost"
+port = 70
+api = "https://hn.algolia.com/api/v1"
+socket = Socket.socket(Socket.AF_INET, Socket.SOCK_STREAM, 0)
+socket.setsockopt(Socket.SOL_SOCKET, Socket.SO_REUSEADDR, 1)
+socket.bind(("0.0.0.0", port))
+socket.listen(5)
+while True:
+    connection, client_address = socket.accept()
+    data = connection.recv(1024).decode()
+    selector = data.split("\r\n")[0]
+    if selector in ("", "/"):
+        response = f"iMost voted on the Hacker News front page\t\t{host}\t{port}\r\n"
+        with urlopen(f"{api}/search?tags=front_page&amp;hitsPerPage=10") as page:
+            stories = json.load(page)["hits"]
+        for position, story in enumerate(stories, start=1):
+            discussion = f"https://news.ycombinator.com/item?id={story['objectID']}"
+            url = story["url"] or discussion
+            response += f"h{position}. {story['title']}\tURL:{url}\t{host}\t{port}\r\n"
+        response += ".\r\n"
+    else:
+        response = f"3Not Found\t\t{host}\t{port}\r\n.\r\n"
+    connection.send(str.encode(response))
+    connection.close()</code></pre>
+<p>Open it and you will see a title followed by ten numbered links. Click any of them and your client will open the story in the browser. This is how it looked on November 18, 2026:</p>
+<pre class="highlight"><code class="language-text">Most voted on the Hacker News front page
+1. Java4Shell: RCE in OpenJDK when processing Base64
+2. Quad9's withdrawal from France: A canary in the coal mine
+3. Highly classified US national security communications network goes down
+4. Nvidia stopped disclosing Singapore sales as revenues hit $104B
+5. Google's AI answers reducing search traffic by 40%
+6. ID.me terms required for IRS sign-in
+7. Phrack 73
+8. Microsoft's ONNX Runtime has disappeared from GitHub
+9. MAI Code 2 and Code 2 Flash
+10. 350 years ago, Ole Rømer discovered that light has a finite speed</code></pre>
+<p>The menu is generated on every request, so if you come back in a few hours you will see different stories.</p>
+<p>This opens up endless possibilities: games, chats, interaction with LLMs, etc.</p>
+<h2 id="blog-single-content__title--conclusion" class="blog-single__content-title">Conclusion</h2>
+<p>If you want to build a more serious Gopher server, some RFC details are missing, such as sending only ASCII text or doubling the periods at the start of a line. Since this is an academic exercise, it is not worth complicating it further.</p>
+<p>All that is left for me to say is that I have learned a lot, and I hope you had fun too. Gopher is a simple protocol, but with a lot of potential. And while we are at it, it would not be a bad idea to start using it for your own projects.</p>
+<p>See you in Gopherspace.</p><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-cf3110ec@andros.dev" class="link">comment+article-cf3110ec@andros.dev</a> to leave a comment. The subject will be ignored.</p>

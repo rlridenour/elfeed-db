@@ -1,0 +1,600 @@
+<p>Good architecture separates business logic from infrastructure. It is the foundation of almost every architecture you have studied. Separating responsibilities keeps you from being tied to a specific technology, like a database or a web framework, and as a side effect, it makes testing and modularity easier.</p>
+<p>I decided to write this article because I needed to build a desktop application in Clojure, and the most natural option is Functional Core, Imperative Shell: the core of the application is only pure functions that receive data and return data. You will find it recommended in plenty of articles and talks because it fits so well with Clojure's immutability and pure functions. And if you use it, that's fine, it is very elegant to work with. However, it has a design problem that makes it hard to deal with uncertainty. If you don't know in advance what data you will need, the separation between the core and the infrastructure loses its clarity.</p>
+<p>That is why I chose Clean Architecture, a first cousin of Hexagonal Architecture. It is a pattern I know in depth after applying it, and fighting with it, in other languages. Thanks to that experience, I was sure it would fit very well with a functional language.</p>
+<p>This is not an article about Clean Architecture in general. If you are interested, I recommend reading my article <a href="/blog/c8838a2b/implementing-clean-architecture-in-python/">Implementing Clean Architecture in Python</a>. Broadly speaking, clean architecture splits the application into four layers:</p>
+<pre class="mermaid">flowchart TB
+    subgraph EI["External Interfaces"]
+        direction TB
+        subgraph GW["Gateways"]
+            direction TB
+            subgraph UC["Use Cases"]
+                direction TB
+                E["Entities"]
+            end
+        end
+    end
+    style EI fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+    style GW fill:#dcfce7,stroke:#22c55e,color:#14532d
+    style UC fill:#fee2e2,stroke:#ef4444,color:#7f1d1d
+    style E fill:#fef9c3,stroke:#eab308,color:#713f12</pre>
+<ul>
+<li><strong>Entities</strong>: The business data.</li>
+<li><strong>Use Cases</strong>: The business logic. They orchestrate the entities and talk to the outside world through interfaces.</li>
+<li><strong>Gateways</strong>: The interfaces the use cases need to interact with the outside world.</li>
+<li><strong>External Interfaces</strong>: The pieces that touch the real world, or infrastructure.<ul>
+<li>Database</li>
+<li>File system</li>
+<li>REST API</li>
+<li>HTTP (website)</li>
+<li>CLI</li>
+</ul>
+</li>
+</ul>
+<p>And one golden rule: inner layers cannot depend on outer layers. For example, use cases cannot import an external interface.</p>
+<p>Therefore:</p>
+<pre class="mermaid">flowchart LR
+    EI["External Interfaces"] -- "Calls come in through interfaces" --> CORE["Use Cases and Entities"]
+    CORE -. "Results go out as simple structures" .-> EI
+    style EI fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a
+    style CORE fill:#fee2e2,stroke:#ef4444,color:#7f1d1d</pre>
+<p>The differences between Functional Core, Imperative Shell and Clean Architecture are not trivial.</p>
+<div class="table"><table>
+<thead>
+<tr>
+<th></th>
+<th>Clean Architecture</th>
+<th>Functional core, imperative shell</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Separation criterion</td>
+<td>Direction of dependencies</td>
+<td>Purity</td>
+</tr>
+<tr>
+<td>Can the core do IO?</td>
+<td>Yes, through an interface</td>
+<td>Never</td>
+</tr>
+<tr>
+<td>Dependency injection</td>
+<td>Protocols or functions</td>
+<td>Not needed</td>
+</tr>
+<tr>
+<td>Core tests</td>
+<td>With test doubles</td>
+<td>Only input and output data</td>
+</tr>
+<tr>
+<td>Data the core needs</td>
+<td>Asks for it when needed</td>
+<td>All of it upfront</td>
+</tr>
+</tbody>
+</table>
+</div><p>Now, to adapt it to Clojure, we have to use the language's own quirks. Not much effort is needed, though, because Clojure's design already pushes you towards this pattern:</p>
+<ul>
+<li><strong>Data is immutable</strong>. An entity cannot change behind your back.</li>
+<li><strong>Maps are the universal structure</strong>. Maps go in, maps come out. No need to convert objects into DTOs, or DTOs into JSON.</li>
+<li><strong>Protocols are interfaces</strong>. They define a contract that any implementation can fulfil, without inheritance.</li>
+<li><strong>Functions are values</strong>. You can pass a dependency as an argument without any ceremony.</li>
+</ul>
+<p>So each element of the architecture translates into its own nature:</p>
+<ul>
+<li><strong>Entities</strong>: Maps and functions. No classes, obviously.</li>
+<li><strong>Use Cases</strong>: Functions that orchestrate pure functions and side effects.</li>
+<li><strong>Gateways</strong>: Protocols.</li>
+<li><strong>External Interfaces</strong>: The libraries in the ecosystem that touch the real world: http-kit, Ring, Compojure, Hiccup, next.jdbc, etc.</li>
+</ul>
+<p>Let's build a practical example and see how everything fits together.</p>
+<h2 id="blog-single-content__title--setting-up-the-project" class="blog-single__content-title">Setting up the project</h2>
+<p>We are going to build a basic to-do list: create, list, mark as done and delete.</p>
+<p>It will have two entry points in our infrastructure:</p>
+<ul>
+<li>A <strong>REST API</strong> that returns JSON.</li>
+<li>A <strong>web page</strong> with a few minimal forms, almost no HTML.</li>
+</ul>
+<p>Both will use exactly the same use cases. That is the whole point of the architecture!</p>
+<p>The folder structure will be the following:</p>
+<ul>
+<li><strong>tasks</strong>: The main project folder.<ul>
+<li>deps.edn: Dependencies and aliases.</li>
+<li><strong>src/tasks</strong>: Source code.<ul>
+<li><strong>core</strong>: Business logic.<ul>
+<li><strong>entities</strong><ul>
+<li>task.clj</li>
+</ul>
+</li>
+<li><strong>gateways</strong><ul>
+<li>repository.clj</li>
+</ul>
+</li>
+<li><strong>use_cases</strong><ul>
+<li>response.clj</li>
+<li>tasks.clj</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><strong>infra</strong>: Infrastructure or external interfaces.<ul>
+<li><strong>database</strong><ul>
+<li>memory_repo.clj</li>
+</ul>
+</li>
+<li><strong>api</strong><ul>
+<li>routes.clj</li>
+</ul>
+</li>
+<li><strong>http</strong><ul>
+<li>routes.clj</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>main.clj</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p>At first, our repository (database) will live in memory. Later we will iterate towards better solutions, such as a file on disk or a conventional database like SQLite.</p>
+<p>About how namespaces work, in case you are not used to Clojure: dashes become underscores in folder names. For example, the namespace <code>tasks.core.use-cases.tasks</code> lives in <code>src/tasks/core/use_cases/tasks.clj</code>. Dependencies, on the other hand, are defined in <code>deps.edn</code>.</p>
+<ul>
+<li>HTTP server: Ring + Jetty</li>
+<li>Routing: Compojure</li>
+<li>HTML rendering: Hiccup</li>
+<li>JSON: data.json</li>
+<li>Logs: slf4j-simple</li>
+</ul>
+<pre class="highlight"><code class="language-clojure">;; deps.edn
+{:paths ["src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.7"}
+        ring/ring-jetty-adapter {:mvn/version "1.15.6"}
+        compojure/compojure {:mvn/version "1.7.2"}
+        org.clojure/data.json {:mvn/version "2.5.2"}
+        hiccup/hiccup {:mvn/version "2.0.0"}
+        org.slf4j/slf4j-simple {:mvn/version "2.0.20"}}
+ :aliases {:run {:main-opts ["-m" "tasks.main"]}}}</code></pre>
+<p>All the libraries will be used in the infrastructure, never in the core.</p>
+<p>Now let's define the entities, the business data, as data and pure functions.</p>
+<h2 id="blog-single-content__title--entities" class="blog-single__content-title">Entities</h2>
+<p>In other languages the entity would be a class. We will use a map.</p>
+<pre class="highlight"><code class="language-clojure">{:id #uuid "b1ef0868-8e2b-4ce8-87cc-c3b55ed11e46"
+ :title "Buy bread"
+ :done? false}</code></pre>
+<p>Not only is it easy to read, it also converts to JSON effortlessly and it is safe, since there is no mutability.</p>
+<p>Now we need pure functions that build, transform and validate tasks.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/core/entities/task.clj
+(ns tasks.core.entities.task
+  (:require [clojure.string :as str]))
+
+(def max-title-length 100)
+
+(defn make-task
+  "Build a new pending task."
+  [id title]
+  {:id id
+   :title (str/trim title)
+   :done? false})
+
+(defn complete
+  "Mark a task as done."
+  [task]
+  (assoc task :done? true))
+
+(defn title-errors
+  "Return the list of errors of a title. Empty if the title is valid."
+  [title]
+  (cond
+    (not (string? title)) [{:field :title :message "Title is required"}]
+    (str/blank? title) [{:field :title :message "Title can't be empty"}]
+    (&gt; (count (str/trim title)) max-title-length)
+    [{:field :title :message (str "Title can't be longer than " max-title-length " characters")}]
+    :else []))</code></pre>
+<p>The first reaction you would have in OOP is to make <code>make-task</code> generate a random <code>id</code>. Instead, we pass it in from outside. Generating a random identifier is a side effect, and we don't want side effects in the entities. The way it is designed now, the function always returns the same output for the same input. That is why it is a pure function.</p>
+<p>Another detail is that <code>complete</code> does not modify the task. It returns a new one with <code>:done?</code> set to <code>true</code>, and the original stays intact.</p>
+<p>Finally, <code>title-errors</code> does not throw exceptions. It returns a list of errors, empty if everything is fine.</p>
+<p>We can try it in the REPL:</p>
+<pre class="highlight"><code class="language-clojure">(complete (make-task 1 "  Buy bread  "))
+;; {:id 1, :title "Buy bread", :done? true}
+
+(title-errors "Buy bread")
+;; []
+
+(title-errors "   ")
+;; [{:field :title, :message "Title can't be empty"}]</code></pre>
+<p>With the entities ready, let's write the use cases, which orchestrate the entities and call the infrastructure through interfaces. They are no longer pure functions: that is the price of being able to ask for data right when they need it.</p>
+<h2 id="blog-single-content__title--use-cases" class="blog-single__content-title">Use cases</h2>
+<p>First, let's define the shape of the responses: a map with 3 keys that every use case will return.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/core/use_cases/response.clj
+(ns tasks.core.use-cases.response)
+
+(defn success [data]
+  {:type :success :errors [] :data data})
+
+(defn parameters-error [errors]
+  {:type :parameters-error :errors errors :data {}})
+
+(defn resource-error [field message]
+  {:type :resource-error :errors [{:field field :message message}] :data {}})
+
+(defn system-error [error]
+  {:type :system-error :errors [{:field :system :message (ex-message error)}] :data {}})</code></pre>
+<ul>
+<li><code>:success</code>: Everything went fine.</li>
+<li><code>:parameters-error</code>: The input is wrong.</li>
+<li><code>:resource-error</code>: The process is correct, but the resource does not exist.</li>
+<li><code>:system-error</code>: Something blew up. An exception we have caught.</li>
+</ul>
+<p>The use cases are the functions that implement the business logic: list, create, complete and delete tasks. They receive a repository as their first argument and return a response map.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/core/use_cases/tasks.clj
+(ns tasks.core.use-cases.tasks
+  (:require [tasks.core.entities.task :as task]
+            [tasks.core.gateways.repository :as repository]
+            [tasks.core.use-cases.response :as response]))
+
+(defn list-tasks [repo]
+  (try
+    (response/success {:tasks (repository/find-all repo)})
+    (catch Exception error
+      (response/system-error error))))
+
+(defn create-task [repo title]
+  (let [errors (task/title-errors title)]
+    (if (seq errors)
+      (response/parameters-error errors)
+      (try
+        (let [new-task (task/make-task (random-uuid) title)]
+          (repository/save! repo new-task)
+          (response/success {:task new-task}))
+        (catch Exception error
+          (response/system-error error))))))
+
+(defn complete-task [repo id]
+  (try
+    (if-let [found (repository/find-by-id repo id)]
+      (let [done (task/complete found)]
+        (repository/save! repo done)
+        (response/success {:task done}))
+      (response/resource-error :id "Task not found"))
+    (catch Exception error
+      (response/system-error error))))
+
+(defn delete-task [repo id]
+  (try
+    (if (repository/find-by-id repo id)
+      (do (repository/delete! repo id)
+          (response/success {:id id}))
+      (response/resource-error :id "Task not found"))
+    (catch Exception error
+      (response/system-error error))))</code></pre>
+<p>As you can see, we never throw an exception. If something fails, we return an error map. Now it is predictable, and we can decide what to do with the error in the infrastructure.</p>
+<p>This is dependency injection in Clojure: <strong>passing the dependency as an argument</strong>.</p>
+<p>One nuance: <code>random-uuid</code> is still a side effect. We moved it out of the entity, we didn't remove it, and now it lives in the use case, which is allowed to have them. If a test needs a specific <code>id</code>, you can inject an id generator just like we inject the repository.</p>
+<p>Now let's define the contracts the use cases need to interact with the infrastructure.</p>
+<h2 id="blog-single-content__title--gateways" class="blog-single__content-title">Gateways</h2>
+<p>The use cases call <code>repository/find-all</code>, <code>repository/save!</code>, etc. It may look like it, but we are not calling a database. We can't. Remember the rule: the core cannot depend on the infrastructure.</p>
+<p>To solve the problem, we create a contract that states what the repository must do, and any concrete implementation can fulfil it.</p>
+<p>In Clojure we use <code>defprotocol</code> to define a contract and <code>defrecord</code> to implement it.</p>
+<p>First, we define the contract:</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/core/gateways/repository.clj
+(ns tasks.core.gateways.repository)
+
+(defprotocol TaskRepository
+  (find-all [repo])
+  (find-by-id [repo id])
+  (save! [repo task])
+  (delete! [repo id]))</code></pre>
+<p>Now let's implement the functions of the in-memory repository, which will store the tasks in an <code>atom</code>.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/infra/database/memory_repo.clj
+(ns tasks.infra.database.memory-repo
+  (:require [tasks.core.gateways.repository :refer [TaskRepository]]))
+
+(defrecord MemoryRepo [store]
+  TaskRepository
+  (find-all [_] (vec (vals @store)))
+  (find-by-id [_ id] (get @store id))
+  (save! [_ task] (swap! store assoc (:id task) task))
+  (delete! [_ id] (swap! store dissoc id)))
+
+(defn make-memory-repo []
+  (-&gt;MemoryRepo (atom {})))</code></pre>
+<p>A detail: <code>vals</code> returns <code>nil</code> when the map is empty, and the API would reply <code>null</code> instead of an empty list. With <code>vec</code> we always return a vector.</p>
+<p>An <code>atom</code> is a mutable reference to an immutable value. I don't want to overwhelm you with Clojure technicalities. Just keep in mind that it is the simplest way to manage state.</p>
+<p>An example of how it works:</p>
+<pre class="highlight"><code class="language-clojure">(def store (atom {}))
+
+@store
+;; {}
+
+(swap! store assoc 1 "Buy bread")
+;; {1 "Buy bread"}
+
+(swap! store assoc 2 "Call mom")
+;; {1 "Buy bread", 2 "Call mom"}
+
+(swap! store dissoc 1)
+;; {2 "Call mom"}</code></pre>
+<p>Now we can inject a <code>MemoryRepo</code> into the use cases.</p>
+<p>It is time to build the infrastructure, the next layer.</p>
+<h2 id="blog-single-content__title--infra-rest-api" class="blog-single__content-title">Infra: REST API</h2>
+<p>The first entry point is a REST API. We will use Compojure for routing and <code>data.json</code> to read and write JSON: each route receives JSON, calls the use case and returns JSON.</p>
+<p>All the code lives in <code>src/tasks/infra/api/routes.clj</code>, which starts by declaring its dependencies.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/infra/api/routes.clj
+(ns tasks.infra.api.routes
+  (:require [clojure.data.json :as json]
+            [compojure.core :refer [DELETE GET PATCH POST context]]
+            [tasks.core.use-cases.tasks :as use-cases]))</code></pre>
+<p>First we need to translate the response type into an HTTP status code. A map is enough, and in Clojure a map can also be called as a function: <code>(http-status :parameters-error)</code> returns <code>400</code>.</p>
+<pre class="highlight"><code class="language-clojure">(def http-status
+  {:success 200
+   :parameters-error 400
+   :resource-error 404
+   :system-error 500})</code></pre>
+<p>This way we link each <code>:type</code> to its HTTP status code, so the infrastructure doesn't have to worry about business logic.</p>
+<p>We also need a function that turns the use case result into an HTTP response with JSON.</p>
+<pre class="highlight"><code class="language-clojure">(defn- json-response [result]
+  {:status (http-status (:type result))
+   :headers {"Content-Type" "application/json"}
+   :body (json/write-str result)})</code></pre>
+<p>Another one to read the request body and parse it into a map.</p>
+<pre class="highlight"><code class="language-clojure">(defn- read-body [request]
+  (try
+    (json/read-str (slurp (:body request)) :key-fn keyword)
+    (catch Exception _ {})))</code></pre>
+<p>Finally, we define the API routes, which call the use cases and return the HTTP response.</p>
+<pre class="highlight"><code class="language-clojure">(defn api-routes [repo]
+  (context "/api/tasks" []
+    (GET "/" []
+      (json-response (use-cases/list-tasks repo)))
+    (POST "/" request
+      (json-response (use-cases/create-task repo (:title (read-body request)))))
+    (PATCH "/:id" [id]
+      (json-response (use-cases/complete-task repo (parse-uuid id))))
+    (DELETE "/:id" [id]
+      (json-response (use-cases/delete-task repo (parse-uuid id))))))</code></pre>
+<p>The API validates nothing, and it doesn't know what a valid title is: it only receives, translates and delivers. It is robust, because if the body is not valid JSON, <code>read-body</code> returns an empty map and the use case replies that the title is missing. It is also aligned with the architecture. The HTTP status codes are the ones that match each response type, and the body is JSON with the same map the use case returns.</p>
+<p>The API infrastructure is done. Now let's go for the web.</p>
+<h2 id="blog-single-content__title--infra-html-forms" class="blog-single__content-title">Infra: HTML forms</h2>
+<p>The second entry point, or way to interact with the use cases, is a page with an HTML form. We will include a minimal interface to create, complete and delete tasks.</p>
+<p>To render HTML we will use Hiccup, which represents HTML as vectors and maps.</p>
+<p>For example, the following vector:</p>
+<pre class="highlight"><code class="language-clojure">[:ul
+ [:li "Buy bread"]
+ [:li "Call mom"]]</code></pre>
+<p>Is equivalent to this HTML:</p>
+<pre class="highlight"><code class="language-html">&lt;ul&gt;
+  &lt;li&gt;Buy bread&lt;/li&gt;
+  &lt;li&gt;Call mom&lt;/li&gt;
+&lt;/ul&gt;</code></pre>
+<p>We will use forms to create, complete and delete tasks. Each form sends a <code>POST</code> to the matching route and, if everything goes well, the server redirects to the home page.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/infra/http/routes.clj
+(ns tasks.infra.http.routes
+  (:require [compojure.core :refer [GET POST routes]]
+            [hiccup2.core :as h]
+            [ring.util.response :refer [redirect]]
+            [tasks.core.use-cases.tasks :as use-cases]))
+
+(defn- task-item [{:keys [id title done?]}]
+  [:li
+   (if done? [:s title] title)
+   (when-not done?
+     [:form {:method "post" :action (str "/tasks/" id "/complete")}
+      [:button "Done"]])
+   [:form {:method "post" :action (str "/tasks/" id "/delete")}
+    [:button "Delete"]]])
+
+(defn- page [tasks errors]
+  (str
+   (h/html
+    [:html
+     [:body
+      [:h1 "Tasks"]
+      (for [{:keys [message]} errors]
+        [:p message])
+      [:form {:method "post" :action "/tasks"}
+       [:input {:name "title"}]
+       [:button "Add"]]
+      [:ul (map task-item tasks)]]])))
+
+(defn- html-response [status body]
+  {:status status
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body body})
+
+(defn http-routes [repo]
+  (routes
+   (GET "/" []
+     (let [result (use-cases/list-tasks repo)]
+       (html-response 200 (page (get-in result [:data :tasks]) (:errors result)))))
+   (POST "/tasks" [title]
+     (let [result (use-cases/create-task repo title)]
+       (if (= :success (:type result))
+         (redirect "/" :see-other)
+         (html-response 400 (page (get-in (use-cases/list-tasks repo) [:data :tasks])
+                                  (:errors result))))))
+   (POST "/tasks/:id/complete" [id]
+     (use-cases/complete-task repo (parse-uuid id))
+     (redirect "/" :see-other))
+   (POST "/tasks/:id/delete" [id]
+     (use-cases/delete-task repo (parse-uuid id))
+     (redirect "/" :see-other))))</code></pre>
+<p>Once again, the infrastructure knows nothing about the business logic. It translates the use cases into the language the browser speaks, and vice versa. To keep the example short, completing and deleting always redirect to the home page, without checking whether the use case returned an error.</p>
+<h2 id="blog-single-content__title--main" class="blog-single__content-title">Main</h2>
+<p>We are missing <code>main.clj</code>, the entry point where the application is assembled.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/main.clj
+(ns tasks.main
+  (:require [compojure.core :refer [routes]]
+            [ring.adapter.jetty :refer [run-jetty]]
+            [ring.middleware.params :refer [wrap-params]]
+            [tasks.infra.api.routes :refer [api-routes]]
+            [tasks.infra.database.memory-repo :refer [make-memory-repo]]
+            [tasks.infra.http.routes :refer [http-routes]]))
+
+(defn -main []
+  (let [repo (make-memory-repo)
+        app (routes (api-routes repo)
+                    (http-routes repo))]
+    (run-jetty (wrap-params app) {:port 3000})))</code></pre>
+<p>Let's run it.</p>
+<pre class="highlight"><code class="language-sh">clojure -M:run</code></pre>
+<p>Let's try the API.</p>
+<pre class="highlight"><code class="language-sh">curl -X POST localhost:3000/api/tasks \
+     -H 'Content-Type: application/json' \
+     -d '{"title":"Buy bread"}'</code></pre>
+<pre class="highlight"><code class="language-json">{"type":"success","errors":[],"data":{"task":{"id":"ac089379-d761-4623-bce3-9f0fe6b7828f","title":"Buy bread","done?":false}}}</code></pre>
+<p>Now let's try to create a task with an empty title.</p>
+<pre class="highlight"><code class="language-sh">curl -X POST localhost:3000/api/tasks \
+     -H 'Content-Type: application/json' \
+     -d '{"title":""}'</code></pre>
+<pre class="highlight"><code class="language-json">{"type":"parameters-error","errors":[{"field":"title","message":"Title can't be empty"}],"data":{}}</code></pre>
+<p>Let's mark the task as done.</p>
+<pre class="highlight"><code class="language-sh">curl -X PATCH localhost:3000/api/tasks/ac089379-d761-4623-bce3-9f0fe6b7828f</code></pre>
+<pre class="highlight"><code class="language-json">{"type":"success","errors":[],"data":{"task":{"id":"ac089379-d761-4623-bce3-9f0fe6b7828f","title":"Buy bread","done?":true}}}</code></pre>
+<p>Now let's try the web version.</p>
+<p>Open <code>http://localhost:3000/</code> in the browser and you will see "Buy bread", crossed out. Add another task from the form and it will also show up in <code>GET /api/tasks</code>.</p>
+<p><img alt="To-do list in the browser, with &quot;Buy bread&quot; crossed out and the Done and Delete buttons" src="https://img.andros.dev/FhkbZdRT9rMCyg6Vn-cNfWIOJmQ=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/11/clojure-clean-architecture-tasks.png" /></p>
+<p>If we submit the form empty, the page shows the same error the API returned. The entity decided it, the web just displays it.</p>
+<p><img alt="The form shows the error &quot;Title can't be empty&quot; above the task list" src="https://img.andros.dev/TOxYfgLL2V7Z8AIE9vgZ52hWmTo=/filters:format(avif):quality(85)/https://andros.dev/media/blog/2026/11/clojure-clean-architecture-tasks-error.png" /></p>
+<p>The full journey of a request:</p>
+<pre class="mermaid">sequenceDiagram
+    autonumber
+    participant U as User
+    participant W as HTML form (infra)
+    participant C as create-task (core)
+    participant E as Task entity (core)
+    participant R as MemoryRepo (infra)
+
+    U->>W: POST /tasks title=Buy bread
+    W->>C: (create-task repo "Buy bread")
+    C->>E: (title-errors "Buy bread")
+    E-->>C: []
+    C->>E: (make-task uuid "Buy bread")
+    E-->>C: {:id ... :title "Buy bread" :done? false}
+    C->>R: (save! repo task)
+    C-->>W: {:type :success ...}
+    W-->>U: 303 redirect to /</pre>
+<p>Call arrows always point inwards. What comes back is always a map.</p>
+<p>We've got it!</p>
+<p>However, there is a small problem: if we restart the application, the tasks disappear. We need to store them somewhere more permanent, like the disk.</p>
+<h2 id="blog-single-content__title--infra-edn-repository" class="blog-single__content-title">Infra: EDN repository</h2>
+<p>EDN (extensible data notation) is Clojure's native data format. It looks like JSON, but it supports more types: keywords, sets, UUIDs or dates. That is why our tasks are stored and read back as they are, <code>#uuid</code> included.</p>
+<p>We only need another implementation of the same protocol.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/infra/database/edn_repo.clj
+(ns tasks.infra.database.edn-repo
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
+            [tasks.core.gateways.repository :refer [TaskRepository]]))
+
+(defn- read-tasks [path]
+  (if (.exists (io/file path))
+    (edn/read-string (slurp path))
+    {}))
+
+(defn- write-tasks! [path tasks]
+  (spit path (pr-str tasks)))
+
+(defrecord EdnRepo [path]
+  TaskRepository
+  (find-all [_] (vec (vals (read-tasks path))))
+  (find-by-id [_ id] (get (read-tasks path) id))
+  (save! [_ task] (write-tasks! path (assoc (read-tasks path) (:id task) task)))
+  (delete! [_ id] (write-tasks! path (dissoc (read-tasks path) id))))
+
+(defn make-edn-repo [path]
+  (-&gt;EdnRepo path))</code></pre>
+<p>And in <code>main.clj</code> we change a single line (plus its <code>require</code>).</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/main.clj
+(ns tasks.main
+  (:require ...
+            [tasks.infra.database.edn-repo :refer [make-edn-repo]])) ; Changed
+
+(defn -main []
+  (let [repo (make-edn-repo "tasks.edn") ; Changed
+        ...]))</code></pre>
+<p>Right in front of you is a practical example of how easy it is to change the infrastructure. Tomorrow it could be PostgreSQL or MongoDB, and the story would be the same: a new <code>defrecord</code> that fulfils <code>TaskRepository</code>.</p>
+<p>However, reading and rewriting the whole file on every operation causes problems when several requests arrive at the same time: one write can overwrite another. We should use a conventional database like SQLite, which takes care of that.</p>
+<h2 id="blog-single-content__title--infra-sqlite-repository" class="blog-single__content-title">Infra: SQLite repository</h2>
+<p>Unlike other languages, almost nobody uses an ORM in Clojure. It makes no sense to turn rows into objects when there are no objects. A row is already a map.</p>
+<p>The ecosystem looks like this:</p>
+<ul>
+<li><strong><a href="https://github.com/seancorfield/next-jdbc" rel="noopener noreferrer" target="_blank">next.jdbc</a></strong>: The reference library. It includes functions like <code>insert!</code>, <code>get-by-id</code> or <code>delete!</code> for everyday CRUD.</li>
+<li><strong><a href="https://github.com/seancorfield/honeysql" rel="noopener noreferrer" target="_blank">HoneySQL</a></strong>: Write SQL as data structures.</li>
+<li><strong><a href="https://github.com/layerware/hugsql" rel="noopener noreferrer" target="_blank">HugSQL</a></strong>: Plain SQL in <code>.sql</code> files, turned into Clojure functions.</li>
+<li><strong><a href="https://github.com/camsaul/toucan2" rel="noopener noreferrer" target="_blank">Toucan 2</a></strong>: The most complete option. It is the closest thing to an ORM, with models, hooks and column transformations.</li>
+</ul>
+<p>We will use <code>next.jdbc</code>. We add <code>next.jdbc</code> and the SQLite JDBC driver to <code>:deps</code> in <code>deps.edn</code>.</p>
+<pre class="highlight"><code class="language-clojure">;; deps.edn (in :deps)
+com.github.seancorfield/next.jdbc {:mvn/version "1.4.72"}
+org.xerial/sqlite-jdbc {:mvn/version "3.54.1.0"}</code></pre>
+<p>And a JVM option to the <code>:run</code> alias. The SQLite driver loads a native library, and recent Java versions warn about it on every start. This option silences the warning.</p>
+<pre class="highlight"><code class="language-clojure">;; deps.edn (in :aliases)
+:run {:jvm-opts ["--enable-native-access=ALL-UNNAMED"]
+      :main-opts ["-m" "tasks.main"]}</code></pre>
+<p>And the new repository.</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/infra/database/sqlite_repo.clj
+(ns tasks.infra.database.sqlite-repo
+  (:require [next.jdbc :as jdbc]
+            [next.jdbc.result-set :as rs]
+            [next.jdbc.sql :as sql]
+            [tasks.core.gateways.repository :refer [TaskRepository]]))
+
+(def ^:private options {:builder-fn rs/as-unqualified-maps})
+
+(defn- row-&gt;task [{:keys [id title done]}]
+  {:id (parse-uuid id)
+   :title title
+   :done? (= 1 done)})
+
+(defn- task-&gt;row [{:keys [id title done?]}]
+  {:id (str id)
+   :title title
+   :done (if done? 1 0)})
+
+(defrecord SqliteRepo [datasource]
+  TaskRepository
+  (find-all [_]
+    (map row-&gt;task (sql/query datasource ["SELECT * FROM tasks"] options)))
+  (find-by-id [_ id]
+    (some-&gt; (sql/get-by-id datasource :tasks (str id) options) row-&gt;task))
+  (save! [_ task]
+    (let [{:keys [id title done]} (task-&gt;row task)]
+      (jdbc/execute-one! datasource
+                         ["INSERT INTO tasks (id, title, done) VALUES (?, ?, ?)
+                           ON CONFLICT (id) DO UPDATE SET title = excluded.title, done = excluded.done"
+                          id title done])))
+  (delete! [_ id]
+    (sql/delete! datasource :tasks {:id (str id)})))
+
+(defn make-sqlite-repo [path]
+  (let [datasource (jdbc/get-datasource {:dbtype "sqlite" :dbname path})]
+    (jdbc/execute! datasource ["CREATE TABLE IF NOT EXISTS tasks (
+                                  id TEXT PRIMARY KEY,
+                                  title TEXT NOT NULL,
+                                  done INTEGER NOT NULL DEFAULT 0)"])
+    (-&gt;SqliteRepo datasource)))</code></pre>
+<p>Look at the <code>row-&gt;task</code> and <code>task-&gt;row</code> functions. SQLite has no UUID or boolean types, and <code>done?</code> is not a valid column name in SQL without quotes. So the repository translates both: the UUID travels as text and <code>:done?</code> as a <code>0</code> or a <code>1</code>. The rest of the details come straight from the <code>next.jdbc</code> documentation.</p>
+<p>That said, SQLite guarantees that each write is atomic, but <code>complete-task</code> reads and then writes in two steps. In an application with heavy concurrency, you would wrap both in a transaction with <code>jdbc/with-transaction</code>.</p>
+<p>To change the database, once again, we only change one line (plus its <code>require</code>).</p>
+<pre class="highlight"><code class="language-clojure">;; src/tasks/main.clj
+(ns tasks.main
+  (:require ...
+            [tasks.infra.database.sqlite-repo :refer [make-sqlite-repo]])) ; Changed
+
+(defn -main []
+  (let [repo (make-sqlite-repo "tasks.db") ; Changed
+        ...]))</code></pre>
+<p>We run it, create a task from the form and another from the API, and look inside the database.</p>
+<pre class="highlight"><code class="language-sh">sqlite3 tasks.db 'SELECT * FROM tasks'</code></pre>
+<pre class="highlight"><code class="language-none">f2ef2060-0dd2-4627-928c-4302bf27a36d|Buy bread|0
+fa7be8c4-ba42-4d4f-bcb7-02615d5acb36|Call mom|0</code></pre>
+<p>The infrastructure keeps changing, and the core stays intact.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>Back to the desktop application that brought me here: there, the infrastructure was the graphical interface, built with <a href="https://github.com/cljfx/cljfx" rel="noopener noreferrer" target="_blank">cljfx</a>, and a JSON-RPC API. The core followed exactly the same structure. The infrastructure changes, not the business logic.</p>
+<p>I have left testing out, it would deserve its own article. With this architecture it is extraordinarily cheap. The use cases are tested by injecting a <code>MemoryRepo</code>, and Ring routes are functions that receive a map and return another one, so they can be tested without starting the server.</p>
+<p>One last thought about Functional Core. To get around the flaw I pointed out at the beginning, yogthos proposes modelling the flow as a <a href="https://yogthos.net/posts/2022-12-18-StructuringClojureApplications.html" rel="noopener noreferrer" target="_blank">state machine</a>, where each step receives a map of resources as its first argument. In my opinion, deep down it is the same idea as Clean Architecture: IO comes in as an explicit argument.</p>
+<p>All the code is ready to run, tests included, in <a href="https://git.andros.dev/andros/clojure-clean-architecture-example">this repository</a>.</p>
+<p>I hope this article serves as a starting point for building Clojure applications with an architecture where the business logic is separated from the infrastructure.</p>
+<p>Now it's time to open the REPL and paste the examples. There is no better teacher than practice.</p><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-bebb6f27@andros.dev" class="link">comment+article-bebb6f27@andros.dev</a> to leave a comment. The subject will be ignored.</p>

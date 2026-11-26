@@ -1,0 +1,90 @@
+<p>
+I like to dictate one sentence per line.
+My voice activity detection sometimes adds extra breaks in between lines if I pause too much in the middle of a sentence.
+<a href="https://sachachua.com/dotemacs#multimedia-whisper">sacha-whisper-insert</a> takes care of inserting the comment markers using <code>comment-indent-new-line</code>.
+After I edit my dictation, I usually want to make the comments more compact.
+The following function
+overrides <code>delete-indentation</code> so that <code>join-line</code> and <code>fill-paragraph</code> all manage the common prefix properly, which means <a href="https://sachachua.com/dotemacs#unfill-paragraph">sacha-reformat-paragraph-or-region</a> can cycle through wrapped, one line per sentence, or everything on one line.
+</p>
+
+<p>
+From <a href="https://tony-zorman.com/posts/join-lines-comments.html">Smartly join comments with join-line · Tony Zorman</a>
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code><span class="org-comment-delimiter">;;;</span><span class="org-comment">###</span><span class="org-comment"><span class="org-warning">autoload</span></span>
+(<span class="org-keyword">defun</span> <span class="org-function-name">sacha-delete-indentation</span> (<span class="org-type">&amp;optional</span> arg beg end)
+  <span class="org-doc">"Join this line to previous and fix up whitespace at join.</span>
+<span class="org-doc">If there is a fill prefix, delete it from the beginning of this</span>
+<span class="org-doc">line.</span>
+<span class="org-doc">With prefix ARG, join the current line to the following line.</span>
+<span class="org-doc">When BEG and END are non-nil, join all lines in the region they</span>
+<span class="org-doc">define.  Interactively, BEG and END are, respectively, the start</span>
+<span class="org-doc">and end of the region if it is active, else nil.  (The region is</span>
+<span class="org-doc">ignored if prefix ARG is given.)</span>
+
+<span class="org-doc">When joining lines, smartly delete comment beginnings, such that one</span>
+<span class="org-doc">does not have to do this by oneself.</span>
+
+<span class="org-doc">From https://tony-zorman.com/posts/join-lines-comments.html"</span>
+  (<span class="org-keyword">interactive</span>
+   (<span class="org-keyword">progn</span> (barf-if-buffer-read-only)
+          (cons current-prefix-arg
+                (<span class="org-keyword">and</span> (use-region-p)
+                     (list (region-beginning) (region-end))))))
+  <span class="org-comment-delimiter">;; </span><span class="org-comment">Consistently deactivate mark even when no text is changed.</span>
+  (<span class="org-keyword">setq</span> deactivate-mark t)
+  (<span class="org-keyword">if</span> (<span class="org-keyword">and</span> beg (not arg))
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">Region is active.  Go to END, but only if region spans</span>
+      <span class="org-comment-delimiter">;; </span><span class="org-comment">multiple lines.</span>
+      (<span class="org-keyword">and</span> (goto-char beg)
+           (&gt; end (line-end-position))
+           (goto-char end))
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">Region is inactive.  Set a loop sentinel</span>
+    <span class="org-comment-delimiter">;; </span><span class="org-comment">(subtracting 1 in order to compare less than BOB).</span>
+    (<span class="org-keyword">setq</span> beg (1- (line-beginning-position (<span class="org-keyword">and</span> arg 2))))
+    (<span class="org-keyword">when</span> arg (forward-line)))
+  (<span class="org-keyword">let*</span> ((comment (string-trim-right comment-start))
+         (prefix-start (<span class="org-keyword">and</span> (&gt; (length comment-start) 0)
+                            (regexp-quote comment)))
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">A continuation of a comment. This is important for</span>
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">languages such as Haskell, where &#45;&#45; starts a comment</span>
+         <span class="org-comment-delimiter">;; </span><span class="org-comment">and &#45;&#45;- still is one.</span>
+         (prefix-cont (<span class="org-keyword">and</span> prefix-start
+                           (regexp-quote (substring comment 0 1))))
+         (prev-comment?                 <span class="org-comment-delimiter">; </span><span class="org-comment">Comment on previous line?</span>
+          (<span class="org-keyword">save-excursion</span>
+            (forward-line -1)
+            (back-to-indentation)
+            (search-forward prefix-start (pos-eol) <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">no-error</span>))))
+    (<span class="org-keyword">while</span> (<span class="org-keyword">and</span> (&gt; (line-beginning-position) beg)
+                (forward-line 0)
+                (= (preceding-char) ?\n))
+      (delete-char -1)
+      (<span class="org-keyword">unless</span> (<span class="org-keyword">save-excursion</span> (forward-line -1) (eolp))
+        (delete-horizontal-space)
+        <span class="org-comment-delimiter">;; </span><span class="org-comment">Delete the start of a comment once.</span>
+        (<span class="org-keyword">when</span> (<span class="org-keyword">and</span> prev-comment? prefix-start (looking-at prefix-start))
+          (replace-match <span class="org-string">""</span> t t)
+          <span class="org-comment-delimiter">;; </span><span class="org-comment">Look for continuations.</span>
+          (<span class="org-keyword">while</span> (<span class="org-keyword">and</span> prefix-cont (looking-at prefix-cont))
+            (replace-match <span class="org-string">""</span> t t)))
+        (fixup-whitespace)))))
+</code></pre>
+</div>
+
+
+<p>
+Let's use advice to override it so that it lasts even if I reevaluate the original.
+</p>
+
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(advice-add <span class="org-highlight-quoted-quote">'</span><span class="org-highlight-quoted-symbol">delete-indentation</span> <span class="org-builtin">:override</span> <span class="org-highlight-quoted-quote">#'</span><span class="org-highlight-quoted-symbol">sacha-delete-indentation</span>)
+</code></pre>
+</div>
+
+
+<div class="note">This is part of my <a href="https://sachachua.com/dotemacs#coding-comments-join-lines-even-in-comments">EmacsConfiguration.</a></div><div><a href="https://sachachua.com/blog/2026/11/emacs-join-lines-even-in-comments/index.org">View Org source for this post</a></div>
+<p>You can <a href="mailto:sacha@sachachua.com?subject=Comment%20on%20https%3A%2F%2Fsachachua.com%2Fblog%2F2026%2F11%2Femacs-join-lines-even-in-comments%2F&body=Name%20you%20want%20to%20be%20credited%20by%20(if%20any)%3A%20%0AMessage%3A%20%0ACan%20I%20share%20your%20comment%20so%20other%20people%20can%20learn%20from%20it%3F%20Yes%2FNo%0A">e-mail me at sacha@sachachua.com</a>.</p>

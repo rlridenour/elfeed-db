@@ -1,0 +1,42 @@
+<p>
+I use <code>org-use-speed-commands</code> all the time when navigating and performing actions on org headlines, but I think I have found a friction point, something that just feels a little off.
+</p>
+
+<p>
+When the point is on <code>*</code> and then you press the key <code>t</code>, it calls <code>org-todo</code> via <code>org-self-insert-command</code>. Fast, but the feel is off, the point stays on the stars, so I have to move right before I can type the headline.
+</p>
+
+
+<div id="org078fa05" class="figure">
+<p><img loading="lazy" class="img-fluid rounded" src="/static/emacs/20261008110300-emacs--Org-Speed-Keys-Making-t-Land-After-the-TODO-Keyword.jpg" alt="20261008110300-emacs--Org-Speed-Keys-Making-t-Land-After-the-TODO-Keyword.jpg" width="100%" />
+</p>
+</div>
+
+<p>
+The reason is in <code>org-todo</code> itself. It has a cursor fixup that parks point just after the keyword, but only when point is <i>not</i> at beginning of line. Speed keys by definition run at beginning of line (<code>org-speed-command-activate</code> requires <code>(bolp)</code>), so the fixup never fires for exactly the keys that would benefit most.
+</p>
+
+<p>
+There is no custom option for it, so I added a small <code>:after</code> advice:
+</p>
+
+<div class="org-src-container">
+<pre class="src src-elisp"><code>(<span style="color: #569cd6; font-weight: bold;">defun</span> <span style="color: #dcdcaa; font-weight: bold;">my/org-todo-stop-after-keyword</span> (<span style="color: #4ec9b0; font-weight: bold; text-decoration: underline;">&amp;rest</span> _)
+  <span style="color: #6a9955; font-style: italic;">"Move point to just after TODO keyword when `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">org-todo</span><span style="color: #6a9955; font-style: italic;">' leaves it at BOL.
+Speed command `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">t</span><span style="color: #6a9955; font-style: italic;">' (via `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">org-self-insert-command</span><span style="color: #6a9955; font-style: italic;">') runs with point at
+beginning of headline, where `</span><span style="color: #4ec9b0; font-weight: bold; font-style: italic; text-decoration: underline;">org-todo</span><span style="color: #6a9955; font-style: italic;">' skips its cursor fixup."</span>
+  (<span style="color: #569cd6; font-weight: bold;">when</span> (<span style="color: #569cd6; font-weight: bold;">and</span> (bolp) (org-at-heading-p))
+    (<span style="color: #569cd6; font-weight: bold;">when</span> (looking-at org-todo-line-regexp)
+      (goto-char (<span style="color: #569cd6; font-weight: bold;">or</span> (match-end 2) (match-end 1)))
+      (<span style="color: #569cd6; font-weight: bold;">when</span> (looking-at <span style="color: #ce9178; font-style: italic;">" "</span>) (forward-char 1)))))
+(advice-add 'org-todo <span style="color: #c586c0; font-weight: bold;">:after</span> #'my/org-todo-stop-after-keyword)
+</code></pre>
+</div>
+
+<p>
+Now <code>* Test</code> with point on <code>*</code> plus <code>t</code> becomes <code>* TODO Test</code> with point on <code>Test</code>, ready to type. Same for cycling <code>* TODO</code> to <code>* DONE</code>.
+</p>
+
+<p>
+Small change, but speed keys finally feel like they finish the job instead of leaving me parked on the margin!
+</p>

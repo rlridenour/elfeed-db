@@ -1,0 +1,194 @@
+<p>A while ago I <a href="/blog/2026/03/30/creating-emacs-color-themes/">wrote</a>
+that multi-variant themes have become the norm - pretty much every popular theme
+these days is a family of a few dark variants and a light one. And every such
+family ships its own command for moving between the variants:
+<code class="language-plaintext highlighter-rouge">modus-themes-toggle</code>, <code class="language-plaintext highlighter-rouge">ef-themes-select</code>, <code class="language-plaintext highlighter-rouge">tokyo-night-select</code>,
+<code class="language-plaintext highlighter-rouge">batppuccin-select</code> and so on.</p>
+
+<p>I have to admit that I had completely missed that Emacs has a built-in command
+for this since Emacs 29 - <code class="language-plaintext highlighter-rouge">theme-choose-variant</code>. I learned about its existence
+only recently, when I tried it with my own
+<a href="https://github.com/bbatsov/tokyo-night-emacs">Tokyo Night</a> theme and got this
+in return:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Theme `tokyo-night' does not have any known variants
+</code></pre></div></div>
+
+<p>Not cool, given that the theme has four variants! So, what’s going on here?</p>
+
+<!--more-->
+
+<h2 id="the-command">The command</h2>
+
+<p><code class="language-plaintext highlighter-rouge">M-x theme-choose-variant</code> looks at the theme that’s currently enabled and
+switches to another theme from the same family. If there’s only one other
+variant it just switches to it, otherwise it asks you which one you want. The
+command is also available as <code class="language-plaintext highlighter-rouge">toggle-theme</code>, which is a much better name for the
+two-variant case.</p>
+
+<p>You don’t need to install anything to try it, as a few of the themes that ship
+with Emacs come in pairs - <code class="language-plaintext highlighter-rouge">tango</code> and <code class="language-plaintext highlighter-rouge">tango-dark</code>, <code class="language-plaintext highlighter-rouge">leuven</code> and <code class="language-plaintext highlighter-rouge">leuven-dark</code>,
+<code class="language-plaintext highlighter-rouge">tsdh-light</code> and <code class="language-plaintext highlighter-rouge">tsdh-dark</code>:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">load-theme</span> <span class="ss">'leuven</span> <span class="no">t</span><span class="p">)</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">M-x toggle-theme</code> will take you to <code class="language-plaintext highlighter-rouge">leuven-dark</code>, and another <code class="language-plaintext highlighter-rouge">M-x toggle-theme</code>
+will bring you back to <code class="language-plaintext highlighter-rouge">leuven</code>. Pretty neat! The old theme gets disabled before
+the new one is loaded, so you don’t end up with one theme stacked on top of the
+other. (I wrote about that problem in
+<a href="/blog/2025/02/03/clean-unloading-of-emacs-themes/">Clean Unloading of Emacs Themes</a>)</p>
+
+<p>Things are a bit different with the Modus themes. There are eight of them in
+Emacs these days, so with <code class="language-plaintext highlighter-rouge">modus-operandi</code> enabled you won’t get a toggle, but a
+prompt listing the other seven. And a theme that’s on its own, like <code class="language-plaintext highlighter-rouge">wombat</code>,
+gives you the same error I got:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Theme `wombat' does not have any known variants
+</code></pre></div></div>
+
+<h2 id="how-themes-opt-in">How themes opt in</h2>
+
+<p>So, how does Emacs know that <code class="language-plaintext highlighter-rouge">leuven</code> and <code class="language-plaintext highlighter-rouge">leuven-dark</code> belong together? In case
+you’re wondering - it doesn’t guess this from their names. In Emacs 29 <code class="language-plaintext highlighter-rouge">deftheme</code>
+started to accept a property list after the docstring, and the theme has to say
+what family it’s a part of:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">deftheme</span> <span class="nv">leuven-dark</span>
+  <span class="s">"Face colors with a dark background."</span>
+  <span class="ss">:background-mode</span> <span class="ss">'dark</span>
+  <span class="ss">:family</span> <span class="ss">'leuven</span>
+  <span class="ss">:kind</span> <span class="ss">'color-scheme</span><span class="p">)</span>
+</code></pre></div></div>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">:family</code> is what ties the variants together. Themes with the same family are
+variants of each other.</li>
+  <li><code class="language-plaintext highlighter-rouge">:kind</code> should be <code class="language-plaintext highlighter-rouge">color-scheme</code> for a regular color theme. Themes that don’t
+set it are treated as color schemes for the time being.</li>
+  <li><code class="language-plaintext highlighter-rouge">:background-mode</code> is <code class="language-plaintext highlighter-rouge">light</code> or <code class="language-plaintext highlighter-rouge">dark</code>. Nothing uses it yet, but the manual
+asks theme authors to set it anyway.</li>
+</ul>
+
+<p><code class="language-plaintext highlighter-rouge">wombat</code> sets a kind and a background mode, but no family. My themes didn’t set
+anything at all - their <code class="language-plaintext highlighter-rouge">deftheme</code> forms are just a name and a docstring.</p>
+
+<h2 id="the-autoload-catch">The autoload catch</h2>
+
+<p>Adding the properties to <code class="language-plaintext highlighter-rouge">deftheme</code> is not enough, though. They are stored on the
+theme’s symbol when the theme file gets evaluated, and nobody has evaluated the
+files of the variants you haven’t loaded yet. Emacs has to know the properties
+of every variant before any of them is loaded.</p>
+
+<p>The built-in themes solve this with a special cookie:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c1">;;;###theme-autoload</span>
+<span class="p">(</span><span class="nv">deftheme</span> <span class="nv">leuven-dark</span>
+  <span class="o">...</span>
+</code></pre></div></div>
+
+<p>When Emacs is built, the properties of every theme marked this way are
+extracted into a file named <code class="language-plaintext highlighter-rouge">theme-loaddefs.el</code>, that’s loaded at startup:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">put</span> <span class="ss">'leuven-dark</span> <span class="ss">'theme-properties</span>
+     <span class="p">(</span><span class="nb">list</span> <span class="ss">:background-mode</span> <span class="ss">'dark</span> <span class="ss">:family</span> <span class="ss">'leuven</span> <span class="ss">:kind</span> <span class="ss">'color-scheme</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>That cookie means nothing in a package you’ve installed from MELPA, though. A
+third-party theme has to use the regular <code class="language-plaintext highlighter-rouge">;;;###autoload</code> cookie in front of its
+<code class="language-plaintext highlighter-rouge">deftheme</code>. Starting with Emacs 29 the autoload generator knows about <code class="language-plaintext highlighter-rouge">deftheme</code>
+and extracts only the properties from it, so you end up with the same <code class="language-plaintext highlighter-rouge">put</code> form
+in the package’s autoloads file.</p>
+
+<p>Without this the command will find only the variants that you’ve already loaded
+in the current Emacs session, which for most people means none of them:</p>
+
+<div class="language-plaintext highlighter-rouge"><div class="highlight"><pre class="highlight"><code>`foo-dark' has no variants
+</code></pre></div></div>
+
+<h2 id="who-supports-this">Who supports this?</h2>
+
+<p>I was curious how many themes have picked this up, so I went over the source of
+60 or so popular ones. The short answer is “very few”. Protesilaos’s themes (Modus,
+Ef, Standard, Doric) declare a family, and so do <code class="language-plaintext highlighter-rouge">doom-themes</code> and a handful of
+smaller packages. Pretty much everyone else declares nothing, including big
+multi-variant families like Solarized, Gruvbox and Kanagawa.</p>
+
+<p>What surprised me more is that I didn’t find a single third-party theme that
+autoloads its properties. As far as I can tell that leaves the built-in command
+blind to the variants you haven’t loaded yet, and I guess that’s why the themes
+that did the work kept their own commands anyway. (e.g. Modus loads its themes
+without enabling them to learn their properties)</p>
+
+<h2 id="a-few-rough-edges">A few rough edges</h2>
+
+<p>The command is pretty basic and it has a few limitations you should be aware of:</p>
+
+<ul>
+  <li>It toggles only when the family has exactly two themes. Tokyo Night has four,
+so I’d get a prompt every time. There’s no way to say “these two are the ones
+I switch between”.</li>
+  <li>It doesn’t know what’s light and what’s dark, because nothing reads
+<code class="language-plaintext highlighter-rouge">:background-mode</code>. You can’t ask it for “the light one”.</li>
+  <li>It refuses to work if you have more than one theme enabled.</li>
+  <li>It loads the new variant with a plain <code class="language-plaintext highlighter-rouge">load-theme</code>, so for a third-party theme
+you haven’t marked as safe you’ll get the usual “Loading a theme can run Lisp
+code” question.</li>
+</ul>
+
+<p>That last one is the reason <code class="language-plaintext highlighter-rouge">modus-themes-toggle</code> is still around. Protesilaos
+considered dropping it in favor of <code class="language-plaintext highlighter-rouge">toggle-theme</code>, and decided against it
+because of the prompts.</p>
+
+<p><strong>Note:</strong> This is a command you invoke by hand. If you want Emacs to follow the
+appearance of your OS or the time of the day, check out
+<a href="/blog/2026/03/29/automatic-light-dark-theme-switching/">Automatic Light/Dark Theme Switching</a>.</p>
+
+<h2 id="what-about-older-emacs-versions">What about older Emacs versions?</h2>
+
+<p>The good news is that the properties are harmless there. <code class="language-plaintext highlighter-rouge">deftheme</code> has been
+ignoring any extra arguments for ages (I checked all the way back to Emacs 24),
+so a theme that declares a family will load just fine on Emacs 27 or 28.</p>
+
+<p>The bad news is that <code class="language-plaintext highlighter-rouge">theme-choose-variant</code> doesn’t exist before Emacs 29, so
+the users of the older versions get nothing out of the properties. The autoload trick doesn’t translate either - the old autoload
+generator doesn’t know about <code class="language-plaintext highlighter-rouge">deftheme</code>, so it copies the whole form into the
+autoloads file and the theme gets declared at startup.</p>
+
+<p>Both Tokyo Night and
+<a href="https://github.com/bbatsov/batppuccin-emacs">Batppuccin</a> support Emacs 27.1,
+which means I can’t rely on the built-in command and I need one of my own
+anyway. It’s not much code:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">defconst</span> <span class="nv">tokyo-night--variants</span>
+  <span class="o">'</span><span class="p">(</span><span class="nv">tokyo-night</span> <span class="nv">tokyo-night-storm</span> <span class="nv">tokyo-night-moon</span> <span class="nv">tokyo-night-day</span><span class="p">))</span>
+
+<span class="c1">;;;###autoload</span>
+<span class="p">(</span><span class="nb">defun</span> <span class="nv">tokyo-night-select</span> <span class="p">()</span>
+  <span class="s">"Select and load a Tokyo theme variant interactively."</span>
+  <span class="p">(</span><span class="nv">interactive</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">let*</span> <span class="p">((</span><span class="nv">names</span> <span class="p">(</span><span class="nb">mapcar</span> <span class="nf">#'</span><span class="nb">symbol-name</span> <span class="nv">tokyo-night--variants</span><span class="p">))</span>
+         <span class="p">(</span><span class="nv">choice</span> <span class="p">(</span><span class="nb">intern</span> <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Tokyo theme: "</span> <span class="nv">names</span> <span class="no">nil</span> <span class="no">t</span><span class="p">))))</span>
+    <span class="p">(</span><span class="nb">mapc</span> <span class="nf">#'</span><span class="nv">disable-theme</span> <span class="nv">tokyo-night--variants</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">load-theme</span> <span class="nv">choice</span> <span class="no">t</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">setq</span> <span class="nv">tokyo-night--current</span> <span class="nv">choice</span><span class="p">)</span>
+    <span class="p">(</span><span class="nv">run-hook-with-args</span> <span class="ss">'tokyo-night-after-load-hook</span> <span class="nv">choice</span><span class="p">)))</span>
+</code></pre></div></div>
+
+<p>The theme knows its own variants, so there are no properties to autoload and no
+theme directories to scan. It works the same on every Emacs version, it doesn’t
+ask you to confirm anything, and it can do things that only make sense for this
+theme, like running a hook after the switch. That’s why I think that theme
+authors who still support older Emacs versions shouldn’t rely on
+<code class="language-plaintext highlighter-rouge">theme-choose-variant</code> for now. Just ship your own command, as most themes
+already do.</p>
+
+<p>Of course, nothing stops you from doing both. Declaring a family takes only a
+few lines per variant, and it makes the theme play nice with the built-in
+command on Emacs 29+. I’ll certainly add the properties to my themes, but their
+own commands are here to stay.</p>
+
+<p>Do you use <code class="language-plaintext highlighter-rouge">theme-choose-variant</code>? Did you even know it existed? I’d love to
+hear about it in the comments!</p>
+
+<p>That’s all I have for you today. Keep hacking!</p>

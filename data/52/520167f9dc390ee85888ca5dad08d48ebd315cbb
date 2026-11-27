@@ -1,0 +1,98 @@
+<p>In the article <a href="https://en.andros.dev/blog/cf3110ec/a-gopher-server-in-9-lines-of-python/">a Gopher server in 9 lines of Python</a> I was on the server side, building a simple implementation. It is a fun and interesting exercise, because the specification is not very long. You learn the basics, and you end up with your own piece of Gopher technology.</p>
+<p>Now we are going to do the same, but without code. We will browse Gopherspace using only Unix commands. Specifically, <code>nc</code> (netcat) to open a TCP connection and <code>printf</code> to define what we send.</p>
+<p>We will play with <code>gopher://gopher.floodgap.com</code>, one of the oldest servers around.</p>
+<h2 id="blog-single-content__title--open-the-connection" class="blog-single__content-title">Open the connection</h2>
+<p>First we need a command that can connect to a TCP port and send data. Gopher uses port 70 by default.</p>
+<pre class="highlight"><code class="language-shell">nc gopher.floodgap.com 70</code></pre>
+<p>When you run it you will see nothing. It returns an empty line, and that is exactly what we expect! The connection is open, but the server is waiting for us to tell it what we want.</p>
+<h2 id="blog-single-content__title--request-the-main-menu" class="blog-single__content-title">Request the main menu</h2>
+<p>The server will reply with its main menu if we send a carriage return and a line feed (<code>\r\n</code>). In our case, pressing "Enter" is enough.</p>
+<p>Or, better, chain a <code>printf</code> with a pipe to control exactly which characters we send.</p>
+<pre class="highlight"><code class="language-shell">printf '\r\n' | nc gopher.floodgap.com 70</code></pre>
+<p>It will print the whole menu. Something like this (trimmed):</p>
+<pre class="highlight"><code class="language-text">iWelcome to Floodgap Systems' official gopher server.       error.host  1
+iFloodgap has served the gopher community since 1999        error.host  1
+...
+1Getting started with gopher, software, more    /gopher gopher.floodgap.com 70
+...
+.</code></pre>
+<p>Each line starts with a character that tells you the resource type: <code>1</code> is another menu, <code>0</code> is a text file, <code>i</code> is informational text.</p>
+<p>What you see in the terminal is not exactly what the server sends. There are invisible characters. To see them, add <code>cat -vt</code> at the end of the pipe.</p>
+<pre class="highlight"><code class="language-shell">printf '\r\n' | nc gopher.floodgap.com 70 | cat -vt</code></pre>
+<pre class="highlight"><code class="language-text">iWelcome to Floodgap Systems' official gopher server.^I^Ierror.host^I1^M
+iFloodgap has served the gopher community since 1999^I^Ierror.host^I1^M
+...
+1Getting started with gopher, software, more^I/gopher^Igopher.floodgap.com^I70^M
+...
+.^M</code></pre>
+<p><code>^I</code> is a tab and <code>^M</code> is the carriage return. Fields are separated by tabs and every line ends in <code>\r\n</code>. That lonely dot at the end is the server's way of saying "I'm done".</p>
+<h2 id="blog-single-content__title--pick-a-jump" class="blog-single__content-title">Pick a jump</h2>
+<p>Our goal is to reach the explanation of Gopherspace by jumping from menu to menu, or in other words, by making requests.</p>
+<p>Let's find the jump we are interested in.</p>
+<p>To keep the line short, I have put a line break where there is actually a tab.</p>
+<pre class="highlight"><code class="language-text">1Getting started with gopher, software, more
+/gopher
+gopher.floodgap.com
+70</code></pre>
+<p>Every menu line always has the same structure:</p>
+<pre class="highlight"><code class="language-text">[type][text] TAB [selector] TAB [domain] TAB [port]</code></pre>
+<p>The selector is the path we must send to the server to request that resource.</p>
+<p>With the selector we can prepare the next request.</p>
+<pre class="highlight"><code class="language-shell">printf '/gopher\r\n' | nc gopher.floodgap.com 70</code></pre>
+<p>We find another menu, with the same format as the previous one:</p>
+<pre class="highlight"><code class="language-text">1Floodgap Systems gopher root   /   gopher.floodgap.com 70
+iWelcome to Gopherspace!        error.host  1
+...
+0A Brief Introduction to Gopherspace -- READ ME FIRST!  /gopher/welcome gopher.floodgap.com 70
+...
+.</code></pre>
+<p>I go straight to <code>READ ME FIRST!</code>.</p>
+<pre class="highlight"><code class="language-text">0A Brief Introduction to Gopherspace -- READ ME FIRST!
+/gopher/welcome
+gopher.floodgap.com
+70</code></pre>
+<p>This time it starts with <code>0</code>: it is a text file, not a menu.</p>
+<h2 id="blog-single-content__title--read-a-document" class="blog-single__content-title">Read a document</h2>
+<p>We prepare the last request to reach our destination.</p>
+<pre class="highlight"><code class="language-shell">printf '/gopher/welcome\r\n' | nc gopher.floodgap.com 70</code></pre>
+<p>And the server returns the text, the same one you would see with a Gopher client.</p>
+<pre class="highlight"><code class="language-text">Floodgap HELP: What is Gopher?
+updated 27 December 2000
+
+   gopher  n.  1. Any of various short tailed, burrowing mammals of
+   the family Geomyidae, of North America.  2. (Amer. colloq.)
+   Native or inhabitant of Minnesota: the Gopher State.
+   3. (Amer. colloq.) One who runs errands, does odd-jobs, fetches
+   or delivers documents for office staff.  4. (computer tech.)
+   Software following a simple protocol for tunneling through a TCP/IP
+   internet.
+
+Welcome to Gopherspace!</code></pre>
+<p>After 3 requests, we have reached our destination! All by following the links in the menus.</p>
+<h2 id="blog-single-content__title--search-engine" class="blog-single__content-title">Search engine</h2>
+<p>Gopher also has search engines, both in the specification and as an indexing service (similar to Google). The best known is Veronica-2, and Floodgap links to it from its main menu with the selector <code>/v2</code>.</p>
+<pre class="highlight"><code class="language-shell">printf '/v2\r\n' | nc gopher.floodgap.com 70</code></pre>
+<p>Inside we find a line of a new type, the <code>7</code>:</p>
+<pre class="highlight"><code class="language-text">7Search Veronica-2
+/v2/vs
+gopher.floodgap.com
+70</code></pre>
+<p>A <code>7</code> is a search. It is the only case where the client sends something more than a path: the selector, a tab and the search terms.</p>
+<pre class="highlight"><code class="language-shell">printf '/v2/vs\temacs\r\n' | nc gopher.floodgap.com 70</code></pre>
+<pre class="highlight"><code class="language-text">iVeronica-2 2.058.2 (C)2000-2022 Cameron Kaiser
+i** Search in progress, please wait **
+i*** Search terms: emacs ***
+iFirst 30 selectors displayed (page 1).
+...</code></pre>
+<p>The response is a plain, ordinary menu, with the same lines as always. You can keep jumping from any of the results.</p>
+<h2 id="blog-single-content__title--a-one-line-shortcut" class="blog-single__content-title">A one-line shortcut</h2>
+<p>Look closely: all the requests are the same. Only the domain and the selector change. Why not turn it into a shell function?</p>
+<pre class="highlight"><code class="language-shell">gopher() { printf '%s\r\n' "$2" | nc "$1" 70; }</code></pre>
+<p>Paste it into your terminal (Bash or Zsh) and you can start browsing.</p>
+<pre class="highlight"><code class="language-shell">gopher gopher.floodgap.com /gopher/welcome</code></pre>
+<p>To search, pass the tab inside the selector:</p>
+<pre class="highlight"><code class="language-shell">gopher gopher.floodgap.com "$(printf '/v2/vs\temacs')"</code></pre>
+<p>You could even create another shortcut just for Gopher searches, or write a small Python script to make the flow more interactive.</p>
+<h2 id="blog-single-content__title--final-notes" class="blog-single__content-title">Final notes</h2>
+<p>How simple it is, and how well it fits with Unix commands, makes it a pleasure to work with.</p>
+<p>I hope this article has planted in you a little passion for Gopher. I leave it up to you which of the endless possibilities you want to spend your creativity on. And if sitting in front of the editor writing code is not your thing, you can always admire its specification while you browse.</p><hr><p>Help me keep writing Every coffee gives me a push toward the next article. <a href="https://ko-fi.com/W7W02LB83">Sure, it's on me!</a></p><p>Send an email to <a href="mailto:comment+article-500fbcb7@andros.dev" class="link">comment+article-500fbcb7@andros.dev</a> to leave a comment. The subject will be ignored.</p>

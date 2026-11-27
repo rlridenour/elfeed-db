@@ -1,0 +1,106 @@
+<p>Every Emacs user knows that pressing <code class="language-plaintext highlighter-rouge">M-p</code> in the minibuffer goes back through
+the history of the things they’ve typed there before. That’s one of the first
+things you learn, right after <code class="language-plaintext highlighter-rouge">C-g</code>. And if you go back too far you can press
+<code class="language-plaintext highlighter-rouge">M-n</code> to go forward again. End of story, right?</p>
+
+<p>Not quite! What happens if you press <code class="language-plaintext highlighter-rouge">M-n</code> right away, when there’s nothing to
+go forward to? You might expect an error, but instead Emacs will often insert
+something useful. That’s what the Emacs manual calls “future history” - a list
+of things that the command guessed you might want to type next. <sup id="fnref:1" role="doc-noteref"><a href="#fn:1" class="footnote" rel="footnote">1</a></sup></p>
+
+<h2 id="a-few-examples">A Few Examples</h2>
+
+<p>Here are a few built-in commands where <code class="language-plaintext highlighter-rouge">M-n</code> does something handy:</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">C-x C-f</code> (<code class="language-plaintext highlighter-rouge">find-file</code>) - inserts the file name at point (if there’s one) and
+after it the name of the file you’re visiting, which is great when you want
+to open one of its siblings</li>
+  <li><code class="language-plaintext highlighter-rouge">M-%</code> (<code class="language-plaintext highlighter-rouge">query-replace</code>) - inserts the symbol at point and after it the last
+thing you searched for with <code class="language-plaintext highlighter-rouge">isearch</code></li>
+  <li><code class="language-plaintext highlighter-rouge">M-s o</code> (<code class="language-plaintext highlighter-rouge">occur</code>) - the same suggestions, plus the active region</li>
+  <li><code class="language-plaintext highlighter-rouge">M-!</code> (<code class="language-plaintext highlighter-rouge">shell-command</code>) - inserts the name of the file you’re visiting (or
+the file at point in Dired), which is super handy for commands that operate
+on the current file</li>
+  <li><code class="language-plaintext highlighter-rouge">C-x b</code> (<code class="language-plaintext highlighter-rouge">switch-to-buffer</code>) - inserts the default buffer and afterwards
+keeps going through the rest of the buffers</li>
+</ul>
+
+<p>The last one shows something that applies to every command that uses
+<code class="language-plaintext highlighter-rouge">completing-read</code>. When you run out of default values, <code class="language-plaintext highlighter-rouge">M-n</code> starts going through
+the completion candidates themselves. So in a pinch <code class="language-plaintext highlighter-rouge">M-n</code> is a poor man’s
+candidate cycling, even if you’re not using any fancy completion framework.</p>
+
+<p><strong>Tip:</strong> A lot of prompts show their default value (e.g. <code class="language-plaintext highlighter-rouge">Describe function
+(default car):</code>) and most people just press <code class="language-plaintext highlighter-rouge">RET</code> to accept it. If the default is
+almost what you want, though, press <code class="language-plaintext highlighter-rouge">M-n</code> to insert it into the minibuffer and
+edit it there.</p>
+
+<h2 id="using-it-in-your-own-commands">Using it in Your Own Commands</h2>
+
+<p>If you’re writing Emacs Lisp you get all of this pretty much for free. The
+functions that read from the minibuffer (<code class="language-plaintext highlighter-rouge">read-string</code>, <code class="language-plaintext highlighter-rouge">read-from-minibuffer</code>,
+<code class="language-plaintext highlighter-rouge">completing-read</code>, <code class="language-plaintext highlighter-rouge">read-shell-command</code> and friends) accept a default value,
+and that default value can also be a list. The first element is the default and
+<code class="language-plaintext highlighter-rouge">M-n</code> will go over the rest of them in order:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nb">defun</span> <span class="nv">my-search</span> <span class="p">(</span><span class="nv">term</span><span class="p">)</span>
+  <span class="p">(</span><span class="nv">interactive</span>
+   <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">read-string</span>
+          <span class="s">"Search for: "</span> <span class="no">nil</span> <span class="no">nil</span>
+          <span class="p">(</span><span class="nv">delq</span> <span class="no">nil</span>
+                <span class="p">(</span><span class="nb">list</span> <span class="p">(</span><span class="nv">thing-at-point</span> <span class="ss">'symbol</span> <span class="no">t</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nv">add-log-current-defun</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nb">and</span> <span class="nv">buffer-file-name</span>
+                           <span class="p">(</span><span class="nv">file-name-base</span> <span class="nv">buffer-file-name</span><span class="p">)))))))</span>
+  <span class="p">(</span><span class="nv">message</span> <span class="s">"Searching for %s"</span> <span class="nv">term</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p>Here <code class="language-plaintext highlighter-rouge">M-n</code> will first offer the symbol at point, then the name of the current
+function and finally the name of the current file. There’s also <code class="language-plaintext highlighter-rouge">read-regexp</code>,
+which adds a bunch of standard suggestions (the ones you saw in <code class="language-plaintext highlighter-rouge">occur</code>) to
+whatever you give it.</p>
+
+<p>That’s the trick behind most of the
+<a href="/blog/2026/11/26/smarter-minibuffer-prompts-in-projectile/">smarter prompts</a>
+in the upcoming Projectile 3.5. I like this approach a lot, because the
+suggestions don’t get in anyone’s way - if you never press <code class="language-plaintext highlighter-rouge">M-n</code> the prompt
+behaves exactly as it always has.</p>
+
+<h2 id="lazy-suggestions">Lazy Suggestions</h2>
+
+<p>There’s one catch with the list approach - you have to compute all the
+suggestions before the prompt shows up, even though most of the time nobody
+will ask for them. If they are expensive to compute that’s a problem. Enter
+<code class="language-plaintext highlighter-rouge">minibuffer-default-add-function</code>. Emacs calls it the first time <code class="language-plaintext highlighter-rouge">M-n</code> runs out
+of default values, and whatever it returns becomes the new list of defaults:</p>
+
+<div class="language-emacs-lisp highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">(</span><span class="nv">minibuffer-with-setup-hook</span>
+    <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+      <span class="p">(</span><span class="nv">setq-local</span> <span class="nv">minibuffer-default-add-function</span>
+                  <span class="p">(</span><span class="k">lambda</span> <span class="p">()</span>
+                    <span class="p">(</span><span class="nb">append</span> <span class="p">(</span><span class="nv">my-expensive-guesses</span><span class="p">)</span>
+                            <span class="p">(</span><span class="nv">minibuffer-default-add-completions</span><span class="p">)))))</span>
+  <span class="p">(</span><span class="nv">completing-read</span> <span class="s">"Find file: "</span> <span class="nv">files</span><span class="p">))</span>
+</code></pre></div></div>
+
+<p><code class="language-plaintext highlighter-rouge">minibuffer-default-add-completions</code> is what this variable is set to out of the
+box, and it’s the reason why <code class="language-plaintext highlighter-rouge">M-n</code> goes through the completion candidates in
+the first place. Here we just put our own guesses in front of them. Keep in mind
+that the function gets called with the minibuffer as the current buffer, so if
+your guesses depend on the buffer the command was invoked from (e.g. you want
+the thing at point) you’ll have to switch to it first.
+<code class="language-plaintext highlighter-rouge">(with-selected-window (minibuffer-selected-window) ...)</code> does the job. That’s
+how <code class="language-plaintext highlighter-rouge">find-file</code> comes up with the file name at point, by the way, and I’m using
+the same trick for Projectile’s <code class="language-plaintext highlighter-rouge">projectile-find-file</code>.</p>
+
+<p>That’s all I have for you today. Give <code class="language-plaintext highlighter-rouge">M-n</code> a try the next time Emacs asks you
+something - you might be pleasantly surprised! Keep hacking!</p>
+
+<div class="footnotes" role="doc-endnotes">
+  <ol>
+    <li id="fn:1" role="doc-endnote">
+      <p>See <code class="language-plaintext highlighter-rouge">C-h f next-history-element</code> and the <a href="https://www.gnu.org/software/emacs/manual/html_node/emacs/Minibuffer-History.html">Minibuffer History</a> section of the manual. <a href="#fnref:1" class="reversefootnote" role="doc-backlink">&#8617;</a></p>
+    </li>
+  </ol>
+</div>
